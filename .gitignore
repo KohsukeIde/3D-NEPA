@@ -1,0 +1,32 @@
+wandb/
+tmp/
+*debug*
+debugs/
+outputs/
+samples/
+dev_tests/
+__pycache__/
+ossutil_output/
+.ossutil_checkpoint/
+checkpoints/
+trainer_output/
+data/
+viz_output/
+
+*.ipynb
+*.safetensors
+*.ckpt
+*.sh
+
+**/.ipynb_checkpoints/
+
+# Local virtual environments
+.venv/
+
+# Experiment logs and checkpoints
+logs/
+runs/
+
+# Cluster / job outputs
+*.err
+*.out

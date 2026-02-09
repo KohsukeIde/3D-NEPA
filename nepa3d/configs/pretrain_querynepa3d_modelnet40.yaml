@@ -1,0 +1,11 @@
+cache_root: data/modelnet40_cache
+backend: mesh
+batch: 32
+epochs: 50
+lr: 0.0003
+n_point: 512
+n_ray: 512
+d_model: 384
+layers: 8
+heads: 6
+save_dir: runs/querynepa3d_meshpre
