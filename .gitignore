@@ -10,7 +10,7 @@ ossutil_output/
 .ossutil_checkpoint/
 checkpoints/
 trainer_output/
-data/
+/data/
 viz_output/
 
 *.ipynb
