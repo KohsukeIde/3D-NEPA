@@ -10,7 +10,14 @@ ossutil_output/
 .ossutil_checkpoint/
 checkpoints/
 trainer_output/
+
+# Ignore all data by default
 data/
+# Re-include specific metadata under data/ (non raw data)
+!data/modelnet40_cache_v1/
+data/modelnet40_cache_v1/*
+!data/modelnet40_cache_v1/train_missing.txt
+
 viz_output/
 
 *.ipynb
