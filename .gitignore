@@ -18,6 +18,7 @@ viz_output/
 *.ckpt
 *.sh
 !nepa3d/**/*.sh
+!scripts/**/*.sh
 
 **/.ipynb_checkpoints/
 
