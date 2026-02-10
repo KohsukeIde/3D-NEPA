@@ -17,6 +17,7 @@ viz_output/
 *.safetensors
 *.ckpt
 *.sh
+!nepa3d/**/*.sh
 
 **/.ipynb_checkpoints/
 
