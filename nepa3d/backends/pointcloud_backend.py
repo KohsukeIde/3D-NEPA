@@ -8,11 +8,19 @@ class PointCloudBackend:
     def __init__(self, npz_path):
         self.d = np.load(npz_path, allow_pickle=False)
         self.pc = self.d["pc_xyz"].astype(np.float32, copy=False)
-        self.kdt = cKDTree(self.pc)
+        self.kdt = None
 
     def get_pools(self):
         pt_xyz = self.d["pt_xyz_pool"].astype(np.float32, copy=False)
-        dist, _ = self.kdt.query(pt_xyz, k=1)
+        # Fast path: reuse precomputed distances from cache (v1/v2 preprocess).
+        if "pt_dist_pool" in self.d:
+            pt_dist = self.d["pt_dist_pool"].astype(np.float32, copy=False)
+        else:
+            # Backward-compat for old caches without pt_dist_pool.
+            if self.kdt is None:
+                self.kdt = cKDTree(self.pc)
+            dist, _ = self.kdt.query(pt_xyz, k=1)
+            pt_dist = dist.astype(np.float32, copy=False)
 
         # Preferred: pointcloud-rendered ray pools (generated in preprocess).
         if "ray_hit_pc_pool" in self.d and "ray_t_pc_pool" in self.d and "ray_n_pc_pool" in self.d:
@@ -27,7 +35,7 @@ class PointCloudBackend:
 
         return {
             "pt_xyz_pool": pt_xyz,
-            "pt_dist_pool": dist.astype(np.float32, copy=False),
+            "pt_dist_pool": pt_dist,
             "ray_o_pool": self.d["ray_o_pool"].astype(np.float32, copy=False),
             "ray_d_pool": self.d["ray_d_pool"].astype(np.float32, copy=False),
             "ray_hit_pool": ray_hit,
@@ -42,10 +50,16 @@ class PointCloudMeshRayBackend(PointCloudBackend):
 
     def get_pools(self):
         pt_xyz = self.d["pt_xyz_pool"].astype(np.float32, copy=False)
-        dist, _ = self.kdt.query(pt_xyz, k=1)
+        if "pt_dist_pool" in self.d:
+            pt_dist = self.d["pt_dist_pool"].astype(np.float32, copy=False)
+        else:
+            if self.kdt is None:
+                self.kdt = cKDTree(self.pc)
+            dist, _ = self.kdt.query(pt_xyz, k=1)
+            pt_dist = dist.astype(np.float32, copy=False)
         return {
             "pt_xyz_pool": pt_xyz,
-            "pt_dist_pool": dist.astype(np.float32, copy=False),
+            "pt_dist_pool": pt_dist,
             "ray_o_pool": self.d["ray_o_pool"].astype(np.float32, copy=False),
             "ray_d_pool": self.d["ray_d_pool"].astype(np.float32, copy=False),
             "ray_hit_pool": self.d["ray_hit_pool"].astype(np.float32, copy=False),

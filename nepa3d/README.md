@@ -185,6 +185,26 @@ python -u nepa3d/data/preprocess_scanobjectnn.py \
   --pt_surface_ratio 0.5 --pt_surface_sigma 0.02
 ```
 
+ShapeNet (simple replacement pretrain corpus):
+
+- expected mesh layout: `ShapeNetCore.v2/<synset>/<model>/models/model_normalized.obj`
+- cache output: `data/shapenet_cache_v0/{train,test}/<synset>/*.npz`
+
+```bash
+SHAPENET_ROOT=data/ShapeNetCore.v2 \
+OUT_ROOT=data/shapenet_cache_v0 \
+SPLIT=all \
+PT_DIST_MODE=kdtree \
+bash scripts/preprocess/preprocess_shapenet.sh
+```
+
+Simple mesh-only pretrain on ShapeNet cache (NEPA + MAE in parallel):
+
+```bash
+CACHE_ROOT=data/shapenet_cache_v0 \
+bash scripts/pretrain/run_shapenet_simple_local.sh
+```
+
 ### Reproducible local commands for mixed pretrain (ECCV v2)
 
 Run both on 2 GPUs in parallel:
@@ -208,6 +228,29 @@ CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.train.pretrain \
 Suggested log files:
 - `logs/eccv_mix_nepa_s0.log`
 - `logs/eccv_mix_mae_s0.log`
+
+### ScanObjectNN main-table launcher (local 2-GPU)
+
+Run full + few-shot (K=0/1/5/10/20) for 4 methods (`scratch`, `mesh_nepa`, `mix_nepa`, `mix_mae`) and seeds `0,1,2`:
+
+```bash
+bash scripts/finetune/run_scanobjectnn_main_table_local.sh
+```
+
+This launches 60 jobs total (2 in parallel, one per GPU), with resume/skip by `last.pt`:
+- logs: `logs/scan_main_table/*.log`
+- per-GPU runner logs: `logs/scan_main_table/runner_gpu0.log`, `logs/scan_main_table/runner_gpu1.log`
+- outputs: `runs/scan_<method>_k<K>_s<seed>/`
+- speed knobs (env): `MC_EVAL_K_VAL=1` (fast), `MC_EVAL_K_TEST=4` (final test only)
+- local recommendation on this machine (RTX PRO 6000 x2): `BATCH=96` for ScanObjectNN finetune
+
+Recommended monitoring:
+
+```bash
+tail -f logs/scan_main_table/runner_gpu0.log
+tail -f logs/scan_main_table/runner_gpu1.log
+nvidia-smi
+```
 
 ### v0 cache
 

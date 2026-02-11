@@ -88,6 +88,18 @@ def main():
 
     ap.add_argument("--eval_seed", type=int, default=0, help="deterministic eval seed (per-sample)")
     ap.add_argument("--mc_eval_k", type=int, default=1, help="MC eval: number of query resamples per test sample")
+    ap.add_argument(
+        "--mc_eval_k_val",
+        type=int,
+        default=-1,
+        help="MC eval resamples for validation (-1: use --mc_eval_k)",
+    )
+    ap.add_argument(
+        "--mc_eval_k_test",
+        type=int,
+        default=-1,
+        help="MC eval resamples for final test (-1: use --mc_eval_k)",
+    )
     ap.add_argument("--drop_ray_prob_train", type=float, default=0.0)
     ap.add_argument("--force_missing_ray", action="store_true")
     ap.add_argument("--add_eos", type=int, default=-1, help="1/0 to override, -1 to infer from checkpoint")
@@ -107,6 +119,8 @@ def main():
 
     train_backend = args.train_backend or args.backend
     eval_backend = args.eval_backend or args.backend
+    mc_eval_k_val = args.mc_eval_k if args.mc_eval_k_val < 0 else int(args.mc_eval_k_val)
+    mc_eval_k_test = args.mc_eval_k if args.mc_eval_k_test < 0 else int(args.mc_eval_k_test)
 
     train_paths_full = list_npz(args.cache_root, "train")
     train_paths, val_paths = stratified_train_val_split(
@@ -161,7 +175,7 @@ def main():
         n_ray=args.n_ray,
         mode="eval",
         eval_seed=args.eval_seed,
-        mc_eval_k=args.mc_eval_k,
+        mc_eval_k=mc_eval_k_val,
         drop_ray_prob=0.0,
         force_missing_ray=args.force_missing_ray,
         add_eos=add_eos,
@@ -179,7 +193,7 @@ def main():
         n_ray=args.n_ray,
         mode="eval",
         eval_seed=args.eval_seed,
-        mc_eval_k=args.mc_eval_k,
+        mc_eval_k=mc_eval_k_test,
         drop_ray_prob=0.0,
         force_missing_ray=args.force_missing_ray,
         add_eos=add_eos,
@@ -282,6 +296,7 @@ def main():
     print(
         f"train_backend={train_backend} eval_backend={eval_backend} "
         f"val_ratio={args.val_ratio} val_seed={args.val_seed} "
+        f"mc_eval_k_val={mc_eval_k_val} mc_eval_k_test={mc_eval_k_test} "
         f"freeze_backbone={bool(args.freeze_backbone)}"
     )
     print(f"num_train={len(train_paths)} num_val={len(val_paths)} num_test={len(test_paths)}")
