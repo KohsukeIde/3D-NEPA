@@ -123,6 +123,7 @@ To avoid this, `preprocess_modelnet40.py` now supports worker recycling:
 - `--pt_dist_mode {mesh,kdtree}`:
   - `mesh`: exact `trimesh.proximity.closest_point` (slow)
   - `kdtree`: nearest sampled surface point approximation (fast)
+- UDF generation now fails fast if SciPy (`distance_transform_edt`) is unavailable.
 
 Recommended local values on this machine (24 CPU threads, 125 GiB RAM):
 - standard: `workers=4`, `chunk_size=1`, `max_tasks_per_child=2`
@@ -132,6 +133,10 @@ Recommended local values on this machine (24 CPU threads, 125 GiB RAM):
 Observed bottlenecks on this machine:
 - `closest_point` (exact pt distance) dominates wall time.
 - ray-mesh intersection is fast only when Embree backend is available (`embreex` installed); otherwise `ray_triangle` is extremely slow.
+- verify Embree availability with:
+  - `python -c "from trimesh.ray.ray_pyembree import RayMeshIntersector; print('ok')"`
+- quick UDF sanity check:
+  - sample `*.npz` and confirm `udf_grid` is not `(1,1,1)` and `pt_dist_udf_pool` has low zero-ratio.
 
 ### Reproducible local commands for v2 caches
 

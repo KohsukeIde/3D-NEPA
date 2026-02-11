@@ -8,6 +8,7 @@ evaluate
 scikit-learn
 timm
 trimesh
+embreex
 rtree
 pyyaml
 tqdm
