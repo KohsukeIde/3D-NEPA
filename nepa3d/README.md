@@ -85,6 +85,97 @@ Alternative baseline objective (`--objective mae`):
 - pretrain: `epochs=50`, `lr=3e-4`
 - finetune: `epochs=100`, `lr=1e-4`
 
+### ECCV v2 preprocessing profile (active)
+
+This is the current preprocessing profile for the mixed-pretrain + ScanObjectNN few-shot plan.
+
+- ModelNet40 cache root: `data/modelnet40_cache_v2`
+- ScanObjectNN cache root: `data/scanobjectnn_cache_v2`
+
+ModelNet40 v2 parameters:
+- `PC_POINTS=2048`
+- `PT_POOL=20000`
+- `RAY_POOL=8000`
+- `N_VIEWS=20`
+- `RAYS_PER_VIEW=400`
+- `PC_GRID=64`
+- `PC_DILATE=1`
+- `DF_GRID=64`
+- `DF_DILATE=1`
+- `PT_SURFACE_RATIO=0.5`
+- `PT_SURFACE_SIGMA=0.02`
+- `PT_QUERY_CHUNK=2048`
+- `RAY_QUERY_CHUNK=2048`
+
+ScanObjectNN v2 parameters:
+- `PT_POOL=4000`
+- `RAY_POOL=256`
+- `PT_SURFACE_RATIO=0.5`
+- `PT_SURFACE_SIGMA=0.02`
+
+### Local stability profile (important)
+
+When running preprocessing from a desktop session, memory growth in long-lived `trimesh` workers can trigger OOM.
+To avoid this, `preprocess_modelnet40.py` now supports worker recycling:
+
+- `--max_tasks_per_child N` (0 disables recycling)
+- `--pt_query_chunk` / `--ray_query_chunk` to cap per-call memory spikes
+- `--pt_dist_mode {mesh,kdtree}`:
+  - `mesh`: exact `trimesh.proximity.closest_point` (slow)
+  - `kdtree`: nearest sampled surface point approximation (fast)
+
+Recommended local values on this machine (24 CPU threads, 125 GiB RAM):
+- standard: `workers=4`, `chunk_size=1`, `max_tasks_per_child=2`
+- safe fallback (if desktop apps are open or OOM appears): `workers=2`, `chunk_size=1`, `max_tasks_per_child=1`
+- run `train` then `test` sequentially (not two concurrent ModelNet jobs)
+
+Observed bottlenecks on this machine:
+- `closest_point` (exact pt distance) dominates wall time.
+- ray-mesh intersection is fast only when Embree backend is available (`embreex` installed); otherwise `ray_triangle` is extremely slow.
+
+### Reproducible local commands for v2 caches
+
+ModelNet40 v2:
+
+```bash
+python -u nepa3d/data/preprocess_modelnet40.py \
+  --modelnet_root data/ModelNet40 \
+  --out_root data/modelnet40_cache_v2 \
+  --split train \
+  --pc_points 2048 --pt_pool 20000 --ray_pool 8000 \
+  --n_views 20 --rays_per_view 400 \
+  --pc_grid 64 --pc_dilate 1 \
+  --df_grid 64 --df_dilate 1 \
+  --pt_surface_ratio 0.5 --pt_surface_sigma 0.02 \
+  --pt_query_chunk 2048 --ray_query_chunk 2048 \
+  --pt_dist_mode kdtree --dist_ref_points 8192 \
+  --workers 4 --chunk_size 1 --max_tasks_per_child 2
+
+python -u nepa3d/data/preprocess_modelnet40.py \
+  --modelnet_root data/ModelNet40 \
+  --out_root data/modelnet40_cache_v2 \
+  --split test \
+  --pc_points 2048 --pt_pool 20000 --ray_pool 8000 \
+  --n_views 20 --rays_per_view 400 \
+  --pc_grid 64 --pc_dilate 1 \
+  --df_grid 64 --df_dilate 1 \
+  --pt_surface_ratio 0.5 --pt_surface_sigma 0.02 \
+  --pt_query_chunk 2048 --ray_query_chunk 2048 \
+  --pt_dist_mode kdtree --dist_ref_points 8192 \
+  --workers 4 --chunk_size 1 --max_tasks_per_child 2
+```
+
+ScanObjectNN v2:
+
+```bash
+python -u nepa3d/data/preprocess_scanobjectnn.py \
+  --scan_root data/ScanObjectNN/h5_files \
+  --out_root data/scanobjectnn_cache_v2 \
+  --split all \
+  --pt_pool 4000 --ray_pool 256 \
+  --pt_surface_ratio 0.5 --pt_surface_sigma 0.02
+```
+
 ### v0 cache
 
 - preprocess params: `pc_points=1024`, `pt_pool=2000`, `ray_pool=1000`, `n_views=10`, `rays_per_view=200`

@@ -247,6 +247,33 @@ def normalize_mesh(mesh):
     return mesh
 
 
+def closest_point_distance_chunked(mesh, xyz, chunk_size=2048):
+    """Compute unsigned point-to-mesh distances in chunks to cap peak memory."""
+    xyz = xyz.astype(np.float32, copy=False)
+    n = xyz.shape[0]
+    out = np.empty((n,), dtype=np.float32)
+    cs = max(1, int(chunk_size))
+    for s in range(0, n, cs):
+        e = min(n, s + cs)
+        _, dist, _ = trimesh.proximity.closest_point(mesh, xyz[s:e])
+        out[s:e] = dist.astype(np.float32, copy=False)
+    return out
+
+
+def approx_point_distance_kdtree(mesh, xyz, ref_points=8192, fallback_pc=None):
+    """Approximate point-to-surface distance using nearest sampled surface points."""
+    if cKDTree is None:
+        raise RuntimeError("cKDTree is unavailable")
+    ref_n = max(1, int(ref_points))
+    if fallback_pc is not None and fallback_pc.shape[0] >= ref_n:
+        ref = fallback_pc.astype(np.float32, copy=False)
+    else:
+        ref = mesh.sample(ref_n).astype(np.float32, copy=False)
+    tree = cKDTree(ref)
+    d, _ = tree.query(xyz.astype(np.float32, copy=False), k=1)
+    return d.astype(np.float32, copy=False)
+
+
 def sample_cameras(n_views, radius=2.2):
     az = np.linspace(0.0, 2.0 * np.pi, n_views, endpoint=False)
     el = np.linspace(-0.35 * np.pi, 0.35 * np.pi, n_views)
@@ -305,6 +332,10 @@ def preprocess_one(
     # point-query pool distribution
     pt_surface_ratio=0.5,
     pt_surface_sigma=0.02,
+    pt_query_chunk=2048,
+    ray_query_chunk=2048,
+    pt_dist_mode="mesh",
+    dist_ref_points=8192,
 ):
 
     if seed is not None:
@@ -346,8 +377,17 @@ def preprocess_one(
     pt_xyz_pool = np.concatenate(pts, axis=0) if len(pts) > 1 else pts[0]
     # Clip to canonical cube
     pt_xyz_pool = np.clip(pt_xyz_pool, -1.0, 1.0).astype(np.float32, copy=False)
-    _, dist, _ = trimesh.proximity.closest_point(mesh, pt_xyz_pool)
-    pt_dist_pool = dist.astype(np.float32)
+    if pt_dist_mode == "kdtree":
+        try:
+            pt_dist_pool = approx_point_distance_kdtree(
+                mesh, pt_xyz_pool, ref_points=dist_ref_points, fallback_pc=pc_xyz
+            )
+        except Exception:
+            pt_dist_pool = closest_point_distance_chunked(
+                mesh, pt_xyz_pool, chunk_size=pt_query_chunk
+            )
+    else:
+        pt_dist_pool = closest_point_distance_chunked(mesh, pt_xyz_pool, chunk_size=pt_query_chunk)
     if not np.isfinite(pt_dist_pool).all():
         finite = np.isfinite(pt_dist_pool)
         fill = float(np.max(pt_dist_pool[finite])) if finite.any() else 1.0
@@ -397,20 +437,22 @@ def preprocess_one(
     except Exception:
         intersector = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
 
-    loc, idx_ray, idx_tri = intersector.intersects_location(
-        ray_o, ray_d, multiple_hits=False
-    )
-
     ray_hit = np.zeros((m,), dtype=np.float32)
     ray_t = np.zeros((m,), dtype=np.float32)
     ray_n = np.zeros((m, 3), dtype=np.float32)
 
-    if len(idx_ray) > 0:
-        ray_hit[idx_ray] = 1.0
-        ray_t[idx_ray] = np.sum((loc - ray_o[idx_ray]) * ray_d[idx_ray], axis=1).astype(
-            np.float32
+    rcs = max(1, int(ray_query_chunk))
+    for s in range(0, m, rcs):
+        e = min(m, s + rcs)
+        loc, idx_ray, idx_tri = intersector.intersects_location(
+            ray_o[s:e], ray_d[s:e], multiple_hits=False
         )
-        ray_n[idx_ray] = mesh.face_normals[idx_tri].astype(np.float32)
+        if len(idx_ray) == 0:
+            continue
+        idx = idx_ray + s
+        ray_hit[idx] = 1.0
+        ray_t[idx] = np.sum((loc - ray_o[idx]) * ray_d[idx], axis=1).astype(np.float32)
+        ray_n[idx] = mesh.face_normals[idx_tri].astype(np.float32)
     bad_t = ~np.isfinite(ray_t)
     bad_n = ~np.isfinite(ray_n).all(axis=1)
     bad = bad_t | bad_n
@@ -495,6 +537,10 @@ def _worker(task):
         compute_udf,
         pt_surface_ratio,
         pt_surface_sigma,
+        pt_query_chunk,
+        ray_query_chunk,
+        pt_dist_mode,
+        dist_ref_points,
     ) = task
     ok = preprocess_one(
         mesh_path,
@@ -514,6 +560,10 @@ def _worker(task):
         compute_udf=compute_udf,
         pt_surface_ratio=pt_surface_ratio,
         pt_surface_sigma=pt_surface_sigma,
+        pt_query_chunk=pt_query_chunk,
+        ray_query_chunk=ray_query_chunk,
+        pt_dist_mode=pt_dist_mode,
+        dist_ref_points=dist_ref_points,
     )
     return (mesh_path, ok)
 
@@ -537,17 +587,39 @@ def main():
     ap.add_argument("--no_udf", action="store_true", help="disable UDF grid/pt_dist_udf_pool generation")
     ap.add_argument("--pt_surface_ratio", type=float, default=0.5, help="fraction of point-query pool sampled near surface")
     ap.add_argument("--pt_surface_sigma", type=float, default=0.02, help="std of Gaussian jitter for near-surface queries")
+    ap.add_argument("--pt_query_chunk", type=int, default=2048, help="chunk size for point-to-mesh distance queries")
+    ap.add_argument("--ray_query_chunk", type=int, default=2048, help="chunk size for ray intersection queries")
+    ap.add_argument(
+        "--pt_dist_mode",
+        type=str,
+        choices=["mesh", "kdtree"],
+        default="mesh",
+        help="point-distance source: exact mesh closest-point or KDTree approximation",
+    )
+    ap.add_argument(
+        "--dist_ref_points",
+        type=int,
+        default=8192,
+        help="number of sampled surface points for pt_dist_mode=kdtree",
+    )
     ap.add_argument(
         "--seed", type=int, default=0, help="set -1 to disable deterministic seeding"
     )
     ap.add_argument("--overwrite", action="store_true")
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--chunk_size", type=int, default=1)
+    ap.add_argument(
+        "--max_tasks_per_child",
+        type=int,
+        default=0,
+        help="restart worker after N tasks to mitigate memory growth (0=disabled)",
+    )
     args = ap.parse_args()
 
     seed_base = None if args.seed < 0 else args.seed
     workers = max(1, args.workers)
     chunk_size = max(1, args.chunk_size)
+    max_tasks_per_child = None if args.max_tasks_per_child <= 0 else int(args.max_tasks_per_child)
 
     pattern = os.path.join(args.modelnet_root, "*", args.split, "*.off")
     paths = sorted(glob.glob(pattern))
@@ -581,6 +653,10 @@ def main():
                 (not args.no_udf),
                 args.pt_surface_ratio,
                 args.pt_surface_sigma,
+                args.pt_query_chunk,
+                args.ray_query_chunk,
+                args.pt_dist_mode,
+                args.dist_ref_points,
             )
         )
 
@@ -597,7 +673,7 @@ def main():
             if not ok:
                 print(f"skip: {mesh_path}")
     else:
-        with mp.Pool(processes=workers) as pool:
+        with mp.Pool(processes=workers, maxtasksperchild=max_tasks_per_child) as pool:
             for mesh_path, ok in tqdm(
                 pool.imap_unordered(_worker, tasks, chunksize=chunk_size),
                 total=len(tasks),
