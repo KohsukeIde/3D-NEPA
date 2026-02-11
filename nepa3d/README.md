@@ -113,6 +113,10 @@ ScanObjectNN v2 parameters:
 - `PT_SURFACE_RATIO=0.5`
 - `PT_SURFACE_SIGMA=0.02`
 
+v2 cache completion status (current local run):
+- ModelNet40: `train=9843`, `test=2468` (`data/modelnet40_cache_v2`)
+- ScanObjectNN: `train=59542`, `test=21889` (`data/scanobjectnn_cache_v2`)
+
 ### Local stability profile (important)
 
 When running preprocessing from a desktop session, memory growth in long-lived `trimesh` workers can trigger OOM.
@@ -180,6 +184,30 @@ python -u nepa3d/data/preprocess_scanobjectnn.py \
   --pt_pool 4000 --ray_pool 256 \
   --pt_surface_ratio 0.5 --pt_surface_sigma 0.02
 ```
+
+### Reproducible local commands for mixed pretrain (ECCV v2)
+
+Run both on 2 GPUs in parallel:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.train.pretrain \
+  --mix_config nepa3d/configs/pretrain_mixed_eccv.yaml \
+  --mix_num_samples 200000 --mix_seed 0 \
+  --objective nepa --drop_ray_prob 0.3 \
+  --batch 32 --epochs 50 --num_workers 6 --seed 0 \
+  --save_dir runs/eccv_mix_nepa_s0
+
+CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.train.pretrain \
+  --mix_config nepa3d/configs/pretrain_mixed_eccv.yaml \
+  --mix_num_samples 200000 --mix_seed 0 \
+  --objective mae --mask_ratio 0.4 \
+  --batch 32 --epochs 50 --num_workers 6 --seed 0 \
+  --save_dir runs/eccv_mix_mae_s0
+```
+
+Suggested log files:
+- `logs/eccv_mix_nepa_s0.log`
+- `logs/eccv_mix_mae_s0.log`
 
 ### v0 cache
 

@@ -616,12 +616,6 @@ def main():
     )
     args = ap.parse_args()
 
-    if (not args.no_udf) and (distance_transform_edt is None):
-        raise RuntimeError(
-            "SciPy distance_transform_edt is required for UDF. "
-            "Install scipy or rerun with --no_udf."
-        )
-
     seed_base = None if args.seed < 0 else args.seed
     workers = max(1, args.workers)
     chunk_size = max(1, args.chunk_size)
