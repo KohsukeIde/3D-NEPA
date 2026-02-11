@@ -10,6 +10,7 @@ from ..backends.pointcloud_backend import (
     PointCloudNoRayBackend,
 )
 from ..backends.voxel_backend import VoxelBackend
+from ..backends.udfgrid_backend import UDFGridBackend
 from ..token.tokenizer import build_sequence
 
 
@@ -70,6 +71,9 @@ class ModelNet40QueryDataset(Dataset):
                 dilate=self.voxel_dilate,
                 max_steps=self.voxel_max_steps,
             )
+        if self.backend == "udfgrid":
+            return UDFGridBackend(path)
+
         raise ValueError(f"unknown backend: {self.backend}")
 
     def __getitem__(self, idx):

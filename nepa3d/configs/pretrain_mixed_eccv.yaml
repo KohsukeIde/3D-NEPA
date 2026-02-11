@@ -1,0 +1,28 @@
+# Mixed pretraining corpus for ECCV.
+# Sample-level backend switching is achieved via the MixtureSampler.
+
+mix_seed: 0
+mix_num_samples: 200000   # per epoch (set by total desired steps * batch)
+replacement: true
+
+datasets:
+  # ModelNet40 meshes: full point+ray queries available.
+  - name: mn40_mesh
+    cache_root: data/modelnet40_cache_v2
+    split: train
+    backend: mesh
+    weight: 0.34
+
+  # ModelNet40 distance-field primitive (UDF grid): point-only (ray missing).
+  - name: mn40_udf
+    cache_root: data/modelnet40_cache_v2
+    split: train
+    backend: udfgrid
+    weight: 0.33
+
+  # ScanObjectNN: real pointclouds, ray missing.
+  - name: scan_noray
+    cache_root: data/scanobjectnn_cache_v2
+    split: train
+    backend: pointcloud_noray
+    weight: 0.33

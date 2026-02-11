@@ -39,6 +39,11 @@ PC_GRID="${PC_GRID:-64}"
 PC_DILATE="${PC_DILATE:-1}"
 PC_MAX_STEPS="${PC_MAX_STEPS:-0}"
 NO_PC_RAYS="${NO_PC_RAYS:-0}"
+DF_GRID="${DF_GRID:-64}"
+DF_DILATE="${DF_DILATE:-1}"
+NO_UDF="${NO_UDF:-0}"
+PT_SURFACE_RATIO="${PT_SURFACE_RATIO:-0.5}"
+PT_SURFACE_SIGMA="${PT_SURFACE_SIGMA:-0.02}"
 
 WORKERS="${N_WORKERS:-${PBS_NP:-64}}"
 CHUNK_SIZE="${CHUNK_SIZE:-2}"
@@ -57,6 +62,11 @@ run_split() {
     --pc_grid "${PC_GRID}" \
     --pc_dilate "${PC_DILATE}" \
     --pc_max_steps "${PC_MAX_STEPS}" \
+    --df_grid "${DF_GRID}" \
+    --df_dilate "${DF_DILATE}" \
+    --pt_surface_ratio "${PT_SURFACE_RATIO}" \
+    --pt_surface_sigma "${PT_SURFACE_SIGMA}" \
+    $( [ "${NO_UDF}" = "1" ] && echo "--no_udf" ) \
     $( [ "${NO_PC_RAYS}" = "1" ] && echo "--no_pc_rays" ) \
     --seed "${SEED}" \
     --workers "${WORKERS}" \

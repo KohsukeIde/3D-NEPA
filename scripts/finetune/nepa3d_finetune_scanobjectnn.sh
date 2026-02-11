@@ -35,6 +35,10 @@ NUM_WORKERS="${NUM_WORKERS:-4}"
 EVAL_SEED="${EVAL_SEED:-0}"
 MC_EVAL_K="${MC_EVAL_K:-4}"
 SEED="${SEED:-0}"
+FEWSHOT_K="${FEWSHOT_K:-0}"
+FEWSHOT_SEED="${FEWSHOT_SEED:-0}"
+VAL_RATIO="${VAL_RATIO:-0.1}"
+VAL_SEED="${VAL_SEED:-0}"
 ADD_EOS="${ADD_EOS:--1}"
 
 "${PYTHON_BIN}" -m nepa3d.train.finetune_cls \
@@ -50,4 +54,8 @@ ADD_EOS="${ADD_EOS:--1}"
   --seed "${SEED}" \
   --add_eos "${ADD_EOS}" \
   --eval_seed "${EVAL_SEED}" \
-  --mc_eval_k "${MC_EVAL_K}"
+  --mc_eval_k "${MC_EVAL_K}" \
+  --val_ratio "${VAL_RATIO}" \
+  --val_seed "${VAL_SEED}" \
+  --fewshot_k "${FEWSHOT_K}" \
+  --fewshot_seed "${FEWSHOT_SEED}"

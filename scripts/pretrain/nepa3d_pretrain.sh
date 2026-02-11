@@ -27,6 +27,9 @@ export OPENBLAS_NUM_THREADS=1
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
 CACHE_ROOT="${CACHE_ROOT:-data/modelnet40_cache_v0}"
+MIX_CONFIG="${MIX_CONFIG:-}"
+MIX_NUM_SAMPLES="${MIX_NUM_SAMPLES:-0}"
+MIX_SEED="${MIX_SEED:-0}"
 BACKEND="${BACKEND:-mesh}"
 BATCH="${BATCH:-32}"
 EPOCHS="${EPOCHS:-50}"
@@ -55,6 +58,9 @@ fi
 
 "${PYTHON_BIN}" -m nepa3d.train.pretrain \
   --cache_root "${CACHE_ROOT}" \
+  --mix_config "${MIX_CONFIG}" \
+  --mix_num_samples "${MIX_NUM_SAMPLES}" \
+  --mix_seed "${MIX_SEED}" \
   --backend "${BACKEND}" \
   --batch "${BATCH}" --epochs "${EPOCHS}" \
   --lr "${LR}" \

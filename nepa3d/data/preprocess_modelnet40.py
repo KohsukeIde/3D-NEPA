@@ -10,9 +10,10 @@ from tqdm import tqdm
 import math
 
 try:
-    from scipy.ndimage import binary_dilation
+    from scipy.ndimage import binary_dilation, distance_transform_edt
 except Exception:
     binary_dilation = None
+    distance_transform_edt = None
 
 try:
     from scipy.spatial import cKDTree
@@ -55,6 +56,47 @@ def build_occ_grid_from_points(pc_xyz, grid=64, dilate=1, bmin=-1.0, bmax=1.0):
         occ = _dilate_occ(occ, iterations=dilate)
     return occ
 
+
+
+
+def trilinear_sample_grid(grid, xyz, bmin=-1.0, bmax=1.0):
+    """Trilinear sampling of a (G,G,G) grid defined at voxel centers.
+
+    Grid voxel centers are assumed at:
+      p(i) = bmin + (i + 0.5) * voxel, voxel=(bmax-bmin)/G
+    """
+    G = int(grid.shape[0])
+    voxel = (bmax - bmin) / float(G)
+    # map xyz -> fractional voxel-center index
+    s = (xyz - bmin) / voxel - 0.5
+    i0 = np.floor(s).astype(np.int32)
+    w = (s - i0.astype(np.float32)).astype(np.float32)
+    i1 = i0 + 1
+
+    i0 = np.clip(i0, 0, G - 1)
+    i1 = np.clip(i1, 0, G - 1)
+
+    wx, wy, wz = w[:, 0], w[:, 1], w[:, 2]
+
+    g000 = grid[i0[:, 0], i0[:, 1], i0[:, 2]]
+    g100 = grid[i1[:, 0], i0[:, 1], i0[:, 2]]
+    g010 = grid[i0[:, 0], i1[:, 1], i0[:, 2]]
+    g110 = grid[i1[:, 0], i1[:, 1], i0[:, 2]]
+    g001 = grid[i0[:, 0], i0[:, 1], i1[:, 2]]
+    g101 = grid[i1[:, 0], i0[:, 1], i1[:, 2]]
+    g011 = grid[i0[:, 0], i1[:, 1], i1[:, 2]]
+    g111 = grid[i1[:, 0], i1[:, 1], i1[:, 2]]
+
+    c00 = g000 * (1.0 - wx) + g100 * wx
+    c10 = g010 * (1.0 - wx) + g110 * wx
+    c01 = g001 * (1.0 - wx) + g101 * wx
+    c11 = g011 * (1.0 - wx) + g111 * wx
+
+    c0 = c00 * (1.0 - wy) + c10 * wy
+    c1 = c01 * (1.0 - wy) + c11 * wy
+
+    c = c0 * (1.0 - wz) + c1 * wz
+    return c.astype(np.float32, copy=False)
 
 def ray_aabb_intersect_batch(ray_o, ray_d, bmin=-1.0, bmax=1.0, eps=1e-9):
     """Slab method. Returns hit_mask, t_entry, t_exit."""
@@ -256,7 +298,15 @@ def preprocess_one(
     pc_dilate=1,
     pc_max_steps=0,
     compute_pc_rays=True,
+    # UDF grid (distance field) settings
+    df_grid=64,
+    df_dilate=1,
+    compute_udf=True,
+    # point-query pool distribution
+    pt_surface_ratio=0.5,
+    pt_surface_sigma=0.02,
 ):
+
     if seed is not None:
         np.random.seed(seed)
 
@@ -281,7 +331,21 @@ def preprocess_one(
     else:
         pc_n = mesh.face_normals[face_idx].astype(np.float32)
 
-    pt_xyz_pool = np.random.uniform(-1.0, 1.0, size=(pt_pool, 3)).astype(np.float32)
+    # Point-query pool: mix uniform-in-cube and near-surface samples.
+    pt_pool = int(pt_pool)
+    n_uni = int(round(float(1.0 - pt_surface_ratio) * pt_pool))
+    n_surf = pt_pool - n_uni
+    pts = []
+    if n_uni > 0:
+        pts.append(np.random.uniform(-1.0, 1.0, size=(n_uni, 3)).astype(np.float32))
+    if n_surf > 0:
+        # Sample near surface by jittering mesh-sampled points.
+        base = pc_xyz[np.random.choice(pc_xyz.shape[0], size=n_surf, replace=(pc_xyz.shape[0] < n_surf))]
+        jitter = np.random.normal(scale=float(pt_surface_sigma), size=(n_surf, 3)).astype(np.float32)
+        pts.append((base + jitter).astype(np.float32))
+    pt_xyz_pool = np.concatenate(pts, axis=0) if len(pts) > 1 else pts[0]
+    # Clip to canonical cube
+    pt_xyz_pool = np.clip(pt_xyz_pool, -1.0, 1.0).astype(np.float32, copy=False)
     _, dist, _ = trimesh.proximity.closest_point(mesh, pt_xyz_pool)
     pt_dist_pool = dist.astype(np.float32)
     if not np.isfinite(pt_dist_pool).all():
@@ -290,6 +354,28 @@ def preprocess_one(
         pt_dist_pool = np.nan_to_num(
             pt_dist_pool, nan=fill, posinf=fill, neginf=0.0
         )
+
+    # UDF grid (unsigned distance field) computed from voxelized surface occupancy.
+    udf_grid = None
+    pt_dist_udf_pool = None
+    occ_grid = None
+    if compute_udf and int(df_grid) > 0 and distance_transform_edt is not None:
+        try:
+            occ_grid = build_occ_grid_from_points(pc_xyz, grid=int(df_grid), dilate=int(df_dilate))
+            voxel = 2.0 / float(int(df_grid))
+            # distance to nearest occupied voxel center, returned in world units via sampling
+            udf_grid = distance_transform_edt(~occ_grid, sampling=(voxel, voxel, voxel)).astype(np.float32)
+            # Precompute UDF distances at the point-query pool locations for speed.
+            pt_dist_udf_pool = trilinear_sample_grid(udf_grid, pt_xyz_pool)
+            # sanitize
+            if not np.isfinite(pt_dist_udf_pool).all():
+                finite = np.isfinite(pt_dist_udf_pool)
+                fill = float(np.max(pt_dist_udf_pool[finite])) if finite.any() else 1.0
+                pt_dist_udf_pool = np.nan_to_num(pt_dist_udf_pool, nan=fill, posinf=fill, neginf=0.0).astype(np.float32)
+        except Exception:
+            udf_grid = None
+            pt_dist_udf_pool = None
+            occ_grid = None
 
     rays_per_view = max(rays_per_view, int(np.ceil(ray_pool / max(n_views, 1))))
     ray_o_list, ray_d_list = [], []
@@ -353,6 +439,19 @@ def preprocess_one(
         ray_t_pc = np.zeros_like(ray_t, dtype=np.float32)
         ray_n_pc = np.zeros_like(ray_n, dtype=np.float32)
 
+    # Ensure UDF keys exist for downstream backends (even if compute_udf=False).
+    if pt_dist_udf_pool is None:
+        pt_dist_udf_pool = pt_dist_pool.astype(np.float32, copy=False)
+    if udf_grid is None:
+        udf_grid = np.zeros((1, 1, 1), dtype=np.float16)
+    else:
+        # store compactly
+        udf_grid = udf_grid.astype(np.float16, copy=False)
+    if occ_grid is None:
+        occ_grid = np.zeros((1, 1, 1), dtype=np.uint8)
+    else:
+        occ_grid = occ_grid.astype(np.uint8, copy=False)
+
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     np.savez_compressed(
         out_path,
@@ -360,6 +459,11 @@ def preprocess_one(
         pc_n=pc_n,
         pt_xyz_pool=pt_xyz_pool,
         pt_dist_pool=pt_dist_pool,
+        pt_dist_udf_pool=pt_dist_udf_pool,
+        udf_grid=udf_grid,
+        occ_grid=occ_grid,
+        df_grid=np.array([int(df_grid)], dtype=np.int32),
+        df_dilate=np.array([int(df_dilate)], dtype=np.int32),
         ray_o_pool=ray_o,
         ray_d_pool=ray_d,
         ray_hit_pool=ray_hit,
@@ -386,6 +490,11 @@ def _worker(task):
         pc_dilate,
         pc_max_steps,
         compute_pc_rays,
+        df_grid,
+        df_dilate,
+        compute_udf,
+        pt_surface_ratio,
+        pt_surface_sigma,
     ) = task
     ok = preprocess_one(
         mesh_path,
@@ -400,6 +509,11 @@ def _worker(task):
         pc_dilate=pc_dilate,
         pc_max_steps=pc_max_steps,
         compute_pc_rays=compute_pc_rays,
+        df_grid=df_grid,
+        df_dilate=df_dilate,
+        compute_udf=compute_udf,
+        pt_surface_ratio=pt_surface_ratio,
+        pt_surface_sigma=pt_surface_sigma,
     )
     return (mesh_path, ok)
 
@@ -418,6 +532,11 @@ def main():
     ap.add_argument("--pc_dilate", type=int, default=1, help="binary dilation iterations for occupancy grid")
     ap.add_argument("--pc_max_steps", type=int, default=0, help="max DDA steps (0=auto)")
     ap.add_argument("--no_pc_rays", action="store_true", help="disable pointcloud ray-march pool generation")
+    ap.add_argument("--df_grid", type=int, default=64, help="UDF grid resolution (0 to disable)")
+    ap.add_argument("--df_dilate", type=int, default=1, help="dilation iterations for UDF occupancy grid")
+    ap.add_argument("--no_udf", action="store_true", help="disable UDF grid/pt_dist_udf_pool generation")
+    ap.add_argument("--pt_surface_ratio", type=float, default=0.5, help="fraction of point-query pool sampled near surface")
+    ap.add_argument("--pt_surface_sigma", type=float, default=0.02, help="std of Gaussian jitter for near-surface queries")
     ap.add_argument(
         "--seed", type=int, default=0, help="set -1 to disable deterministic seeding"
     )
@@ -457,6 +576,11 @@ def main():
                 args.pc_dilate,
                 args.pc_max_steps,
                 (not args.no_pc_rays),
+                args.df_grid,
+                args.df_dilate,
+                (not args.no_udf),
+                args.pt_surface_ratio,
+                args.pt_surface_sigma,
             )
         )
 

@@ -26,6 +26,8 @@ OUT_ROOT="${OUT_ROOT:-data/scanobjectnn_cache_v1}"
 SPLIT="${SPLIT:-all}"  # train|test|all
 PT_POOL="${PT_POOL:-2000}"
 RAY_POOL="${RAY_POOL:-1000}"
+PT_SURFACE_RATIO="${PT_SURFACE_RATIO:-0.5}"
+PT_SURFACE_SIGMA="${PT_SURFACE_SIGMA:-0.02}"
 SEED="${SEED:-0}"
 OVERWRITE="${OVERWRITE:-0}"
 
@@ -40,5 +42,7 @@ fi
   --split "${SPLIT}" \
   --pt_pool "${PT_POOL}" \
   --ray_pool "${RAY_POOL}" \
+  --pt_surface_ratio "${PT_SURFACE_RATIO}" \
+  --pt_surface_sigma "${PT_SURFACE_SIGMA}" \
   --seed "${SEED}" \
   ${EXTRA_OVERWRITE}

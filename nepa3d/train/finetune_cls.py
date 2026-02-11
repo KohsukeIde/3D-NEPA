@@ -13,6 +13,28 @@ from ..models.query_nepa import QueryNepa
 from ..utils.seed import set_seed
 
 
+def stratified_kshot(paths, k, seed=0):
+    """Select up to K samples per class from a list of paths (.../<split>/<class>/<id>.npz)."""
+    from collections import defaultdict
+    from ..data.modelnet40_index import label_from_path
+
+    paths = list(paths)
+    if k <= 0:
+        return sorted(paths)
+    groups = defaultdict(list)
+    for p in paths:
+        groups[label_from_path(p)].append(p)
+
+    rng = np.random.RandomState(int(seed) & 0xFFFFFFFF)
+
+    out = []
+    for cls, cls_paths in groups.items():
+        cls_paths = sorted(cls_paths)
+        rng.shuffle(cls_paths)
+        out.extend(cls_paths[: min(len(cls_paths), int(k))])
+    return sorted(out)
+
+
 class ClsWrapper(nn.Module):
     def __init__(self, backbone, n_classes):
         super().__init__()
@@ -32,21 +54,21 @@ def main():
         "--backend",
         type=str,
         default="mesh",
-        choices=["mesh", "pointcloud", "pointcloud_meshray", "pointcloud_noray", "voxel"],
+        choices=["mesh", "pointcloud", "pointcloud_meshray", "pointcloud_noray", "voxel", "udfgrid"],
         help="shorthand: sets both --train_backend and --eval_backend unless they are explicitly provided",
     )
     ap.add_argument(
         "--train_backend",
         type=str,
         default=None,
-        choices=["mesh", "pointcloud", "pointcloud_meshray", "pointcloud_noray", "voxel"],
+        choices=["mesh", "pointcloud", "pointcloud_meshray", "pointcloud_noray", "voxel", "udfgrid"],
         help="backend for TRAIN split (fine-tuning / probe training)",
     )
     ap.add_argument(
         "--eval_backend",
         type=str,
         default=None,
-        choices=["mesh", "pointcloud", "pointcloud_meshray", "pointcloud_noray", "voxel"],
+        choices=["mesh", "pointcloud", "pointcloud_meshray", "pointcloud_noray", "voxel", "udfgrid"],
         help="backend for VAL/TEST split (evaluation). Use this for cross-backend probing.",
     )
     ap.add_argument("--ckpt", type=str, required=True)
@@ -61,6 +83,9 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--val_ratio", type=float, default=0.1, help="stratified val split ratio from TRAIN")
     ap.add_argument("--val_seed", type=int, default=0, help="seed for stratified train/val split")
+    ap.add_argument("--fewshot_k", type=int, default=0, help="K-shot fine-tuning: number of training samples per class (0=full train)")
+    ap.add_argument("--fewshot_seed", type=int, default=0, help="seed for K-shot subset selection")
+
     ap.add_argument("--eval_seed", type=int, default=0, help="deterministic eval seed (per-sample)")
     ap.add_argument("--mc_eval_k", type=int, default=1, help="MC eval: number of query resamples per test sample")
     ap.add_argument("--drop_ray_prob_train", type=float, default=0.0)
@@ -87,6 +112,10 @@ def main():
     train_paths, val_paths = stratified_train_val_split(
         train_paths_full, val_ratio=args.val_ratio, seed=args.val_seed
     )
+    if args.fewshot_k and args.fewshot_k > 0:
+        train_paths = stratified_kshot(train_paths, k=args.fewshot_k, seed=args.fewshot_seed)
+        print(f"[fewshot] k={args.fewshot_k} selected_train={len(train_paths)} (from split-train)")
+
     test_paths = list_npz(args.cache_root, "test")
     label_map = build_label_map(train_paths_full)
 

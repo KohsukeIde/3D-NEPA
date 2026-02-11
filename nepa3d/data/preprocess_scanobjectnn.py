@@ -18,12 +18,24 @@ def normalize_points(pc):
     return pc / scale
 
 
-def make_pools(pc_xyz, pt_pool=2000, ray_pool=1000, rng=None):
+def make_pools(pc_xyz, pt_pool=2000, ray_pool=1000, rng=None, pt_surface_ratio=0.5, pt_surface_sigma=0.02):
     if rng is None:
         rng = np.random
     kdt = cKDTree(pc_xyz)
 
-    pt_xyz_pool = rng.uniform(-1.0, 1.0, size=(pt_pool, 3)).astype(np.float32)
+    # Point-query pool: mix uniform and near-point samples (surface-biased).
+    pt_pool = int(pt_pool)
+    n_uni = int(round(float(1.0 - pt_surface_ratio) * pt_pool))
+    n_surf = pt_pool - n_uni
+    pts = []
+    if n_uni > 0:
+        pts.append(rng.uniform(-1.0, 1.0, size=(n_uni, 3)).astype(np.float32))
+    if n_surf > 0:
+        base = pc_xyz[rng.choice(pc_xyz.shape[0], size=n_surf, replace=(pc_xyz.shape[0] < n_surf))]
+        jitter = rng.normal(scale=float(pt_surface_sigma), size=(n_surf, 3)).astype(np.float32)
+        pts.append((base + jitter).astype(np.float32))
+    pt_xyz_pool = np.concatenate(pts, axis=0) if len(pts) > 1 else pts[0]
+    pt_xyz_pool = np.clip(pt_xyz_pool, -1.0, 1.0).astype(np.float32, copy=False)
     pt_dist_pool, _ = kdt.query(pt_xyz_pool, k=1)
     pt_dist_pool = pt_dist_pool.astype(np.float32, copy=False)
 
@@ -71,7 +83,7 @@ def find_split_files(scan_root, split):
     return sorted(set(paths))
 
 
-def preprocess_split(scan_root, out_root, split, pt_pool=2000, ray_pool=1000, seed=0, overwrite=False):
+def preprocess_split(scan_root, out_root, split, pt_pool=2000, ray_pool=1000, seed=0, overwrite=False, pt_surface_ratio=0.5, pt_surface_sigma=0.02):
     h5_paths = find_split_files(scan_root, split)
     if not h5_paths:
         raise FileNotFoundError(f"no {split} h5 files under: {scan_root}")
@@ -90,7 +102,7 @@ def preprocess_split(scan_root, out_root, split, pt_pool=2000, ray_pool=1000, se
 
         pc_xyz = normalize_points(pc)
         pc_n = np.zeros_like(pc_xyz, dtype=np.float32)
-        pools = make_pools(pc_xyz, pt_pool=pt_pool, ray_pool=ray_pool, rng=rng)
+        pools = make_pools(pc_xyz, pt_pool=pt_pool, ray_pool=ray_pool, rng=rng, pt_surface_ratio=pt_surface_ratio, pt_surface_sigma=pt_surface_sigma)
 
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         np.savez_compressed(
@@ -108,6 +120,8 @@ def main():
     ap.add_argument("--split", type=str, choices=["train", "test", "all"], default="all")
     ap.add_argument("--pt_pool", type=int, default=2000)
     ap.add_argument("--ray_pool", type=int, default=1000)
+    ap.add_argument("--pt_surface_ratio", type=float, default=0.5)
+    ap.add_argument("--pt_surface_sigma", type=float, default=0.02)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--overwrite", action="store_true")
     args = ap.parse_args()
@@ -121,6 +135,8 @@ def main():
             ray_pool=args.ray_pool,
             seed=args.seed,
             overwrite=args.overwrite,
+            pt_surface_ratio=args.pt_surface_ratio,
+            pt_surface_sigma=args.pt_surface_sigma,
         )
     if args.split in ("test", "all"):
         preprocess_split(
@@ -131,6 +147,8 @@ def main():
             ray_pool=args.ray_pool,
             seed=args.seed + 12345,
             overwrite=args.overwrite,
+            pt_surface_ratio=args.pt_surface_ratio,
+            pt_surface_sigma=args.pt_surface_sigma,
         )
 
 

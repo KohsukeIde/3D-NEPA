@@ -1,12 +1,14 @@
 import argparse
 import os
 
+import numpy as np
 import torch
 import torch.optim as optim
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 
 from ..data.dataset import ModelNet40QueryDataset, collate
+from ..data.mixed_pretrain import build_mixed_pretrain
 from ..data.modelnet40_index import list_npz
 from ..models.query_nepa import QueryNepa
 from ..token.tokenizer import TYPE_BOS, TYPE_EOS
@@ -36,11 +38,14 @@ def build_token_mask(type_id, mask_ratio):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache_root", type=str, default="data/modelnet40_cache")
+    ap.add_argument("--mix_config", type=str, default="", help="YAML config for mixed pretraining. If set, ignores --cache_root/--backend for dataset construction.")
+    ap.add_argument("--mix_num_samples", type=int, default=0, help="override mix_num_samples in YAML (0=use YAML/default)")
+    ap.add_argument("--mix_seed", type=int, default=0, help="override mix_seed in YAML (0=use YAML/default if provided)")
     ap.add_argument(
         "--backend",
         type=str,
         default="mesh",
-        choices=["mesh", "pointcloud", "pointcloud_meshray", "pointcloud_noray", "voxel"],
+        choices=["mesh", "pointcloud", "pointcloud_meshray", "pointcloud_noray", "voxel", "udfgrid"],
     )
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--epochs", type=int, default=50)
@@ -65,30 +70,74 @@ def main():
 
     set_seed(args.seed)
 
+    def _worker_init_fn(worker_id: int):
+        # Ensure numpy RNG differs across dataloader workers.
+        import random
+        base = (torch.initial_seed() + worker_id) % (2**32)
+        np.random.seed(base)
+        random.seed(base)
+
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     use_amp = device == "cuda"
 
-    train_paths = list_npz(args.cache_root, "train")
-    ds = ModelNet40QueryDataset(
-        train_paths,
-        backend=args.backend,
-        n_point=args.n_point,
-        n_ray=args.n_ray,
-        drop_ray_prob=args.drop_ray_prob,
-        force_missing_ray=args.force_missing_ray,
-        add_eos=bool(args.add_eos),
-        voxel_grid=args.voxel_grid,
-        voxel_dilate=args.voxel_dilate,
-        voxel_max_steps=args.voxel_max_steps,
-    )
-    dl = DataLoader(
-        ds,
-        batch_size=args.batch,
-        shuffle=True,
-        num_workers=args.num_workers,
-        pin_memory=True,
-        collate_fn=collate,
-    )
+    if args.mix_config:
+        ds, sampler, mix_info = build_mixed_pretrain(
+            args.mix_config,
+            n_point=args.n_point,
+            n_ray=args.n_ray,
+            mode="train",
+            drop_ray_prob=args.drop_ray_prob,
+            force_missing_ray=args.force_missing_ray,
+            add_eos=bool(args.add_eos),
+            voxel_grid=args.voxel_grid,
+            voxel_dilate=args.voxel_dilate,
+            voxel_max_steps=args.voxel_max_steps,
+        )
+        # Optional overrides from CLI (useful for PBS -v variables)
+        if args.mix_num_samples and args.mix_num_samples > 0:
+            sampler.num_samples = int(args.mix_num_samples)
+        if args.mix_seed and args.mix_seed != mix_info.get("seed", 0):
+            sampler.seed = int(args.mix_seed)
+
+        print("[mix] components:")
+        for n, w, sz in zip(mix_info["names"], mix_info["weights"], mix_info["sizes"]):
+            print(f"  - {n}: weight={w:.3f} size={sz}")
+        print(f"[mix] num_samples_per_epoch={len(sampler)} replacement={mix_info['replacement']} seed={sampler.seed}")
+
+        dl = DataLoader(
+            ds,
+            batch_size=args.batch,
+            shuffle=False,
+            sampler=sampler,
+            num_workers=args.num_workers,
+            pin_memory=True,
+            collate_fn=collate,
+            worker_init_fn=_worker_init_fn,
+        )
+    else:
+        train_paths = list_npz(args.cache_root, "train")
+        ds = ModelNet40QueryDataset(
+            train_paths,
+            backend=args.backend,
+            n_point=args.n_point,
+            n_ray=args.n_ray,
+            drop_ray_prob=args.drop_ray_prob,
+            force_missing_ray=args.force_missing_ray,
+            add_eos=bool(args.add_eos),
+            voxel_grid=args.voxel_grid,
+            voxel_dilate=args.voxel_dilate,
+            voxel_max_steps=args.voxel_max_steps,
+        )
+        dl = DataLoader(
+            ds,
+            batch_size=args.batch,
+            shuffle=True,
+            num_workers=args.num_workers,
+            pin_memory=True,
+            collate_fn=collate,
+            worker_init_fn=_worker_init_fn,
+        )
 
     t = 1 + args.n_point + args.n_ray + (1 if bool(args.add_eos) else 0)
     model = QueryNepa(
@@ -108,6 +157,12 @@ def main():
     step = 0
     model.train()
     for ep in range(args.epochs):
+        if args.mix_config:
+            # Deterministic per-epoch sampler.
+            try:
+                dl.sampler.set_epoch(ep)
+            except Exception:
+                pass
         for batch in dl:
             feat = batch["feat"].to(device, non_blocking=True).float()
             type_id = batch["type_id"].to(device, non_blocking=True).long()
