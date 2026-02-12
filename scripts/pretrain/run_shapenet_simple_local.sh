@@ -27,8 +27,8 @@ GPU1="${GPU1:-1}"
 
 SAVE_NEPA="${SAVE_NEPA:-runs/shapenet_mesh_nepa_s0}"
 SAVE_MAE="${SAVE_MAE:-runs/shapenet_mesh_mae_s0}"
-LOG_NEPA="${LOG_NEPA:-logs/shapenet_mesh_nepa_s0.log}"
-LOG_MAE="${LOG_MAE:-logs/shapenet_mesh_mae_s0.log}"
+LOG_NEPA="${LOG_NEPA:-logs/pretrain/shapenet_mesh/nepa_s0.log}"
+LOG_MAE="${LOG_MAE:-logs/pretrain/shapenet_mesh/mae_s0.log}"
 
 if [ ! -x "${PYTHON_BIN}" ]; then
   echo "[error] python not found: ${PYTHON_BIN}"
@@ -72,4 +72,3 @@ echo $! > "${LOG_MAE}.pid"
 
 echo "nepa_pid=$(cat "${LOG_NEPA}.pid")"
 echo "mae_pid=$(cat "${LOG_MAE}.pid")"
-

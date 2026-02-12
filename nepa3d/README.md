@@ -226,8 +226,8 @@ CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.train.pretrain \
 ```
 
 Suggested log files:
-- `logs/eccv_mix_nepa_s0.log`
-- `logs/eccv_mix_mae_s0.log`
+- `logs/pretrain/eccv_mixed/mix_nepa_s0.log`
+- `logs/pretrain/eccv_mixed/mix_mae_s0.log`
 
 ### ScanObjectNN main-table launcher (local 2-GPU)
 
@@ -237,9 +237,15 @@ Run full + few-shot (K=0/1/5/10/20) for 4 methods (`scratch`, `mesh_nepa`, `mix_
 bash scripts/finetune/run_scanobjectnn_main_table_local.sh
 ```
 
+Background launcher:
+
+```bash
+bash scripts/finetune/launch_scanobjectnn_main_table_local.sh
+```
+
 This launches 60 jobs total (2 in parallel, one per GPU), with resume/skip by `last.pt`:
-- logs: `logs/scan_main_table/*.log`
-- per-GPU runner logs: `logs/scan_main_table/runner_gpu0.log`, `logs/scan_main_table/runner_gpu1.log`
+- logs: `logs/finetune/scan_main_table/jobs/*.log`
+- per-GPU runner logs: `logs/finetune/scan_main_table/jobs/runner_gpu0.log`, `logs/finetune/scan_main_table/jobs/runner_gpu1.log`
 - outputs: `runs/scan_<method>_k<K>_s<seed>/`
 - speed knobs (env): `MC_EVAL_K_VAL=1` (fast), `MC_EVAL_K_TEST=4` (final test only)
 - local recommendation on this machine (RTX PRO 6000 x2): `BATCH=96` for ScanObjectNN finetune
@@ -247,10 +253,29 @@ This launches 60 jobs total (2 in parallel, one per GPU), with resume/skip by `l
 Recommended monitoring:
 
 ```bash
-tail -f logs/scan_main_table/runner_gpu0.log
-tail -f logs/scan_main_table/runner_gpu1.log
+tail -f logs/finetune/scan_main_table/jobs/runner_gpu0.log
+tail -f logs/finetune/scan_main_table/jobs/runner_gpu1.log
 nvidia-smi
 ```
+
+### ScanObjectNN fine-tune from ShapeNet pretrain (local 2-GPU)
+
+Run full + few-shot (K=0/1/5/10/20) for 3 methods (`scratch`, `shapenet_nepa`, `shapenet_mae`) and seeds `0,1,2`:
+
+```bash
+bash scripts/finetune/run_scanobjectnn_shapenet_table_local.sh
+```
+
+Background launcher:
+
+```bash
+bash scripts/finetune/launch_scanobjectnn_shapenet_table_local.sh
+```
+
+This launches 45 jobs total (2 in parallel, one per GPU), with resume/skip by `last.pt`:
+- logs: `logs/finetune/scan_shapenet_table/jobs/*.log`
+- per-GPU runner logs: `logs/finetune/scan_shapenet_table/jobs/runner_gpu0.log`, `logs/finetune/scan_shapenet_table/jobs/runner_gpu1.log`
+- outputs: `runs/scan_<method>_k<K>_s<seed>/`
 
 ### v0 cache
 

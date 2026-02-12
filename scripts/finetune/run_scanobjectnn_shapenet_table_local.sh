@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
-set -u
+set -eu
 
-# Local 2-GPU launcher for ScanObjectNN full/few-shot main table.
+# Local 2-GPU launcher for ScanObjectNN full/few-shot with ShapeNet-pretrained ckpts.
 # Methods:
 #   - scratch
-#   - mesh_nepa
-#   - mix_nepa
-#   - mix_mae
+#   - shapenet_nepa
+#   - shapenet_mae
 # Seeds: 0,1,2
 # K-shot: 0,1,5,10,20
-#
-# Usage:
-#   bash scripts/finetune/run_scanobjectnn_main_table_local.sh
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}" || exit 1
@@ -20,44 +16,48 @@ PYTHON_BIN="${PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"
 CACHE_ROOT="${CACHE_ROOT:-data/scanobjectnn_cache_v2}"
 BACKEND="${BACKEND:-pointcloud_noray}"
 
-BATCH="${BATCH:-96}"
+BATCH="${BATCH:-128}"
 EPOCHS="${EPOCHS:-100}"
 LR="${LR:-1e-4}"
-NUM_WORKERS="${NUM_WORKERS:-6}"
+NUM_WORKERS="${NUM_WORKERS:-8}"
 VAL_RATIO="${VAL_RATIO:-0.1}"
 VAL_SEED="${VAL_SEED:-0}"
 EVAL_SEED="${EVAL_SEED:-0}"
 MC_EVAL_K="${MC_EVAL_K:-4}"
 MC_EVAL_K_VAL="${MC_EVAL_K_VAL:-1}"
 MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-${MC_EVAL_K}}"
+N_POINT="${N_POINT:-256}"
+N_RAY="${N_RAY:-256}"
 
 GPU0="${GPU0:-0}"
 GPU1="${GPU1:-1}"
 
-LOG_ROOT="${LOG_ROOT:-logs/finetune/scan_main_table/jobs}"
+LOG_ROOT="${LOG_ROOT:-logs/finetune/scan_shapenet_table/jobs}"
 RUN_ROOT="${RUN_ROOT:-runs}"
 mkdir -p "${LOG_ROOT}" "${RUN_ROOT}"
 
-MESH_NEPA_CKPT="${MESH_NEPA_CKPT:-runs/eccv_mesh_nepa_s0/ckpt_ep049.pt}"
-MIX_NEPA_CKPT="${MIX_NEPA_CKPT:-runs/eccv_mix_nepa_s0/ckpt_ep049.pt}"
-MIX_MAE_CKPT="${MIX_MAE_CKPT:-runs/eccv_mix_mae_s0/ckpt_ep049.pt}"
+SHAPENET_NEPA_CKPT="${SHAPENET_NEPA_CKPT:-runs/shapenet_mesh_nepa_s0/ckpt_ep049.pt}"
+SHAPENET_MAE_CKPT="${SHAPENET_MAE_CKPT:-runs/shapenet_mesh_mae_s0/ckpt_ep049.pt}"
+
+SEEDS="${SEEDS:-0 1 2}"
+K_LIST="${K_LIST:-0 1 5 10 20}"
 
 if [ ! -x "${PYTHON_BIN}" ]; then
   echo "[error] python not found: ${PYTHON_BIN}"
   exit 1
 fi
 
-for ckpt in "${MESH_NEPA_CKPT}" "${MIX_NEPA_CKPT}" "${MIX_MAE_CKPT}"; do
+if [ ! -d "${CACHE_ROOT}" ]; then
+  echo "[error] missing cache root: ${CACHE_ROOT}"
+  exit 1
+fi
+
+for ckpt in "${SHAPENET_NEPA_CKPT}" "${SHAPENET_MAE_CKPT}"; do
   if [ ! -f "${ckpt}" ]; then
     echo "[error] missing ckpt: ${ckpt}"
     exit 1
   fi
 done
-
-if [ ! -d "${CACHE_ROOT}" ]; then
-  echo "[error] missing cache root: ${CACHE_ROOT}"
-  exit 1
-fi
 
 make_scratch_ckpt() {
   local seed="$1"
@@ -131,17 +131,16 @@ add_job() {
   JOBS+=("${method}|${seed}|${k}|${ckpt}|${fewshot_seed}|${save_dir}|${job_log}")
 }
 
-for seed in 0 1 2; do
+for seed in ${SEEDS}; do
   scratch_ckpt="$(make_scratch_ckpt "${seed}")"
-  for k in 0 1 5 10 20; do
+  for k in ${K_LIST}; do
     fs="${seed}"
     if [ "${k}" = "0" ]; then
       fs="0"
     fi
     add_job "scratch" "${seed}" "${k}" "${scratch_ckpt}" "${fs}"
-    add_job "mesh_nepa" "${seed}" "${k}" "${MESH_NEPA_CKPT}" "${fs}"
-    add_job "mix_nepa" "${seed}" "${k}" "${MIX_NEPA_CKPT}" "${fs}"
-    add_job "mix_mae" "${seed}" "${k}" "${MIX_MAE_CKPT}" "${fs}"
+    add_job "shapenet_nepa" "${seed}" "${k}" "${SHAPENET_NEPA_CKPT}" "${fs}"
+    add_job "shapenet_mae" "${seed}" "${k}" "${SHAPENET_MAE_CKPT}" "${fs}"
   done
 done
 
@@ -166,6 +165,8 @@ run_one() {
     --batch "${BATCH}" \
     --epochs "${EPOCHS}" \
     --lr "${LR}" \
+    --n_point "${N_POINT}" \
+    --n_ray "${N_RAY}" \
     --num_workers "${NUM_WORKERS}" \
     --seed "${seed}" \
     --fewshot_k "${k}" \
@@ -199,9 +200,10 @@ worker() {
   done
 }
 
-echo "[info] total_jobs=${#JOBS[@]} (4 methods x 5 K x 3 seeds)"
+echo "[info] total_jobs=${#JOBS[@]} (3 methods x ${K_LIST} x ${SEEDS})"
 echo "[info] gpu0=${GPU0} gpu1=${GPU1}"
 echo "[info] logs=${LOG_ROOT}"
+echo "[info] batch=${BATCH} workers=${NUM_WORKERS}"
 
 worker "${GPU0}" 0 &
 pid0=$!
