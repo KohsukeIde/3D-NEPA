@@ -1,6 +1,40 @@
-# NEPA-3D: Query-Interface Experiments on ModelNet40
+# NEPA-3D: Query-Interface Experiments (ShapeNet/ScanObjectNN M1)
 
 This document tracks what was implemented in `nepa3d/`, what was executed, and current results.
+
+## 0) Current active track (M1)
+
+Primary track is now:
+
+- pretrain: ShapeNet mesh + ShapeNet UDF + ScanObjectNN pointcloud_noray (mixed)
+- downstream: ScanObjectNN full/few-shot (`K=0,1,5,10,20`)
+- methods: `scratch`, `shapenet_nepa`, `shapenet_mesh_udf_nepa`, `shapenet_mix_nepa`, `shapenet_mix_mae`
+
+Current launch flow in this repo:
+
+```bash
+# 1) M1 pretrains (2 GPUs, queued 3 jobs)
+bash scripts/pretrain/launch_shapenet_m1_pretrains_local.sh
+
+# 2) (optional) auto-launch M1 ScanObjectNN table after pretrain succeeds
+bash scripts/finetune/launch_scanobjectnn_m1_after_pretrain.sh
+
+# 3) or launch table manually
+bash scripts/finetune/launch_scanobjectnn_m1_table_local.sh
+```
+
+Resume behavior for pretrain:
+- `pretrain.py` now supports `--resume <ckpt>` and `--auto_resume 1` (default).
+- current launchers pass `--resume <save_dir>/last.pt`, so interrupted jobs resume automatically from saved epoch when relaunched.
+
+Current log locations:
+
+- pretrain: `logs/pretrain/m1/`
+- finetune table: `logs/finetune/scan_m1_table/`
+- auto-chain watcher: `logs/finetune/m1_after_pretrain/`
+- status/cleanup helpers: `scripts/logs/show_pipeline_status.sh`, `scripts/logs/cleanup_stale_pids.sh`
+
+Legacy ModelNet40-era experiments are kept for reference but are no longer the primary experimental path.
 
 ## 1) Research target
 
@@ -85,9 +119,10 @@ Alternative baseline objective (`--objective mae`):
 - pretrain: `epochs=50`, `lr=3e-4`
 - finetune: `epochs=100`, `lr=1e-4`
 
-### ECCV v2 preprocessing profile (active)
+### ECCV v2 preprocessing profile (legacy reference)
 
-This is the current preprocessing profile for the mixed-pretrain + ScanObjectNN few-shot plan.
+This profile was used for the earlier ModelNet40-centered mixed-pretrain plan.
+Current main path is ShapeNet-based M1 (see section `0)` above).
 
 - ModelNet40 cache root: `data/modelnet40_cache_v2`
 - ScanObjectNN cache root: `data/scanobjectnn_cache_v2`
@@ -202,10 +237,18 @@ Simple mesh-only pretrain on ShapeNet cache (NEPA + MAE in parallel):
 
 ```bash
 CACHE_ROOT=data/shapenet_cache_v0 \
+SAVE_EVERY=10 SAVE_LAST=1 \
 bash scripts/pretrain/run_shapenet_simple_local.sh
 ```
 
-### Reproducible local commands for mixed pretrain (ECCV v2)
+Checkpoint pruning helper (keep every 10 epochs + last):
+
+```bash
+KEEP_EVERY=10 KEEP_LAST=1 \
+bash scripts/pretrain/prune_pretrain_checkpoints.sh
+```
+
+### Reproducible local commands for mixed pretrain (ECCV v2, legacy)
 
 Run both on 2 GPUs in parallel:
 
@@ -229,7 +272,7 @@ Suggested log files:
 - `logs/pretrain/eccv_mixed/mix_nepa_s0.log`
 - `logs/pretrain/eccv_mixed/mix_mae_s0.log`
 
-### ScanObjectNN main-table launcher (local 2-GPU)
+### ScanObjectNN main-table launcher (local 2-GPU, legacy)
 
 Run full + few-shot (K=0/1/5/10/20) for 4 methods (`scratch`, `mesh_nepa`, `mix_nepa`, `mix_mae`) and seeds `0,1,2`:
 
@@ -272,10 +315,62 @@ Background launcher:
 bash scripts/finetune/launch_scanobjectnn_shapenet_table_local.sh
 ```
 
+Chain launcher (auto-start mixed/main-table after shapenet-table completes successfully):
+
+```bash
+bash scripts/finetune/launch_chain_shapenet_to_main.sh
+```
+
 This launches 45 jobs total (2 in parallel, one per GPU), with resume/skip by `last.pt`:
 - logs: `logs/finetune/scan_shapenet_table/jobs/*.log`
 - per-GPU runner logs: `logs/finetune/scan_shapenet_table/jobs/runner_gpu0.log`, `logs/finetune/scan_shapenet_table/jobs/runner_gpu1.log`
 - outputs: `runs/scan_<method>_k<K>_s<seed>/`
+
+### M1 pretrain set (ShapeNet-based mixed)
+
+Pretrain jobs for M1:
+- `shapenet_mesh_udf_nepa_s0` (mesh+UDF)
+- `shapenet_mix_nepa_s0` (mesh+UDF+ScanObjectNN no-ray)
+- `shapenet_mix_mae_s0` (same mixed corpus, MAE objective)
+
+Run:
+
+```bash
+bash scripts/pretrain/launch_shapenet_m1_pretrains_local.sh
+```
+
+Logs:
+- `logs/pretrain/m1/pipeline.log`
+- `logs/pretrain/m1/*.log`
+
+### M1 ScanObjectNN table (local 2-GPU)
+
+Methods:
+- `scratch`
+- `shapenet_nepa` (mesh-only pretrain)
+- `shapenet_mesh_udf_nepa`
+- `shapenet_mix_nepa`
+- `shapenet_mix_mae`
+
+Run:
+
+```bash
+bash scripts/finetune/launch_scanobjectnn_m1_table_local.sh
+```
+
+Logs:
+- `logs/finetune/scan_m1_table/pipeline.log`
+- `logs/finetune/scan_m1_table/jobs/*.log`
+
+### M1 end-to-end chain
+
+Wait for current `scan_shapenet_table` completion, then launch:
+1) M1 pretrains
+2) M1 ScanObjectNN table
+
+```bash
+bash scripts/finetune/launch_m1_pipeline_after_shapenet_table.sh
+```
 
 ### v0 cache
 

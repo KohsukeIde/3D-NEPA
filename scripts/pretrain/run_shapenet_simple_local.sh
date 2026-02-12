@@ -20,6 +20,9 @@ D_MODEL="${D_MODEL:-384}"
 LAYERS="${LAYERS:-8}"
 HEADS="${HEADS:-6}"
 NUM_WORKERS="${NUM_WORKERS:-6}"
+SAVE_EVERY="${SAVE_EVERY:-10}"
+SAVE_LAST="${SAVE_LAST:-1}"
+AUTO_RESUME="${AUTO_RESUME:-1}"
 
 MASK_RATIO="${MASK_RATIO:-0.4}"
 GPU0="${GPU0:-0}"
@@ -51,6 +54,8 @@ nohup env CUDA_VISIBLE_DEVICES="${GPU0}" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPE
   --batch "${BATCH}" --epochs "${EPOCHS}" --lr "${LR}" \
   --n_point "${N_POINT}" --n_ray "${N_RAY}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
+  --save_every "${SAVE_EVERY}" --save_last "${SAVE_LAST}" \
+  --auto_resume "${AUTO_RESUME}" --resume "${SAVE_NEPA}/last.pt" \
   --num_workers "${NUM_WORKERS}" --seed "${SEED}" \
   --save_dir "${SAVE_NEPA}" \
   > "${LOG_NEPA}" 2>&1 &
@@ -65,6 +70,8 @@ nohup env CUDA_VISIBLE_DEVICES="${GPU1}" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPE
   --batch "${BATCH}" --epochs "${EPOCHS}" --lr "${LR}" \
   --n_point "${N_POINT}" --n_ray "${N_RAY}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
+  --save_every "${SAVE_EVERY}" --save_last "${SAVE_LAST}" \
+  --auto_resume "${AUTO_RESUME}" --resume "${SAVE_MAE}/last.pt" \
   --num_workers "${NUM_WORKERS}" --seed "${SEED}" \
   --save_dir "${SAVE_MAE}" \
   > "${LOG_MAE}" 2>&1 &

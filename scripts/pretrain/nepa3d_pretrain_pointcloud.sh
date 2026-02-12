@@ -34,6 +34,10 @@ D_MODEL="${D_MODEL:-384}"
 LAYERS="${LAYERS:-8}"
 HEADS="${HEADS:-6}"
 SAVE_DIR="${SAVE_DIR:-runs/querynepa3d_pcpre_v0}"
+SAVE_EVERY="${SAVE_EVERY:-10}"
+SAVE_LAST="${SAVE_LAST:-1}"
+AUTO_RESUME="${AUTO_RESUME:-1}"
+RESUME="${RESUME:-}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
 
 "${PYTHON_BIN}" -m nepa3d.train.pretrain \
@@ -44,4 +48,8 @@ NUM_WORKERS="${NUM_WORKERS:-4}"
   --n_point "${N_POINT}" --n_ray "${N_RAY}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
   --num_workers "${NUM_WORKERS}" \
+  --save_every "${SAVE_EVERY}" \
+  --save_last "${SAVE_LAST}" \
+  --auto_resume "${AUTO_RESUME}" \
+  --resume "${RESUME}" \
   --save_dir "${SAVE_DIR}"

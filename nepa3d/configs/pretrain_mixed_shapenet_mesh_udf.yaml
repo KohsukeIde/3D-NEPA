@@ -1,0 +1,19 @@
+# M1 ablation pretraining corpus:
+#   ShapeNet mesh + ShapeNet UDF (no real ScanObjectNN pointcloud component).
+
+mix_seed: 0
+mix_num_samples: 200000
+replacement: true
+
+datasets:
+  - name: shapenet_mesh
+    cache_root: data/shapenet_cache_v0
+    split: train
+    backend: mesh
+    weight: 0.5
+
+  - name: shapenet_udf
+    cache_root: data/shapenet_cache_v0
+    split: train
+    backend: udfgrid
+    weight: 0.5

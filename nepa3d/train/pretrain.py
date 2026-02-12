@@ -56,6 +56,10 @@ def main():
     ap.add_argument("--layers", type=int, default=8)
     ap.add_argument("--heads", type=int, default=6)
     ap.add_argument("--save_dir", type=str, default="runs/querynepa3d_pretrain")
+    ap.add_argument("--save_every", type=int, default=1, help="save periodic checkpoints every N epochs (>=1)")
+    ap.add_argument("--save_last", type=int, default=1, help="if 1, also write save_dir/last.pt at checkpoint save points")
+    ap.add_argument("--resume", type=str, default="", help="checkpoint path to resume from (e.g. save_dir/last.pt)")
+    ap.add_argument("--auto_resume", type=int, default=1, help="if 1 and --resume is empty, auto-resume from save_dir/last.pt")
     ap.add_argument("--num_workers", type=int, default=4)
     ap.add_argument("--drop_ray_prob", type=float, default=0.0)
     ap.add_argument("--force_missing_ray", action="store_true")
@@ -153,10 +157,51 @@ def main():
     scaler = GradScaler(enabled=use_amp)
 
     os.makedirs(args.save_dir, exist_ok=True)
+    save_every = max(1, int(args.save_every))
+    save_last = bool(int(args.save_last))
+    auto_resume = bool(int(args.auto_resume))
 
+    start_epoch = 0
     step = 0
+    resume_path = args.resume.strip()
+    if (not resume_path) and auto_resume:
+        candidate = os.path.join(args.save_dir, "last.pt")
+        if os.path.isfile(candidate):
+            resume_path = candidate
+
+    if resume_path:
+        if not os.path.isfile(resume_path):
+            if auto_resume:
+                print(f"[resume] checkpoint not found ({resume_path}); starting fresh")
+                resume_path = ""
+            else:
+                raise FileNotFoundError(f"resume checkpoint not found: {resume_path}")
+
+    if resume_path:
+        ckpt = torch.load(resume_path, map_location="cpu")
+        model.load_state_dict(ckpt["model"], strict=True)
+        if "opt" in ckpt:
+            opt.load_state_dict(ckpt["opt"])
+        else:
+            print("[resume] optimizer state missing in checkpoint; using fresh optimizer state")
+        if use_amp and ("scaler" in ckpt) and (ckpt["scaler"] is not None):
+            try:
+                scaler.load_state_dict(ckpt["scaler"])
+            except Exception as e:
+                print(f"[resume] failed to load scaler state ({e}); using fresh scaler state")
+
+        start_epoch = int(ckpt.get("epoch", -1)) + 1
+        step = int(ckpt.get("step", start_epoch * len(dl)))
+        print(f"[resume] loaded={resume_path} start_epoch={start_epoch} step={step}")
+    else:
+        print("[resume] disabled (no checkpoint found/requested)")
+
+    if start_epoch >= args.epochs:
+        print(f"[resume] checkpoint already reached target epochs: start_epoch={start_epoch} >= epochs={args.epochs}")
+        return
+
     model.train()
-    for ep in range(args.epochs):
+    for ep in range(start_epoch, args.epochs):
         if args.mix_config:
             # Deterministic per-epoch sampler.
             try:
@@ -189,12 +234,21 @@ def main():
                 print(f"ep={ep} step={step} loss={loss.item():.4f}")
             step += 1
 
-        ckpt = {
-            "model": model.state_dict(),
-            "args": vars(args),
-            "epoch": ep,
-        }
-        torch.save(ckpt, os.path.join(args.save_dir, f"ckpt_ep{ep:03d}.pt"))
+        is_last = ep == (args.epochs - 1)
+        should_save = (ep % save_every == 0) or is_last
+        if should_save:
+            ckpt = {
+                "model": model.state_dict(),
+                "opt": opt.state_dict(),
+                "scaler": scaler.state_dict() if use_amp else None,
+                "args": vars(args),
+                "epoch": ep,
+                "step": step,
+            }
+            ckpt_path = os.path.join(args.save_dir, f"ckpt_ep{ep:03d}.pt")
+            torch.save(ckpt, ckpt_path)
+            if save_last:
+                torch.save(ckpt, os.path.join(args.save_dir, "last.pt"))
 
 
 if __name__ == "__main__":

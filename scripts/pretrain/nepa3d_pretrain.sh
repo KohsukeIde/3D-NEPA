@@ -40,6 +40,10 @@ D_MODEL="${D_MODEL:-384}"
 LAYERS="${LAYERS:-8}"
 HEADS="${HEADS:-6}"
 SAVE_DIR="${SAVE_DIR:-runs/querynepa3d_meshpre_v0}"
+SAVE_EVERY="${SAVE_EVERY:-10}"
+SAVE_LAST="${SAVE_LAST:-1}"
+AUTO_RESUME="${AUTO_RESUME:-1}"
+RESUME="${RESUME:-}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
 SEED="${SEED:-0}"
 DROP_RAY_PROB="${DROP_RAY_PROB:-0.0}"
@@ -71,6 +75,10 @@ fi
   --add_eos "${ADD_EOS}" \
   --objective "${OBJECTIVE}" \
   --mask_ratio "${MASK_RATIO}" \
+  --save_every "${SAVE_EVERY}" \
+  --save_last "${SAVE_LAST}" \
+  --auto_resume "${AUTO_RESUME}" \
+  --resume "${RESUME}" \
   --voxel_grid "${VOXEL_GRID}" \
   --voxel_dilate "${VOXEL_DILATE}" \
   --voxel_max_steps "${VOXEL_MAX_STEPS}" \
