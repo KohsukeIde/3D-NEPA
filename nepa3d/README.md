@@ -673,3 +673,194 @@ Aggregate over all 27 probe runs:
   - `best_val=0.9043` (ep 92), `test_acc=0.8728`
 - MAE objective baseline (`logs/mae_ft_mesh.out`):
   - `best_val=0.8855` (ep 70), `test_acc=0.8606`
+
+## 12) UCPR / CPAC loop (cache-reuse path)
+
+This section tracks the new ECCV-oriented loop:
+
+- implement `unpaired primitive` utilities
+- run quick experiments
+- update this section
+- get feedback and iterate
+
+### 12.1 Implementation added (non-destructive to existing core)
+
+New files:
+
+- split builder from existing ShapeNet cache:
+  - `nepa3d/data/shapenet_unpaired_split.py`
+- unpaired cache materializer (symlink/hardlink/copy):
+  - `nepa3d/data/preprocess_shapenet_unpaired.py`
+- UCPR evaluation:
+  - `nepa3d/analysis/retrieval_ucpr.py`
+- CPAC-UDF probe evaluation:
+  - `nepa3d/analysis/completion_cpac_udf.py`
+- mix config (compatible with current `datasets:` schema):
+  - `nepa3d/configs/shapenet_unpaired_mix.yaml`
+- wrappers:
+  - `scripts/preprocess/make_shapenet_unpaired_split.sh`
+  - `scripts/preprocess/preprocess_shapenet_unpaired.sh`
+  - `scripts/analysis/nepa3d_ucpr.sh`
+  - `scripts/analysis/nepa3d_cpac_udf.sh`
+- run-plan memo:
+  - `docs/eccv_ucpr_cpac_tables.md`
+
+Design note:
+- Existing training code (`pretrain.py`, `finetune_cls.py`, `mixed_pretrain.py`) was kept unchanged.
+- Unpaired split uses already-built cache (`data/shapenet_cache_v0`) to avoid expensive re-preprocess.
+
+### 12.2 Unpaired split/cache created from existing ShapeNet cache
+
+Executed:
+
+```bash
+python -m nepa3d.data.shapenet_unpaired_split \
+  --cache_root data/shapenet_cache_v0 \
+  --train_split train --eval_split test \
+  --out_json data/shapenet_unpaired_splits_v1.json \
+  --ratios 0.34 0.33 0.33 --seed 0
+
+python -m nepa3d.data.preprocess_shapenet_unpaired \
+  --src_cache_root data/shapenet_cache_v0 \
+  --split_json data/shapenet_unpaired_splits_v1.json \
+  --out_root data/shapenet_unpaired_cache_v1 \
+  --link_mode symlink
+```
+
+Current split counts:
+
+- `train_mesh=15875`
+- `train_pc=15407`
+- `train_udf=15406`
+- `eval=5185`
+
+Metadata:
+- `data/shapenet_unpaired_splits_v1.json`
+- `data/shapenet_unpaired_cache_v1/_meta/split_source.json`
+
+### 12.3 Smoke runs (debug scale)
+
+Purpose:
+- validate end-to-end execution of new UCPR/CPAC scripts before full-scale jobs.
+
+Small debug pretrain checkpoint:
+
+```bash
+python -u -m nepa3d.train.pretrain \
+  --mix_config nepa3d/configs/shapenet_unpaired_mix.yaml \
+  --mix_num_samples 96 --mix_seed 0 \
+  --objective nepa \
+  --batch 8 --epochs 1 --num_workers 0 \
+  --n_point 64 --n_ray 64 \
+  --d_model 128 --layers 2 --heads 4 \
+  --save_dir runs/debug_ucpr_nepa_s0 \
+  --seed 0
+```
+
+Generated ckpt:
+- `runs/debug_ucpr_nepa_s0/ckpt_ep000.pt`
+
+UCPR debug eval:
+
+```bash
+python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 \
+  --split eval \
+  --ckpt runs/debug_ucpr_nepa_s0/ckpt_ep000.pt \
+  --query_backend mesh \
+  --gallery_backend udfgrid \
+  --max_files 200 \
+  --out_json results/ucpr_debug_mesh2udf.json
+```
+
+Result (`results/ucpr_debug_mesh2udf.json`):
+- `r@1=0.005`
+- `r@5=0.025`
+- `r@10=0.050`
+- `mAP=0.0302`
+
+CPAC-UDF debug eval:
+
+```bash
+python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 \
+  --split eval \
+  --ckpt runs/debug_ucpr_nepa_s0/ckpt_ep000.pt \
+  --context_backend pointcloud_noray \
+  --n_context 64 --n_query 64 \
+  --max_shapes 120 --head_train_ratio 0.25 \
+  --ridge_lambda 1e-3 --tau 0.03 \
+  --out_json results/cpac_debug_pc2udf.json
+```
+
+Result (`results/cpac_debug_pc2udf.json`):
+- `mae=0.0819`
+- `rmse=0.1099`
+- `iou@tau=0.4786`
+
+Important:
+- These are smoke/debug numbers (small model + tiny training budget), not final ECCV table values.
+
+### 12.4 Next run set (for next feedback cycle)
+
+1) Pretrain full checkpoints for:
+- mesh-only NEPA
+- mixed-unpaired NEPA
+- mixed-unpaired MAE
+
+2) Evaluate UCPR (Table 1 candidates):
+- `mesh -> pointcloud_noray`
+- `mesh -> udfgrid`
+- `pointcloud_noray -> udfgrid`
+
+3) Evaluate CPAC-UDF (Table 2 candidate):
+- `context_backend=pointcloud_noray`
+
+4) Integrate into ScanObjectNN few-shot comparisons (Table 3 candidate).
+
+### 12.5 Fast pretrain config decision (2026-02-13)
+
+Goal:
+- finish `mixed-unpaired` pretraining as fast as possible on local 2-GPU.
+
+Quick throughput benchmark (same samples/epoch, NEPA/MAE each tested with `mix_num_samples=19200`, `epochs=1`, `n_point=n_ray=256`, `num_workers=6`):
+
+| batch | NEPA wall sec | MAE wall sec |
+|---:|---:|---:|
+| 96 | 19.08 | 21.91 |
+| 256 | 19.97 | 22.54 |
+| 512 | 21.32 | 23.86 |
+| 768 | 22.51 | 24.74 |
+
+Decision:
+- Use `batch=96` (fastest in local measurement).
+- Even though VRAM has headroom, larger batch was slower in wall-time for this workload.
+
+Relaunched run (resume from epoch-1 checkpoints):
+
+```bash
+CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.train.pretrain \
+  --mix_config nepa3d/configs/shapenet_unpaired_mix.yaml \
+  --mix_num_samples 200000 --mix_seed 0 \
+  --objective nepa --drop_ray_prob 0.3 \
+  --batch 96 --epochs 50 --num_workers 6 --seed 0 \
+  --n_point 256 --n_ray 256 \
+  --resume runs/eccv_upmix_nepa_s0/ckpt_ep001.pt \
+  --save_dir runs/eccv_upmix_nepa_s0
+
+CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.train.pretrain \
+  --mix_config nepa3d/configs/shapenet_unpaired_mix.yaml \
+  --mix_num_samples 200000 --mix_seed 0 \
+  --objective mae --mask_ratio 0.4 \
+  --batch 96 --epochs 50 --num_workers 6 --seed 0 \
+  --n_point 256 --n_ray 256 \
+  --resume runs/eccv_upmix_mae_s0/ckpt_ep001.pt \
+  --save_dir runs/eccv_upmix_mae_s0
+```
+
+Current logs:
+- `logs/pretrain/eccv_unpaired_mixed/upmix_nepa_s0_fast_bs96_resume_20260213_145746.log`
+- `logs/pretrain/eccv_unpaired_mixed/upmix_mae_s0_fast_bs96_resume_20260213_145746.log`
+
+Resume note:
+- old checkpoints did not contain optimizer state, so resume starts from loaded model weights with fresh optimizer (`[resume] optimizer state missing ...` is expected).
