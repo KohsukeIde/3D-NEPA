@@ -34,6 +34,9 @@ scanobjectnn_cache_v2.tar.gz
 shapenet_shapecore_and_cache.tar.gz
 logs/pretrain/m1/runner_gpu0.log
 
+# Zip archives
+*.zip
+
 # Cluster / job outputs
 *.err
 *.out
