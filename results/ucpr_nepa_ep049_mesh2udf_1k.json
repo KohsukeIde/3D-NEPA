@@ -1,0 +1,17 @@
+{
+  "r@1": 0.007,
+  "r@5": 0.037,
+  "r@10": 0.051,
+  "mAP": 0.02774983085691929,
+  "mean_rank": 289.866,
+  "median_rank": 232.0,
+  "query_backend": "mesh",
+  "gallery_backend": "udfgrid",
+  "n_files": 1000,
+  "n_point": 256,
+  "n_ray": 256,
+  "add_eos": true,
+  "mc_k": 1,
+  "eval_seed": 0,
+  "ckpt": "/home/cvrt/Desktop/dev/3D-NEPA/runs/eccv_upmix_nepa_s0/ckpt_ep049.pt"
+}

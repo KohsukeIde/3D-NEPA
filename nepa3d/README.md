@@ -238,16 +238,99 @@ Canonical artifact paths:
 - UCPR JSON: `results/ucpr_*.json`
 - CPAC JSON: `results/cpac_*.json`
 
-Current recorded metrics:
+### 8.1 External-PC run profile (synced)
 
-### UCPR
+This block is for the external machine run, recorded in the same style as M1.
+
+Pretrain checkpoints used for evaluation:
+
+- `runs/eccv_upmix_nepa_s0/ckpt_ep049.pt`
+- `runs/eccv_upmix_mae_s0/ckpt_ep049.pt`
+
+Pretrain setting summary (both objectives):
+
+- config: `nepa3d/configs/shapenet_unpaired_mix.yaml`
+- `mix_num_samples=200000`, `mix_seed=0`
+- `epochs=50`, `batch=96`, `n_point=256`, `n_ray=256`, `num_workers=6`
+- resume from `ckpt_ep001.pt` to final `ckpt_ep049.pt`
+
+Scripts/modules used:
+
+- pretrain: `nepa3d.train.pretrain`
+- retrieval eval: `nepa3d.analysis.retrieval_ucpr`
+- completion eval: `nepa3d.analysis.completion_cpac_udf`
+
+Evaluation commands used for this synced snapshot:
+
+```bash
+# UCPR (mesh -> udfgrid), 1k subset
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 \
+  --split eval \
+  --ckpt runs/eccv_upmix_nepa_s0/ckpt_ep049.pt \
+  --query_backend mesh \
+  --gallery_backend udfgrid \
+  --max_files 1000 \
+  --out_json results/ucpr_nepa_ep049_mesh2udf_1k.json
+
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 \
+  --split eval \
+  --ckpt runs/eccv_upmix_mae_s0/ckpt_ep049.pt \
+  --query_backend mesh \
+  --gallery_backend udfgrid \
+  --max_files 1000 \
+  --out_json results/ucpr_mae_ep049_mesh2udf_1k.json
+
+# CPAC-UDF (pointcloud_noray -> udf), 800-shape subset
+.venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 \
+  --split eval \
+  --ckpt runs/eccv_upmix_nepa_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --n_context 256 --n_query 256 \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 \
+  --out_json results/cpac_nepa_ep049_pc2udf_800.json
+
+.venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 \
+  --split eval \
+  --ckpt runs/eccv_upmix_mae_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --n_context 256 --n_query 256 \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 \
+  --out_json results/cpac_mae_ep049_pc2udf_800.json
+```
+
+Synced logs/artifacts:
+
+- pretrain logs: `logs/pretrain/eccv_unpaired_mixed/upmix_*_fast_bs96_resume_*.log`
+- eval logs: `logs/analysis/ucpr_*_ep049_*.log`, `logs/analysis/cpac_*_ep049_*.log`
+- result JSON:
+  - `results/ucpr_nepa_ep049_mesh2udf_1k.json`
+  - `results/ucpr_mae_ep049_mesh2udf_1k.json`
+  - `results/cpac_nepa_ep049_pc2udf_800.json`
+  - `results/cpac_mae_ep049_pc2udf_800.json`
+
+### 8.2 UCPR
 
 | Tag | CKPT | Query -> Gallery | Split | max_files | R@1 | R@5 | R@10 | mAP | Note |
 |---|---|---|---|---:|---:|---:|---:|---:|---|
-| `debug_local` | `runs/debug_ucpr_nepa_s0/ckpt_ep000.pt` | `mesh -> udfgrid` | `eval` | 200 | 0.0050 | 0.0250 | 0.0500 | 0.0302 | migrated from old README text |
+| `debug_local` | `runs/debug_ucpr_nepa_s0/ckpt_ep000.pt` | `mesh -> udfgrid` | `eval` | 200 | 0.0050 | 0.0250 | 0.0500 | 0.0302 | smoke run |
+| `external_ep049_nepa` | `runs/eccv_upmix_nepa_s0/ckpt_ep049.pt` | `mesh -> udfgrid` | `eval` | 1000 | 0.0070 | 0.0370 | 0.0510 | 0.0277 | synced from external-PC run |
+| `external_ep049_mae` | `runs/eccv_upmix_mae_s0/ckpt_ep049.pt` | `mesh -> udfgrid` | `eval` | 1000 | 0.1270 | 0.2930 | 0.3980 | 0.2196 | synced from external-PC run |
 
-### CPAC-UDF
+### 8.3 CPAC-UDF
 
-| Tag | CKPT | Context -> Target | Split | max_shapes | MAE | RMSE | Note |
-|---|---|---|---|---:|---:|---:|---|
-| `pending_external_sync` | `-` | `pointcloud_noray -> udf` | `eval` | - | - | - | running on another machine |
+| Tag | CKPT | Context -> Target | Split | max_shapes | MAE | RMSE | IoU@0.03 | Note |
+|---|---|---|---|---:|---:|---:|---:|---|
+| `debug_local` | `runs/debug_ucpr_nepa_s0/ckpt_ep000.pt` | `pointcloud_noray -> udf` | `eval` | 120 | 0.0819 | 0.1099 | 0.4786 | smoke run |
+| `external_ep049_nepa` | `runs/eccv_upmix_nepa_s0/ckpt_ep049.pt` | `pointcloud_noray -> udf` | `eval` | 800 | 0.1169 | 0.1510 | 0.4047 | synced from external-PC run |
+| `external_ep049_mae` | `runs/eccv_upmix_mae_s0/ckpt_ep049.pt` | `pointcloud_noray -> udf` | `eval` | 800 | 0.0917 | 0.1210 | 0.4204 | synced from external-PC run |
+
+### 8.4 Current readout (subset, single-seed)
+
+- In this synced subset evaluation, MAE objective is stronger than NEPA on both UCPR and CPAC.
+- This section is still a partial readout (`mesh->udf` only for UCPR, subset eval sizes), not the final ECCV main table.

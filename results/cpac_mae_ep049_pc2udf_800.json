@@ -1,0 +1,16 @@
+{
+  "mae": 0.09173104166984558,
+  "rmse": 0.12097513675689697,
+  "iou@tau": 0.4203530681113792,
+  "context_backend": "pointcloud_noray",
+  "target": "udfgrid_distance_probe",
+  "n_context": 256,
+  "n_query": 256,
+  "n_shapes_total": 800,
+  "n_shapes_head_train": 160,
+  "n_shapes_head_test": 640,
+  "ridge_lambda": 0.001,
+  "tau": 0.03,
+  "add_eos": true,
+  "ckpt": "/home/cvrt/Desktop/dev/3D-NEPA/runs/eccv_upmix_mae_s0/ckpt_ep049.pt"
+}
