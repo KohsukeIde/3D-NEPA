@@ -5,7 +5,7 @@ This file tracks the current active experiments.
 - Active track:
   - M1 few-shot table on ScanObjectNN
   - UCPR/CPAC evaluation loop on ShapeNet-unpaired cache
-- As-of snapshot date: February 13, 2026
+- As-of snapshot date: February 14, 2026
 
 Legacy means ModelNet40-era experiments only. See `nepa3d/docs/results_modelnet40_legacy.md`.
 
@@ -202,48 +202,59 @@ bash scripts/logs/show_pipeline_status.sh
 bash scripts/logs/cleanup_stale_pids.sh
 ```
 
-## 6) Current result snapshot (partial, M1 few-shot)
+## 6) Current result snapshot (complete, M1 few-shot)
 
-Status (as of February 13, 2026):
+Status (as of February 14, 2026):
 
-- completed jobs: `30 / 75`
+- completed jobs: `75 / 75`
 - completion by method:
-  - `scratch`: `10/15`
-  - `shapenet_nepa`: `10/15`
-  - `shapenet_mesh_udf_nepa`: `3/15`
-  - `shapenet_mix_nepa`: `4/15`
-  - `shapenet_mix_mae`: `3/15`
+  - `scratch`: `15/15`
+  - `shapenet_nepa`: `15/15`
+  - `shapenet_mesh_udf_nepa`: `15/15`
+  - `shapenet_mix_nepa`: `15/15`
+  - `shapenet_mix_mae`: `15/15`
 
-Table below is computed from completed `runs/*/last.pt` only.
-`n(seed)` is the number of finished seeds for each `(method, K)`.
+Table below is computed from `runs/scan_<method>_k<K>_s<seed>/last.pt`.
+`n(seed)=3` for all rows.
 
 | Method | K | n(seed) | test_acc mean +- std |
 |---|---:|---:|---:|
-| `scratch` | 0 | 2 | 0.8221 +- 0.0038 |
-| `scratch` | 1 | 2 | 0.1414 +- 0.0211 |
-| `scratch` | 5 | 2 | 0.1456 +- 0.0033 |
-| `scratch` | 10 | 2 | 0.1115 +- 0.0000 |
-| `scratch` | 20 | 2 | 0.1115 +- 0.0000 |
-| `shapenet_nepa` | 0 | 2 | 0.8075 +- 0.0028 |
-| `shapenet_nepa` | 1 | 2 | 0.1630 +- 0.0328 |
-| `shapenet_nepa` | 5 | 2 | 0.2283 +- 0.0117 |
-| `shapenet_nepa` | 10 | 2 | 0.2618 +- 0.0155 |
-| `shapenet_nepa` | 20 | 2 | 0.3247 +- 0.0042 |
-| `shapenet_mesh_udf_nepa` | 0 | 1 | 0.8178 +- 0.0000 |
-| `shapenet_mesh_udf_nepa` | 1 | 1 | 0.1345 +- 0.0000 |
-| `shapenet_mesh_udf_nepa` | 10 | 1 | 0.2827 +- 0.0000 |
-| `shapenet_mix_nepa` | 0 | 1 | 0.8285 +- 0.0000 |
-| `shapenet_mix_nepa` | 1 | 1 | 0.1293 +- 0.0000 |
-| `shapenet_mix_nepa` | 5 | 1 | 0.2546 +- 0.0000 |
-| `shapenet_mix_nepa` | 20 | 1 | 0.3793 +- 0.0000 |
-| `shapenet_mix_mae` | 0 | 1 | 0.7856 +- 0.0000 |
-| `shapenet_mix_mae` | 1 | 1 | 0.1399 +- 0.0000 |
-| `shapenet_mix_mae` | 10 | 1 | 0.2662 +- 0.0000 |
+| `scratch` | 0 | 3 | 0.8204 +- 0.0039 |
+| `scratch` | 1 | 3 | 0.1314 +- 0.0222 |
+| `scratch` | 5 | 3 | 0.1549 +- 0.0134 |
+| `scratch` | 10 | 3 | 0.1115 +- 0.0000 |
+| `scratch` | 20 | 3 | 0.1115 +- 0.0000 |
+| `shapenet_nepa` | 0 | 3 | 0.8076 +- 0.0023 |
+| `shapenet_nepa` | 1 | 3 | 0.1553 +- 0.0289 |
+| `shapenet_nepa` | 5 | 3 | 0.2259 +- 0.0102 |
+| `shapenet_nepa` | 10 | 3 | 0.2569 +- 0.0145 |
+| `shapenet_nepa` | 20 | 3 | 0.3197 +- 0.0079 |
+| `shapenet_mesh_udf_nepa` | 0 | 3 | 0.8170 +- 0.0011 |
+| `shapenet_mesh_udf_nepa` | 1 | 3 | 0.1413 +- 0.0177 |
+| `shapenet_mesh_udf_nepa` | 5 | 3 | 0.2524 +- 0.0122 |
+| `shapenet_mesh_udf_nepa` | 10 | 3 | 0.3016 +- 0.0166 |
+| `shapenet_mesh_udf_nepa` | 20 | 3 | 0.3562 +- 0.0069 |
+| `shapenet_mix_nepa` | 0 | 3 | 0.8264 +- 0.0018 |
+| `shapenet_mix_nepa` | 1 | 3 | 0.1408 +- 0.0153 |
+| `shapenet_mix_nepa` | 5 | 3 | 0.2501 +- 0.0047 |
+| `shapenet_mix_nepa` | 10 | 3 | 0.3128 +- 0.0149 |
+| `shapenet_mix_nepa` | 20 | 3 | 0.3753 +- 0.0054 |
+| `shapenet_mix_mae` | 0 | 3 | 0.7883 +- 0.0028 |
+| `shapenet_mix_mae` | 1 | 3 | 0.1611 +- 0.0182 |
+| `shapenet_mix_mae` | 5 | 3 | 0.2588 +- 0.0125 |
+| `shapenet_mix_mae` | 10 | 3 | 0.2750 +- 0.0107 |
+| `shapenet_mix_mae` | 20 | 3 | 0.3107 +- 0.0077 |
+
+Readout:
+
+- Full (`K=0`) best: `shapenet_mix_nepa` (`0.8264`)
+- Low-shot (`K=1,5`) best: `shapenet_mix_mae`
+- Mid/high-shot (`K=10,20`) best: `shapenet_mix_nepa`
 
 ## 7) Notes
 
 - `scratch K=10/20` shows majority-class collapse behavior in current seeds.
-- Do not finalize claims until all `75` jobs are complete.
+- Main M1 few-shot run is complete (`75/75`).
 
 ## 8) UCPR/CPAC active results
 
