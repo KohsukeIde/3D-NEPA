@@ -1,6 +1,7 @@
 import argparse
 import glob
 import os
+from collections import defaultdict
 
 import h5py
 import numpy as np
@@ -83,10 +84,70 @@ def find_split_files(scan_root, split):
     return sorted(set(paths))
 
 
-def preprocess_split(scan_root, out_root, split, pt_pool=2000, ray_pool=1000, seed=0, overwrite=False, pt_surface_ratio=0.5, pt_surface_sigma=0.02):
+def _assert_unique_stems(h5_paths, allow_duplicate_stems=False):
+    by_stem = defaultdict(list)
+    for p in h5_paths:
+        stem = os.path.splitext(os.path.basename(p))[0]
+        by_stem[stem].append(p)
+    dup = {k: v for k, v in by_stem.items() if len(v) > 1}
+    if dup and not allow_duplicate_stems:
+        msg_lines = [
+            "duplicate h5 stems detected across scan_root.",
+            "This can silently overwrite cache outputs when multiple ScanObjectNN splits are mixed.",
+            "Use a split-specific SCAN_ROOT (e.g., .../h5_files/main_split) or pass --allow_duplicate_stems to override.",
+            f"duplicate_stems={len(dup)}",
+        ]
+        # Show a few concrete examples for quick debugging.
+        for stem, paths in list(sorted(dup.items()))[:5]:
+            msg_lines.append(f"  - {stem}: " + " | ".join(paths))
+        raise RuntimeError("\n".join(msg_lines))
+
+
+def _write_preprocess_meta(out_root, split, scan_root, h5_paths, pt_pool, ray_pool, pt_surface_ratio, pt_surface_sigma, seed):
+    meta_dir = os.path.join(out_root, "_meta")
+    os.makedirs(meta_dir, exist_ok=True)
+    meta_path = os.path.join(meta_dir, f"scanobjectnn_{split}_source.txt")
+    with open(meta_path, "w", encoding="utf-8") as f:
+        f.write(f"scan_root={os.path.abspath(scan_root)}\n")
+        f.write(f"split={split}\n")
+        f.write(f"seed={int(seed)}\n")
+        f.write(f"pt_pool={int(pt_pool)}\n")
+        f.write(f"ray_pool={int(ray_pool)}\n")
+        f.write(f"pt_surface_ratio={float(pt_surface_ratio)}\n")
+        f.write(f"pt_surface_sigma={float(pt_surface_sigma)}\n")
+        f.write(f"h5_count={len(h5_paths)}\n")
+        for p in h5_paths:
+            f.write(f"{os.path.abspath(p)}\n")
+
+
+def preprocess_split(
+    scan_root,
+    out_root,
+    split,
+    pt_pool=2000,
+    ray_pool=1000,
+    seed=0,
+    overwrite=False,
+    pt_surface_ratio=0.5,
+    pt_surface_sigma=0.02,
+    allow_duplicate_stems=False,
+):
     h5_paths = find_split_files(scan_root, split)
     if not h5_paths:
         raise FileNotFoundError(f"no {split} h5 files under: {scan_root}")
+
+    _assert_unique_stems(h5_paths, allow_duplicate_stems=allow_duplicate_stems)
+    _write_preprocess_meta(
+        out_root,
+        split,
+        scan_root,
+        h5_paths,
+        pt_pool,
+        ray_pool,
+        pt_surface_ratio,
+        pt_surface_sigma,
+        seed,
+    )
 
     rng = np.random.RandomState(int(seed) & 0xFFFFFFFF)
     items = list(iter_h5_samples(h5_paths))
@@ -123,6 +184,11 @@ def main():
     ap.add_argument("--pt_surface_ratio", type=float, default=0.5)
     ap.add_argument("--pt_surface_sigma", type=float, default=0.02)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument(
+        "--allow_duplicate_stems",
+        action="store_true",
+        help="allow duplicate h5 basenames across scan_root (unsafe; can overwrite outputs)",
+    )
     ap.add_argument("--overwrite", action="store_true")
     args = ap.parse_args()
 
@@ -137,6 +203,7 @@ def main():
             overwrite=args.overwrite,
             pt_surface_ratio=args.pt_surface_ratio,
             pt_surface_sigma=args.pt_surface_sigma,
+            allow_duplicate_stems=args.allow_duplicate_stems,
         )
     if args.split in ("test", "all"):
         preprocess_split(
@@ -149,6 +216,7 @@ def main():
             overwrite=args.overwrite,
             pt_surface_ratio=args.pt_surface_ratio,
             pt_surface_sigma=args.pt_surface_sigma,
+            allow_duplicate_stems=args.allow_duplicate_stems,
         )
 
 

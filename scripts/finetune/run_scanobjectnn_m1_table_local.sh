@@ -14,7 +14,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}" || exit 1
 
 PYTHON_BIN="${PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"
-CACHE_ROOT="${CACHE_ROOT:-data/scanobjectnn_cache_v2}"
+# Paper-safe default: use split-specific cache generated from h5_files/main_split.
+# Legacy/internal tables may still use data/scanobjectnn_cache_v2 explicitly.
+CACHE_ROOT="${CACHE_ROOT:-data/scanobjectnn_main_split_v2}"
 BACKEND="${BACKEND:-pointcloud_noray}"
 
 BATCH="${BATCH:-128}"

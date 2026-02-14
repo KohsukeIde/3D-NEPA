@@ -51,6 +51,21 @@ qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<ckpt>,QUERY_
   scripts/analysis/nepa3d_ucpr.sh
 ```
 
+MUST-1 diagnostics (recommended before paper table freeze):
+
+- independent sampling:
+  - set `EVAL_SEED=0`, `EVAL_SEED_GALLERY=999`
+- feature ablations:
+  - `ABLATE_POINT_XYZ=1`
+  - `ABLATE_POINT_DIST=1`
+
+Example:
+
+```bash
+qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<ckpt>,QUERY_BACKEND=mesh,GALLERY_BACKEND=udfgrid,EVAL_SEED=0,EVAL_SEED_GALLERY=999,OUT_JSON=results/ucpr_mesh2udf_indep.json \
+  scripts/analysis/nepa3d_ucpr.sh
+```
+
 ## Table 2: CPAC-UDF probe
 
 Default setting:
@@ -71,7 +86,7 @@ qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<ckpt>,CONTEX
 Use the local table launcher:
 
 ```bash
-bash scripts/finetune/run_scanobjectnn_main_table_local.sh
+bash scripts/finetune/run_scanobjectnn_m1_table_local.sh
 ```
 
 Methods should include scratch, ShapeNet-only, ShapeNet+UDF, mixed-unpaired (NEPA/MAE).

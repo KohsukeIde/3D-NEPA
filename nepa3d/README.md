@@ -66,24 +66,28 @@ Output layout:
 - `data/shapenet_cache_v0/test/<synset>/<model>.npz`
 - split manifest: `data/shapenet_cache_v0/_splits/{train.txt,test.txt}`
 
-### 2.2 ScanObjectNN v2 cache (`data/scanobjectnn_cache_v2`)
+### 2.2 ScanObjectNN cache (paper-safe setting)
 
-Input root:
+Recommended input root (split-specific, required for paper tables):
 
-- `data/ScanObjectNN/h5_files`
+- `data/ScanObjectNN/h5_files/main_split`
 
-Profile used in active runs:
+Recommended cache root:
+
+- `data/scanobjectnn_main_split_v2`
+
+Profile:
 
 - `PT_POOL=4000`
 - `RAY_POOL=256`
 - `PT_SURFACE_RATIO=0.5`, `PT_SURFACE_SIGMA=0.02`
 
-Local command (Python module; cluster wrapper is `scripts/preprocess/preprocess_scanobjectnn.sh`):
+Local command (Python module):
 
 ```bash
 .venv/bin/python -u -m nepa3d.data.preprocess_scanobjectnn \
-  --scan_root data/ScanObjectNN/h5_files \
-  --out_root data/scanobjectnn_cache_v2 \
+  --scan_root data/ScanObjectNN/h5_files/main_split \
+  --out_root data/scanobjectnn_main_split_v2 \
   --split all \
   --pt_pool 4000 \
   --ray_pool 256 \
@@ -92,10 +96,28 @@ Local command (Python module; cluster wrapper is `scripts/preprocess/preprocess_
   --seed 0
 ```
 
+Cluster wrapper (same defaults):
+
+```bash
+bash scripts/preprocess/preprocess_scanobjectnn.sh
+```
+
+Safety behavior:
+
+- preprocess now fails fast when duplicate h5 basenames are detected across `scan_root` (`--allow_duplicate_stems` to override intentionally).
+- provenance file is saved:
+  - `data/scanobjectnn_main_split_v2/_meta/scanobjectnn_train_source.txt`
+  - `data/scanobjectnn_main_split_v2/_meta/scanobjectnn_test_source.txt`
+
 Output layout:
 
-- `data/scanobjectnn_cache_v2/train/class_XXX/*.npz`
-- `data/scanobjectnn_cache_v2/test/class_XXX/*.npz`
+- `data/scanobjectnn_main_split_v2/train/class_XXX/*.npz`
+- `data/scanobjectnn_main_split_v2/test/class_XXX/*.npz`
+
+Legacy note:
+
+- `data/scanobjectnn_cache_v2` is kept for historical/internal runs.
+- For camera-ready tables, use a split-specific cache (`scanobjectnn_main_split_v2` or an explicitly named split cache).
 
 ### 2.3 ShapeNet unpaired cache for UCPR/CPAC (`data/shapenet_unpaired_cache_v1`)
 
@@ -214,6 +236,11 @@ Status (as of February 14, 2026):
   - `shapenet_mix_nepa`: `15/15`
   - `shapenet_mix_mae`: `15/15`
 
+Dataset/caching note for this table:
+
+- This completed `75/75` table was produced on `CACHE_ROOT=data/scanobjectnn_cache_v2` (legacy cache naming).
+- Repro runs for paper should use a split-specific cache root (Section 2.2).
+
 Table below is computed from `runs/scan_<method>_k<K>_s<seed>/last.pt`.
 `n(seed)=3` for all rows.
 
@@ -251,9 +278,37 @@ Readout:
 - Low-shot (`K=1,5`) best: `shapenet_mix_mae`
 - Mid/high-shot (`K=10,20`) best: `shapenet_mix_nepa`
 
+Protocol details for this table:
+
+- optimizer/eval seeds:
+  - `SEED in {0,1,2}`
+  - `VAL_SEED=0` (fixed)
+  - `EVAL_SEED=0` (fixed)
+- few-shot subset seed:
+  - `K=0`: `fewshot_seed=0`
+  - `K>0`: `fewshot_seed=SEED`
+- MC evaluation:
+  - `mc_eval_k_val=1`
+  - `mc_eval_k_test=4`
+
+Method/run-name mapping (exact):
+
+- `scratch` -> `runs/scan_scratch_k<K>_s<seed>/`
+- `shapenet_nepa` -> `runs/scan_shapenet_nepa_k<K>_s<seed>/`
+- `shapenet_mesh_udf_nepa` -> `runs/scan_shapenet_mesh_udf_nepa_k<K>_s<seed>/`
+- `shapenet_mix_nepa` -> `runs/scan_shapenet_mix_nepa_k<K>_s<seed>/`
+- `shapenet_mix_mae` -> `runs/scan_shapenet_mix_mae_k<K>_s<seed>/`
+
 ## 7) Notes
 
 - `scratch K=10/20` shows majority-class collapse behavior in current seeds.
+- This is not a K-shot sampling bug:
+  - `stratified_kshot` produces exact per-class counts (`K x 15 classes`).
+  - observed `test_acc=0.1115` matches test majority ratio (`2440/21889=0.11147`).
+  - observed best-val around `0.1249` matches val majority ratio (`743/5948=0.12492`).
+- ScanObjectNN task here is not raw point-set classification:
+  - model input is query-token sequence with `POINT xyz + dist` (`pt_dist_pool`), and optional ray channels.
+  - comparisons to raw-point baselines should explicitly note this representation difference.
 - Main M1 few-shot run is complete (`75/75`).
 
 ## 8) UCPR/CPAC active results

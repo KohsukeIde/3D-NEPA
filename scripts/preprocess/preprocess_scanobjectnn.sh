@@ -21,19 +21,25 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
-SCAN_ROOT="${SCAN_ROOT:-data/ScanObjectNN/h5_files}"
-OUT_ROOT="${OUT_ROOT:-data/scanobjectnn_cache_v1}"
+SCAN_ROOT="${SCAN_ROOT:-data/ScanObjectNN/h5_files/main_split}"
+OUT_ROOT="${OUT_ROOT:-data/scanobjectnn_main_split_v2}"
 SPLIT="${SPLIT:-all}"  # train|test|all
-PT_POOL="${PT_POOL:-2000}"
-RAY_POOL="${RAY_POOL:-1000}"
+PT_POOL="${PT_POOL:-4000}"
+RAY_POOL="${RAY_POOL:-256}"
 PT_SURFACE_RATIO="${PT_SURFACE_RATIO:-0.5}"
 PT_SURFACE_SIGMA="${PT_SURFACE_SIGMA:-0.02}"
 SEED="${SEED:-0}"
 OVERWRITE="${OVERWRITE:-0}"
+ALLOW_DUPLICATE_STEMS="${ALLOW_DUPLICATE_STEMS:-0}"
 
 EXTRA_OVERWRITE=""
 if [ "${OVERWRITE}" = "1" ]; then
   EXTRA_OVERWRITE="--overwrite"
+fi
+
+EXTRA_DUP=""
+if [ "${ALLOW_DUPLICATE_STEMS}" = "1" ]; then
+  EXTRA_DUP="--allow_duplicate_stems"
 fi
 
 "${PYTHON_BIN}" nepa3d/data/preprocess_scanobjectnn.py \
@@ -45,4 +51,5 @@ fi
   --pt_surface_ratio "${PT_SURFACE_RATIO}" \
   --pt_surface_sigma "${PT_SURFACE_SIGMA}" \
   --seed "${SEED}" \
-  ${EXTRA_OVERWRITE}
+  ${EXTRA_OVERWRITE} \
+  ${EXTRA_DUP}
