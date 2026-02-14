@@ -43,6 +43,7 @@ SHAPENET_NEPA_CKPT="${SHAPENET_NEPA_CKPT:-runs/shapenet_mesh_nepa_s0/ckpt_ep049.
 SHAPENET_MESH_UDF_NEPA_CKPT="${SHAPENET_MESH_UDF_NEPA_CKPT:-runs/shapenet_mesh_udf_nepa_s0/ckpt_ep049.pt}"
 SHAPENET_MIX_NEPA_CKPT="${SHAPENET_MIX_NEPA_CKPT:-runs/shapenet_mix_nepa_s0/ckpt_ep049.pt}"
 SHAPENET_MIX_MAE_CKPT="${SHAPENET_MIX_MAE_CKPT:-runs/shapenet_mix_mae_s0/ckpt_ep049.pt}"
+METHODS="${METHODS:-scratch shapenet_nepa shapenet_mesh_udf_nepa shapenet_mix_nepa shapenet_mix_mae}"
 
 SEEDS="${SEEDS:-0 1 2}"
 K_LIST="${K_LIST:-0 1 5 10 20}"
@@ -57,16 +58,32 @@ if [ ! -d "${CACHE_ROOT}" ]; then
   exit 1
 fi
 
-for ckpt in \
-  "${SHAPENET_NEPA_CKPT}" \
-  "${SHAPENET_MESH_UDF_NEPA_CKPT}" \
-  "${SHAPENET_MIX_NEPA_CKPT}" \
-  "${SHAPENET_MIX_MAE_CKPT}"; do
-  if [ ! -f "${ckpt}" ]; then
-    echo "[error] missing ckpt: ${ckpt}"
-    exit 1
-  fi
-done
+has_method() {
+  local target="$1"
+  for m in ${METHODS}; do
+    if [ "${m}" = "${target}" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+if has_method "shapenet_nepa" && [ ! -f "${SHAPENET_NEPA_CKPT}" ]; then
+  echo "[error] missing ckpt: ${SHAPENET_NEPA_CKPT}"
+  exit 1
+fi
+if has_method "shapenet_mesh_udf_nepa" && [ ! -f "${SHAPENET_MESH_UDF_NEPA_CKPT}" ]; then
+  echo "[error] missing ckpt: ${SHAPENET_MESH_UDF_NEPA_CKPT}"
+  exit 1
+fi
+if has_method "shapenet_mix_nepa" && [ ! -f "${SHAPENET_MIX_NEPA_CKPT}" ]; then
+  echo "[error] missing ckpt: ${SHAPENET_MIX_NEPA_CKPT}"
+  exit 1
+fi
+if has_method "shapenet_mix_mae" && [ ! -f "${SHAPENET_MIX_MAE_CKPT}" ]; then
+  echo "[error] missing ckpt: ${SHAPENET_MIX_MAE_CKPT}"
+  exit 1
+fi
 
 make_scratch_ckpt() {
   local seed="$1"
@@ -147,11 +164,21 @@ for seed in ${SEEDS}; do
     if [ "${k}" = "0" ]; then
       fs="0"
     fi
-    add_job "scratch" "${seed}" "${k}" "${scratch_ckpt}" "${fs}"
-    add_job "shapenet_nepa" "${seed}" "${k}" "${SHAPENET_NEPA_CKPT}" "${fs}"
-    add_job "shapenet_mesh_udf_nepa" "${seed}" "${k}" "${SHAPENET_MESH_UDF_NEPA_CKPT}" "${fs}"
-    add_job "shapenet_mix_nepa" "${seed}" "${k}" "${SHAPENET_MIX_NEPA_CKPT}" "${fs}"
-    add_job "shapenet_mix_mae" "${seed}" "${k}" "${SHAPENET_MIX_MAE_CKPT}" "${fs}"
+    if has_method "scratch"; then
+      add_job "scratch" "${seed}" "${k}" "${scratch_ckpt}" "${fs}"
+    fi
+    if has_method "shapenet_nepa"; then
+      add_job "shapenet_nepa" "${seed}" "${k}" "${SHAPENET_NEPA_CKPT}" "${fs}"
+    fi
+    if has_method "shapenet_mesh_udf_nepa"; then
+      add_job "shapenet_mesh_udf_nepa" "${seed}" "${k}" "${SHAPENET_MESH_UDF_NEPA_CKPT}" "${fs}"
+    fi
+    if has_method "shapenet_mix_nepa"; then
+      add_job "shapenet_mix_nepa" "${seed}" "${k}" "${SHAPENET_MIX_NEPA_CKPT}" "${fs}"
+    fi
+    if has_method "shapenet_mix_mae"; then
+      add_job "shapenet_mix_mae" "${seed}" "${k}" "${SHAPENET_MIX_MAE_CKPT}" "${fs}"
+    fi
   done
 done
 
@@ -211,10 +238,11 @@ worker() {
   done
 }
 
-echo "[info] total_jobs=${#JOBS[@]} (5 methods x ${K_LIST} x ${SEEDS})"
+echo "[info] total_jobs=${#JOBS[@]}"
 echo "[info] gpu0=${GPU0} gpu1=${GPU1}"
 echo "[info] logs=${LOG_ROOT}"
 echo "[info] batch=${BATCH} workers=${NUM_WORKERS}"
+echo "[info] methods=${METHODS}"
 
 worker "${GPU0}" 0 &
 pid0=$!

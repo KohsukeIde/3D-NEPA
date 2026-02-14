@@ -1,0 +1,26 @@
+# Paper-safe mixed pretraining corpus:
+#   ShapeNet mesh + ShapeNet UDF + ScanObjectNN(main_split) pointcloud_noray.
+# ScanObjectNN component uses split-specific cache root.
+
+mix_seed: 0
+mix_num_samples: 200000
+replacement: true
+
+datasets:
+  - name: shapenet_mesh
+    cache_root: data/shapenet_cache_v0
+    split: train
+    backend: mesh
+    weight: 0.34
+
+  - name: shapenet_udf
+    cache_root: data/shapenet_cache_v0
+    split: train
+    backend: udfgrid
+    weight: 0.33
+
+  - name: scan_noray_mainsplit
+    cache_root: data/scanobjectnn_main_split_v2
+    split: train
+    backend: pointcloud_noray
+    weight: 0.33
