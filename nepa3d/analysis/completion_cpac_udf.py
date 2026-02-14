@@ -252,6 +252,27 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--head_train_ratio", type=float, default=0.2)
     ap.add_argument("--head_train_n", type=int, default=0)
+    ap.add_argument(
+        "--head_train_split",
+        type=str,
+        default="train_udf",
+        help=("Split used to train the ridge head. "
+              "Default: train_udf (non-transductive). "
+              "If set to empty or 'none', uses legacy transductive split within --split."),
+    )
+    ap.add_argument(
+        "--head_train_backend",
+        type=str,
+        default="udfgrid",
+        help=("Backend used for head training context extraction. "
+              "Default: udfgrid (monolingual target language)."),
+    )
+    ap.add_argument(
+        "--head_train_max_shapes",
+        type=int,
+        default=0,
+        help="Optional cap on number of shapes used to train the head (0=all).",
+    )
     ap.add_argument("--ridge_lambda", type=float, default=1e-3)
     ap.add_argument("--tau", type=float, default=0.03)
     ap.add_argument("--max_shapes", type=int, default=0)
@@ -265,29 +286,45 @@ def main():
     model, ckpt = build_model_from_ckpt(args.ckpt, device)
     add_eos = infer_add_eos(ckpt, args.add_eos)
 
-    paths = list_npz(args.cache_root, args.split)
+    # Evaluation shapes (never used to train the probe head in the default protocol).
+    eval_paths = list_npz(args.cache_root, args.split)
     if args.max_shapes and args.max_shapes > 0:
-        paths = paths[: int(args.max_shapes)]
-    if len(paths) < 2:
-        raise RuntimeError("need at least 2 shapes for train/test head split")
+        eval_paths = eval_paths[: int(args.max_shapes)]
+    if len(eval_paths) < 1:
+        raise RuntimeError("need at least 1 shape for evaluation")
 
-    rng = np.random.RandomState(int(args.seed) & 0xFFFFFFFF)
-    perm = np.arange(len(paths))
-    rng.shuffle(perm)
+    head_split = (args.head_train_split or "").strip()
+    legacy_transductive = (head_split == "") or (head_split.lower() == "none")
 
-    if args.head_train_n and args.head_train_n > 0:
-        n_train = min(int(args.head_train_n), len(paths) - 1)
+    if not legacy_transductive:
+        # Non-transductive protocol: train the ridge head on a *different* split (default: train_udf).
+        tr_paths = list_npz(args.cache_root, head_split)
+        if args.head_train_max_shapes and args.head_train_max_shapes > 0:
+            tr_paths = tr_paths[: int(args.head_train_max_shapes)]
+        if len(tr_paths) < 1:
+            raise RuntimeError(f"no shapes found for head_train_split={head_split}")
+        te_paths = eval_paths
+        head_backend = args.head_train_backend
     else:
-        n_train = int(round(float(args.head_train_ratio) * len(paths)))
-        n_train = max(1, min(n_train, len(paths) - 1))
-
-    tr_paths = [paths[i] for i in perm[:n_train]]
-    te_paths = [paths[i] for i in perm[n_train:]]
+        # Legacy (transductive) protocol: split within eval shapes by ratio.
+        if len(eval_paths) < 2:
+            raise RuntimeError("need at least 2 shapes for legacy transductive head split")
+        rng = np.random.RandomState(int(args.seed) & 0xFFFFFFFF)
+        perm = np.arange(len(eval_paths))
+        rng.shuffle(perm)
+        if args.head_train_n and args.head_train_n > 0:
+            n_train = min(int(args.head_train_n), len(eval_paths) - 1)
+        else:
+            n_train = int(round(float(args.head_train_ratio) * len(eval_paths)))
+            n_train = max(1, min(n_train, len(eval_paths) - 1))
+        tr_paths = [eval_paths[i] for i in perm[:n_train]]
+        te_paths = [eval_paths[i] for i in perm[n_train:]]
+        head_backend = args.context_backend
 
     Xtr, Ytr = collect_xy(
         model,
         tr_paths,
-        args.context_backend,
+        head_backend,
         args.n_context,
         args.n_query,
         add_eos,
@@ -323,7 +360,11 @@ def main():
             "target": "udfgrid_distance_probe",
             "n_context": int(args.n_context),
             "n_query": int(args.n_query),
-            "n_shapes_total": int(len(paths)),
+            "eval_split": args.split,
+            "head_train_split": (head_split if not legacy_transductive else "legacy_transductive"),
+            "head_train_backend": head_backend,
+            "legacy_transductive": bool(legacy_transductive),
+            "n_shapes_total": int(len(eval_paths)),
             "n_shapes_head_train": int(len(tr_paths)),
             "n_shapes_head_test": int(len(te_paths)),
             "ridge_lambda": float(args.ridge_lambda),

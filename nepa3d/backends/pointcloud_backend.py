@@ -12,11 +12,21 @@ class PointCloudBackend:
 
     def get_pools(self):
         pt_xyz = self.d["pt_xyz_pool"].astype(np.float32, copy=False)
-        # Fast path: reuse precomputed distances from cache (v1/v2 preprocess).
-        if "pt_dist_pool" in self.d:
+        # Prefer observation-derived distances if available (pc->query).
+        # This avoids leaking mesh-derived distances (pt_dist_pool) into pointcloud experiments.
+        if "pt_dist_pc_pool" in self.d:
+            pt_dist = self.d["pt_dist_pc_pool"].astype(np.float32, copy=False)
+            # If preprocess marked distances as invalid (-1) or NaN, recompute from pc on-the-fly.
+            if (not np.isfinite(pt_dist).all()) or np.any(pt_dist < 0):
+                if self.kdt is None:
+                    self.kdt = cKDTree(self.pc)
+                dist, _ = self.kdt.query(pt_xyz, k=1)
+                pt_dist = dist.astype(np.float32, copy=False)
+        # Fallback: mesh-derived distances (legacy caches).
+        elif "pt_dist_pool" in self.d:
             pt_dist = self.d["pt_dist_pool"].astype(np.float32, copy=False)
         else:
-            # Backward-compat for old caches without pt_dist_pool.
+            # Backward-compat for old caches without any distance pool.
             if self.kdt is None:
                 self.kdt = cKDTree(self.pc)
             dist, _ = self.kdt.query(pt_xyz, k=1)
@@ -50,7 +60,16 @@ class PointCloudMeshRayBackend(PointCloudBackend):
 
     def get_pools(self):
         pt_xyz = self.d["pt_xyz_pool"].astype(np.float32, copy=False)
-        if "pt_dist_pool" in self.d:
+        # Prefer observation-derived distances if available (pc->query).
+        if "pt_dist_pc_pool" in self.d:
+            pt_dist = self.d["pt_dist_pc_pool"].astype(np.float32, copy=False)
+            # If preprocess marked distances as invalid (-1) or NaN, recompute from pc on-the-fly.
+            if (not np.isfinite(pt_dist).all()) or np.any(pt_dist < 0):
+                if self.kdt is None:
+                    self.kdt = cKDTree(self.pc)
+                dist, _ = self.kdt.query(pt_xyz, k=1)
+                pt_dist = dist.astype(np.float32, copy=False)
+        elif "pt_dist_pool" in self.d:
             pt_dist = self.d["pt_dist_pool"].astype(np.float32, copy=False)
         else:
             if self.kdt is None:

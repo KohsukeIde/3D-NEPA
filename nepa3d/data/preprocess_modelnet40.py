@@ -395,6 +395,35 @@ def preprocess_one(
             pt_dist_pool, nan=fill, posinf=fill, neginf=0.0
         )
 
+
+    # PointCloud distance pool: distance from query points to observed point cloud.
+    # This is used by PointCloudBackend to avoid leaking mesh-derived distances via pt_dist_pool.
+    # NOTE: pt_dist_pool is mesh-derived (explicit surface). pt_dist_pc_pool is observation-derived.
+    pt_dist_pc_pool = None
+    try:
+        if cKDTree is not None:
+            kdt_pc = cKDTree(pc_xyz)
+            dist_pc, _ = kdt_pc.query(pt_xyz_pool, k=1)
+            pt_dist_pc_pool = dist_pc.astype(np.float32, copy=False)
+        else:
+            # Fallback: brute-force nearest neighbor distance in chunks (slower).
+            pt_dist_pc_pool = np.empty((pt_xyz_pool.shape[0],), dtype=np.float32)
+            cs = max(1, int(pt_query_chunk))
+            for s in range(0, pt_xyz_pool.shape[0], cs):
+                e = min(pt_xyz_pool.shape[0], s + cs)
+                diff = pt_xyz_pool[s:e, None, :] - pc_xyz[None, :, :]
+                d2 = np.sum(diff * diff, axis=2)
+                pt_dist_pc_pool[s:e] = np.sqrt(np.min(d2, axis=1)).astype(np.float32)
+    except Exception:
+        pt_dist_pc_pool = None
+    if pt_dist_pc_pool is None:
+        # As a last resort, mark as invalid (-1). PointCloudBackend will recompute if needed.
+        pt_dist_pc_pool = -np.ones((pt_xyz_pool.shape[0],), dtype=np.float32)
+    if not np.isfinite(pt_dist_pc_pool).all():
+        finite = np.isfinite(pt_dist_pc_pool)
+        fill = float(np.max(pt_dist_pc_pool[finite])) if finite.any() else 1.0
+        pt_dist_pc_pool = np.nan_to_num(pt_dist_pc_pool, nan=fill, posinf=fill, neginf=0.0).astype(np.float32)
+
     # UDF grid (unsigned distance field) computed from voxelized surface occupancy.
     udf_grid = None
     pt_dist_udf_pool = None
@@ -501,6 +530,7 @@ def preprocess_one(
         pc_n=pc_n,
         pt_xyz_pool=pt_xyz_pool,
         pt_dist_pool=pt_dist_pool,
+        pt_dist_pc_pool=pt_dist_pc_pool,
         pt_dist_udf_pool=pt_dist_udf_pool,
         udf_grid=udf_grid,
         occ_grid=occ_grid,

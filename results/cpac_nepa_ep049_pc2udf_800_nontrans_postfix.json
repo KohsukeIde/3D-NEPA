@@ -1,0 +1,20 @@
+{
+  "mae": 0.12518632411956787,
+  "rmse": 0.16126003861427307,
+  "iou@tau": 0.3173926429017873,
+  "context_backend": "pointcloud_noray",
+  "target": "udfgrid_distance_probe",
+  "n_context": 256,
+  "n_query": 256,
+  "eval_split": "eval",
+  "head_train_split": "train_udf",
+  "head_train_backend": "udfgrid",
+  "legacy_transductive": false,
+  "n_shapes_total": 800,
+  "n_shapes_head_train": 15406,
+  "n_shapes_head_test": 800,
+  "ridge_lambda": 0.001,
+  "tau": 0.03,
+  "add_eos": true,
+  "ckpt": "/home/cvrt/Desktop/dev/3D-NEPA/runs/eccv_upmix_nepa_s0/ckpt_ep049.pt"
+}

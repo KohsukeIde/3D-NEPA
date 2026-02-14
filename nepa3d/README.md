@@ -122,6 +122,20 @@ Output layout:
   --link_mode symlink
 ```
 
+3. Step0 migration (add `pt_dist_pc_pool` to source cache; required to avoid mesh-distance leakage in pointcloud backend):
+
+```bash
+.venv/bin/python -u -m nepa3d.data.migrate_add_pt_dist_pc_pool \
+  --cache_root data/shapenet_cache_v0 \
+  --splits train,test \
+  --workers 16
+```
+
+Migration logs (example):
+
+- `logs/preprocess_migrate_ptdistpc_test.log` (`ok=5185 fail=0`)
+- `logs/preprocess_migrate_ptdistpc_train.log` (`ok=46688 fail=0`)
+
 ## 3) Train/eval launch commands
 
 M1 pretrain (3 jobs on 2 GPUs):
@@ -259,6 +273,11 @@ Scripts/modules used:
 - pretrain: `nepa3d.train.pretrain`
 - retrieval eval: `nepa3d.analysis.retrieval_ucpr`
 - completion eval: `nepa3d.analysis.completion_cpac_udf`
+- migration: `nepa3d.data.migrate_add_pt_dist_pc_pool`
+- wrappers:
+  - `scripts/analysis/nepa3d_ucpr.sh`
+  - `scripts/analysis/nepa3d_cpac_udf.sh`
+  - `scripts/preprocess/migrate_add_pt_dist_pc_pool.sh`
 
 Evaluation commands used for this synced snapshot:
 
@@ -302,6 +321,50 @@ Evaluation commands used for this synced snapshot:
   --max_shapes 800 --head_train_ratio 0.2 \
   --ridge_lambda 1e-3 --tau 0.03 \
   --out_json results/cpac_mae_ep049_pc2udf_800.json
+
+# UCPR (pointcloud_noray -> udfgrid), 1k subset, after Step0 migration
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 \
+  --split eval \
+  --ckpt runs/eccv_upmix_nepa_s0/ckpt_ep049.pt \
+  --query_backend pointcloud_noray \
+  --gallery_backend udfgrid \
+  --max_files 1000 \
+  --out_json results/ucpr_nepa_ep049_pc2udf_1k_postfix.json
+
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 \
+  --split eval \
+  --ckpt runs/eccv_upmix_mae_s0/ckpt_ep049.pt \
+  --query_backend pointcloud_noray \
+  --gallery_backend udfgrid \
+  --max_files 1000 \
+  --out_json results/ucpr_mae_ep049_pc2udf_1k_postfix.json
+
+# CPAC-UDF non-transductive (head train split fixed to train_udf)
+.venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 \
+  --split eval \
+  --head_train_split train_udf \
+  --head_train_backend udfgrid \
+  --context_backend pointcloud_noray \
+  --ckpt runs/eccv_upmix_nepa_s0/ckpt_ep049.pt \
+  --n_context 256 --n_query 256 \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 \
+  --out_json results/cpac_nepa_ep049_pc2udf_800_nontrans_postfix.json
+
+.venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 \
+  --split eval \
+  --head_train_split train_udf \
+  --head_train_backend udfgrid \
+  --context_backend pointcloud_noray \
+  --ckpt runs/eccv_upmix_mae_s0/ckpt_ep049.pt \
+  --n_context 256 --n_query 256 \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 \
+  --out_json results/cpac_mae_ep049_pc2udf_800_nontrans_postfix.json
 ```
 
 Synced logs/artifacts:
@@ -313,6 +376,10 @@ Synced logs/artifacts:
   - `results/ucpr_mae_ep049_mesh2udf_1k.json`
   - `results/cpac_nepa_ep049_pc2udf_800.json`
   - `results/cpac_mae_ep049_pc2udf_800.json`
+  - `results/ucpr_nepa_ep049_pc2udf_1k_postfix.json`
+  - `results/ucpr_mae_ep049_pc2udf_1k_postfix.json`
+  - `results/cpac_nepa_ep049_pc2udf_800_nontrans_postfix.json`
+  - `results/cpac_mae_ep049_pc2udf_800_nontrans_postfix.json`
 
 ### 8.2 UCPR
 
@@ -321,6 +388,8 @@ Synced logs/artifacts:
 | `debug_local` | `runs/debug_ucpr_nepa_s0/ckpt_ep000.pt` | `mesh -> udfgrid` | `eval` | 200 | 0.0050 | 0.0250 | 0.0500 | 0.0302 | smoke run |
 | `external_ep049_nepa` | `runs/eccv_upmix_nepa_s0/ckpt_ep049.pt` | `mesh -> udfgrid` | `eval` | 1000 | 0.0070 | 0.0370 | 0.0510 | 0.0277 | synced from external-PC run |
 | `external_ep049_mae` | `runs/eccv_upmix_mae_s0/ckpt_ep049.pt` | `mesh -> udfgrid` | `eval` | 1000 | 0.1270 | 0.2930 | 0.3980 | 0.2196 | synced from external-PC run |
+| `external_ep049_nepa_postfix` | `runs/eccv_upmix_nepa_s0/ckpt_ep049.pt` | `pointcloud_noray -> udfgrid` | `eval` | 1000 | 0.9990 | 1.0000 | 1.0000 | 0.9995 | after Step0 migration (`pt_dist_pc_pool`) |
+| `external_ep049_mae_postfix` | `runs/eccv_upmix_mae_s0/ckpt_ep049.pt` | `pointcloud_noray -> udfgrid` | `eval` | 1000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | after Step0 migration (`pt_dist_pc_pool`) |
 
 ### 8.3 CPAC-UDF
 
@@ -329,8 +398,44 @@ Synced logs/artifacts:
 | `debug_local` | `runs/debug_ucpr_nepa_s0/ckpt_ep000.pt` | `pointcloud_noray -> udf` | `eval` | 120 | 0.0819 | 0.1099 | 0.4786 | smoke run |
 | `external_ep049_nepa` | `runs/eccv_upmix_nepa_s0/ckpt_ep049.pt` | `pointcloud_noray -> udf` | `eval` | 800 | 0.1169 | 0.1510 | 0.4047 | synced from external-PC run |
 | `external_ep049_mae` | `runs/eccv_upmix_mae_s0/ckpt_ep049.pt` | `pointcloud_noray -> udf` | `eval` | 800 | 0.0917 | 0.1210 | 0.4204 | synced from external-PC run |
+| `external_ep049_nepa_nontrans_postfix` | `runs/eccv_upmix_nepa_s0/ckpt_ep049.pt` | `pointcloud_noray -> udf` | `eval` | 800 | 0.1252 | 0.1613 | 0.3174 | non-transductive (`head_train_split=train_udf`) after Step0 |
+| `external_ep049_mae_nontrans_postfix` | `runs/eccv_upmix_mae_s0/ckpt_ep049.pt` | `pointcloud_noray -> udf` | `eval` | 800 | 0.1020 | 0.1341 | 0.3353 | non-transductive (`head_train_split=train_udf`) after Step0 |
 
 ### 8.4 Current readout (subset, single-seed)
 
 - In this synced subset evaluation, MAE objective is stronger than NEPA on both UCPR and CPAC.
+- After Step0/1 cleanup, MAE remains stronger than NEPA on CPAC non-transductive.
+- `pointcloud_noray -> udfgrid` UCPR is near-saturated for both objectives in this setting; treat it as an easy pair and do not use it as the sole alignment evidence.
 - This section is still a partial readout (`mesh->udf` only for UCPR, subset eval sizes), not the final ECCV main table.
+
+### 8.5 Done checklist (this cycle, no multi-seed)
+
+Executed in this cycle:
+
+1. Step0 patch integration (`pt_dist_pc_pool` support + backend priority):
+   - `nepa3d/backends/pointcloud_backend.py`
+   - `nepa3d/data/preprocess_modelnet40.py`
+   - `nepa3d/data/migrate_add_pt_dist_pc_pool.py`
+   - `scripts/preprocess/migrate_add_pt_dist_pc_pool.sh`
+2. Step1 patch integration (CPAC non-transductive defaults):
+   - `nepa3d/analysis/completion_cpac_udf.py`
+   - `scripts/analysis/nepa3d_cpac_udf.sh`
+3. Cache migration completed:
+   - `data/shapenet_cache_v0/test`: `ok=5185`, `fail=0`
+   - `data/shapenet_cache_v0/train`: `ok=46688`, `fail=0`
+4. Post-fix single-seed evaluations completed:
+   - UCPR `pointcloud_noray -> udfgrid` (`max_files=1000`)
+   - CPAC non-transductive (`head_train_split=train_udf`, `max_shapes=800`)
+
+Single-seed result summary from this cycle:
+
+- UCPR `pointcloud_noray -> udfgrid`:
+  - NEPA: `R@1=0.9990`, `mAP=0.9995`
+  - MAE: `R@1=1.0000`, `mAP=1.0000`
+- CPAC non-transductive:
+  - NEPA: `MAE=0.1252`, `RMSE=0.1613`, `IoU@0.03=0.3174`
+  - MAE: `MAE=0.1020`, `RMSE=0.1341`, `IoU@0.03=0.3353`
+
+Scope note:
+
+- Multi-seed was intentionally skipped in this cycle.
