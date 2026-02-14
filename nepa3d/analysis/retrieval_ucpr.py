@@ -15,7 +15,7 @@ from ..backends.pointcloud_backend import (
 from ..backends.udfgrid_backend import UDFGridBackend
 from ..backends.voxel_backend import VoxelBackend
 from ..models.query_nepa import QueryNepa
-from ..token.tokenizer import TYPE_EOS, build_sequence
+from ..token.tokenizer import TYPE_EOS, TYPE_POINT, build_sequence
 
 try:
     from tqdm import tqdm
@@ -97,6 +97,8 @@ def embed_path(
     voxel_dilate,
     voxel_max_steps,
     device,
+    ablate_point_xyz: bool = False,
+    ablate_point_dist: bool = False,
 ):
     embs = []
     for k in range(max(1, int(mc_k))):
@@ -120,6 +122,15 @@ def embed_path(
             add_eos=add_eos,
             rng=rng,
         )
+
+        # Optional ablations (diagnostic): remove access to POINT xyz/dist.
+        # This helps detect trivial retrieval caused by shared query coordinates.
+        if ablate_point_xyz or ablate_point_dist:
+            pt_mask = (type_id == TYPE_POINT)
+            if ablate_point_xyz:
+                feat[pt_mask, 0:3] = 0.0
+            if ablate_point_dist:
+                feat[pt_mask, 9] = 0.0
 
         feat_t = torch.from_numpy(feat).unsqueeze(0).to(device).float()
         type_t = torch.from_numpy(type_id).unsqueeze(0).to(device).long()
@@ -169,7 +180,23 @@ def main():
     ap.add_argument("--n_ray", type=int, default=None)
     ap.add_argument("--add_eos", type=int, default=-1)
     ap.add_argument("--eval_seed", type=int, default=0)
+    ap.add_argument(
+        "--eval_seed_gallery",
+        type=int,
+        default=-1,
+        help="If <0, uses --eval_seed. Use a different seed to avoid identical sampling for query/gallery.",
+    )
     ap.add_argument("--mc_k", type=int, default=1)
+    ap.add_argument(
+        "--ablate_point_xyz",
+        action="store_true",
+        help="Zero-out POINT xyz features before encoding (diagnostic).",
+    )
+    ap.add_argument(
+        "--ablate_point_dist",
+        action="store_true",
+        help="Zero-out POINT dist features before encoding (diagnostic).",
+    )
     ap.add_argument("--max_files", type=int, default=0)
     ap.add_argument("--chunk", type=int, default=256)
     ap.add_argument("--voxel_grid", type=int, default=64)
@@ -177,6 +204,12 @@ def main():
     ap.add_argument("--voxel_max_steps", type=int, default=0)
     ap.add_argument("--out_json", type=str, default="")
     args = ap.parse_args()
+
+    eval_seed_gallery = (
+        int(args.eval_seed)
+        if int(args.eval_seed_gallery) < 0
+        else int(args.eval_seed_gallery)
+    )
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model, ckpt = build_model_from_ckpt(args.ckpt, device)
@@ -209,6 +242,8 @@ def main():
             args.voxel_dilate,
             args.voxel_max_steps,
             device,
+            args.ablate_point_xyz,
+            args.ablate_point_dist,
         )
 
     for i, p in enumerate(tqdm(paths, desc=f"embed gallery={args.gallery_backend}")):
@@ -219,12 +254,14 @@ def main():
             n_point,
             n_ray,
             add_eos,
-            args.eval_seed,
+            eval_seed_gallery,
             args.mc_k,
             args.voxel_grid,
             args.voxel_dilate,
             args.voxel_max_steps,
             device,
+            args.ablate_point_xyz,
+            args.ablate_point_dist,
         )
 
     metrics = retrieval_metrics(q_emb, g_emb, ks=(1, 5, 10), chunk=max(1, int(args.chunk)))
@@ -238,6 +275,9 @@ def main():
             "add_eos": bool(add_eos),
             "mc_k": int(args.mc_k),
             "eval_seed": int(args.eval_seed),
+            "eval_seed_gallery": int(eval_seed_gallery),
+            "ablate_point_xyz": bool(args.ablate_point_xyz),
+            "ablate_point_dist": bool(args.ablate_point_dist),
             "ckpt": os.path.abspath(args.ckpt),
         }
     )

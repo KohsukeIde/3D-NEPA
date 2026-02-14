@@ -1,0 +1,20 @@
+{
+  "r@1": 0.04,
+  "r@5": 0.141,
+  "r@10": 0.204,
+  "mAP": 0.10171211510896683,
+  "mean_rank": 91.693,
+  "median_rank": 55.5,
+  "query_backend": "mesh",
+  "gallery_backend": "pointcloud_noray",
+  "n_files": 1000,
+  "n_point": 256,
+  "n_ray": 256,
+  "add_eos": true,
+  "mc_k": 1,
+  "eval_seed": 0,
+  "eval_seed_gallery": 999,
+  "ablate_point_xyz": false,
+  "ablate_point_dist": false,
+  "ckpt": "/home/cvrt/Desktop/dev/3D-NEPA/runs/eccv_upmix_mae_s0/ckpt_ep049.pt"
+}
