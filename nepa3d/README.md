@@ -271,6 +271,7 @@ Full tables:
 
 - `nepa3d/docs/results_ucpr_cpac_active.md`
 - latest follow-up (`pooling/context controls`, Feb 15, 2026) is also tracked there
+- latest MAE parity + eval-seed variance follow-up (Feb 15, 2026) is tracked there
 
 ## 7) Notes for paper
 

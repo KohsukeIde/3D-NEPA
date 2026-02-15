@@ -768,3 +768,234 @@ Qualitative MC smoke (`grid_res=16`, 1 shape):
 
 - `scikit-image` is required for marching cubes (`pip install scikit-image`).
 - `save_png=1` requires matplotlib; the script skips preview export if matplotlib is unavailable.
+
+## MAE Parity + Eval-Seed Variance (Feb 15, 2026, follow-up)
+
+This cycle focused on two items from feedback:
+
+- run MAE under the same CPAC/UCPR settings used in the QA+dualmask analysis
+- add small variance readout with `eval_seed={0,1,2}` (pretrain seed fixed)
+
+### Commands used
+
+CPAC (MAE, same controls as QA+dualmask):
+
+```bash
+# normal + NN-copy (pool query)
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_mae_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 4000 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source pool \
+  --baseline nn_copy \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --out_json results/cpac_mae_s0_pc2udf_800_normal_h_htrain4k_with_nncopy.json
+
+# no-context / mismatch controls
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_mae_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 4000 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test none \
+  --rep_source h --query_source pool \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --out_json results/cpac_mae_s0_pc2udf_800_testnone_h_htrain4k.json
+
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_mae_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 4000 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test mismatch \
+  --mismatch_shift 1 \
+  --rep_source h --query_source pool \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --out_json results/cpac_mae_s0_pc2udf_800_testmismatch_h_htrain4k.json
+
+# grid query + NN-copy
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_mae_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 4000 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source grid \
+  --baseline nn_copy \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --out_json results/cpac_mae_s0_pc2udf_800_grid_h_htrain4k_with_nncopy.json
+```
+
+Eval-seed variance (CPAC pool normal, both ckpts):
+
+```bash
+# seed=1
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 4000 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source pool \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 1 \
+  --out_json results/cpac_nepa_qa_dualmask_s0_pc2udf_800_normal_h_htrain4k_seed1.json
+
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_mae_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 4000 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source pool \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 1 \
+  --out_json results/cpac_mae_s0_pc2udf_800_normal_h_htrain4k_seed1.json
+
+# seed=2
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 4000 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source pool \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 2 \
+  --out_json results/cpac_nepa_qa_dualmask_s0_pc2udf_800_normal_h_htrain4k_seed2.json
+
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_mae_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 4000 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source pool \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 2 \
+  --out_json results/cpac_mae_s0_pc2udf_800_normal_h_htrain4k_seed2.json
+```
+
+UCPR hard-pair (`pooling=mean_a`, `eval_seed={0,1,2}`, `eval_seed_gallery=999`):
+
+```bash
+# mesh -> udfgrid
+for S in 0 1 2; do
+  TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+    --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+    --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+    --query_backend mesh --gallery_backend udfgrid \
+    --eval_seed ${S} --eval_seed_gallery 999 --max_files 1000 \
+    --pooling mean_a \
+    --out_json results/ucpr_nepa_qa_dualmask_s0_mesh2udf_1k_indep_mean_a_seed${S}.json
+done
+
+for S in 0 1 2; do
+  TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+    --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+    --ckpt runs/eccv_upmix_mae_s0/ckpt_ep049.pt \
+    --query_backend mesh --gallery_backend udfgrid \
+    --eval_seed ${S} --eval_seed_gallery 999 --max_files 1000 \
+    --pooling mean_a \
+    --out_json results/ucpr_mae_s0_mesh2udf_1k_indep_mean_a_seed${S}.json
+done
+
+# mesh -> pointcloud_noray
+for S in 0 1 2; do
+  TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+    --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+    --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+    --query_backend mesh --gallery_backend pointcloud_noray \
+    --eval_seed ${S} --eval_seed_gallery 999 --max_files 1000 \
+    --pooling mean_a \
+    --out_json results/ucpr_nepa_qa_dualmask_s0_mesh2pc_1k_indep_mean_a_seed${S}.json
+done
+
+for S in 0 1 2; do
+  TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+    --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+    --ckpt runs/eccv_upmix_mae_s0/ckpt_ep049.pt \
+    --query_backend mesh --gallery_backend pointcloud_noray \
+    --eval_seed ${S} --eval_seed_gallery 999 --max_files 1000 \
+    --pooling mean_a \
+    --out_json results/ucpr_mae_s0_mesh2pc_1k_indep_mean_a_seed${S}.json
+done
+```
+
+### Results
+
+CPAC MAE parity check (seed0 controls, non-transductive, `htrain4k`):
+
+| Model / setting | MAE | RMSE | IoU@0.03 |
+|---|---:|---:|---:|
+| NEPA QA+dualmask, pool normal | 0.02653 | 0.03531 | 0.72281 |
+| MAE, pool normal | 0.09226 | 0.12263 | 0.41660 |
+| MAE, pool no-context | 0.89780 | 1.13171 | 0.41151 |
+| MAE, pool mismatch-context | 0.10155 | 0.13629 | 0.40275 |
+| NEPA QA+dualmask, grid normal | 0.03578 | 0.04501 | 0.29105 |
+| MAE, grid normal | 0.10323 | 0.12999 | 0.05971 |
+
+CPAC vs NN-copy baseline (seed0):
+
+| Model / query source | Probe MAE / RMSE / IoU@0.03 | NN-copy MAE / RMSE / IoU@0.03 |
+|---|---|---|
+| NEPA QA+dualmask, pool | `0.02653 / 0.03531 / 0.72281` | `0.06151 / 0.09474 / 0.70891` |
+| MAE, pool | `0.09226 / 0.12263 / 0.41660` | `0.06151 / 0.09474 / 0.70891` |
+| NEPA QA+dualmask, grid | `0.03578 / 0.04501 / 0.29105` | `0.10402 / 0.13157 / 0.12963` |
+| MAE, grid | `0.10323 / 0.12999 / 0.05971` | `0.10402 / 0.13157 / 0.12963` |
+
+Eval-seed variance (`eval_seed=0,1,2`, pretrain seed fixed):
+
+| Task | Model | mean +- std |
+|---|---|---:|
+| CPAC pool MAE | NEPA QA+dualmask | 0.02653 +- 0.00001 |
+| CPAC pool MAE | MAE | 0.09289 +- 0.00044 |
+| CPAC pool RMSE | NEPA QA+dualmask | 0.03528 +- 0.00009 |
+| CPAC pool RMSE | MAE | 0.12331 +- 0.00049 |
+| CPAC pool IoU@0.03 | NEPA QA+dualmask | 0.72218 +- 0.00151 |
+| CPAC pool IoU@0.03 | MAE | 0.40953 +- 0.00504 |
+| UCPR `mesh->udfgrid` R@1 (`mean_a`) | NEPA QA+dualmask | 0.01767 +- 0.00047 |
+| UCPR `mesh->udfgrid` R@1 (`mean_a`) | MAE | 0.01900 +- 0.00082 |
+| UCPR `mesh->udfgrid` mAP (`mean_a`) | NEPA QA+dualmask | 0.04112 +- 0.00027 |
+| UCPR `mesh->udfgrid` mAP (`mean_a`) | MAE | 0.05010 +- 0.00072 |
+| UCPR `mesh->pointcloud_noray` R@1 (`mean_a`) | NEPA QA+dualmask | 0.02233 +- 0.00047 |
+| UCPR `mesh->pointcloud_noray` R@1 (`mean_a`) | MAE | 0.02067 +- 0.00125 |
+| UCPR `mesh->pointcloud_noray` mAP (`mean_a`) | NEPA QA+dualmask | 0.04568 +- 0.00043 |
+| UCPR `mesh->pointcloud_noray` mAP (`mean_a`) | MAE | 0.05446 +- 0.00089 |
+
+### Readout (this follow-up)
+
+- Same-setting MAE parity runs are now recorded (CPAC controls + UCPR hard-pair `mean_a`).
+- CPAC remains strongly in favor of NEPA QA+dualmask under the current non-transductive probe setup.
+- Hard-pair UCPR remains mixed: MAE is higher on `mesh->udfgrid`, while NEPA QA+dualmask is slightly higher on `mesh->pointcloud_noray` R@1.
+- Eval-seed variance on these subsets is small relative to NEPA-vs-MAE CPAC gap.
