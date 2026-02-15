@@ -136,14 +136,59 @@ worker() {
   done
 }
 
+worker_dynamic() {
+  local gpu="$1"
+  local total="${#JOBS[@]}"
+  while true; do
+    local idx
+    idx="$(next_job_index "${total}")"
+    if [ -z "${idx}" ]; then
+      break
+    fi
+    run_one "${gpu}" "${JOBS[${idx}]}"
+  done
+}
+
+next_job_index() {
+  local total="$1"
+  local out=""
+  exec 9>>"${JOB_LOCK_FILE}"
+  flock 9
+  local cur
+  cur="$(cat "${JOB_INDEX_FILE}")"
+  if [ "${cur}" -lt "${total}" ]; then
+    out="${cur}"
+    echo $((cur + 1)) > "${JOB_INDEX_FILE}"
+  fi
+  flock -u 9
+  exec 9>&-
+  echo "${out}"
+}
+
 echo "[info] total_jobs=${#JOBS[@]}"
 echo "[info] gpu0=${GPU0} gpu1=${GPU1}"
 echo "[info] logs=${LOG_ROOT}"
 
-worker "${GPU0}" 0 &
-pid0=$!
-worker "${GPU1}" 1 &
-pid1=$!
+JOB_INDEX_FILE="$(mktemp)"
+JOB_LOCK_FILE="$(mktemp)"
+echo "0" > "${JOB_INDEX_FILE}"
+cleanup_scheduler() {
+  rm -f "${JOB_INDEX_FILE}" "${JOB_LOCK_FILE}"
+}
+trap cleanup_scheduler EXIT
+
+if ! command -v flock >/dev/null 2>&1; then
+  echo "[warn] flock not found; fallback to static split scheduling"
+  worker "${GPU0}" 0 &
+  pid0=$!
+  worker "${GPU1}" 1 &
+  pid1=$!
+else
+  worker_dynamic "${GPU0}" &
+  pid0=$!
+  worker_dynamic "${GPU1}" &
+  pid1=$!
+fi
 
 echo "[info] worker_pid_gpu${GPU0}=${pid0}"
 echo "[info] worker_pid_gpu${GPU1}=${pid1}"
