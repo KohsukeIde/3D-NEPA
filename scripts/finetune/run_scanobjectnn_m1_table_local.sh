@@ -30,7 +30,19 @@ MC_EVAL_K="${MC_EVAL_K:-4}"
 MC_EVAL_K_VAL="${MC_EVAL_K_VAL:-1}"
 MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-${MC_EVAL_K}}"
 N_POINT="${N_POINT:-256}"
-N_RAY="${N_RAY:-256}"
+N_RAY="${N_RAY:-}"
+if [ -z "${N_RAY}" ]; then
+  if [ "${BACKEND}" = "pointcloud_noray" ]; then
+    N_RAY=0
+  else
+    N_RAY=256
+  fi
+fi
+FREEZE_BACKBONE="${FREEZE_BACKBONE:-0}"
+RUN_SUFFIX="${RUN_SUFFIX:-}"
+if [ "${FREEZE_BACKBONE}" = "1" ] && [ -z "${RUN_SUFFIX}" ]; then
+  RUN_SUFFIX="_lp"
+fi
 
 GPU0="${GPU0:-0}"
 GPU1="${GPU1:-1}"
@@ -87,14 +99,14 @@ fi
 
 make_scratch_ckpt() {
   local seed="$1"
-  local out_dir="${RUN_ROOT}/scratch_seed${seed}_init"
+  local out_dir="${RUN_ROOT}/scratch_seed${seed}_np${N_POINT}_nr${N_RAY}_init"
   local ckpt="${out_dir}/ckpt_ep000.pt"
   mkdir -p "${out_dir}"
   if [ -f "${ckpt}" ]; then
     echo "${ckpt}"
     return 0
   fi
-  "${PYTHON_BIN}" - "${seed}" "${ckpt}" <<'PY'
+  "${PYTHON_BIN}" - "${seed}" "${ckpt}" "${N_POINT}" "${N_RAY}" <<'PY'
 import os
 import sys
 import torch
@@ -103,10 +115,10 @@ from nepa3d.utils.seed import set_seed
 
 seed = int(sys.argv[1])
 ckpt_path = sys.argv[2]
+n_point = int(sys.argv[3])
+n_ray = int(sys.argv[4])
 
 set_seed(seed)
-n_point = 256
-n_ray = 256
 d_model = 384
 layers = 8
 heads = 6
@@ -152,8 +164,8 @@ add_job() {
   local k="$3"
   local ckpt="$4"
   local fewshot_seed="$5"
-  local save_dir="${RUN_ROOT}/scan_${method}_k${k}_s${seed}"
-  local job_log="${LOG_ROOT}/${method}_k${k}_s${seed}.log"
+  local save_dir="${RUN_ROOT}/scan_${method}${RUN_SUFFIX}_k${k}_s${seed}"
+  local job_log="${LOG_ROOT}/${method}${RUN_SUFFIX}_k${k}_s${seed}.log"
   JOBS+=("${method}|${seed}|${k}|${ckpt}|${fewshot_seed}|${save_dir}|${job_log}")
 }
 
@@ -195,6 +207,11 @@ run_one() {
 
   echo "[start][gpu${gpu}] $(date '+%F %T') ${method} k=${k} seed=${seed}" | tee -a "${LOG_ROOT}/runner_gpu${gpu}.log"
 
+  local extra_args=()
+  if [ "${FREEZE_BACKBONE}" = "1" ]; then
+    extra_args+=(--freeze_backbone)
+  fi
+
   CUDA_VISIBLE_DEVICES="${gpu}" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   "${PYTHON_BIN}" -u -m nepa3d.train.finetune_cls \
     --cache_root "${CACHE_ROOT}" \
@@ -215,6 +232,7 @@ run_one() {
     --mc_eval_k "${MC_EVAL_K}" \
     --mc_eval_k_val "${MC_EVAL_K_VAL}" \
     --mc_eval_k_test "${MC_EVAL_K_TEST}" \
+    "${extra_args[@]}" \
     --save_dir "${save_dir}" \
     > "${job_log}" 2>&1
   rc=$?
@@ -272,6 +290,7 @@ echo "[info] gpu0=${GPU0} gpu1=${GPU1}"
 echo "[info] logs=${LOG_ROOT}"
 echo "[info] batch=${BATCH} workers=${NUM_WORKERS}"
 echo "[info] methods=${METHODS}"
+echo "[info] n_point=${N_POINT} n_ray=${N_RAY} freeze_backbone=${FREEZE_BACKBONE} run_suffix=${RUN_SUFFIX}"
 
 JOB_INDEX_FILE="$(mktemp)"
 JOB_LOCK_FILE="$(mktemp)"

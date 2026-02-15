@@ -147,17 +147,24 @@ def main():
     else:
         qa_tokens = bool(pre_args.get("qa_tokens", ckpt_n_types >= 9))
 
+    pre_n_point = int(pre_args["n_point"])
+    pre_n_ray = int(pre_args["n_ray"])
+
     if args.n_point is None:
-        args.n_point = pre_args["n_point"]
-    elif args.n_point != pre_args["n_point"]:
-        print("override n_point to match pretrain")
-        args.n_point = pre_args["n_point"]
+        args.n_point = pre_n_point
+    elif args.n_point > pre_n_point:
+        print(f"override n_point down to pretrain value ({pre_n_point})")
+        args.n_point = pre_n_point
+    elif args.n_point <= 0:
+        raise ValueError(f"--n_point must be positive, got {args.n_point}")
 
     if args.n_ray is None:
-        args.n_ray = pre_args["n_ray"]
-    elif args.n_ray != pre_args["n_ray"]:
-        print("override n_ray to match pretrain")
-        args.n_ray = pre_args["n_ray"]
+        args.n_ray = pre_n_ray
+    elif args.n_ray > pre_n_ray:
+        print(f"override n_ray down to pretrain value ({pre_n_ray})")
+        args.n_ray = pre_n_ray
+    elif args.n_ray < 0:
+        raise ValueError(f"--n_ray must be >= 0, got {args.n_ray}")
 
     train_ds = ModelNet40QueryDataset(
         train_paths,
@@ -249,17 +256,25 @@ def main():
         worker_init_fn=_worker_init_fn,
     )
 
-    if qa_tokens:
-        t = 1 + 2 * args.n_point + 2 * args.n_ray + (1 if add_eos else 0)
+    # Keep model positional size equal to the checkpoint to allow
+    # fine-tune-time token-count reduction (e.g., n_ray=0 for no-ray backend).
+    if "pos_emb" in ckpt["model"]:
+        model_max_len = int(ckpt["model"]["pos_emb"].shape[1])
     else:
-        t = 1 + args.n_point + args.n_ray + (1 if add_eos else 0)
+        pre_add_eos = bool(pre_args.get("add_eos", ckpt_n_types >= 5))
+        pre_qa_tokens = bool(pre_args.get("qa_tokens", ckpt_n_types >= 9))
+        if pre_qa_tokens:
+            model_max_len = 1 + 2 * pre_n_point + 2 * pre_n_ray + (1 if pre_add_eos else 0)
+        else:
+            model_max_len = 1 + pre_n_point + pre_n_ray + (1 if pre_add_eos else 0)
+
     backbone = QueryNepa(
         feat_dim=15,
         d_model=pre_args["d_model"],
         n_types=ckpt_n_types,
         nhead=pre_args["heads"],
         num_layers=pre_args["layers"],
-        max_len=t,
+        max_len=model_max_len,
     )
     backbone.load_state_dict(ckpt["model"], strict=True)
     backbone.to(device)
@@ -309,7 +324,9 @@ def main():
         f"train_backend={train_backend} eval_backend={eval_backend} "
         f"val_ratio={args.val_ratio} val_seed={args.val_seed} "
         f"mc_eval_k_val={mc_eval_k_val} mc_eval_k_test={mc_eval_k_test} "
-        f"freeze_backbone={bool(args.freeze_backbone)}"
+        f"freeze_backbone={bool(args.freeze_backbone)} "
+        f"n_point={args.n_point}/{pre_n_point} n_ray={args.n_ray}/{pre_n_ray} "
+        f"model_max_len={model_max_len}"
     )
     print(f"num_train={len(train_paths)} num_val={len(val_paths)} num_test={len(test_paths)}")
 
