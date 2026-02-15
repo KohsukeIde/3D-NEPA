@@ -43,6 +43,9 @@ CONTEXT_MODE_TRAIN="${CONTEXT_MODE_TRAIN:-normal}"   # normal / none / mismatch
 CONTEXT_MODE_TEST="${CONTEXT_MODE_TEST:-normal}"     # normal / none / mismatch
 MISMATCH_SHIFT="${MISMATCH_SHIFT:-1}"
 REP_SOURCE="${REP_SOURCE:-h}"                        # h / zhat
+QUERY_SOURCE="${QUERY_SOURCE:-pool}"                 # pool / grid
+BASELINE="${BASELINE:-none}"                         # none / nn_copy
+BASELINE_ONLY="${BASELINE_ONLY:-0}"                  # 0 / 1
 OUT_JSON="${OUT_JSON:-results/cpac_${CONTEXT_BACKEND}_to_udf.json}"
 
 ARGS="--cache_root ${CACHE_ROOT} --split ${SPLIT} --ckpt ${CKPT} \
@@ -59,6 +62,9 @@ ARGS="--cache_root ${CACHE_ROOT} --split ${SPLIT} --ckpt ${CKPT} \
 --context_mode_test ${CONTEXT_MODE_TEST} \
 --mismatch_shift ${MISMATCH_SHIFT} \
 --rep_source ${REP_SOURCE} \
+--query_source ${QUERY_SOURCE} \
+--baseline ${BASELINE} \
+--baseline_only ${BASELINE_ONLY} \
 --out_json ${OUT_JSON}"
 
 if [ -n "${HEAD_TRAIN_SPLIT}" ]; then

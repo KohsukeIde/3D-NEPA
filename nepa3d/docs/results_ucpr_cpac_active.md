@@ -666,3 +666,105 @@ Easy-pair diagnostic (`pointcloud_noray -> udfgrid`, `pooling=mean_a`, dualmask)
 - For hard-pair UCPR, `mean_a` pooling is clearly better than `eos` and `mean_zhat`.
 - Under `mean_a` pooling, dual-mask outperforms no-dual on both hard pairs tested.
 - Easy-pair (`pc->udf`) remains largely `xyz`-driven in this setup (`ablate_point_xyz` collapse, `ablate_point_dist` not harmful).
+
+## CPAC NN-Copy + Grid Query (Feb 15, 2026)
+
+This cycle integrates:
+
+- `completion_cpac_udf.py`:
+  - `--baseline {none,nn_copy}`
+  - `--baseline_only 1`
+  - `--query_source {pool,grid}`
+- `scripts/analysis/nepa3d_cpac_udf.sh`:
+  - `QUERY_SOURCE`, `BASELINE`, `BASELINE_ONLY`
+- new qualitative script:
+  - `nepa3d/analysis/qualitative_cpac_marching_cubes.py`
+
+### Commands used
+
+```bash
+# CPAC (pool query) + NN-copy baseline in the same run
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 4000 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source pool \
+  --baseline nn_copy \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --out_json results/cpac_nepa_qa_dualmask_s0_pc2udf_800_normal_h_htrain4k_with_nncopy.json
+
+# CPAC (grid query) + NN-copy baseline
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 4000 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source grid \
+  --baseline nn_copy \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --out_json results/cpac_nepa_qa_dualmask_s0_pc2udf_800_grid_h_htrain4k_with_nncopy.json
+
+# Baseline-only mode smoke
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 1000 \
+  --n_context 256 --n_query 256 \
+  --query_source grid \
+  --baseline nn_copy --baseline_only 1 \
+  --max_shapes 200 --eval_seed 0 \
+  --out_json results/cpac_nepa_qa_dualmask_s0_grid_nncopy_baselineonly_200.json
+```
+
+Qualitative marching-cubes smoke:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.qualitative_cpac_marching_cubes \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 1000 \
+  --n_context 256 --n_query_probe 256 \
+  --grid_res 16 --mc_level 0.03 \
+  --max_shapes 1 --shape_offset 0 \
+  --out_dir results/qual_mc_smoke \
+  --save_volumes 1 --save_png 0
+```
+
+### Results
+
+CPAC vs NN-copy baseline:
+
+| Query source | Probe MAE / RMSE / IoU@0.03 | NN-copy MAE / RMSE / IoU@0.03 |
+|---|---|---|
+| `pool` | `0.02653 / 0.03531 / 0.72281` | `0.06151 / 0.09474 / 0.70891` |
+| `grid` | `0.03578 / 0.04501 / 0.29105` | `0.10402 / 0.13157 / 0.12963` |
+
+Baseline-only smoke (`grid`, `max_shapes=200`):
+
+- `MAE=0.10812`, `RMSE=0.13551`, `IoU@0.03=0.12926`
+
+Qualitative MC smoke (`grid_res=16`, 1 shape):
+
+- output dir: `results/qual_mc_smoke/000_1203825bf97bc3524722e1824a086fad`
+- summary: `results/qual_mc_smoke/summary.json`
+- sample grid metrics: `MAE=0.04685`, `RMSE=0.05718`, `IoU@level(0.03)=0.30526`
+
+### Notes
+
+- `scikit-image` is required for marching cubes (`pip install scikit-image`).
+- `save_png=1` requires matplotlib; the script skips preview export if matplotlib is unavailable.

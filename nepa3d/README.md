@@ -197,8 +197,20 @@ qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<ckpt>,QUERY_
 CPAC-UDF template:
 
 ```bash
-qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<ckpt>,CONTEXT_BACKEND=pointcloud_noray,HEAD_TRAIN_SPLIT=train_udf,HEAD_TRAIN_BACKEND=udfgrid,DISJOINT_CONTEXT_QUERY=1,CONTEXT_MODE_TEST=normal,REP_SOURCE=h,OUT_JSON=results/cpac_pc2udf.json \
+qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<ckpt>,CONTEXT_BACKEND=pointcloud_noray,HEAD_TRAIN_SPLIT=train_udf,HEAD_TRAIN_BACKEND=udfgrid,DISJOINT_CONTEXT_QUERY=1,CONTEXT_MODE_TEST=normal,REP_SOURCE=h,QUERY_SOURCE=pool,BASELINE=nn_copy,OUT_JSON=results/cpac_pc2udf.json \
   scripts/analysis/nepa3d_cpac_udf.sh
+```
+
+Qualitative CPAC (grid query + marching cubes):
+
+```bash
+.venv/bin/python -u -m nepa3d.analysis.qualitative_cpac_marching_cubes \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt <ckpt> \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --grid_res 32 --mc_level 0.03 \
+  --out_dir results/qual_mc
 ```
 
 ## 4) Resume behavior
