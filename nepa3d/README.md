@@ -5,6 +5,7 @@ This file is the active-run hub.
 - Active track:
   - ScanObjectNN few-shot/classification (paper-safe protocol variants)
   - UCPR/CPAC evaluation loop on ShapeNet-unpaired cache
+  - K-plane/Tri-plane baseline track on ShapeNet-unpaired cache (UCPR/CPAC)
 - As-of snapshot date: February 15, 2026
 
 Legacy means ModelNet40-era experiments only. See `nepa3d/docs/results_modelnet40_legacy.md`.
@@ -16,6 +17,7 @@ Legacy means ModelNet40-era experiments only. See `nepa3d/docs/results_modelnet4
 - ScanObjectNN M1 legacy snapshot (`75/75`): `nepa3d/docs/results_scanobjectnn_m1_legacy.md`
 - UCPR/CPAC active results (incl. QA cycle): `nepa3d/docs/results_ucpr_cpac_active.md`
 - UCPR/CPAC planning doc: `nepa3d/docs/eccv_ucpr_cpac_tables.md`
+- K-plane/Tri-plane pilot results are tracked in `nepa3d/docs/results_ucpr_cpac_active.md` (`K-Plane / Tri-Plane Baseline Pilot`)
 
 ## 1) Current experiment definition
 
@@ -201,6 +203,27 @@ qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<ckpt>,CONTEX
   scripts/analysis/nepa3d_cpac_udf.sh
 ```
 
+K-plane/Tri-plane pretrain template:
+
+```bash
+qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,MIX_CONFIG=nepa3d/configs/shapenet_unpaired_mix.yaml,PLANE_TYPE=kplane,FUSION=product,PLANE_RES=64,PLANE_CH=32,HIDDEN_DIM=128,EPOCHS=50,BATCH=96,SAVE_DIR=runs/eccv_kplane_product_s0 \
+  scripts/pretrain/nepa3d_kplane_pretrain.sh
+```
+
+K-plane UCPR template:
+
+```bash
+qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<kplane_ckpt>,QUERY_BACKEND=mesh,GALLERY_BACKEND=udfgrid,POOLING=mean_query,EVAL_SEED=0,EVAL_SEED_GALLERY=999,OUT_JSON=results/ucpr_kplane_mesh2udf.json \
+  scripts/analysis/nepa3d_kplane_ucpr.sh
+```
+
+K-plane CPAC template:
+
+```bash
+qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<kplane_ckpt>,CONTEXT_BACKEND=pointcloud_noray,HEAD_TRAIN_SPLIT=train_udf,HEAD_TRAIN_BACKEND=udfgrid,QUERY_SOURCE=pool,BASELINE=nn_copy,OUT_JSON=results/cpac_kplane_pc2udf.json \
+  scripts/analysis/nepa3d_kplane_cpac.sh
+```
+
 Qualitative CPAC (grid query + marching cubes):
 
 ```bash
@@ -272,6 +295,20 @@ Full tables:
 - `nepa3d/docs/results_ucpr_cpac_active.md`
 - latest follow-up (`pooling/context controls`, Feb 15, 2026) is also tracked there
 - latest MAE parity + eval-seed variance follow-up (Feb 15, 2026) is tracked there
+
+### 6.4 K-plane/Tri-plane pilot (active, fast5)
+
+- completed checkpoints:
+  - `runs/eccv_kplane_product_s0_fast5/ckpt_ep004.pt`
+  - `runs/eccv_triplane_sum_s0_fast5/ckpt_ep004.pt`
+- quick readout (`mesh -> udfgrid`, `pooling=mean_query`, `max_files=1000`):
+  - k-plane(product): `R@1=0.006`, `mAP=0.02506`
+  - tri-plane(sum): `R@1=0.013`, `mAP=0.03652`
+- CPAC readout (`pointcloud_noray -> udf`, non-trans, `max_shapes=800`):
+  - k-plane(product): `MAE=0.17990`, `RMSE=0.24980`, `IoU@0.03=0.56906`
+  - tri-plane(sum): `MAE=0.10499`, `RMSE=0.16542`, `IoU@0.03=0.68938`
+- full commands and additional pooling/ablation results are in:
+  - `nepa3d/docs/results_ucpr_cpac_active.md`
 
 ## 7) Notes for paper
 

@@ -999,3 +999,156 @@ Eval-seed variance (`eval_seed=0,1,2`, pretrain seed fixed):
 - CPAC remains strongly in favor of NEPA QA+dualmask under the current non-transductive probe setup.
 - Hard-pair UCPR remains mixed: MAE is higher on `mesh->udfgrid`, while NEPA QA+dualmask is slightly higher on `mesh->pointcloud_noray` R@1.
 - Eval-seed variance on these subsets is small relative to NEPA-vs-MAE CPAC gap.
+
+## K-Plane / Tri-Plane Baseline Pilot (Feb 15, 2026)
+
+This cycle adds a plane-factorized baseline track under the same ShapeNet-unpaired cache and UCPR/CPAC protocol.
+
+Goal:
+
+- compare `tri-plane(sum)` vs `k-plane(product)` under the same context/query sampling
+- keep evaluation protocol aligned with existing UCPR/CPAC (`eval_seed=0`, `eval_seed_gallery=999`, `head_train_split=train_udf`, non-transductive)
+
+New modules/scripts added in this cycle:
+
+- model: `nepa3d/models/kplane.py`
+- data: `nepa3d/data/kplane_dataset.py`
+- pretrain: `nepa3d/train/pretrain_kplane.py`
+- eval:
+  - `nepa3d/analysis/retrieval_kplane.py`
+  - `nepa3d/analysis/completion_cpac_kplane.py`
+- wrappers:
+  - `scripts/pretrain/nepa3d_kplane_pretrain.sh`
+  - `scripts/analysis/nepa3d_kplane_ucpr.sh`
+  - `scripts/analysis/nepa3d_kplane_cpac.sh`
+
+### Commands used (fast pilot)
+
+Pretrain (`5` epochs, `mix_num_samples=20000`, single seed):
+
+```bash
+# K-plane(product)
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.train.pretrain_kplane \
+  --mix_config nepa3d/configs/shapenet_unpaired_mix.yaml \
+  --mix_num_samples 20000 --mix_seed 0 \
+  --epochs 5 --batch 96 --num_workers 6 \
+  --n_context 256 --n_query 256 --disjoint_context_query 1 \
+  --plane_type kplane --fusion product \
+  --plane_resolutions 64 --plane_channels 32 --hidden_dim 128 \
+  --save_every 1 --save_last 1 \
+  --save_dir runs/eccv_kplane_product_s0_fast5 \
+  --seed 0
+
+# Tri-plane(sum)
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.train.pretrain_kplane \
+  --mix_config nepa3d/configs/shapenet_unpaired_mix.yaml \
+  --mix_num_samples 20000 --mix_seed 0 \
+  --epochs 5 --batch 96 --num_workers 6 \
+  --n_context 256 --n_query 256 --disjoint_context_query 1 \
+  --plane_type triplane --fusion sum \
+  --plane_resolutions 64 --plane_channels 32 --hidden_dim 128 \
+  --save_every 1 --save_last 1 \
+  --save_dir runs/eccv_triplane_sum_s0_fast5 \
+  --seed 0
+```
+
+UCPR hard pairs:
+
+```bash
+# mean_query pooling
+for CKPT in \
+  runs/eccv_kplane_product_s0_fast5/ckpt_ep004.pt \
+  runs/eccv_triplane_sum_s0_fast5/ckpt_ep004.pt
+do
+  NAME=$(basename "$(dirname "${CKPT}")")
+  .venv/bin/python -u -m nepa3d.analysis.retrieval_kplane \
+    --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+    --ckpt "${CKPT}" \
+    --query_backend mesh --gallery_backend udfgrid \
+    --eval_seed 0 --eval_seed_gallery 999 \
+    --max_files 1000 --n_context 256 --n_query 256 \
+    --pooling mean_query \
+    --out_json "results/ucpr_${NAME}_mesh2udf_1k_mean_query.json"
+done
+
+# plane_gap pooling
+for CKPT in \
+  runs/eccv_kplane_product_s0_fast5/ckpt_ep004.pt \
+  runs/eccv_triplane_sum_s0_fast5/ckpt_ep004.pt
+do
+  NAME=$(basename "$(dirname "${CKPT}")")
+  .venv/bin/python -u -m nepa3d.analysis.retrieval_kplane \
+    --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+    --ckpt "${CKPT}" \
+    --query_backend mesh --gallery_backend pointcloud_noray \
+    --eval_seed 0 --eval_seed_gallery 999 \
+    --max_files 1000 --n_context 256 --n_query 256 \
+    --pooling plane_gap \
+    --out_json "results/ucpr_${NAME}_mesh2pc_1k_plane_gap.json"
+done
+```
+
+CPAC (non-transductive, pool query, NN-copy baseline):
+
+```bash
+# K-plane(product)
+.venv/bin/python -u -m nepa3d.analysis.completion_cpac_kplane \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_kplane_product_s0_fast5/ckpt_ep004.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 4000 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 --query_source pool \
+  --baseline nn_copy \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --out_json results/cpac_kplane_product_fast5_pc2udf_800_pool_htrain4k.json
+
+# Tri-plane(sum)
+.venv/bin/python -u -m nepa3d.analysis.completion_cpac_kplane \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_triplane_sum_s0_fast5/ckpt_ep004.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 4000 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 --query_source pool \
+  --baseline nn_copy \
+  --max_shapes 800 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --out_json results/cpac_triplane_sum_fast5_pc2udf_800_pool_htrain4k.json
+```
+
+### Results (fast pilot, single-seed)
+
+UCPR hard pairs:
+
+| Pair | Pooling | K-plane(product) R@1/R@5/R@10/mAP | Tri-plane(sum) R@1/R@5/R@10/mAP |
+|---|---|---|---|
+| `mesh -> udfgrid` | `mean_query` | `0.006 / 0.019 / 0.041 / 0.02506` | `0.013 / 0.037 / 0.069 / 0.03652` |
+| `mesh -> pointcloud_noray` | `mean_query` | `0.010 / 0.030 / 0.063 / 0.03224` | `0.012 / 0.048 / 0.086 / 0.04054` |
+| `mesh -> udfgrid` | `plane_gap` | `0.012 / 0.031 / 0.054 / 0.03281` | `0.012 / 0.039 / 0.065 / 0.03622` |
+| `mesh -> pointcloud_noray` | `plane_gap` | `0.016 / 0.057 / 0.088 / 0.04649` | `0.023 / 0.073 / 0.110 / 0.05906` |
+
+CPAC-UDF (non-transductive, `query_source=pool`, with NN-copy baseline):
+
+| Model | MAE | RMSE | IoU@0.03 | NN-copy MAE/RMSE/IoU@0.03 |
+|---|---:|---:|---:|---|
+| K-plane(product) | 0.17990 | 0.24980 | 0.56906 | `0.06151 / 0.09474 / 0.70891` |
+| Tri-plane(sum) | 0.10499 | 0.16542 | 0.68938 | `0.06151 / 0.09474 / 0.70891` |
+
+UCPR ablation (`mesh -> udfgrid`, `pooling=mean_query`):
+
+| Model | Base R@1/mAP | `ablate_query_xyz` R@1/mAP | `ablate_context_dist` R@1/mAP |
+|---|---|---|---|
+| K-plane(product) | `0.006 / 0.02506` | `0.366 / 0.37147` | `0.012 / 0.03896` |
+| Tri-plane(sum) | `0.013 / 0.03652` | `0.003 / 0.01537` | `0.012 / 0.04258` |
+
+### Readout (fast pilot)
+
+- Baseline stack (train/eval) is now integrated and runs on the same cache/protocol as NEPA UCPR/CPAC.
+- Under this `fast5` budget, tri-plane(sum) is stronger than k-plane(product) on both hard-pair UCPR and CPAC.
+- Both plane baselines remain below current NEPA QA+dualmask CPAC numbers in this repo.
+- The `k-plane(product)` `ablate_query_xyz` spike on `mesh->udfgrid` is likely a shortcut artifact and should not be used as main evidence without additional controls.
+- These are pilot numbers (`epochs=5`, single seed), not final table settings.
