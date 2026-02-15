@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from ..token.tokenizer import TYPE_POINT, TYPE_Q_POINT, TYPE_Q_RAY, TYPE_RAY
+
 
 class CausalTransformer(nn.Module):
     def __init__(self, d_model=384, nhead=6, num_layers=8, mlp_ratio=4, dropout=0.0):
@@ -28,10 +30,12 @@ class CausalTransformer(nn.Module):
     def forward(
         self,
         x,
+        type_id=None,
         dual_mask_near: float = 0.0,
         dual_mask_far: float = 0.0,
         dual_mask_window: int = 0,
         dual_mask_seed: int | None = None,
+        dual_mask_type_aware: int | bool = 0,
     ):
         """Causal transformer with optional *dual masking* (PointGPT-style).
 
@@ -59,12 +63,31 @@ class CausalTransformer(nn.Module):
                 rel = i - j  # >0 means "past" token
                 past = rel > 0
 
+                # Optional type-aware mode: only drop Q/Q edges so query-to-answer
+                # information remains visible while suppressing local geometry copy.
+                eligible = past
+                if bool(dual_mask_type_aware) and type_id is not None:
+                    tid = type_id
+                    if tid.dim() == 1:
+                        tid = tid.unsqueeze(0)
+                    is_query_like = (
+                        (tid == TYPE_Q_POINT)
+                        | (tid == TYPE_Q_RAY)
+                        | (tid == TYPE_POINT)
+                        | (tid == TYPE_RAY)
+                    )
+                    is_query_pos = is_query_like.any(dim=0)
+                    qq = is_query_pos[:, None] & is_query_pos[None, :]
+                    eligible = past & qq
+
                 if int(dual_mask_window) > 0:
                     win = int(dual_mask_window)
-                    prob = torch.full((t, t), p_far, device=x.device, dtype=torch.float32)
-                    prob = prob.masked_fill(past & (rel <= win), p_near)
+                    prob = torch.zeros((t, t), device=x.device, dtype=torch.float32)
+                    prob = prob.masked_fill(eligible & (rel <= win), p_near)
+                    prob = prob.masked_fill(eligible & (rel > win), p_far)
                 else:
-                    prob = torch.full((t, t), p_far, device=x.device, dtype=torch.float32)
+                    prob = torch.zeros((t, t), device=x.device, dtype=torch.float32)
+                    prob = prob.masked_fill(eligible, p_far)
 
                 gen = None
                 if dual_mask_seed is not None:
@@ -72,7 +95,7 @@ class CausalTransformer(nn.Module):
                     gen.manual_seed(int(dual_mask_seed) & 0xFFFFFFFF)
 
                 u = torch.rand((t, t), device=x.device, generator=gen)
-                extra = past & (u < prob)
+                extra = eligible & (u < prob)
                 attn_mask = attn_mask | extra
 
         return self.enc(x, mask=attn_mask)

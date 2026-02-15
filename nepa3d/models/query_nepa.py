@@ -54,6 +54,7 @@ class QueryNepa(nn.Module):
         dual_mask_far: float = 0.0,
         dual_mask_window: int = 0,
         dual_mask_seed: int | None = None,
+        dual_mask_type_aware: int | bool = 0,
     ):
         """Forward.
 
@@ -62,10 +63,12 @@ class QueryNepa(nn.Module):
         z = self.embed_tokens(feat, type_id)
         h = self.backbone(
             z,
+            type_id=type_id,
             dual_mask_near=float(dual_mask_near),
             dual_mask_far=float(dual_mask_far),
             dual_mask_window=int(dual_mask_window),
             dual_mask_seed=None if dual_mask_seed is None else int(dual_mask_seed),
+            dual_mask_type_aware=int(dual_mask_type_aware),
         )
         z_hat = self.pred_head(h)
         return z, z_hat, h

@@ -42,6 +42,23 @@ def _stable_seed(path, seed):
     return (int(h, 16) + int(seed)) & 0xFFFFFFFF
 
 
+def _sample_disjoint_indices(n, k_ctx, k_q, rng):
+    total = int(k_ctx) + int(k_q)
+    if total <= 0:
+        return np.zeros((0,), dtype=np.int64), np.zeros((0,), dtype=np.int64)
+    replace = n < total
+    idx = rng.choice(n, size=total, replace=replace).astype(np.int64)
+    return idx[: int(k_ctx)], idx[int(k_ctx):]
+
+
+def _sample_indices(n, k, rng):
+    k = int(k)
+    if k <= 0:
+        return np.zeros((0,), dtype=np.int64)
+    replace = n < k
+    return rng.choice(n, size=k, replace=replace).astype(np.int64)
+
+
 def make_backend(name, path, voxel_grid, voxel_dilate, voxel_max_steps):
     if name == "mesh":
         return MeshBackend(path)
@@ -142,62 +159,88 @@ def extract_xy_for_path(
     voxel_max_steps,
     device,
     qa_tokens,
+    context_mode="normal",
+    disjoint_context_query=True,
+    mismatch_path=None,
+    rep_source="h",
 ):
-    rng = np.random.RandomState(_stable_seed(path, seed))
-    be_ctx = make_backend(context_backend, path, voxel_grid, voxel_dilate, voxel_max_steps)
-    pools = be_ctx.get_pools()
-    pt_xyz_ctx_pool = pools["pt_xyz_pool"].astype(np.float32, copy=False)
-    pt_dist_ctx_pool = pools["pt_dist_pool"].astype(np.float32, copy=False)
-    cidx = rng.choice(
-        pt_xyz_ctx_pool.shape[0],
-        size=int(n_context),
-        replace=(pt_xyz_ctx_pool.shape[0] < int(n_context)),
-    )
-    ctx_xyz = pt_xyz_ctx_pool[cidx].astype(np.float32, copy=False)
-    ctx_dist = pt_dist_ctx_pool[cidx].astype(np.float32, copy=False)
-    corder = np.argsort(morton3d(ctx_xyz))
-    ctx_xyz = ctx_xyz[corder]
-    ctx_dist = ctx_dist[corder]
+    if context_mode not in ("normal", "none", "mismatch"):
+        raise ValueError(f"unknown context_mode: {context_mode}")
+    if rep_source not in ("h", "zhat"):
+        raise ValueError(f"unknown rep_source: {rep_source}")
 
+    rng = np.random.RandomState(_stable_seed(path, seed))
     d = np.load(path, allow_pickle=False)
     pt_xyz_pool = d["pt_xyz_pool"].astype(np.float32, copy=False)
-    idx = rng.choice(pt_xyz_pool.shape[0], size=int(n_query), replace=(pt_xyz_pool.shape[0] < int(n_query)))
-    q_xyz = pt_xyz_pool[idx].astype(np.float32, copy=False)
+    n_pool = int(pt_xyz_pool.shape[0])
 
-    if "pt_dist_udf_pool" in d:
-        q_dist = d["pt_dist_udf_pool"].astype(np.float32, copy=False)[idx]
+    if context_mode == "normal" and bool(disjoint_context_query):
+        cidx, qidx = _sample_disjoint_indices(n_pool, int(n_context), int(n_query), rng)
     else:
-        q_dist = d["pt_dist_pool"].astype(np.float32, copy=False)[idx]
+        cidx = _sample_indices(n_pool, int(n_context), rng)
+        qidx = _sample_indices(n_pool, int(n_query), rng)
 
-    order = np.argsort(morton3d(q_xyz))
-    q_xyz = q_xyz[order]
-    q_dist = q_dist[order]
+    if context_mode == "none":
+        n_ctx_eff = 0
+        ctx_xyz = np.zeros((0, 3), dtype=np.float32)
+        ctx_dist = np.zeros((0,), dtype=np.float32)
+    else:
+        n_ctx_eff = int(n_context)
+        ctx_path = mismatch_path if (context_mode == "mismatch" and mismatch_path is not None) else path
+        be_ctx = make_backend(context_backend, ctx_path, voxel_grid, voxel_dilate, voxel_max_steps)
+        pools_ctx = be_ctx.get_pools()
+        pt_xyz_ctx_pool = pools_ctx["pt_xyz_pool"].astype(np.float32, copy=False)
+        pt_dist_ctx_pool = pools_ctx["pt_dist_pool"].astype(np.float32, copy=False)
+        n_ctx_pool = int(pt_xyz_ctx_pool.shape[0])
+
+        if ctx_path != path or (cidx.size > 0 and int(cidx.max()) >= n_ctx_pool):
+            cidx = _sample_indices(n_ctx_pool, int(n_context), rng)
+
+        ctx_xyz = pt_xyz_ctx_pool[cidx].astype(np.float32, copy=False)
+        ctx_dist = pt_dist_ctx_pool[cidx].astype(np.float32, copy=False)
+        if ctx_xyz.shape[0] > 0:
+            corder = np.argsort(morton3d(ctx_xyz))
+            ctx_xyz = ctx_xyz[corder]
+            ctx_dist = ctx_dist[corder]
+
+    q_xyz = pt_xyz_pool[qidx].astype(np.float32, copy=False)
+    if "pt_dist_udf_pool" in d:
+        q_dist = d["pt_dist_udf_pool"].astype(np.float32, copy=False)[qidx]
+    else:
+        q_dist = d["pt_dist_pool"].astype(np.float32, copy=False)[qidx]
+    if q_xyz.shape[0] > 0:
+        order = np.argsort(morton3d(q_xyz))
+        q_xyz = q_xyz[order]
+        q_dist = q_dist[order]
 
     bos = np.zeros((1, 15), dtype=np.float32)
     eos = np.zeros((1, 15), dtype=np.float32)
 
     if bool(qa_tokens):
-        ctx_q = np.zeros((int(n_context), 15), dtype=np.float32)
-        ctx_a = np.zeros((int(n_context), 15), dtype=np.float32)
-        ctx_q[:, 0:3] = ctx_xyz
-        ctx_a[:, 10] = ctx_dist
+        ctx_q = np.zeros((int(n_ctx_eff), 15), dtype=np.float32)
+        ctx_a = np.zeros((int(n_ctx_eff), 15), dtype=np.float32)
+        if n_ctx_eff > 0:
+            ctx_q[:, 0:3] = ctx_xyz
+            ctx_a[:, 10] = ctx_dist
 
         qry_q = np.zeros((int(n_query), 15), dtype=np.float32)
         qry_a = np.zeros((int(n_query), 15), dtype=np.float32)
         qry_q[:, 0:3] = q_xyz
         qry_a[:, 10] = 0.0
 
-        ctx_qa = np.zeros((2 * int(n_context), 15), dtype=np.float32)
+        ctx_qa = np.zeros((2 * int(n_ctx_eff), 15), dtype=np.float32)
         qry_qa = np.zeros((2 * int(n_query), 15), dtype=np.float32)
-        ctx_qa[0::2], ctx_qa[1::2] = ctx_q, ctx_a
-        qry_qa[0::2], qry_qa[1::2] = qry_q, qry_a
+        if n_ctx_eff > 0:
+            ctx_qa[0::2], ctx_qa[1::2] = ctx_q, ctx_a
+        if int(n_query) > 0:
+            qry_qa[0::2], qry_qa[1::2] = qry_q, qry_a
 
         if add_eos:
             feat = np.concatenate([bos, ctx_qa, qry_qa, eos], axis=0)
             type_id = np.concatenate(
                 [
                     np.array([TYPE_BOS], dtype=np.int64),
-                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), int(n_context)),
+                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), int(n_ctx_eff)),
                     np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), int(n_query)),
                     np.array([TYPE_EOS], dtype=np.int64),
                 ],
@@ -208,15 +251,16 @@ def extract_xy_for_path(
             type_id = np.concatenate(
                 [
                     np.array([TYPE_BOS], dtype=np.int64),
-                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), int(n_context)),
+                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), int(n_ctx_eff)),
                     np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), int(n_query)),
                 ],
                 axis=0,
             )
     else:
-        ctx_feat = np.zeros((int(n_context), 15), dtype=np.float32)
-        ctx_feat[:, 0:3] = ctx_xyz
-        ctx_feat[:, 10] = ctx_dist
+        ctx_feat = np.zeros((int(n_ctx_eff), 15), dtype=np.float32)
+        if n_ctx_eff > 0:
+            ctx_feat[:, 0:3] = ctx_xyz
+            ctx_feat[:, 10] = ctx_dist
 
         q_feat = np.zeros((int(n_query), 15), dtype=np.float32)
         q_feat[:, 0:3] = q_xyz
@@ -227,7 +271,7 @@ def extract_xy_for_path(
             type_id = np.concatenate(
                 [
                     np.array([TYPE_BOS], dtype=np.int64),
-                    np.full((int(n_context),), TYPE_POINT, dtype=np.int64),
+                    np.full((int(n_ctx_eff),), TYPE_POINT, dtype=np.int64),
                     np.full((int(n_query),), TYPE_POINT, dtype=np.int64),
                     np.array([TYPE_EOS], dtype=np.int64),
                 ],
@@ -238,7 +282,7 @@ def extract_xy_for_path(
             type_id = np.concatenate(
                 [
                     np.array([TYPE_BOS], dtype=np.int64),
-                    np.full((int(n_context),), TYPE_POINT, dtype=np.int64),
+                    np.full((int(n_ctx_eff),), TYPE_POINT, dtype=np.int64),
                     np.full((int(n_query),), TYPE_POINT, dtype=np.int64),
                 ],
                 axis=0,
@@ -246,17 +290,20 @@ def extract_xy_for_path(
 
     feat_t = torch.from_numpy(feat).unsqueeze(0).to(device).float()
     type_t = torch.from_numpy(type_id).unsqueeze(0).to(device).long()
-    _, _, h = model(feat_t, type_t)
-    h = h.squeeze(0).detach().cpu().numpy().astype(np.float32)
+    _, z_hat, h = model(feat_t, type_t)
+
+    rep = z_hat if rep_source == "zhat" else h
+    rep = rep.squeeze(0).detach().cpu().numpy().astype(np.float32)
 
     if bool(qa_tokens):
-        q_start = 1 + 2 * int(n_context)
+        q_start = 1 + 2 * int(n_ctx_eff)
         q_pos = q_start + 2 * np.arange(int(n_query), dtype=np.int64)
-        X = h[q_pos]
+        X = rep[q_pos]
     else:
-        q0 = 1 + int(n_context)
+        q0 = 1 + int(n_ctx_eff)
         q1 = q0 + int(n_query)
-        X = h[q0:q1]
+        X = rep[q0:q1]
+
     y = q_dist.reshape(-1, 1).astype(np.float32, copy=False)
     return X, y
 
@@ -275,10 +322,21 @@ def collect_xy(
     device,
     qa_tokens,
     desc,
+    context_mode="normal",
+    disjoint_context_query=True,
+    mismatch_shift=1,
+    rep_source="h",
 ):
+    mismatch_paths = [None for _ in range(len(paths))]
+    if context_mode == "mismatch" and len(paths) > 1:
+        shift = int(mismatch_shift) % len(paths)
+        if shift == 0:
+            shift = 1
+        mismatch_paths = [paths[(i + shift) % len(paths)] for i in range(len(paths))]
+
     xs = []
     ys = []
-    for p in tqdm(paths, desc=desc):
+    for i, p in enumerate(tqdm(paths, desc=desc)):
         X, y = extract_xy_for_path(
             model,
             p,
@@ -292,6 +350,10 @@ def collect_xy(
             voxel_max_steps,
             device,
             qa_tokens,
+            context_mode=context_mode,
+            disjoint_context_query=bool(disjoint_context_query),
+            mismatch_path=mismatch_paths[i],
+            rep_source=rep_source,
         )
         xs.append(X)
         ys.append(y)
@@ -308,7 +370,13 @@ def main():
     ap.add_argument("--n_query", type=int, default=256)
     ap.add_argument("--add_eos", type=int, default=-1)
     ap.add_argument("--qa_tokens", type=int, default=-1, help="Use Q/A tokenization (1/0). -1: infer from ckpt.")
-    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--eval_seed", type=int, default=0)
+    ap.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Alias for --eval_seed (kept for older wrappers).",
+    )
     ap.add_argument("--head_train_ratio", type=float, default=0.2)
     ap.add_argument("--head_train_n", type=int, default=0)
     ap.add_argument(
@@ -338,8 +406,45 @@ def main():
     ap.add_argument("--voxel_grid", type=int, default=64)
     ap.add_argument("--voxel_dilate", type=int, default=1)
     ap.add_argument("--voxel_max_steps", type=int, default=0)
+    ap.add_argument(
+        "--disjoint_context_query",
+        type=int,
+        default=1,
+        help="If 1, sample context/query indices disjointly when context_mode is normal.",
+    )
+    ap.add_argument(
+        "--context_mode_train",
+        type=str,
+        default="normal",
+        choices=["normal", "none", "mismatch"],
+        help="Context mode used when fitting the ridge head.",
+    )
+    ap.add_argument(
+        "--context_mode_test",
+        type=str,
+        default="normal",
+        choices=["normal", "none", "mismatch"],
+        help="Context mode used when evaluating on split.",
+    )
+    ap.add_argument(
+        "--mismatch_shift",
+        type=int,
+        default=1,
+        help="Deterministic shift used for mismatched context mapping (i -> i+shift).",
+    )
+    ap.add_argument(
+        "--rep_source",
+        type=str,
+        default="h",
+        choices=["h", "zhat"],
+        help="Representation source for ridge head: hidden state h or predicted embedding z_hat.",
+    )
     ap.add_argument("--out_json", type=str, default="")
     args = ap.parse_args()
+
+    # Backward compatibility for existing wrappers.
+    if args.seed is not None:
+        args.eval_seed = int(args.seed)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model, ckpt = build_model_from_ckpt(args.ckpt, device)
@@ -369,7 +474,7 @@ def main():
         # Legacy (transductive) protocol: split within eval shapes by ratio.
         if len(eval_paths) < 2:
             raise RuntimeError("need at least 2 shapes for legacy transductive head split")
-        rng = np.random.RandomState(int(args.seed) & 0xFFFFFFFF)
+        rng = np.random.RandomState(int(args.eval_seed) & 0xFFFFFFFF)
         perm = np.arange(len(eval_paths))
         rng.shuffle(perm)
         if args.head_train_n and args.head_train_n > 0:
@@ -388,14 +493,23 @@ def main():
         args.n_context,
         args.n_query,
         add_eos,
-        args.seed,
+        args.eval_seed,
         args.voxel_grid,
         args.voxel_dilate,
         args.voxel_max_steps,
         device,
         qa_tokens,
         desc="collect train",
+        context_mode=args.context_mode_train,
+        disjoint_context_query=bool(args.disjoint_context_query),
+        mismatch_shift=int(args.mismatch_shift),
+        rep_source=args.rep_source,
     )
+    if args.head_train_n and args.head_train_n > 0 and Xtr.shape[0] > int(args.head_train_n):
+        rng_cap = np.random.RandomState(int(args.eval_seed) & 0xFFFFFFFF)
+        sel = rng_cap.permutation(Xtr.shape[0])[: int(args.head_train_n)]
+        Xtr = Xtr[sel]
+        Ytr = Ytr[sel]
     w = _ridge_fit(Xtr, Ytr, lam=float(args.ridge_lambda))
 
     Xte, Yte = collect_xy(
@@ -405,13 +519,17 @@ def main():
         args.n_context,
         args.n_query,
         add_eos,
-        args.seed + 999,
+        args.eval_seed + 999,
         args.voxel_grid,
         args.voxel_dilate,
         args.voxel_max_steps,
         device,
         qa_tokens,
         desc="collect test",
+        context_mode=args.context_mode_test,
+        disjoint_context_query=bool(args.disjoint_context_query),
+        mismatch_shift=int(args.mismatch_shift),
+        rep_source=args.rep_source,
     )
     Yhat = _ridge_pred(Xte, w)
 
@@ -426,11 +544,17 @@ def main():
             "head_train_split": (head_split if not legacy_transductive else "legacy_transductive"),
             "head_train_backend": head_backend,
             "legacy_transductive": bool(legacy_transductive),
+            "eval_seed": int(args.eval_seed),
             "n_shapes_total": int(len(eval_paths)),
             "n_shapes_head_train": int(len(tr_paths)),
             "n_shapes_head_test": int(len(te_paths)),
             "ridge_lambda": float(args.ridge_lambda),
             "tau": float(args.tau),
+            "disjoint_context_query": bool(args.disjoint_context_query),
+            "context_mode_train": str(args.context_mode_train),
+            "context_mode_test": str(args.context_mode_test),
+            "mismatch_shift": int(args.mismatch_shift),
+            "rep_source": str(args.rep_source),
             "add_eos": bool(add_eos),
             "qa_tokens": bool(qa_tokens),
             "ckpt": os.path.abspath(args.ckpt),

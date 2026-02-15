@@ -178,14 +178,14 @@ bash scripts/finetune/launch_scanobjectnn_review_chain_local.sh
 UCPR template:
 
 ```bash
-qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<ckpt>,QUERY_BACKEND=mesh,GALLERY_BACKEND=udfgrid,OUT_JSON=results/ucpr_mesh2udf.json \
+qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<ckpt>,QUERY_BACKEND=mesh,GALLERY_BACKEND=udfgrid,EVAL_SEED=0,EVAL_SEED_GALLERY=999,POOLING=mean_a,OUT_JSON=results/ucpr_mesh2udf.json \
   scripts/analysis/nepa3d_ucpr.sh
 ```
 
 CPAC-UDF template:
 
 ```bash
-qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<ckpt>,CONTEXT_BACKEND=pointcloud_noray,OUT_JSON=results/cpac_pc2udf.json \
+qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<ckpt>,CONTEXT_BACKEND=pointcloud_noray,HEAD_TRAIN_SPLIT=train_udf,HEAD_TRAIN_BACKEND=udfgrid,DISJOINT_CONTEXT_QUERY=1,CONTEXT_MODE_TEST=normal,REP_SOURCE=h,OUT_JSON=results/cpac_pc2udf.json \
   scripts/analysis/nepa3d_cpac_udf.sh
 ```
 
@@ -246,6 +246,7 @@ Full tables:
 ### 6.3 UCPR/CPAC active details moved
 
 - `nepa3d/docs/results_ucpr_cpac_active.md`
+- latest follow-up (`pooling/context controls`, Feb 15, 2026) is also tracked there
 
 ## 7) Notes for paper
 

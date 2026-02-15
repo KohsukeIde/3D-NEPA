@@ -23,9 +23,23 @@ CKPT="${CKPT:?set CKPT=...}"
 QUERY_BACKEND="${QUERY_BACKEND:-mesh}"
 GALLERY_BACKEND="${GALLERY_BACKEND:-udfgrid}"
 EVAL_SEED="${EVAL_SEED:-0}"
+EVAL_SEED_GALLERY="${EVAL_SEED_GALLERY:-${EVAL_SEED}}"
 MC_K="${MC_K:-1}"
 MAX_FILES="${MAX_FILES:-0}"
+# Pooling: eos / mean_a / mean_zhat
+POOLING="${POOLING:-eos}"
+# Optional ablations (0/1)
+ABLATE_POINT_XYZ="${ABLATE_POINT_XYZ:-0}"
+ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
 OUT_JSON="${OUT_JSON:-results/ucpr_${QUERY_BACKEND}_to_${GALLERY_BACKEND}.json}"
+
+EXTRA_ARGS=""
+if [ "${ABLATE_POINT_XYZ}" -eq 1 ]; then
+  EXTRA_ARGS="${EXTRA_ARGS} --ablate_point_xyz"
+fi
+if [ "${ABLATE_POINT_DIST}" -eq 1 ]; then
+  EXTRA_ARGS="${EXTRA_ARGS} --ablate_point_dist"
+fi
 
 "${PYTHON_BIN}" -m nepa3d.analysis.retrieval_ucpr \
   --cache_root "${CACHE_ROOT}" \
@@ -34,6 +48,9 @@ OUT_JSON="${OUT_JSON:-results/ucpr_${QUERY_BACKEND}_to_${GALLERY_BACKEND}.json}"
   --query_backend "${QUERY_BACKEND}" \
   --gallery_backend "${GALLERY_BACKEND}" \
   --eval_seed "${EVAL_SEED}" \
+  --eval_seed_gallery "${EVAL_SEED_GALLERY}" \
   --mc_k "${MC_K}" \
   --max_files "${MAX_FILES}" \
-  --out_json "${OUT_JSON}"
+  --pooling "${POOLING}" \
+  --out_json "${OUT_JSON}" \
+  ${EXTRA_ARGS}

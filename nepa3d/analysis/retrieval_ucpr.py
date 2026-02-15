@@ -16,10 +16,15 @@ from ..backends.udfgrid_backend import UDFGridBackend
 from ..backends.voxel_backend import VoxelBackend
 from ..models.query_nepa import QueryNepa
 from ..token.tokenizer import (
+    TYPE_BOS,
     TYPE_EOS,
+    TYPE_MISSING_RAY,
     TYPE_POINT,
+    TYPE_RAY,
     TYPE_Q_POINT,
+    TYPE_Q_RAY,
     TYPE_A_POINT,
+    TYPE_A_RAY,
     build_sequence,
 )
 
@@ -112,6 +117,7 @@ def embed_path(
     voxel_max_steps,
     device,
     qa_tokens: bool = False,
+    pooling: str = "eos",
     ablate_point_xyz: bool = False,
     ablate_point_dist: bool = False,
 ):
@@ -151,12 +157,38 @@ def embed_path(
 
         feat_t = torch.from_numpy(feat).unsqueeze(0).to(device).float()
         type_t = torch.from_numpy(type_id).unsqueeze(0).to(device).long()
-        _, _, h = model(feat_t, type_t)
+        _, z_hat, h = model(feat_t, type_t)
 
-        if add_eos and type_id.shape[0] > 0 and int(type_id[-1]) == TYPE_EOS:
-            v = h[:, -1, :]
+        if pooling == "eos":
+            if add_eos and type_id.shape[0] > 0 and int(type_id[-1]) == TYPE_EOS:
+                v = h[:, -1, :]
+            else:
+                v = h[:, -1, :]
+        elif pooling == "mean_a":
+            if qa_tokens:
+                mask = (type_t == TYPE_A_POINT) | (type_t == TYPE_A_RAY)
+            else:
+                mask = (type_t != TYPE_BOS) & (type_t != TYPE_EOS) & (type_t != TYPE_MISSING_RAY)
+            if not bool(mask.any()):
+                v = h.mean(dim=1)
+            else:
+                denom = mask.sum(dim=1, keepdim=True).clamp(min=1)
+                v = (h * mask.unsqueeze(-1)).sum(dim=1) / denom
+        elif pooling == "mean_zhat":
+            zhat = z_hat[:, :-1, :]
+            target_t = type_t[:, 1:]
+            if qa_tokens:
+                mask = (target_t == TYPE_A_POINT) | (target_t == TYPE_A_RAY)
+            else:
+                mask = (target_t != TYPE_BOS) & (target_t != TYPE_EOS) & (target_t != TYPE_MISSING_RAY)
+            if not bool(mask.any()):
+                v = zhat.mean(dim=1)
+            else:
+                denom = mask.sum(dim=1, keepdim=True).clamp(min=1)
+                v = (zhat * mask.unsqueeze(-1)).sum(dim=1) / denom
         else:
-            v = h[:, -1, :]
+            raise ValueError(f"unknown pooling: {pooling}")
+
         v = torch.nn.functional.normalize(v, dim=-1)
         embs.append(v.squeeze(0).detach().cpu().numpy().astype(np.float32))
 
@@ -215,6 +247,13 @@ def main():
         action="store_true",
         help="Zero-out POINT dist features before encoding (diagnostic).",
     )
+    ap.add_argument(
+        "--pooling",
+        type=str,
+        default="eos",
+        choices=["eos", "mean_a", "mean_zhat"],
+        help="Embedding pooling mode for retrieval.",
+    )
     ap.add_argument("--max_files", type=int, default=0)
     ap.add_argument("--chunk", type=int, default=256)
     ap.add_argument("--voxel_grid", type=int, default=64)
@@ -262,6 +301,7 @@ def main():
             args.voxel_max_steps,
             device,
             qa_tokens,
+            args.pooling,
             args.ablate_point_xyz,
             args.ablate_point_dist,
         )
@@ -281,6 +321,7 @@ def main():
             args.voxel_max_steps,
             device,
             qa_tokens,
+            args.pooling,
             args.ablate_point_xyz,
             args.ablate_point_dist,
         )
@@ -300,6 +341,7 @@ def main():
             "eval_seed_gallery": int(eval_seed_gallery),
             "ablate_point_xyz": bool(args.ablate_point_xyz),
             "ablate_point_dist": bool(args.ablate_point_dist),
+            "pooling": str(args.pooling),
             "ckpt": os.path.abspath(args.ckpt),
         }
     )

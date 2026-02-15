@@ -69,6 +69,12 @@ def main():
     ap.add_argument("--dual_mask_far", type=float, default=0.0, help="Dual masking prob for *far* past tokens.")
     ap.add_argument("--dual_mask_window", type=int, default=32, help="Near-window size in token steps for dual masking.")
     ap.add_argument("--dual_mask_warmup_frac", type=float, default=0.05, help="Warmup fraction for ramping dual masking to target probs.")
+    ap.add_argument(
+        "--dual_mask_type_aware",
+        type=int,
+        default=0,
+        help="If 1, apply dual-mask only to Query-like token pairs (Q/Q).",
+    )
     ap.add_argument("--objective", type=str, default="nepa", choices=["nepa", "mae"])
     ap.add_argument("--mask_ratio", type=float, default=0.4)
     ap.add_argument("--voxel_grid", type=int, default=64)
@@ -250,6 +256,7 @@ def main():
                         dual_mask_far=dm_far,
                         dual_mask_window=int(args.dual_mask_window),
                         dual_mask_seed=dm_seed,
+                        dual_mask_type_aware=int(args.dual_mask_type_aware),
                     )
                     loss = model.nepa_loss(z, z_hat, type_id=type_id)
                 else:
