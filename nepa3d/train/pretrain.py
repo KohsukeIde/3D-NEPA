@@ -64,6 +64,11 @@ def main():
     ap.add_argument("--drop_ray_prob", type=float, default=0.0)
     ap.add_argument("--force_missing_ray", action="store_true")
     ap.add_argument("--add_eos", type=int, default=1)
+    ap.add_argument("--qa_tokens", type=int, default=0, help="Use Q/A separated tokenization (v2).")
+    ap.add_argument("--dual_mask_near", type=float, default=0.0, help="Dual masking prob for *near* past tokens (PointGPT-style).")
+    ap.add_argument("--dual_mask_far", type=float, default=0.0, help="Dual masking prob for *far* past tokens.")
+    ap.add_argument("--dual_mask_window", type=int, default=32, help="Near-window size in token steps for dual masking.")
+    ap.add_argument("--dual_mask_warmup_frac", type=float, default=0.05, help="Warmup fraction for ramping dual masking to target probs.")
     ap.add_argument("--objective", type=str, default="nepa", choices=["nepa", "mae"])
     ap.add_argument("--mask_ratio", type=float, default=0.4)
     ap.add_argument("--voxel_grid", type=int, default=64)
@@ -88,6 +93,7 @@ def main():
     if args.mix_config:
         ds, sampler, mix_info = build_mixed_pretrain(
             args.mix_config,
+            qa_tokens=bool(args.qa_tokens),
             n_point=args.n_point,
             n_ray=args.n_ray,
             mode="train",
@@ -129,6 +135,7 @@ def main():
             drop_ray_prob=args.drop_ray_prob,
             force_missing_ray=args.force_missing_ray,
             add_eos=bool(args.add_eos),
+            qa_tokens=bool(args.qa_tokens),
             voxel_grid=args.voxel_grid,
             voxel_dilate=args.voxel_dilate,
             voxel_max_steps=args.voxel_max_steps,
@@ -143,11 +150,18 @@ def main():
             worker_init_fn=_worker_init_fn,
         )
 
-    t = 1 + args.n_point + args.n_ray + (1 if bool(args.add_eos) else 0)
+    qa_tokens = bool(args.qa_tokens)
+    if qa_tokens:
+        t = 1 + 2 * args.n_point + 2 * args.n_ray + (1 if bool(args.add_eos) else 0)
+        n_types = 9
+    else:
+        t = 1 + args.n_point + args.n_ray + (1 if bool(args.add_eos) else 0)
+        n_types = 5
+
     model = QueryNepa(
         feat_dim=15,
         d_model=args.d_model,
-        n_types=5,
+        n_types=n_types,
         nhead=args.heads,
         num_layers=args.layers,
         max_len=t,
@@ -200,6 +214,13 @@ def main():
         print(f"[resume] checkpoint already reached target epochs: start_epoch={start_epoch} >= epochs={args.epochs}")
         return
 
+    # Dual-masking schedule (PointGPT-style) for AR shortcut mitigation.
+    # We ramp probabilities from 0 -> target over an initial warmup fraction.
+    total_steps = int(args.epochs) * max(1, len(dl))
+    warmup_steps = max(1, int(float(args.dual_mask_warmup_frac) * total_steps))
+    # Keep schedule consistent with resume.
+    global_step = int(step)
+
     model.train()
     for ep in range(start_epoch, args.epochs):
         if args.mix_config:
@@ -215,7 +236,21 @@ def main():
             opt.zero_grad(set_to_none=True)
             with autocast(enabled=use_amp):
                 if args.objective == "nepa":
-                    z, z_hat, _ = model(feat, type_id)
+                    # Dual masking only affects the causal attention during training.
+                    # Note: we keep it off for MAE objective to avoid confounding baselines.
+                    ramp = min(1.0, float(global_step) / float(warmup_steps))
+                    dm_near = float(args.dual_mask_near) * ramp
+                    dm_far = float(args.dual_mask_far) * ramp
+                    dm_seed = int(args.seed) * 1000003 + int(global_step)
+
+                    z, z_hat, _ = model(
+                        feat,
+                        type_id,
+                        dual_mask_near=dm_near,
+                        dual_mask_far=dm_far,
+                        dual_mask_window=int(args.dual_mask_window),
+                        dual_mask_seed=dm_seed,
+                    )
                     loss = model.nepa_loss(z, z_hat, type_id=type_id)
                 else:
                     token_mask = build_token_mask(type_id, args.mask_ratio)
@@ -233,6 +268,7 @@ def main():
             if step % 100 == 0:
                 print(f"ep={ep} step={step} loss={loss.item():.4f}")
             step += 1
+            global_step += 1
 
         is_last = ep == (args.epochs - 1)
         should_save = (ep % save_every == 0) or is_last

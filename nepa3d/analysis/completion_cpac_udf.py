@@ -16,7 +16,13 @@ from ..backends.udfgrid_backend import UDFGridBackend
 from ..backends.voxel_backend import VoxelBackend
 from ..models.query_nepa import QueryNepa
 from ..token.ordering import morton3d
-from ..token.tokenizer import TYPE_BOS, TYPE_EOS, TYPE_POINT, build_sequence
+from ..token.tokenizer import (
+    TYPE_BOS,
+    TYPE_EOS,
+    TYPE_POINT,
+    TYPE_Q_POINT,
+    TYPE_A_POINT,
+)
 
 try:
     from tqdm import tqdm
@@ -58,6 +64,14 @@ def infer_add_eos(ckpt, add_eos_arg):
     pre_args = ckpt.get("args", {})
     ckpt_n_types = ckpt["model"]["type_emb.weight"].shape[0]
     return bool(pre_args.get("add_eos", ckpt_n_types >= 5))
+
+
+def infer_qa_tokens(ckpt, qa_tokens_arg):
+    if qa_tokens_arg >= 0:
+        return bool(qa_tokens_arg)
+    pre_args = ckpt.get("args", {})
+    ckpt_n_types = ckpt["model"]["type_emb.weight"].shape[0]
+    return bool(pre_args.get("qa_tokens", ckpt_n_types >= 9))
 
 
 def build_model_from_ckpt(ckpt_path, device):
@@ -127,28 +141,23 @@ def extract_xy_for_path(
     voxel_dilate,
     voxel_max_steps,
     device,
+    qa_tokens,
 ):
     rng = np.random.RandomState(_stable_seed(path, seed))
     be_ctx = make_backend(context_backend, path, voxel_grid, voxel_dilate, voxel_max_steps)
     pools = be_ctx.get_pools()
-    ray_available = bool(pools.get("ray_available", True))
-
-    feat_ctx, _ = build_sequence(
-        pools["pt_xyz_pool"],
-        pools["pt_dist_pool"],
-        pools["ray_o_pool"],
-        pools["ray_d_pool"],
-        pools["ray_hit_pool"],
-        pools["ray_t_pool"],
-        pools["ray_n_pool"],
-        n_point=int(n_context),
-        n_ray=0,
-        drop_ray_prob=0.0,
-        ray_available=ray_available,
-        add_eos=False,
-        rng=rng,
+    pt_xyz_ctx_pool = pools["pt_xyz_pool"].astype(np.float32, copy=False)
+    pt_dist_ctx_pool = pools["pt_dist_pool"].astype(np.float32, copy=False)
+    cidx = rng.choice(
+        pt_xyz_ctx_pool.shape[0],
+        size=int(n_context),
+        replace=(pt_xyz_ctx_pool.shape[0] < int(n_context)),
     )
-    ctx_pts = feat_ctx[1 : 1 + int(n_context)].astype(np.float32, copy=False)
+    ctx_xyz = pt_xyz_ctx_pool[cidx].astype(np.float32, copy=False)
+    ctx_dist = pt_dist_ctx_pool[cidx].astype(np.float32, copy=False)
+    corder = np.argsort(morton3d(ctx_xyz))
+    ctx_xyz = ctx_xyz[corder]
+    ctx_dist = ctx_dist[corder]
 
     d = np.load(path, allow_pickle=False)
     pt_xyz_pool = d["pt_xyz_pool"].astype(np.float32, copy=False)
@@ -164,43 +173,90 @@ def extract_xy_for_path(
     q_xyz = q_xyz[order]
     q_dist = q_dist[order]
 
-    q_feat = np.zeros((int(n_query), 15), dtype=np.float32)
-    q_feat[:, 0:3] = q_xyz
-    q_feat[:, 10] = 0.0
-
     bos = np.zeros((1, 15), dtype=np.float32)
     eos = np.zeros((1, 15), dtype=np.float32)
 
-    if add_eos:
-        feat = np.concatenate([bos, ctx_pts, q_feat, eos], axis=0)
-        type_id = np.concatenate(
-            [
-                np.array([TYPE_BOS], dtype=np.int64),
-                np.full((int(n_context),), TYPE_POINT, dtype=np.int64),
-                np.full((int(n_query),), TYPE_POINT, dtype=np.int64),
-                np.array([TYPE_EOS], dtype=np.int64),
-            ],
-            axis=0,
-        )
+    if bool(qa_tokens):
+        ctx_q = np.zeros((int(n_context), 15), dtype=np.float32)
+        ctx_a = np.zeros((int(n_context), 15), dtype=np.float32)
+        ctx_q[:, 0:3] = ctx_xyz
+        ctx_a[:, 10] = ctx_dist
+
+        qry_q = np.zeros((int(n_query), 15), dtype=np.float32)
+        qry_a = np.zeros((int(n_query), 15), dtype=np.float32)
+        qry_q[:, 0:3] = q_xyz
+        qry_a[:, 10] = 0.0
+
+        ctx_qa = np.zeros((2 * int(n_context), 15), dtype=np.float32)
+        qry_qa = np.zeros((2 * int(n_query), 15), dtype=np.float32)
+        ctx_qa[0::2], ctx_qa[1::2] = ctx_q, ctx_a
+        qry_qa[0::2], qry_qa[1::2] = qry_q, qry_a
+
+        if add_eos:
+            feat = np.concatenate([bos, ctx_qa, qry_qa, eos], axis=0)
+            type_id = np.concatenate(
+                [
+                    np.array([TYPE_BOS], dtype=np.int64),
+                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), int(n_context)),
+                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), int(n_query)),
+                    np.array([TYPE_EOS], dtype=np.int64),
+                ],
+                axis=0,
+            )
+        else:
+            feat = np.concatenate([bos, ctx_qa, qry_qa], axis=0)
+            type_id = np.concatenate(
+                [
+                    np.array([TYPE_BOS], dtype=np.int64),
+                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), int(n_context)),
+                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), int(n_query)),
+                ],
+                axis=0,
+            )
     else:
-        feat = np.concatenate([bos, ctx_pts, q_feat], axis=0)
-        type_id = np.concatenate(
-            [
-                np.array([TYPE_BOS], dtype=np.int64),
-                np.full((int(n_context),), TYPE_POINT, dtype=np.int64),
-                np.full((int(n_query),), TYPE_POINT, dtype=np.int64),
-            ],
-            axis=0,
-        )
+        ctx_feat = np.zeros((int(n_context), 15), dtype=np.float32)
+        ctx_feat[:, 0:3] = ctx_xyz
+        ctx_feat[:, 10] = ctx_dist
+
+        q_feat = np.zeros((int(n_query), 15), dtype=np.float32)
+        q_feat[:, 0:3] = q_xyz
+        q_feat[:, 10] = 0.0
+
+        if add_eos:
+            feat = np.concatenate([bos, ctx_feat, q_feat, eos], axis=0)
+            type_id = np.concatenate(
+                [
+                    np.array([TYPE_BOS], dtype=np.int64),
+                    np.full((int(n_context),), TYPE_POINT, dtype=np.int64),
+                    np.full((int(n_query),), TYPE_POINT, dtype=np.int64),
+                    np.array([TYPE_EOS], dtype=np.int64),
+                ],
+                axis=0,
+            )
+        else:
+            feat = np.concatenate([bos, ctx_feat, q_feat], axis=0)
+            type_id = np.concatenate(
+                [
+                    np.array([TYPE_BOS], dtype=np.int64),
+                    np.full((int(n_context),), TYPE_POINT, dtype=np.int64),
+                    np.full((int(n_query),), TYPE_POINT, dtype=np.int64),
+                ],
+                axis=0,
+            )
 
     feat_t = torch.from_numpy(feat).unsqueeze(0).to(device).float()
     type_t = torch.from_numpy(type_id).unsqueeze(0).to(device).long()
     _, _, h = model(feat_t, type_t)
     h = h.squeeze(0).detach().cpu().numpy().astype(np.float32)
 
-    q0 = 1 + int(n_context)
-    q1 = q0 + int(n_query)
-    X = h[q0:q1]
+    if bool(qa_tokens):
+        q_start = 1 + 2 * int(n_context)
+        q_pos = q_start + 2 * np.arange(int(n_query), dtype=np.int64)
+        X = h[q_pos]
+    else:
+        q0 = 1 + int(n_context)
+        q1 = q0 + int(n_query)
+        X = h[q0:q1]
     y = q_dist.reshape(-1, 1).astype(np.float32, copy=False)
     return X, y
 
@@ -217,6 +273,7 @@ def collect_xy(
     voxel_dilate,
     voxel_max_steps,
     device,
+    qa_tokens,
     desc,
 ):
     xs = []
@@ -234,6 +291,7 @@ def collect_xy(
             voxel_dilate,
             voxel_max_steps,
             device,
+            qa_tokens,
         )
         xs.append(X)
         ys.append(y)
@@ -249,6 +307,7 @@ def main():
     ap.add_argument("--n_context", type=int, default=256)
     ap.add_argument("--n_query", type=int, default=256)
     ap.add_argument("--add_eos", type=int, default=-1)
+    ap.add_argument("--qa_tokens", type=int, default=-1, help="Use Q/A tokenization (1/0). -1: infer from ckpt.")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--head_train_ratio", type=float, default=0.2)
     ap.add_argument("--head_train_n", type=int, default=0)
@@ -285,6 +344,7 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model, ckpt = build_model_from_ckpt(args.ckpt, device)
     add_eos = infer_add_eos(ckpt, args.add_eos)
+    qa_tokens = infer_qa_tokens(ckpt, args.qa_tokens)
 
     # Evaluation shapes (never used to train the probe head in the default protocol).
     eval_paths = list_npz(args.cache_root, args.split)
@@ -333,6 +393,7 @@ def main():
         args.voxel_dilate,
         args.voxel_max_steps,
         device,
+        qa_tokens,
         desc="collect train",
     )
     w = _ridge_fit(Xtr, Ytr, lam=float(args.ridge_lambda))
@@ -349,6 +410,7 @@ def main():
         args.voxel_dilate,
         args.voxel_max_steps,
         device,
+        qa_tokens,
         desc="collect test",
     )
     Yhat = _ridge_pred(Xte, w)
@@ -370,6 +432,7 @@ def main():
             "ridge_lambda": float(args.ridge_lambda),
             "tau": float(args.tau),
             "add_eos": bool(add_eos),
+            "qa_tokens": bool(qa_tokens),
             "ckpt": os.path.abspath(args.ckpt),
         }
     )

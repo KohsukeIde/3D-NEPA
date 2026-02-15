@@ -27,6 +27,7 @@ class ModelNet40QueryDataset(Dataset):
         drop_ray_prob=0.0,
         force_missing_ray=False,
         add_eos=True,
+        qa_tokens=False,
         voxel_grid=64,
         voxel_dilate=1,
         voxel_max_steps=0,
@@ -43,6 +44,7 @@ class ModelNet40QueryDataset(Dataset):
         self.drop_ray_prob = float(drop_ray_prob)
         self.force_missing_ray = bool(force_missing_ray)
         self.add_eos = bool(add_eos)
+        self.qa_tokens = bool(qa_tokens)
         self.voxel_grid = int(voxel_grid)
         self.voxel_dilate = int(voxel_dilate)
         self.voxel_max_steps = int(voxel_max_steps)
@@ -110,6 +112,7 @@ class ModelNet40QueryDataset(Dataset):
                     drop_ray_prob=0.0,
                     ray_available=ray_available,
                     add_eos=self.add_eos,
+                    qa_tokens=self.qa_tokens,
                     rng=rng,
                 )
                 feats.append(feat)
@@ -130,6 +133,7 @@ class ModelNet40QueryDataset(Dataset):
                 drop_ray_prob=self.drop_ray_prob,
                 ray_available=ray_available,
                 add_eos=self.add_eos,
+                qa_tokens=self.qa_tokens,
                 rng=np.random,
             )
 

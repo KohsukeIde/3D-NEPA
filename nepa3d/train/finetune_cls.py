@@ -103,6 +103,7 @@ def main():
     ap.add_argument("--drop_ray_prob_train", type=float, default=0.0)
     ap.add_argument("--force_missing_ray", action="store_true")
     ap.add_argument("--add_eos", type=int, default=-1, help="1/0 to override, -1 to infer from checkpoint")
+    ap.add_argument("--qa_tokens", type=int, default=-1, help="Use Q/A separated tokenization (0/1). -1: infer from checkpoint")
     ap.add_argument("--voxel_grid", type=int, default=64)
     ap.add_argument("--voxel_dilate", type=int, default=1)
     ap.add_argument("--voxel_max_steps", type=int, default=0)
@@ -141,6 +142,11 @@ def main():
     else:
         add_eos = bool(args.add_eos)
 
+    if args.qa_tokens >= 0:
+        qa_tokens = bool(args.qa_tokens)
+    else:
+        qa_tokens = bool(pre_args.get("qa_tokens", ckpt_n_types >= 9))
+
     if args.n_point is None:
         args.n_point = pre_args["n_point"]
     elif args.n_point != pre_args["n_point"]:
@@ -161,6 +167,7 @@ def main():
         drop_ray_prob=args.drop_ray_prob_train,
         force_missing_ray=args.force_missing_ray,
         add_eos=add_eos,
+        qa_tokens=qa_tokens,
         voxel_grid=args.voxel_grid,
         voxel_dilate=args.voxel_dilate,
         voxel_max_steps=args.voxel_max_steps,
@@ -179,6 +186,7 @@ def main():
         drop_ray_prob=0.0,
         force_missing_ray=args.force_missing_ray,
         add_eos=add_eos,
+        qa_tokens=qa_tokens,
         voxel_grid=args.voxel_grid,
         voxel_dilate=args.voxel_dilate,
         voxel_max_steps=args.voxel_max_steps,
@@ -197,6 +205,7 @@ def main():
         drop_ray_prob=0.0,
         force_missing_ray=args.force_missing_ray,
         add_eos=add_eos,
+        qa_tokens=qa_tokens,
         voxel_grid=args.voxel_grid,
         voxel_dilate=args.voxel_dilate,
         voxel_max_steps=args.voxel_max_steps,
@@ -240,7 +249,10 @@ def main():
         worker_init_fn=_worker_init_fn,
     )
 
-    t = 1 + args.n_point + args.n_ray + (1 if add_eos else 0)
+    if qa_tokens:
+        t = 1 + 2 * args.n_point + 2 * args.n_ray + (1 if add_eos else 0)
+    else:
+        t = 1 + args.n_point + args.n_ray + (1 if add_eos else 0)
     backbone = QueryNepa(
         feat_dim=15,
         d_model=pre_args["d_model"],

@@ -5,7 +5,7 @@ This file tracks the current active experiments.
 - Active track:
   - M1 few-shot table on ScanObjectNN
   - UCPR/CPAC evaluation loop on ShapeNet-unpaired cache
-- As-of snapshot date: February 14, 2026
+- As-of snapshot date: February 15, 2026
 
 Legacy means ModelNet40-era experiments only. See `nepa3d/docs/results_modelnet40_legacy.md`.
 
@@ -504,4 +504,275 @@ Single-seed result summary from this cycle:
 
 Scope note:
 
+- Multi-seed was intentionally skipped in this cycle.
+
+### 8.6 QA-token + dual-mask integration (this cycle)
+
+Integrated patch source:
+
+- `/home/cvrt/Downloads/nepa_qa_dualmask_patch`
+
+Patched files:
+
+- `nepa3d/token/tokenizer.py`
+- `nepa3d/models/query_nepa.py`
+- `nepa3d/models/causal_transformer.py`
+- `nepa3d/train/pretrain.py`
+- `nepa3d/data/dataset.py`
+- `nepa3d/data/mixed_pretrain.py`
+- `nepa3d/train/finetune_cls.py`
+
+Key behavior added:
+
+- optional Q/A tokenization (`--qa_tokens 1`)
+- answer-only NEPA loss on Q/A sequences
+- dual masking in causal attention (`--dual_mask_near/far/window`)
+- dual-mask warmup schedule (`--dual_mask_warmup_frac`)
+- finetune-side `qa_tokens` inference/override (`--qa_tokens -1/0/1`)
+
+Local fix applied during merge:
+
+- `nepa3d/train/pretrain.py`: fixed `start_ep` typo in schedule init
+  (`global_step` now initialized from resumed `step`)
+
+Smoke run (passed):
+
+```bash
+CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.train.pretrain \
+  --mix_config nepa3d/configs/shapenet_unpaired_mix.yaml \
+  --mix_num_samples 256 --mix_seed 0 \
+  --objective nepa \
+  --qa_tokens 1 \
+  --dual_mask_near 0.4 \
+  --dual_mask_far 0.1 \
+  --dual_mask_window 32 \
+  --dual_mask_warmup_frac 0.05 \
+  --epochs 1 --batch 8 --n_point 64 --n_ray 64 \
+  --num_workers 2 \
+  --save_every 1 --save_last 1 \
+  --save_dir runs/_tmp_qa_dualmask_smoke \
+  --seed 0
+```
+
+Smoke artifacts:
+
+- log: `logs/pretrain/_tmp_qa_dualmask_smoke.log`
+- ckpt: `runs/_tmp_qa_dualmask_smoke/ckpt_ep000.pt`
+- last: `runs/_tmp_qa_dualmask_smoke/last.pt`
+
+Note:
+
+- UCPR/CPAC evaluators are QA-aware in this branch (`--qa_tokens -1` = infer from ckpt, `--qa_tokens 0/1` = manual override).
+- Patched files:
+  - `nepa3d/analysis/retrieval_ucpr.py`
+  - `nepa3d/analysis/completion_cpac_udf.py`
+
+### 8.7 QA pretrain runs (completed)
+
+Purpose:
+
+- test whether `Q/A + dual-mask` reduces Morton-local shortcut compared to `Q/A (no dual-mask)` under the same data/objective
+
+Launched runs:
+
+1. QA + dual-mask (`GPU0`)
+
+```bash
+CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.train.pretrain \
+  --mix_config nepa3d/configs/shapenet_unpaired_mix.yaml \
+  --mix_num_samples 200000 --mix_seed 0 \
+  --objective nepa \
+  --qa_tokens 1 \
+  --dual_mask_near 0.4 \
+  --dual_mask_far 0.1 \
+  --dual_mask_window 32 \
+  --dual_mask_warmup_frac 0.05 \
+  --epochs 50 --batch 96 --n_point 256 --n_ray 256 \
+  --num_workers 6 \
+  --save_every 1 --save_last 1 \
+  --save_dir runs/eccv_upmix_nepa_qa_dualmask_s0 \
+  --seed 0
+```
+
+2. QA no-dual baseline (`GPU1`)
+
+```bash
+CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.train.pretrain \
+  --mix_config nepa3d/configs/shapenet_unpaired_mix.yaml \
+  --mix_num_samples 200000 --mix_seed 0 \
+  --objective nepa \
+  --qa_tokens 1 \
+  --dual_mask_near 0.0 \
+  --dual_mask_far 0.0 \
+  --dual_mask_window 32 \
+  --dual_mask_warmup_frac 0.05 \
+  --epochs 50 --batch 96 --n_point 256 --n_ray 256 \
+  --num_workers 6 \
+  --save_every 1 --save_last 1 \
+  --save_dir runs/eccv_upmix_nepa_qa_nodual_s0 \
+  --seed 0
+```
+
+Run logs:
+
+- `logs/pretrain/eccv_qa_dualmask/upmix_nepa_qa_dualmask_s0_bs96.log`
+- `logs/pretrain/eccv_qa_dualmask/upmix_nepa_qa_nodual_s0_bs96.log`
+
+Completion status:
+
+- `runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt` and `last.pt` exist
+- `runs/eccv_upmix_nepa_qa_nodual_s0/ckpt_ep049.pt` and `last.pt` exist
+
+### 8.8 QA UCPR/CPAC eval commands (this cycle, single-seed)
+
+Evaluated checkpoints:
+
+- `runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt`
+- `runs/eccv_upmix_nepa_qa_nodual_s0/ckpt_ep049.pt`
+
+UCPR hard-pair + easy-pair (independent sampling):
+
+```bash
+# dualmask
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --query_backend mesh --gallery_backend udfgrid \
+  --eval_seed 0 --eval_seed_gallery 999 --max_files 1000 \
+  --out_json results/ucpr_nepa_qa_dualmask_ep049_mesh2udf_1k_indep.json
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --query_backend udfgrid --gallery_backend mesh \
+  --eval_seed 0 --eval_seed_gallery 999 --max_files 1000 \
+  --out_json results/ucpr_nepa_qa_dualmask_ep049_udf2mesh_1k_indep.json
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --query_backend mesh --gallery_backend pointcloud_noray \
+  --eval_seed 0 --eval_seed_gallery 999 --max_files 1000 \
+  --out_json results/ucpr_nepa_qa_dualmask_ep049_mesh2pc_1k_indep.json
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --query_backend pointcloud_noray --gallery_backend udfgrid \
+  --eval_seed 0 --eval_seed_gallery 999 --max_files 1000 \
+  --out_json results/ucpr_nepa_qa_dualmask_ep049_pc2udf_1k_indep.json
+
+# nodual
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_nodual_s0/ckpt_ep049.pt \
+  --query_backend mesh --gallery_backend udfgrid \
+  --eval_seed 0 --eval_seed_gallery 999 --max_files 1000 \
+  --out_json results/ucpr_nepa_qa_nodual_ep049_mesh2udf_1k_indep.json
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_nodual_s0/ckpt_ep049.pt \
+  --query_backend udfgrid --gallery_backend mesh \
+  --eval_seed 0 --eval_seed_gallery 999 --max_files 1000 \
+  --out_json results/ucpr_nepa_qa_nodual_ep049_udf2mesh_1k_indep.json
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_nodual_s0/ckpt_ep049.pt \
+  --query_backend mesh --gallery_backend pointcloud_noray \
+  --eval_seed 0 --eval_seed_gallery 999 --max_files 1000 \
+  --out_json results/ucpr_nepa_qa_nodual_ep049_mesh2pc_1k_indep.json
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_nodual_s0/ckpt_ep049.pt \
+  --query_backend pointcloud_noray --gallery_backend udfgrid \
+  --eval_seed 0 --eval_seed_gallery 999 --max_files 1000 \
+  --out_json results/ucpr_nepa_qa_nodual_ep049_pc2udf_1k_indep.json
+```
+
+UCPR ablation (`pointcloud_noray -> udfgrid`):
+
+```bash
+# dualmask
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --query_backend pointcloud_noray --gallery_backend udfgrid \
+  --eval_seed 0 --eval_seed_gallery 999 --max_files 1000 --ablate_point_xyz \
+  --out_json results/ucpr_nepa_qa_dualmask_ep049_pc2udf_1k_indep_ablate_xyz.json
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --query_backend pointcloud_noray --gallery_backend udfgrid \
+  --eval_seed 0 --eval_seed_gallery 999 --max_files 1000 --ablate_point_dist \
+  --out_json results/ucpr_nepa_qa_dualmask_ep049_pc2udf_1k_indep_ablate_dist.json
+
+# nodual
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_nodual_s0/ckpt_ep049.pt \
+  --query_backend pointcloud_noray --gallery_backend udfgrid \
+  --eval_seed 0 --eval_seed_gallery 999 --max_files 1000 --ablate_point_xyz \
+  --out_json results/ucpr_nepa_qa_nodual_ep049_pc2udf_1k_indep_ablate_xyz.json
+.venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_nodual_s0/ckpt_ep049.pt \
+  --query_backend pointcloud_noray --gallery_backend udfgrid \
+  --eval_seed 0 --eval_seed_gallery 999 --max_files 1000 --ablate_point_dist \
+  --out_json results/ucpr_nepa_qa_nodual_ep049_pc2udf_1k_indep_ablate_dist.json
+```
+
+CPAC non-transductive:
+
+```bash
+.venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --max_shapes 800 --ridge_lambda 1e-3 --tau 0.03 \
+  --out_json results/cpac_nepa_qa_dualmask_ep049_pc2udf_800_nontrans.json
+
+.venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_nodual_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --max_shapes 800 --ridge_lambda 1e-3 --tau 0.03 \
+  --out_json results/cpac_nepa_qa_nodual_ep049_pc2udf_800_nontrans.json
+```
+
+### 8.9 QA UCPR results (single-seed, complete)
+
+Main UCPR (independent sampling, `eval_seed=0`, `eval_seed_gallery=999`, `max_files=1000`):
+
+| Pair | NoDual R@1/R@5/R@10/mAP | DualMask R@1/R@5/R@10/mAP |
+|---|---|---|
+| `mesh -> udfgrid` | `0.001 / 0.015 / 0.029 / 0.0145` | `0.006 / 0.021 / 0.041 / 0.0226` |
+| `udfgrid -> mesh` | `0.002 / 0.006 / 0.012 / 0.0099` | `0.001 / 0.011 / 0.017 / 0.0102` |
+| `mesh -> pointcloud_noray` | `0.003 / 0.012 / 0.029 / 0.0161` | `0.004 / 0.021 / 0.043 / 0.0218` |
+| `pointcloud_noray -> udfgrid` | `0.215 / 0.419 / 0.532 / 0.3175` | `0.093 / 0.229 / 0.297 / 0.1661` |
+
+`pointcloud_noray -> udfgrid` ablation:
+
+| Model | Base R@1/mAP | `ablate_point_xyz` R@1/mAP | `ablate_point_dist` R@1/mAP |
+|---|---|---|---|
+| NoDual | `0.215 / 0.3175` | `0.009 / 0.0341` | `0.126 / 0.2162` |
+| DualMask | `0.093 / 0.1661` | `0.007 / 0.0342` | `0.092 / 0.1631` |
+
+### 8.10 QA CPAC non-transductive results (single-seed, complete)
+
+Protocol:
+
+- `eval_split=eval`, `head_train_split=train_udf`, `head_train_backend=udfgrid`
+- `n_shapes_head_train=15406`, `n_shapes_head_test=800`
+- `context_backend=pointcloud_noray`, `n_context=256`, `n_query=256`
+
+| Model | MAE | RMSE | IoU@0.03 |
+|---|---:|---:|---:|
+| `qa_nodual_ep049` | 0.03072 | 0.04154 | 0.72231 |
+| `qa_dualmask_ep049` | 0.02717 | 0.03623 | 0.72676 |
+
+### 8.11 Readout (this QA cycle, no multi-seed)
+
+- Both QA pretrains finished to `ep049`.
+- Hard-pair UCPR (`mesh -> udfgrid`, `mesh -> pointcloud_noray`) improved with dual-mask over no-dual.
+- Easy-pair UCPR (`pointcloud_noray -> udfgrid`) is still higher for no-dual.
+- CPAC non-trans improved with dual-mask (`MAE/RMSE` lower, `IoU@0.03` higher).
 - Multi-seed was intentionally skipped in this cycle.

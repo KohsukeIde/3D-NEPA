@@ -28,6 +28,7 @@ viz_output/
 # Experiment logs and checkpoints
 logs/
 runs/
+results/
 
 # Local archives / cache bundles
 scanobjectnn_cache_v2.tar.gz

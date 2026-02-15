@@ -15,7 +15,13 @@ from ..backends.pointcloud_backend import (
 from ..backends.udfgrid_backend import UDFGridBackend
 from ..backends.voxel_backend import VoxelBackend
 from ..models.query_nepa import QueryNepa
-from ..token.tokenizer import TYPE_EOS, TYPE_POINT, build_sequence
+from ..token.tokenizer import (
+    TYPE_EOS,
+    TYPE_POINT,
+    TYPE_Q_POINT,
+    TYPE_A_POINT,
+    build_sequence,
+)
 
 try:
     from tqdm import tqdm
@@ -60,6 +66,14 @@ def infer_add_eos(ckpt, add_eos_arg):
     return bool(pre_args.get("add_eos", ckpt_n_types >= 5))
 
 
+def infer_qa_tokens(ckpt, qa_tokens_arg):
+    if qa_tokens_arg >= 0:
+        return bool(qa_tokens_arg)
+    pre_args = ckpt.get("args", {})
+    ckpt_n_types = ckpt["model"]["type_emb.weight"].shape[0]
+    return bool(pre_args.get("qa_tokens", ckpt_n_types >= 9))
+
+
 def build_model_from_ckpt(ckpt_path, device):
     ckpt = torch.load(ckpt_path, map_location="cpu")
     pre_args = ckpt.get("args", {})
@@ -97,6 +111,7 @@ def embed_path(
     voxel_dilate,
     voxel_max_steps,
     device,
+    qa_tokens: bool = False,
     ablate_point_xyz: bool = False,
     ablate_point_dist: bool = False,
 ):
@@ -120,17 +135,19 @@ def embed_path(
             drop_ray_prob=0.0,
             ray_available=ray_available,
             add_eos=add_eos,
+            qa_tokens=qa_tokens,
             rng=rng,
         )
 
         # Optional ablations (diagnostic): remove access to POINT xyz/dist.
         # This helps detect trivial retrieval caused by shared query coordinates.
         if ablate_point_xyz or ablate_point_dist:
-            pt_mask = (type_id == TYPE_POINT)
+            pt_q_mask = (type_id == TYPE_POINT) | (type_id == TYPE_Q_POINT)
+            pt_a_mask = (type_id == TYPE_POINT) | (type_id == TYPE_A_POINT)
             if ablate_point_xyz:
-                feat[pt_mask, 0:3] = 0.0
+                feat[pt_q_mask, 0:3] = 0.0
             if ablate_point_dist:
-                feat[pt_mask, 9] = 0.0
+                feat[pt_a_mask, 10] = 0.0
 
         feat_t = torch.from_numpy(feat).unsqueeze(0).to(device).float()
         type_t = torch.from_numpy(type_id).unsqueeze(0).to(device).long()
@@ -179,6 +196,7 @@ def main():
     ap.add_argument("--n_point", type=int, default=None)
     ap.add_argument("--n_ray", type=int, default=None)
     ap.add_argument("--add_eos", type=int, default=-1)
+    ap.add_argument("--qa_tokens", type=int, default=-1, help="Use Q/A tokenization (1/0). -1: infer from ckpt.")
     ap.add_argument("--eval_seed", type=int, default=0)
     ap.add_argument(
         "--eval_seed_gallery",
@@ -216,6 +234,7 @@ def main():
     pre_args = ckpt.get("args", {})
 
     add_eos = infer_add_eos(ckpt, args.add_eos)
+    qa_tokens = infer_qa_tokens(ckpt, args.qa_tokens)
     n_point = int(pre_args.get("n_point", 256) if args.n_point is None else args.n_point)
     n_ray = int(pre_args.get("n_ray", 256) if args.n_ray is None else args.n_ray)
 
@@ -242,6 +261,7 @@ def main():
             args.voxel_dilate,
             args.voxel_max_steps,
             device,
+            qa_tokens,
             args.ablate_point_xyz,
             args.ablate_point_dist,
         )
@@ -260,6 +280,7 @@ def main():
             args.voxel_dilate,
             args.voxel_max_steps,
             device,
+            qa_tokens,
             args.ablate_point_xyz,
             args.ablate_point_dist,
         )
@@ -273,6 +294,7 @@ def main():
             "n_point": int(n_point),
             "n_ray": int(n_ray),
             "add_eos": bool(add_eos),
+            "qa_tokens": bool(qa_tokens),
             "mc_k": int(args.mc_k),
             "eval_seed": int(args.eval_seed),
             "eval_seed_gallery": int(eval_seed_gallery),
