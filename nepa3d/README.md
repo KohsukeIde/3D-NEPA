@@ -175,6 +175,18 @@ Review-response chain (core3 with mix methods + `N_RAY=0` + linear-probe):
 bash scripts/finetune/launch_scanobjectnn_review_chain_local.sh
 ```
 
+ModelNet40 protocol run (full + episodic few-shot):
+
+```bash
+bash scripts/finetune/launch_modelnet40_pointgpt_protocol_local.sh
+```
+
+Auto-chain (wait current review jobs, then start ModelNet40 protocol):
+
+```bash
+bash scripts/finetune/launch_after_review_modelnet_chain_local.sh
+```
+
 UCPR template:
 
 ```bash
@@ -256,3 +268,4 @@ Full tables:
 - MC evaluation is used in current setup (`mc_eval_k_test=4`); report this explicitly against raw-point baselines.
 - ScanObjectNN classification should be treated as downstream/supporting evidence; core unpaired capability evidence is UCPR/CPAC.
 - Fine-tune launcher now defaults to `N_RAY=0` when `BACKEND=pointcloud_noray` and `N_RAY` is not explicitly set.
+- ModelNet40 few-shot protocol support was added to `finetune_cls.py` via `--fewshot_n_way` and `--fewshot_way_seed` (episodic N-way M-shot trials).

@@ -8,7 +8,12 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from ..data.dataset import ModelNet40QueryDataset, collate
-from ..data.modelnet40_index import build_label_map, list_npz, stratified_train_val_split
+from ..data.modelnet40_index import (
+    build_label_map,
+    label_from_path,
+    list_npz,
+    stratified_train_val_split,
+)
 from ..models.query_nepa import QueryNepa
 from ..utils.seed import set_seed
 
@@ -33,6 +38,30 @@ def stratified_kshot(paths, k, seed=0):
         rng.shuffle(cls_paths)
         out.extend(cls_paths[: min(len(cls_paths), int(k))])
     return sorted(out)
+
+
+def stratified_nway(paths, n_way, seed=0):
+    """Select N classes and keep all samples from those classes."""
+    from collections import defaultdict
+
+    paths = list(paths)
+    if n_way <= 0:
+        classes = sorted({label_from_path(p) for p in paths})
+        return sorted(paths), classes
+
+    groups = defaultdict(list)
+    for p in paths:
+        groups[label_from_path(p)].append(p)
+    classes = sorted(groups.keys())
+    if n_way > len(classes):
+        raise ValueError(f"n_way={n_way} exceeds available classes={len(classes)}")
+
+    rng = np.random.RandomState(int(seed) & 0xFFFFFFFF)
+    picked_idx = rng.choice(len(classes), size=int(n_way), replace=False)
+    picked = sorted(classes[i] for i in picked_idx.tolist())
+    picked_set = set(picked)
+    out = [p for p in paths if label_from_path(p) in picked_set]
+    return sorted(out), picked
 
 
 class ClsWrapper(nn.Module):
@@ -85,6 +114,18 @@ def main():
     ap.add_argument("--val_seed", type=int, default=0, help="seed for stratified train/val split")
     ap.add_argument("--fewshot_k", type=int, default=0, help="K-shot fine-tuning: number of training samples per class (0=full train)")
     ap.add_argument("--fewshot_seed", type=int, default=0, help="seed for K-shot subset selection")
+    ap.add_argument(
+        "--fewshot_n_way",
+        type=int,
+        default=0,
+        help="N-way episodic setting: keep only N classes for train/val/test (0=all classes)",
+    )
+    ap.add_argument(
+        "--fewshot_way_seed",
+        type=int,
+        default=-1,
+        help="seed for N-way class selection (-1: use --fewshot_seed)",
+    )
 
     ap.add_argument("--eval_seed", type=int, default=0, help="deterministic eval seed (per-sample)")
     ap.add_argument("--mc_eval_k", type=int, default=1, help="MC eval: number of query resamples per test sample")
@@ -124,6 +165,26 @@ def main():
     mc_eval_k_test = args.mc_eval_k if args.mc_eval_k_test < 0 else int(args.mc_eval_k_test)
 
     train_paths_full = list_npz(args.cache_root, "train")
+    test_paths = list_npz(args.cache_root, "test")
+    way_seed = args.fewshot_seed if args.fewshot_way_seed < 0 else args.fewshot_way_seed
+    picked_classes = None
+    if args.fewshot_n_way and args.fewshot_n_way > 0:
+        train_paths_full, picked_classes = stratified_nway(
+            train_paths_full,
+            n_way=args.fewshot_n_way,
+            seed=way_seed,
+        )
+        picked_set = set(picked_classes)
+        test_paths = sorted([p for p in test_paths if label_from_path(p) in picked_set])
+        print(
+            f"[fewshot-nway] n_way={args.fewshot_n_way} way_seed={way_seed} "
+            f"picked_classes={picked_classes}"
+        )
+        print(
+            f"[fewshot-nway] filtered_train={len(train_paths_full)} "
+            f"filtered_test={len(test_paths)}"
+        )
+
     train_paths, val_paths = stratified_train_val_split(
         train_paths_full, val_ratio=args.val_ratio, seed=args.val_seed
     )
@@ -131,7 +192,6 @@ def main():
         train_paths = stratified_kshot(train_paths, k=args.fewshot_k, seed=args.fewshot_seed)
         print(f"[fewshot] k={args.fewshot_k} selected_train={len(train_paths)} (from split-train)")
 
-    test_paths = list_npz(args.cache_root, "test")
     label_map = build_label_map(train_paths_full)
 
     ckpt = torch.load(args.ckpt, map_location="cpu")
