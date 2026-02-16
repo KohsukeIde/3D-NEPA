@@ -6,6 +6,7 @@ Use this index to avoid mixing active and legacy tracks.
 
 - Active run hub: `../README.md`
 - ScanObjectNN core3 active tables: `results_scanobjectnn_core3_active.md`
+- ScanObjectNN review tables (full-ft + linear-probe, paper-safe core3): `results_scanobjectnn_review_active.md`
 - UCPR/CPAC active results (including QA cycle): `results_ucpr_cpac_active.md`
 - UCPR/CPAC table planning and command templates: `eccv_ucpr_cpac_tables.md`
 
