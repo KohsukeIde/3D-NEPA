@@ -13,6 +13,7 @@ from ..data.modelnet40_index import list_npz
 from ..models.query_nepa import QueryNepa
 from ..token.tokenizer import TYPE_BOS, TYPE_EOS
 from ..utils.seed import set_seed
+from ..utils.ckpt_utils import load_state_dict_flexible, maybe_resize_pos_emb_in_state_dict
 
 
 def build_token_mask(type_id, mask_ratio):
@@ -52,6 +53,42 @@ def main():
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--n_point", type=int, default=512)
     ap.add_argument("--n_ray", type=int, default=512)
+    ap.add_argument(
+        "--max_len",
+        type=int,
+        default=-1,
+        help=(
+            "Transformer max sequence length / learned pos-emb length. "
+            "If <0, auto-compute from (qa_tokens, add_eos, n_point/n_ray and schedules)."
+        ),
+    )
+    ap.add_argument(
+        "--n_point_schedule",
+        type=str,
+        default="",
+        help=(
+            "Optional epoch-based n_point schedule. Format: '0:256,10:512,20:1024'. "
+            "If empty, uses --n_point for all epochs."
+        ),
+    )
+    ap.add_argument(
+        "--n_ray_schedule",
+        type=str,
+        default="",
+        help=(
+            "Optional epoch-based n_ray schedule. Format: '0:256,10:512'. "
+            "If empty, uses --n_ray for all epochs."
+        ),
+    )
+    ap.add_argument(
+        "--resume_optimizer",
+        type=int,
+        default=1,
+        help=(
+            "When --resume is set, also load optimizer/scaler state (1) or not (0). "
+            "If max_len changes (pos_emb resize), optimizer state is automatically skipped."
+        ),
+    )
     ap.add_argument("--d_model", type=int, default=384)
     ap.add_argument("--layers", type=int, default=8)
     ap.add_argument("--heads", type=int, default=6)
@@ -95,6 +132,77 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     use_amp = device == "cuda"
+
+    # -------------------------
+    # Point/ray scaling schedule (curriculum)
+    # -------------------------
+    qa_tokens = bool(args.qa_tokens)
+    add_eos = bool(args.add_eos)
+
+    def _parse_epoch_value_schedule(s: str) -> list[tuple[int, int]]:
+        s = (s or "").strip()
+        if not s:
+            return []
+        items: list[tuple[int, int]] = []
+        for part in s.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if ":" not in part:
+                raise ValueError(
+                    f"bad schedule item '{part}'. Expected 'epoch:value' (e.g., '10:512')."
+                )
+            ep_s, val_s = part.split(":", 1)
+            items.append((int(ep_s), int(val_s)))
+        items.sort(key=lambda x: x[0])
+        return items
+
+    def _schedule_value(items: list[tuple[int, int]], epoch: int, default: int) -> int:
+        v = int(default)
+        for ep, val in items:
+            if int(epoch) >= int(ep):
+                v = int(val)
+            else:
+                break
+        return v
+
+    n_point_sched = _parse_epoch_value_schedule(args.n_point_schedule)
+    n_ray_sched = _parse_epoch_value_schedule(args.n_ray_schedule)
+
+    def _max_sched_value(items: list[tuple[int, int]], default: int) -> int:
+        if not items:
+            return int(default)
+        return max(int(default), max(int(v) for _, v in items))
+
+    def _required_seq_len(n_point: int, n_ray: int) -> int:
+        if qa_tokens:
+            # BOS + interleaved (Q,A) pairs + optional EOS
+            return 1 + 2 * int(n_point) + 2 * int(n_ray) + (1 if add_eos else 0)
+        # legacy: BOS + points + rays + optional EOS
+        return 1 + int(n_point) + int(n_ray) + (1 if add_eos else 0)
+
+    # Auto max_len must cover the maximum sizes used in schedule.
+    n_point_max = _max_sched_value(n_point_sched, args.n_point)
+    n_ray_max = _max_sched_value(n_ray_sched, args.n_ray)
+    required_max_len = _required_seq_len(n_point_max, n_ray_max)
+    if int(args.max_len) < 0:
+        args.max_len = required_max_len
+    if int(args.max_len) < required_max_len:
+        raise ValueError(
+            f"--max_len too small for requested schedule: max_len={args.max_len} < required={required_max_len} "
+            f"(qa_tokens={qa_tokens}, add_eos={add_eos}, n_point_max={n_point_max}, n_ray_max={n_ray_max})."
+        )
+
+    # Initial dataset sizes (epoch 0). If schedule is provided, it overrides.
+    n_point_init = _schedule_value(n_point_sched, 0, args.n_point)
+    n_ray_init = _schedule_value(n_ray_sched, 0, args.n_ray)
+    if n_point_init != args.n_point or n_ray_init != args.n_ray:
+        print(
+            f"[schedule:init] overriding dataset sizes at epoch0: n_point {args.n_point}->{n_point_init}, "
+            f"n_ray {args.n_ray}->{n_ray_init}"
+        )
+        args.n_point = int(n_point_init)
+        args.n_ray = int(n_ray_init)
 
     if args.mix_config:
         ds, sampler, mix_info = build_mixed_pretrain(
@@ -157,12 +265,9 @@ def main():
         )
 
     qa_tokens = bool(args.qa_tokens)
-    if qa_tokens:
-        t = 1 + 2 * args.n_point + 2 * args.n_ray + (1 if bool(args.add_eos) else 0)
-        n_types = 9
-    else:
-        t = 1 + args.n_point + args.n_ray + (1 if bool(args.add_eos) else 0)
-        n_types = 5
+    n_types = 9 if qa_tokens else 5
+    # max_len is the *capacity*; actual sequence length varies with n_point/n_ray.
+    t = int(args.max_len)
 
     model = QueryNepa(
         feat_dim=15,
@@ -199,12 +304,35 @@ def main():
 
     if resume_path:
         ckpt = torch.load(resume_path, map_location="cpu")
-        model.load_state_dict(ckpt["model"], strict=True)
-        if "opt" in ckpt:
+
+        ckpt_model = ckpt["model"]
+        ckpt_pos_len: int | None = None
+        if (
+            "pos_emb" in ckpt_model
+            and torch.is_tensor(ckpt_model["pos_emb"])
+            and ckpt_model["pos_emb"].ndim == 3
+        ):
+            ckpt_pos_len = int(ckpt_model["pos_emb"].shape[1])
+            if ckpt_pos_len != int(t):
+                print(f"[resume] resizing pos_emb: ckpt_len={ckpt_pos_len} -> max_len={t}")
+                ckpt_model = maybe_resize_pos_emb_in_state_dict(dict(ckpt_model), int(t))
+
+        load_state_dict_flexible(model, ckpt_model, strict=True)
+
+        can_resume_opt = bool(int(args.resume_optimizer))
+        if ckpt_pos_len is not None and ckpt_pos_len != int(t):
+            # Optimizer state tensors for pos_emb would mismatch.
+            can_resume_opt = False
+
+        if can_resume_opt and ("opt" in ckpt):
             opt.load_state_dict(ckpt["opt"])
         else:
-            print("[resume] optimizer state missing in checkpoint; using fresh optimizer state")
-        if use_amp and ("scaler" in ckpt) and (ckpt["scaler"] is not None):
+            if "opt" not in ckpt:
+                print("[resume] optimizer state missing in checkpoint; using fresh optimizer state")
+            elif not can_resume_opt:
+                print("[resume] skipping optimizer state load")
+
+        if use_amp and can_resume_opt and ("scaler" in ckpt) and (ckpt["scaler"] is not None):
             try:
                 scaler.load_state_dict(ckpt["scaler"])
             except Exception as e:
@@ -227,8 +355,27 @@ def main():
     # Keep schedule consistent with resume.
     global_step = int(step)
 
+    # Track current dataset sizes so we only print when they change.
+    cur_n_point = int(args.n_point)
+    cur_n_ray = int(args.n_ray)
+
     model.train()
     for ep in range(start_epoch, args.epochs):
+        # Update dataset sizes according to schedule.
+        if n_point_sched or n_ray_sched:
+            new_n_point = _schedule_value(n_point_sched, ep, cur_n_point)
+            new_n_ray = _schedule_value(n_ray_sched, ep, cur_n_ray)
+            if new_n_point != cur_n_point or new_n_ray != cur_n_ray:
+                needed = _required_seq_len(new_n_point, new_n_ray)
+                if needed > int(t):
+                    raise ValueError(
+                        f"schedule requests seq_len={needed} at epoch {ep}, but --max_len={t}. "
+                        f"(n_point={new_n_point}, n_ray={new_n_ray}, qa_tokens={qa_tokens}, add_eos={add_eos})"
+                    )
+                ds.set_sizes(n_point=new_n_point, n_ray=new_n_ray)
+                cur_n_point, cur_n_ray = int(new_n_point), int(new_n_ray)
+                print(f"[schedule] epoch {ep}: n_point={cur_n_point}, n_ray={cur_n_ray}")
+
         if args.mix_config:
             # Deterministic per-epoch sampler.
             try:

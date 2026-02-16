@@ -225,6 +225,15 @@ def main():
     ap.add_argument("--cache_root", type=str, required=True)
     ap.add_argument("--split", type=str, default="eval")
     ap.add_argument("--ckpt", type=str, required=True)
+    ap.add_argument(
+        "--max_len",
+        type=int,
+        default=-1,
+        help=(
+            "Override model max_len (pos-emb length). If set and differs from checkpoint, "
+            "pos_emb is resized by 1D interpolation."
+        ),
+    )
     ap.add_argument("--context_backend", type=str, default="pointcloud_noray")
     ap.add_argument("--head_train_split", type=str, default="train_udf")
     ap.add_argument("--head_train_backend", type=str, default="udfgrid")
@@ -247,7 +256,7 @@ def main():
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model, ckpt = build_model_from_ckpt(args.ckpt, device)
+    model, ckpt = build_model_from_ckpt(args.ckpt, device, max_len_override=args.max_len)
     add_eos = infer_add_eos(ckpt, -1)
     qa_tokens = infer_qa_tokens(ckpt, -1)
 

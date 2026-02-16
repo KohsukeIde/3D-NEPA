@@ -1363,8 +1363,461 @@ CPAC-UDF (`head_train_split=train_udf`, `head_train_max_shapes=4000`):
 Chain artifacts:
 
 - pipeline log: `logs/analysis/kplane_sum_chain/pipeline.log`
+- note: this log only captures launcher-side wait start; final completion was confirmed from `results/*kplane_sum*_e50*.json` timestamps and contents
 - expected result prefixes:
   - `results/ucpr_kplane_sum_s0_e50_*_tiefix.json`
   - `results/ucpr_kplane_sum_large_s0_e50_*_tiefix.json`
   - `results/cpac_kplane_sum_s0_e50_*.json`
   - `results/cpac_kplane_sum_large_s0_e50_*.json`
+
+## Progress-8 Merge + Scaling-6 Smoke (Feb 16, 2026)
+
+This cycle starts integration of `/home/cvrt/Downloads/nepa_progress_8` into the active repo (`/home/cvrt/Desktop/dev/3D-NEPA`) and validates scaling hooks with small smoke runs.
+
+Merged code scope:
+
+- max-length/resizing utility:
+  - `nepa3d/utils/ckpt_utils.py` (new)
+- pretrain/finetune scaling:
+  - `nepa3d/train/pretrain.py`
+  - `nepa3d/train/finetune_cls.py`
+  - `nepa3d/data/dataset.py`
+  - `nepa3d/data/mixed_pretrain.py`
+- eval max-len override:
+  - `nepa3d/analysis/retrieval_ucpr.py` (merged while keeping tie-aware ranking + sanity flags)
+  - `nepa3d/analysis/completion_cpac_udf.py`
+  - `nepa3d/analysis/qualitative_cpac_marching_cubes.py`
+- wrappers:
+  - `scripts/pretrain/nepa3d_pretrain.sh`
+  - `scripts/analysis/nepa3d_ucpr.sh`
+  - `scripts/analysis/nepa3d_cpac_udf.sh`
+
+### Commands used (smoke)
+
+```bash
+# 1) pretrain scaling schedule smoke (2 epochs)
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.train.pretrain \
+  --mix_config nepa3d/configs/shapenet_unpaired_mix.yaml \
+  --mix_num_samples 128 --mix_seed 0 \
+  --objective nepa --qa_tokens 1 \
+  --dual_mask_near 0.4 --dual_mask_far 0.1 --dual_mask_window 32 \
+  --dual_mask_warmup_frac 0.05 \
+  --epochs 2 --batch 8 \
+  --n_point 64 --n_ray 32 \
+  --max_len 512 \
+  --n_point_schedule "0:64,1:96" \
+  --n_ray_schedule "0:32,1:64" \
+  --num_workers 2 \
+  --save_every 1 --save_last 1 \
+  --resume_optimizer 1 \
+  --save_dir runs/_tmp_scale_sched_smoke_fresh \
+  --seed 0
+
+# 2) CPAC pool/grid with and without max_len scaling (small subset)
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 1000 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --baseline nn_copy \
+  --max_shapes 120 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --n_context 256 --n_query 256 --query_source pool \
+  --out_json results/cpac_nepa_qa_dualmask_ep049_pc2udf_120_nontrans_pool_n256_smoke.json
+
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --max_len 4096 \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 1000 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source pool \
+  --max_shapes 120 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --n_context 512 --n_query 512 \
+  --out_json results/cpac_nepa_qa_dualmask_ep049_pc2udf_120_nontrans_n512_maxlen4096_smoke.json
+
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 1000 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source grid --baseline nn_copy \
+  --max_shapes 120 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --n_context 256 --n_query 256 \
+  --out_json results/cpac_nepa_qa_dualmask_ep049_pc2udf_120_nontrans_grid_n256_smoke.json
+
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --max_len 4096 \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 1000 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source grid --baseline nn_copy \
+  --max_shapes 120 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --n_context 512 --n_query 512 \
+  --out_json results/cpac_nepa_qa_dualmask_ep049_pc2udf_120_nontrans_grid_n512_maxlen4096_smoke.json
+
+# 3) UCPR smoke with max_len override and larger n_point/n_ray
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.retrieval_ucpr \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --max_len 4096 \
+  --query_backend mesh --gallery_backend udfgrid \
+  --n_point 512 --n_ray 512 \
+  --eval_seed 0 --eval_seed_gallery 999 \
+  --max_files 200 --pooling mean_a \
+  --out_json results/ucpr_nepa_qa_dualmask_ep049_mesh2udf_200_indep_mean_a_n512_maxlen4096_smoke.json
+```
+
+### Results (smoke)
+
+CPAC small-subset comparison (`max_shapes=120`, `head_train_max_shapes=1000`):
+
+| Query source | n_context/n_query | MAE | RMSE | IoU@0.03 | NN-copy MAE/RMSE/IoU@0.03 |
+|---|---:|---:|---:|---:|---|
+| pool | 256/256 | 0.02507 | 0.03322 | 0.78617 | `0.06244 / 0.09688 / 0.78598` |
+| pool | 512/512 (`max_len=4096`) | 0.02845 | 0.03839 | 0.77282 | - |
+| grid | 256/256 | 0.03329 | 0.04153 | 0.36364 | `0.10837 / 0.13583 / 0.13222` |
+| grid | 512/512 (`max_len=4096`) | 0.04011 | 0.05154 | 0.34259 | `0.08690 / 0.10867 / 0.18620` |
+
+UCPR smoke (`mesh->udfgrid`, `max_files=200`, `pooling=mean_a`, `n_point=n_ray=512`, `max_len=4096`):
+
+- `R@1=0.010`, `R@5=0.050`, `R@10=0.080`, `mAP=0.04454`
+
+Pretrain schedule smoke:
+
+- run completed with dynamic size update (`[schedule] epoch 1: n_point=96, n_ray=64`)
+- artifacts: `runs/_tmp_scale_sched_smoke_fresh/{ckpt_ep000.pt,ckpt_ep001.pt,last.pt}`
+
+### Readout (smoke)
+
+- Progress-8 merge is now active in the main repo for scaling hooks (`max_len`, schedule, pos-emb resize).
+- No regression observed in retrieval tie-aware path (tie-aware args and sanity flag preserved).
+- On this small subset, naive inference-time scaling (`256 -> 512`) did not improve CPAC; retraining with scaling curriculum is required for fair assessment.
+- Grid remains substantially above NN-copy in these smoke settings, but is still far below pool in absolute IoU.
+
+## A-Pilot: Query Mix / Grid Sampler / Target Transform (Feb 16, 2026)
+
+This cycle adds minimal A-style controls to `completion_cpac_udf.py`:
+
+- `--query_source {pool,grid,hybrid}`
+- `--query_pool_frac` (used when `hybrid`)
+- `--grid_sample_mode {uniform,near_surface,stratified}`
+- `--grid_near_tau`, `--grid_near_frac`
+- `--target_transform {none,trunc,log1p}`
+- `--target_trunc_max`, `--target_log_scale`
+- `--report_near_tau` (`near@tau_report` metrics block)
+
+Wrapper update:
+
+- `scripts/analysis/nepa3d_cpac_udf.sh` now forwards all options above.
+
+### Commands used (smoke, `max_shapes=40`)
+
+```bash
+# pool control
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 800 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source pool --baseline nn_copy \
+  --max_shapes 40 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --out_json results/cpac_nepa_qa_dualmask_s0_pc2udf_40_pool_control_a6_smoke.json
+
+# hybrid (pool 50% + grid 50%), uniform grid sampling
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 800 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source hybrid --query_pool_frac 0.5 \
+  --grid_sample_mode uniform --baseline nn_copy \
+  --max_shapes 40 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --out_json results/cpac_nepa_qa_dualmask_s0_pc2udf_40_hybrid50_uniform_a6_smoke.json
+
+# hybrid + near-surface grid sampling
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 800 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source hybrid --query_pool_frac 0.5 \
+  --grid_sample_mode near_surface --grid_near_tau 0.05 --grid_near_frac 0.8 \
+  --baseline nn_copy \
+  --max_shapes 40 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --out_json results/cpac_nepa_qa_dualmask_s0_pc2udf_40_hybrid50_near08_notrans_a6_smoke.json
+
+# hybrid + near-surface + trunc target transform
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 800 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source hybrid --query_pool_frac 0.5 \
+  --grid_sample_mode near_surface --grid_near_tau 0.05 --grid_near_frac 0.8 \
+  --target_transform trunc --target_trunc_max 0.1 \
+  --baseline nn_copy \
+  --max_shapes 40 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --out_json results/cpac_nepa_qa_dualmask_s0_pc2udf_40_hybrid50_near08_trunc01_a6_smoke.json
+
+# grid-only comparison: uniform vs near-surface
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 800 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source grid --grid_sample_mode uniform \
+  --baseline nn_copy \
+  --max_shapes 40 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --out_json results/cpac_nepa_qa_dualmask_s0_pc2udf_40_grid_uniform_a6_smoke.json
+
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 800 \
+  --n_context 256 --n_query 256 \
+  --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source grid --grid_sample_mode near_surface \
+  --grid_near_tau 0.05 --grid_near_frac 0.8 \
+  --baseline nn_copy \
+  --max_shapes 40 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --out_json results/cpac_nepa_qa_dualmask_s0_pc2udf_40_grid_near08_a6_smoke.json
+```
+
+### Results (smoke)
+
+| Setting | Probe MAE / RMSE / IoU@0.03 | Near-only (`y<=0.05`) MAE / RMSE / IoU@0.03 | NN-copy MAE / RMSE / IoU@0.03 |
+|---|---|---|---|
+| pool control | `0.02463 / 0.03280 / 0.79701` | `0.01746 / 0.02292 / 0.79807` | `0.06199 / 0.09604 / 0.80096` |
+| hybrid 50/50 + uniform | `0.02930 / 0.03728 / 0.71381` | `0.02172 / 0.02840 / 0.71540` | `0.08456 / 0.11662 / 0.70852` |
+| hybrid 50/50 + near-surface | `0.02337 / 0.03076 / 0.66440` | `0.01880 / 0.02426 / 0.66492` | `0.05048 / 0.08256 / 0.58683` |
+| hybrid + near-surface + trunc(0.1) | `0.16416 / 0.30722 / 0.76923` | `0.01199 / 0.01497 / 0.77024` | `0.05048 / 0.08256 / 0.58683` |
+| grid + uniform | `0.03299 / 0.04098 / 0.41451` | `0.03587 / 0.04522 / 0.43011` | `0.10856 / 0.13542 / 0.13086` |
+| grid + near-surface | `0.02168 / 0.02844 / 0.53708` | `0.01880 / 0.02384 / 0.53729` | `0.03885 / 0.06578 / 0.42571` |
+
+### Readout (A-pilot)
+
+- Grid query improves substantially with near-surface sampling (`IoU 0.4145 -> 0.5371` in this smoke).
+- Hybrid sampling lowers absolute IoU vs pool-only, but clearly exceeds NN-copy under the same mixed query distribution.
+- Trunc transform is useful for near-surface optimization (`near MAE` strongly improved), but raw MAE is no longer directly comparable to non-trunc settings.
+- Next step should be full-scale rerun (`max_shapes=800`, `head_train_max_shapes=4000`, eval-seed sweep) before drawing main-table conclusions.
+
+### Full matrix (`max_shapes=800`, `head_train_max_shapes=4000`, `eval_seed=0,1,2`)
+
+Runner:
+
+- `scripts/analysis/run_cpac_a_pilot_full.sh`
+
+Executed:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 EVAL_SEEDS="0 1 2" \
+MAX_SHAPES=800 HEAD_TRAIN_MAX_SHAPES=4000 \
+bash scripts/analysis/run_cpac_a_pilot_full.sh
+```
+
+Result JSONs:
+
+- `results/cpac_nepa_qa_dualmask_s0_pc2udf_800_pool_uniform_seed{0,1,2}.json`
+- `results/cpac_nepa_qa_dualmask_s0_pc2udf_800_grid_uniform_seed{0,1,2}.json`
+- `results/cpac_nepa_qa_dualmask_s0_pc2udf_800_grid_near08_seed{0,1,2}.json`
+- `results/cpac_nepa_qa_dualmask_s0_pc2udf_800_hybrid50_uniform_seed{0,1,2}.json`
+- `results/cpac_nepa_qa_dualmask_s0_pc2udf_800_hybrid50_near08_seed{0,1,2}.json`
+- `results/cpac_nepa_qa_dualmask_s0_pc2udf_800_hybrid50_near08_trunc01_seed{0,1,2}.json`
+- aggregated summary: `results/cpac_nepa_qa_dualmask_s0_pc2udf_800_a_pilot_seed012_summary.json`
+
+Mean ± std over `eval_seed=0,1,2`:
+
+| Setting | Probe MAE | Probe RMSE | Probe IoU@0.03 | Near-MAE (`y<=0.05`) | Near-IoU@0.03 | NN-copy MAE/RMSE/IoU@0.03 |
+|---|---:|---:|---:|---:|---:|---|
+| pool uniform | 0.02653 ± 0.00001 | 0.03528 ± 0.00009 | 0.72218 ± 0.00151 | 0.01946 ± 0.00003 | 0.72398 ± 0.00150 | `0.06149 ± 0.00001 / 0.09454 ± 0.00014 / 0.70786 ± 0.00075` |
+| grid uniform | 0.03563 ± 0.00011 | 0.04477 ± 0.00018 | 0.29243 ± 0.00247 | 0.03666 ± 0.00027 | 0.30348 ± 0.00328 | `0.10416 ± 0.00013 / 0.13173 ± 0.00018 / 0.13060 ± 0.00069` |
+| grid near08 | 0.02307 ± 0.00008 | 0.03058 ± 0.00010 | 0.46286 ± 0.00027 | 0.02015 ± 0.00007 | 0.46328 ± 0.00030 | `0.03867 ± 0.00006 / 0.06566 ± 0.00012 / 0.37682 ± 0.00061` |
+| hybrid50 uniform | 0.03162 ± 0.00006 | 0.04051 ± 0.00013 | 0.62275 ± 0.00139 | 0.02416 ± 0.00007 | 0.62579 ± 0.00143 | `0.08282 ± 0.00009 / 0.11464 ± 0.00015 / 0.60840 ± 0.00047` |
+| hybrid50 near08 | 0.02532 ± 0.00001 | 0.03357 ± 0.00006 | 0.59457 ± 0.00155 | 0.02068 ± 0.00002 | 0.59556 ± 0.00162 | `0.05025 ± 0.00008 / 0.08165 ± 0.00024 / 0.52811 ± 0.00087` |
+| hybrid50 near08 + trunc0.1 | 0.14299 ± 0.00031 | 0.27323 ± 0.00057 | 0.70613 ± 0.00073 | 0.01344 ± 0.00001 | 0.70780 ± 0.00082 | `0.05025 ± 0.00008 / 0.08165 ± 0.00024 / 0.52811 ± 0.00087` |
+
+Readout (full matrix):
+
+- `grid` bottleneck is reduced by near-surface sampling (`IoU 0.292 -> 0.463`) while keeping a stable gain over NN-copy.
+- `pool` remains strongest on this protocol (`IoU ~0.722`), consistent with earlier runs.
+- `hybrid` improves over NN-copy but does not yet exceed pool-only; query distribution design still needs tuning.
+- `trunc` strongly improves near-surface fit and IoU, but raw MAE/RMSE become non-comparable; report trunc rows as auxiliary.
+
+## B-1 Pilot: Lipschitz-Regularized Probe (Feb 16, 2026)
+
+This cycle adds an optional Lipschitz penalty to the CPAC ridge probe fitting path in:
+
+- `nepa3d/analysis/completion_cpac_udf.py`
+
+Added args:
+
+- `--ridge_lipschitz_lambda`
+- `--ridge_lipschitz_pairs`
+- `--ridge_lipschitz_steps`
+- `--ridge_lipschitz_lr`
+- `--ridge_lipschitz_batch`
+- `--ridge_lipschitz_max_points`
+- `--ridge_lipschitz_seed`
+
+Wrapper forwarding added in:
+
+- `scripts/analysis/nepa3d_cpac_udf.sh` (`RIDGE_LIPSCHITZ_*`)
+
+Implementation note (stability fix in this cycle):
+
+- The Lipschitz refinement now uses a ridge solution computed on the same capped training set.
+- If sampled violations are already zero at init, refinement is skipped (`zero_violation_at_init`) to avoid unnecessary drift.
+
+### Commands used
+
+Quick lambda sweep (`max_shapes=200`, `grid_near08`):
+
+```bash
+for L in 0 1e-4 3e-4 1e-3; do
+  TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+    --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+    --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+    --context_backend pointcloud_noray \
+    --head_train_split train_udf --head_train_backend udfgrid \
+    --head_train_max_shapes 1000 \
+    --n_context 256 --n_query 256 --disjoint_context_query 1 \
+    --context_mode_train normal --context_mode_test normal \
+    --rep_source h --query_source grid \
+    --grid_sample_mode near_surface --grid_near_tau 0.05 --grid_near_frac 0.8 \
+    --max_shapes 200 --head_train_ratio 0.2 \
+    --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+    --ridge_lipschitz_lambda ${L} --ridge_lipschitz_pairs 1024 \
+    --ridge_lipschitz_steps 80 --ridge_lipschitz_lr 1e-2 \
+    --ridge_lipschitz_batch 4096 --ridge_lipschitz_max_points 50000 \
+    --out_json results/cpac_nepa_qa_dualmask_s0_pc2udf_200_grid_near08_lip${L}_v2.json
+
+done
+```
+
+High-pair check (`max_shapes=200`):
+
+```bash
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+  --context_backend pointcloud_noray \
+  --head_train_split train_udf --head_train_backend udfgrid \
+  --head_train_max_shapes 1000 \
+  --n_context 256 --n_query 256 --disjoint_context_query 1 \
+  --context_mode_train normal --context_mode_test normal \
+  --rep_source h --query_source grid \
+  --grid_sample_mode near_surface --grid_near_tau 0.05 --grid_near_frac 0.8 \
+  --max_shapes 200 --head_train_ratio 0.2 \
+  --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+  --ridge_lipschitz_lambda 1e-3 --ridge_lipschitz_pairs 16384 \
+  --ridge_lipschitz_steps 120 --ridge_lipschitz_lr 5e-3 \
+  --ridge_lipschitz_batch 4096 --ridge_lipschitz_max_points 100000 \
+  --out_json results/cpac_nepa_qa_dualmask_s0_pc2udf_200_grid_near08_lip1e-3_pairs16k_v2.json
+```
+
+Full-size comparison (`max_shapes=800`, `htrain4k`, `eval_seed=0,1,2`):
+
+```bash
+for S in 0 1 2; do
+  TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+    --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+    --ckpt runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt \
+    --context_backend pointcloud_noray \
+    --head_train_split train_udf --head_train_backend udfgrid \
+    --head_train_max_shapes 4000 \
+    --n_context 256 --n_query 256 --disjoint_context_query 1 \
+    --context_mode_train normal --context_mode_test normal \
+    --rep_source h --query_source grid \
+    --grid_sample_mode near_surface --grid_near_tau 0.05 --grid_near_frac 0.8 \
+    --max_shapes 800 --head_train_ratio 0.2 \
+    --ridge_lambda 1e-3 --tau 0.03 --eval_seed ${S} \
+    --ridge_lipschitz_lambda 1e-3 --ridge_lipschitz_pairs 16384 \
+    --ridge_lipschitz_steps 120 --ridge_lipschitz_lr 5e-3 \
+    --ridge_lipschitz_batch 4096 --ridge_lipschitz_max_points 200000 \
+    --out_json results/cpac_nepa_qa_dualmask_s0_pc2udf_800_grid_near08_lip1e-3_pairs16k_v2$( [ ${S} -eq 0 ] && echo '' || echo "_seed${S}" ).json
+
+done
+```
+
+### Results
+
+Quick sweep (`max_shapes=200`, seed0):
+
+| Setting | MAE | RMSE | IoU@0.03 | Notes |
+|---|---:|---:|---:|---|
+| `lip=0` | 0.02223 | 0.02929 | 0.52529 | baseline |
+| `lip=1e-4, pairs=1024` | 0.02222 | 0.02935 | 0.52519 | `zero_violation_at_init` |
+| `lip=3e-4, pairs=1024` | 0.02222 | 0.02935 | 0.52519 | `zero_violation_at_init` |
+| `lip=1e-3, pairs=1024` | 0.02222 | 0.02935 | 0.52519 | `zero_violation_at_init` |
+| `lip=1e-3, pairs=16384` | 0.02235 | 0.02939 | 0.52106 | `init_lip=1.85e-5` |
+
+Full-size (`max_shapes=800`, `eval_seed=0,1,2`) vs baseline `grid_near08`:
+
+| Setting | MAE mean ± std | RMSE mean ± std | IoU@0.03 mean ± std | Near-IoU@0.03 mean ± std |
+|---|---:|---:|---:|---:|
+| baseline (`lip=0`) | 0.02307 ± 0.00008 | 0.03058 ± 0.00010 | 0.46286 ± 0.00027 | 0.46328 ± 0.00030 |
+| Lipschitz (`lip=1e-3`, `pairs=16384`) | 0.02329 ± 0.00015 | 0.03087 ± 0.00020 | 0.45720 ± 0.00233 | 0.45765 ± 0.00230 |
+
+Delta (`Lipschitz - baseline`):
+
+- MAE: `+0.000216`
+- RMSE: `+0.000284`
+- IoU@0.03: `-0.005654`
+- Near-IoU@0.03: `-0.005626`
+
+Summary artifact:
+
+- `results/cpac_nepa_qa_dualmask_s0_pc2udf_800_grid_near08_b1_lipschitz_summary.json`
+
+### Readout (B-1 pilot)
+
+- Under current probe-time formulation, B-1 does **not** improve CPAC grid-near performance.
+- With moderate pair sampling, violations are often already near-zero at initialization; with large pair sampling, penalties activate but still slightly hurt IoU.
+- Keep `ridge_lipschitz_lambda=0` as default for main runs.
+- B-1 hooks remain in code for future use (e.g., pretrain-time regularization instead of probe-time only).

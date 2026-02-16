@@ -138,6 +138,15 @@ class MixedPretrainDataset(Dataset):
     def __getitem__(self, idx: int):
         return self.concat[idx]
 
+    # -------------------------
+    # Runtime scaling helpers
+    # -------------------------
+    def set_sizes(self, *, n_point: int | None = None, n_ray: int | None = None) -> None:
+        """Propagate sampling-size updates to underlying datasets."""
+        for ds in self.datasets:
+            if hasattr(ds, "set_sizes"):
+                ds.set_sizes(n_point=n_point, n_ray=n_ray)
+
 
 class MixtureSampler(Sampler[int]):
     """Sample from a concatenated dataset by first sampling dataset-id, then local index.

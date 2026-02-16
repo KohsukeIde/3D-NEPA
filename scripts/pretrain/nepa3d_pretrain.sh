@@ -36,6 +36,9 @@ EPOCHS="${EPOCHS:-50}"
 LR="${LR:-3e-4}"
 N_POINT="${N_POINT:-256}"
 N_RAY="${N_RAY:-256}"
+MAX_LEN="${MAX_LEN:--1}"  # -1 = auto from (qa_tokens/add_eos/n_point/n_ray/schedules)
+N_POINT_SCHEDULE="${N_POINT_SCHEDULE:-}"  # e.g., '0:256,10:512,20:1024'
+N_RAY_SCHEDULE="${N_RAY_SCHEDULE:-}"      # e.g., '0:256,10:512'
 D_MODEL="${D_MODEL:-384}"
 LAYERS="${LAYERS:-8}"
 HEADS="${HEADS:-6}"
@@ -44,6 +47,7 @@ SAVE_EVERY="${SAVE_EVERY:-10}"
 SAVE_LAST="${SAVE_LAST:-1}"
 AUTO_RESUME="${AUTO_RESUME:-1}"
 RESUME="${RESUME:-}"
+RESUME_OPTIMIZER="${RESUME_OPTIMIZER:-1}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
 SEED="${SEED:-0}"
 DROP_RAY_PROB="${DROP_RAY_PROB:-0.0}"
@@ -69,6 +73,9 @@ fi
   --batch "${BATCH}" --epochs "${EPOCHS}" \
   --lr "${LR}" \
   --n_point "${N_POINT}" --n_ray "${N_RAY}" \
+  --max_len "${MAX_LEN}" \
+  --n_point_schedule "${N_POINT_SCHEDULE}" \
+  --n_ray_schedule "${N_RAY_SCHEDULE}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
   --num_workers "${NUM_WORKERS}" \
   --drop_ray_prob "${DROP_RAY_PROB}" \
@@ -79,6 +86,7 @@ fi
   --save_last "${SAVE_LAST}" \
   --auto_resume "${AUTO_RESUME}" \
   --resume "${RESUME}" \
+  --resume_optimizer "${RESUME_OPTIMIZER}" \
   --voxel_grid "${VOXEL_GRID}" \
   --voxel_dilate "${VOXEL_DILATE}" \
   --voxel_max_steps "${VOXEL_MAX_STEPS}" \
