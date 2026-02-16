@@ -53,16 +53,33 @@ def make_backend(name, path, voxel_grid, voxel_dilate, voxel_max_steps):
     raise ValueError(f"unknown backend: {name}")
 
 
-def _sample_ctx_qry(pt_xyz_pool, pt_dist_pool, n_context, n_query, rng):
-    n_pool = int(pt_xyz_pool.shape[0])
-    total = int(n_context) + int(n_query)
-    replace = n_pool < total
-    idx = rng.choice(n_pool, size=total, replace=replace).astype(np.int64)
-    cidx = idx[: int(n_context)]
-    qidx = idx[int(n_context):]
-    ctx_xyz = pt_xyz_pool[cidx].astype(np.float32, copy=False)
-    ctx_dist = pt_dist_pool[cidx].astype(np.float32, copy=False)
-    qry_xyz = pt_xyz_pool[qidx].astype(np.float32, copy=False)
+def _sample_ctx_qry(
+    pt_xyz_query,
+    pt_dist_query,
+    pt_xyz_context,
+    pt_dist_context,
+    n_context,
+    n_query,
+    rng,
+    disjoint_context_query=True,
+):
+    n_q_pool = int(pt_xyz_query.shape[0])
+    n_c_pool = int(pt_xyz_context.shape[0])
+    use_disjoint = bool(disjoint_context_query) and (n_q_pool == n_c_pool)
+
+    if use_disjoint:
+        total = int(n_context) + int(n_query)
+        replace = n_q_pool < total
+        idx = rng.choice(n_q_pool, size=total, replace=replace).astype(np.int64)
+        cidx = idx[: int(n_context)]
+        qidx = idx[int(n_context):]
+    else:
+        cidx = rng.choice(n_c_pool, size=int(n_context), replace=n_c_pool < int(n_context)).astype(np.int64)
+        qidx = rng.choice(n_q_pool, size=int(n_query), replace=n_q_pool < int(n_query)).astype(np.int64)
+
+    ctx_xyz = pt_xyz_context[cidx].astype(np.float32, copy=False)
+    ctx_dist = pt_dist_context[cidx].astype(np.float32, copy=False)
+    qry_xyz = pt_xyz_query[qidx].astype(np.float32, copy=False)
     if ctx_xyz.shape[0] > 0:
         order = np.argsort(morton3d(ctx_xyz))
         ctx_xyz = ctx_xyz[order]
@@ -89,20 +106,49 @@ def embed_path(
     pooling: str = "mean_query",
     ablate_query_xyz: bool = False,
     ablate_context_dist: bool = False,
+    context_mode: str = "normal",
+    mismatch_path: str | None = None,
+    disjoint_context_query: bool = True,
 ):
     descs = []
     for k in range(max(1, int(mc_k))):
         rng = np.random.RandomState(_stable_seed(path, eval_seed, k))
-        be = make_backend(backend, path, voxel_grid, voxel_dilate, voxel_max_steps)
-        pools = be.get_pools()
+        be_q = make_backend(backend, path, voxel_grid, voxel_dilate, voxel_max_steps)
+        pools_q = be_q.get_pools()
 
-        ctx_xyz, ctx_dist, qry_xyz = _sample_ctx_qry(
-            pools["pt_xyz_pool"],
-            pools["pt_dist_pool"],
-            n_context=n_context,
-            n_query=n_query,
-            rng=rng,
-        )
+        if context_mode == "none":
+            ctx_xyz = np.zeros((0, 3), dtype=np.float32)
+            ctx_dist = np.zeros((0,), dtype=np.float32)
+            n_q_pool = int(pools_q["pt_xyz_pool"].shape[0])
+            qidx = rng.choice(n_q_pool, size=int(n_query), replace=n_q_pool < int(n_query)).astype(np.int64)
+            qry_xyz = pools_q["pt_xyz_pool"][qidx].astype(np.float32, copy=False)
+            if qry_xyz.shape[0] > 0:
+                order = np.argsort(morton3d(qry_xyz))
+                qry_xyz = qry_xyz[order]
+        else:
+            ctx_path = mismatch_path if (context_mode == "mismatch" and mismatch_path is not None) else path
+            be_c = make_backend(backend, ctx_path, voxel_grid, voxel_dilate, voxel_max_steps)
+            pools_c = be_c.get_pools()
+            ctx_xyz, ctx_dist, qry_xyz = _sample_ctx_qry(
+                pools_q["pt_xyz_pool"],
+                pools_q["pt_dist_pool"],
+                pools_c["pt_xyz_pool"],
+                pools_c["pt_dist_pool"],
+                n_context=n_context,
+                n_query=n_query,
+                rng=rng,
+                disjoint_context_query=bool(disjoint_context_query),
+            )
+
+        if context_mode not in ("normal", "none", "mismatch"):
+            raise ValueError(f"unknown context_mode: {context_mode}")
+
+        if qry_xyz.shape[0] == 0:
+            # Avoid empty query pooling edge case.
+            continue
+        if ctx_xyz.shape[0] == 0:
+            ctx_xyz = np.zeros((0, 3), dtype=np.float32)
+            ctx_dist = np.zeros((0,), dtype=np.float32)
 
         ctx_xyz_t = torch.from_numpy(ctx_xyz).unsqueeze(0).to(device).float()
         ctx_dist_t = torch.from_numpy(ctx_dist).unsqueeze(0).to(device).float()
@@ -131,17 +177,27 @@ def embed_path(
     return out.astype(np.float32)
 
 
-def retrieval_metrics(query, gallery, ks=(1, 5, 10), chunk=256):
+def _ranks_from_score_tieaware(score: np.ndarray, target_idx: np.ndarray) -> np.ndarray:
+    order = np.argsort(-score, axis=1, kind="mergesort")
+    inv = np.empty_like(order, dtype=np.int32)
+    inv[np.arange(order.shape[0])[:, None], order] = np.arange(order.shape[1], dtype=np.int32)[None, :]
+    return inv[np.arange(order.shape[0]), target_idx.astype(np.int32)] + 1
+
+
+def retrieval_metrics(query, gallery, ks=(1, 5, 10), chunk=256, tie_seed=0, tie_break_eps=1e-6):
     q = query / (np.linalg.norm(query, axis=1, keepdims=True) + 1e-9)
     g = gallery / (np.linalg.norm(gallery, axis=1, keepdims=True) + 1e-9)
     n = q.shape[0]
     ranks = np.zeros((n,), dtype=np.int32)
+    rng = np.random.RandomState(int(tie_seed) & 0xFFFFFFFF)
 
     for s in range(0, n, chunk):
         e = min(n, s + chunk)
         score = q[s:e] @ g.T
-        corr = score[np.arange(e - s), np.arange(s, e)]
-        ranks[s:e] = 1 + np.sum(score > corr[:, None], axis=1).astype(np.int32)
+        if float(tie_break_eps) > 0.0:
+            score = score + float(tie_break_eps) * rng.standard_normal(score.shape).astype(np.float32, copy=False)
+        target_idx = np.arange(s, e, dtype=np.int32)
+        ranks[s:e] = _ranks_from_score_tieaware(score, target_idx)
 
     out = {}
     for k in ks:
@@ -172,6 +228,17 @@ def main():
     ap.add_argument("--pooling", type=str, default="mean_query", choices=["mean_query", "plane_gap"])
     ap.add_argument("--ablate_query_xyz", action="store_true")
     ap.add_argument("--ablate_context_dist", action="store_true")
+    ap.add_argument("--disjoint_context_query", type=int, default=1, choices=[0, 1])
+    ap.add_argument("--context_mode_query", type=str, default="normal", choices=["normal", "none", "mismatch"])
+    ap.add_argument("--context_mode_gallery", type=str, default="normal", choices=["normal", "none", "mismatch"])
+    ap.add_argument("--mismatch_shift_query", type=int, default=1)
+    ap.add_argument("--mismatch_shift_gallery", type=int, default=1)
+    ap.add_argument("--tie_break_eps", type=float, default=1e-6)
+    ap.add_argument(
+        "--sanity_constant_embed",
+        action="store_true",
+        help="Sanity mode: replace all embeddings with a constant vector to verify rank behaves ~random.",
+    )
     ap.add_argument("--out_json", type=str, default="")
     args = ap.parse_args()
 
@@ -188,9 +255,21 @@ def main():
     if eval_seed_gallery < 0:
         eval_seed_gallery = int(args.eval_seed)
 
+    def _build_mismatch_paths(mode: str, shift: int):
+        out = [None for _ in range(len(paths))]
+        if mode == "mismatch" and len(paths) > 1:
+            s = int(shift) % len(paths)
+            if s == 0:
+                s = 1
+            out = [paths[(i + s) % len(paths)] for i in range(len(paths))]
+        return out
+
+    mismatch_q = _build_mismatch_paths(args.context_mode_query, int(args.mismatch_shift_query))
+    mismatch_g = _build_mismatch_paths(args.context_mode_gallery, int(args.mismatch_shift_gallery))
+
     Q = []
     G = []
-    for p in tqdm(paths, desc=f"embed query={args.query_backend}"):
+    for i, p in enumerate(tqdm(paths, desc=f"embed query={args.query_backend}")):
         Q.append(
             embed_path(
                 model,
@@ -207,9 +286,12 @@ def main():
                 pooling=args.pooling,
                 ablate_query_xyz=bool(args.ablate_query_xyz),
                 ablate_context_dist=bool(args.ablate_context_dist),
+                context_mode=str(args.context_mode_query),
+                mismatch_path=mismatch_q[i],
+                disjoint_context_query=bool(int(args.disjoint_context_query)),
             )
         )
-    for p in tqdm(paths, desc=f"embed gallery={args.gallery_backend}"):
+    for i, p in enumerate(tqdm(paths, desc=f"embed gallery={args.gallery_backend}")):
         G.append(
             embed_path(
                 model,
@@ -226,12 +308,27 @@ def main():
                 pooling=args.pooling,
                 ablate_query_xyz=bool(args.ablate_query_xyz),
                 ablate_context_dist=bool(args.ablate_context_dist),
+                context_mode=str(args.context_mode_gallery),
+                mismatch_path=mismatch_g[i],
+                disjoint_context_query=bool(int(args.disjoint_context_query)),
             )
         )
 
     Q = np.stack(Q, axis=0)
     G = np.stack(G, axis=0)
-    out = retrieval_metrics(Q, G, ks=(1, 5, 10), chunk=int(args.chunk))
+    if bool(args.sanity_constant_embed):
+        Q.fill(1.0)
+        G.fill(1.0)
+
+    tie_seed = int(args.eval_seed) * 1000003 + int(eval_seed_gallery)
+    out = retrieval_metrics(
+        Q,
+        G,
+        ks=(1, 5, 10),
+        chunk=int(args.chunk),
+        tie_seed=tie_seed,
+        tie_break_eps=float(args.tie_break_eps),
+    )
     out.update(
         {
             "query_backend": args.query_backend,
@@ -245,6 +342,14 @@ def main():
             "pooling": str(args.pooling),
             "ablate_query_xyz": bool(args.ablate_query_xyz),
             "ablate_context_dist": bool(args.ablate_context_dist),
+            "disjoint_context_query": bool(int(args.disjoint_context_query)),
+            "context_mode_query": str(args.context_mode_query),
+            "context_mode_gallery": str(args.context_mode_gallery),
+            "mismatch_shift_query": int(args.mismatch_shift_query),
+            "mismatch_shift_gallery": int(args.mismatch_shift_gallery),
+            "tie_break_eps": float(args.tie_break_eps),
+            "sanity_constant_embed": bool(args.sanity_constant_embed),
+            "expected_random_r@1": float(1.0 / max(1, len(paths))),
             "ckpt": os.path.abspath(args.ckpt),
             "kplane_cfg": ckpt.get("kplane_cfg", {}),
         }

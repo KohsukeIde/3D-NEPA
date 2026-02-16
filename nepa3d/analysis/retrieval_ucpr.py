@@ -197,17 +197,28 @@ def embed_path(
     return out.astype(np.float32)
 
 
-def retrieval_metrics(query, gallery, ks=(1, 5, 10), chunk=256):
+def _ranks_from_score_tieaware(score: np.ndarray, target_idx: np.ndarray) -> np.ndarray:
+    # Tie-aware rank via full sorting: equal scores are handled by pre-added tiny noise.
+    order = np.argsort(-score, axis=1, kind="mergesort")
+    inv = np.empty_like(order, dtype=np.int32)
+    inv[np.arange(order.shape[0])[:, None], order] = np.arange(order.shape[1], dtype=np.int32)[None, :]
+    return inv[np.arange(order.shape[0]), target_idx.astype(np.int32)] + 1
+
+
+def retrieval_metrics(query, gallery, ks=(1, 5, 10), chunk=256, tie_seed=0, tie_break_eps=1e-6):
     q = query / (np.linalg.norm(query, axis=1, keepdims=True) + 1e-9)
     g = gallery / (np.linalg.norm(gallery, axis=1, keepdims=True) + 1e-9)
     n = q.shape[0]
     ranks = np.zeros((n,), dtype=np.int32)
+    rng = np.random.RandomState(int(tie_seed) & 0xFFFFFFFF)
 
     for s in range(0, n, chunk):
         e = min(n, s + chunk)
         score = q[s:e] @ g.T
-        corr = score[np.arange(e - s), np.arange(s, e)]
-        ranks[s:e] = 1 + np.sum(score > corr[:, None], axis=1).astype(np.int32)
+        if float(tie_break_eps) > 0.0:
+            score = score + float(tie_break_eps) * rng.standard_normal(score.shape).astype(np.float32, copy=False)
+        target_idx = np.arange(s, e, dtype=np.int32)
+        ranks[s:e] = _ranks_from_score_tieaware(score, target_idx)
 
     out = {}
     for k in ks:
@@ -259,6 +270,12 @@ def main():
     ap.add_argument("--voxel_grid", type=int, default=64)
     ap.add_argument("--voxel_dilate", type=int, default=1)
     ap.add_argument("--voxel_max_steps", type=int, default=0)
+    ap.add_argument("--tie_break_eps", type=float, default=1e-6)
+    ap.add_argument(
+        "--sanity_constant_embed",
+        action="store_true",
+        help="Sanity mode: replace all embeddings with a constant vector to verify rank behaves ~random.",
+    )
     ap.add_argument("--out_json", type=str, default="")
     args = ap.parse_args()
 
@@ -326,7 +343,19 @@ def main():
             args.ablate_point_dist,
         )
 
-    metrics = retrieval_metrics(q_emb, g_emb, ks=(1, 5, 10), chunk=max(1, int(args.chunk)))
+    if bool(args.sanity_constant_embed):
+        q_emb.fill(1.0)
+        g_emb.fill(1.0)
+
+    tie_seed = int(args.eval_seed) * 1000003 + int(eval_seed_gallery)
+    metrics = retrieval_metrics(
+        q_emb,
+        g_emb,
+        ks=(1, 5, 10),
+        chunk=max(1, int(args.chunk)),
+        tie_seed=tie_seed,
+        tie_break_eps=float(args.tie_break_eps),
+    )
     metrics.update(
         {
             "query_backend": args.query_backend,
@@ -342,6 +371,9 @@ def main():
             "ablate_point_xyz": bool(args.ablate_point_xyz),
             "ablate_point_dist": bool(args.ablate_point_dist),
             "pooling": str(args.pooling),
+            "tie_break_eps": float(args.tie_break_eps),
+            "sanity_constant_embed": bool(args.sanity_constant_embed),
+            "expected_random_r@1": float(1.0 / max(1, len(paths))),
             "ckpt": os.path.abspath(args.ckpt),
         }
     )

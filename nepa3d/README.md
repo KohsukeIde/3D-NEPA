@@ -230,6 +230,12 @@ K-plane full-chain (wait pretrain completion, then run UCPR/CPAC pack):
 bash scripts/analysis/launch_kplane_full_chain_local.sh
 ```
 
+K-plane fusion sweep chain (wait `kplane_sum` / `kplane_sum_large` e50 completion, then run tie-aware UCPR/CPAC pack):
+
+```bash
+bash scripts/analysis/launch_kplane_sum_chain_local.sh
+```
+
 Qualitative CPAC (grid query + marching cubes):
 
 ```bash
@@ -307,14 +313,42 @@ Full tables:
 - completed checkpoints:
   - `runs/eccv_kplane_product_s0/ckpt_ep049.pt`
   - `runs/eccv_triplane_sum_s0/ckpt_ep049.pt`
-- quick readout (`mesh -> udfgrid`, `pooling=mean_query`, `max_files=1000`):
-  - k-plane(product): `R@1=0.003`, `mAP=0.02029`
-  - tri-plane(sum): `R@1=0.049`, `mAP=0.11009`
+- quick readout (`mesh -> udfgrid`, `pooling=mean_query`, `max_files=1000`, tie-aware ranking):
+  - k-plane(product): `R@1=0.002`, `mAP=0.01992`
+  - tri-plane(sum): `R@1=0.050`, `mAP=0.11058`
 - CPAC readout (`pointcloud_noray -> udf`, non-trans, `max_shapes=800`):
   - k-plane(product): `MAE=0.17604`, `RMSE=0.24831`, `IoU@0.03=0.61277`
   - tri-plane(sum): `MAE=0.09774`, `RMSE=0.15701`, `IoU@0.03=0.75702`
+- retrieval evaluator fix:
+  - tie-aware ranking + constant-embedding sanity check added to `retrieval_ucpr.py` and `retrieval_kplane.py`
+  - details and before/after comparison are in:
+    - `nepa3d/docs/results_ucpr_cpac_active.md` (`Tie-Aware UCPR Fix + Sanity`)
 - full commands and pooling/ablation/control results are in:
   - `nepa3d/docs/results_ucpr_cpac_active.md`
+
+### 6.5 K-plane fusion sweep (completed, e50)
+
+- completed checkpoints:
+  - `runs/eccv_kplane_sum_s0/ckpt_ep049.pt` (`plane_type=kplane`, `fusion=sum`, `plane_res=64`, `ch=32`, `hid=128`)
+  - `runs/eccv_kplane_sum_large_s0/ckpt_ep049.pt` (`plane_type=kplane`, `fusion=sum`, `plane_res=128`, `ch=64`, `hid=256`)
+- logs:
+  - `logs/pretrain/eccv_kplane_baseline/kplane_sum_s0_bs96_e50.log`
+  - `logs/pretrain/eccv_kplane_baseline/kplane_sum_large_s0_bs96_e50.log`
+- quick readout (tie-aware UCPR):
+  - `mesh -> udfgrid`
+    - kplane(sum): `R@1=0.036`, `mAP=0.09429`
+    - kplane(sum, large): `R@1=0.030`, `mAP=0.06659`
+  - `mesh -> pointcloud_noray`
+    - kplane(sum): `R@1=0.040`, `mAP=0.09963`
+    - kplane(sum, large): `R@1=0.040`, `mAP=0.09308`
+- quick readout (CPAC pool normal, non-trans):
+  - kplane(sum): `MAE=0.09776`, `RMSE=0.15700`, `IoU@0.03=0.75630`
+  - kplane(sum, large): `MAE=0.14229`, `RMSE=0.21260`, `IoU@0.03=0.52054`
+  - `kplane(sum)` is the stronger variant in this sweep
+- auto-eval chain:
+  - launcher: `scripts/analysis/launch_kplane_sum_chain_local.sh`
+  - worker: `scripts/analysis/run_kplane_sum_chain_local.sh`
+  - pipeline log: `logs/analysis/kplane_sum_chain/pipeline.log`
 
 ## 7) Notes for paper
 

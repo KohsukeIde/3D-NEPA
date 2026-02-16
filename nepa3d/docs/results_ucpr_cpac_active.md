@@ -1245,3 +1245,126 @@ CPAC-UDF (non-transductive controls, `head_train_split=train_udf`, `head_train_m
 - For CPAC pool-normal, tri-plane(sum) is substantially better than k-plane(product), but both remain behind the current NN-copy baseline on MAE/RMSE.
 - CPAC controls (`testnone`, `testmismatch`) degrade strongly for both models, so context dependence is present.
 - The `k-plane(product)` `ablate_query_xyz` spike persists at e50 and should be treated as a likely shortcut artifact, not main evidence.
+
+### Tie-Aware UCPR Fix + Sanity (Feb 16, 2026, follow-up)
+
+This follow-up applies tie-aware rank handling in both retrieval evaluators:
+
+- `nepa3d/analysis/retrieval_ucpr.py`
+- `nepa3d/analysis/retrieval_kplane.py`
+
+Changes:
+
+- rank computation switched from `count(score > corr)` to tie-aware sorting
+- deterministic tiny noise (`tie_break_eps`, default `1e-6`) is added before ranking
+- sanity mode added: `--sanity_constant_embed`
+- `retrieval_kplane.py` also adds context controls:
+  - `--context_mode_query {normal,none,mismatch}`
+  - `--context_mode_gallery {normal,none,mismatch}`
+  - `--disjoint_context_query`, `--mismatch_shift_{query,gallery}`
+
+Wrapper updates:
+
+- `scripts/analysis/nepa3d_ucpr.sh`
+- `scripts/analysis/nepa3d_kplane_ucpr.sh`
+
+Sanity check (`max_files=200`, constant embeddings):
+
+| Evaluator | Pair | R@1 | expected random R@1 |
+|---|---|---:|---:|
+| `retrieval_kplane.py` | `mesh -> udfgrid` | 0.000 | 0.005 |
+| `retrieval_ucpr.py` | `mesh -> udfgrid` | 0.000 | 0.005 |
+
+Key re-readout after tie-fix (`max_files=1000`, `eval_seed=0`, `eval_seed_gallery=999`):
+
+| Pair / setting | K-plane(product) R@1/mAP | Tri-plane(sum) R@1/mAP |
+|---|---|---|
+| `mesh -> udfgrid`, `mean_query` | `0.002 / 0.01992` | `0.050 / 0.11058` |
+| `mesh -> pointcloud_noray`, `mean_query` | `0.006 / 0.02666` | `0.051 / 0.11700` |
+| `mesh -> udfgrid`, `ablate_query_xyz` | `0.000 / 0.00774` | `0.006 / 0.02066` |
+| `mesh -> udfgrid`, `ablate_context_dist` | `0.008 / 0.02442` | `0.049 / 0.11888` |
+
+Context controls on UCPR (`mesh -> udfgrid`, `mean_query`):
+
+| Model | normal R@1/mAP | `context_mode=none` R@1/mAP | `query=mismatch, gallery=normal` R@1/mAP |
+|---|---|---|---|
+| K-plane(product) | `0.002 / 0.01992` | `0.002 / 0.00817` | `0.001 / 0.00803` |
+| Tri-plane(sum) | `0.050 / 0.11058` | `0.002 / 0.00817` | `0.002 / 0.01412` |
+
+Interpretation update:
+
+- The previous product `ablate_query_xyz` spike (`R@1=0.364`) is removed by tie-aware ranking and was an evaluation artifact.
+- Under corrected ranking, both models collapse to near-random under `context_mode=none` and drop strongly under query-side mismatch.
+- Main ordering remains unchanged: tri-plane(sum) > k-plane(product) on hard-pair UCPR in this setup.
+
+## K-plane Fusion Sweep (completed, Feb 16, 2026)
+
+Objective:
+
+- follow-up from feedback item `(2)` and compare `kplane + sum` variants against existing `kplane(product)` / `triplane(sum)` under the same protocol
+
+Completed checkpoints:
+
+- base: `runs/eccv_kplane_sum_s0` (`fusion=sum`, `plane_res=64`, `plane_channels=32`, `hidden_dim=128`)
+- large: `runs/eccv_kplane_sum_large_s0` (`fusion=sum`, `plane_res=128`, `plane_channels=64`, `hidden_dim=256`)
+
+Logs:
+
+- `logs/pretrain/eccv_kplane_baseline/kplane_sum_s0_bs96_e50.log`
+- `logs/pretrain/eccv_kplane_baseline/kplane_sum_large_s0_bs96_e50.log`
+
+Auto evaluation chain (wait for `ckpt_ep049.pt`, then run tie-aware UCPR/CPAC pack):
+
+```bash
+bash scripts/analysis/launch_kplane_sum_chain_local.sh
+```
+
+Smoke validation (existing checkpoints, reduced `max_files/max_shapes`) was run to verify chain wiring before waiting for new checkpoints:
+
+- `scripts/analysis/run_kplane_sum_chain_local.sh`
+- both model branches completed and emitted `_tmp_chain_smoke_*` JSON successfully
+
+Final eval execution:
+
+- `bash scripts/analysis/run_kplane_sum_chain_local.sh`
+- tie-aware UCPR + CPAC pack completed for both `kplane_sum_s0_e50` and `kplane_sum_large_s0_e50`
+
+### Results (e50, single-seed)
+
+UCPR hard pairs (`pooling=mean_query`, tie-aware):
+
+| Pair | K-plane(sum, base) R@1/R@5/R@10/mAP | K-plane(sum, large) R@1/R@5/R@10/mAP |
+|---|---|---|
+| `mesh -> udfgrid` | `0.036 / 0.130 / 0.187 / 0.09429` | `0.030 / 0.079 / 0.128 / 0.06659` |
+| `mesh -> pointcloud_noray` | `0.040 / 0.146 / 0.217 / 0.09963` | `0.040 / 0.125 / 0.203 / 0.09308` |
+
+CPAC-UDF (`head_train_split=train_udf`, `head_train_max_shapes=4000`):
+
+| Model / setting | MAE | RMSE | IoU@0.03 | Baseline (NN-copy) |
+|---|---:|---:|---:|---|
+| K-plane(sum, base), `pool normal` | 0.09776 | 0.15700 | 0.75630 | `0.06151 / 0.09474 / 0.70891` |
+| K-plane(sum, large), `pool normal` | 0.14229 | 0.21260 | 0.52054 | `0.06151 / 0.09474 / 0.70891` |
+| K-plane(sum, base), `pool testnone` | 0.37192 | 0.41225 | 0.00000 | - |
+| K-plane(sum, large), `pool testnone` | 0.31261 | 0.34175 | 0.00000 | - |
+| K-plane(sum, base), `pool testmismatch` | 0.16285 | 0.22623 | 0.39971 | - |
+| K-plane(sum, large), `pool testmismatch` | 0.20377 | 0.26490 | 0.23201 | - |
+| K-plane(sum, base), `grid normal` | 0.15984 | 0.20484 | 0.12538 | `0.10402 / 0.13157 / 0.12963` |
+| K-plane(sum, large), `grid normal` | 0.19829 | 0.24462 | 0.06178 | `0.10402 / 0.13157 / 0.12963` |
+
+### Readout (fusion sweep)
+
+- `kplane + sum` clearly outperforms `kplane + product` on hard-pair UCPR in this setup.
+- `kplane + sum (base)` is stronger than `kplane + sum (large)` across UCPR and CPAC.
+- Against previous baselines:
+  - UCPR: `kplane + sum (base)` is below `tri-plane(sum)` but much closer than `kplane(product)`.
+  - CPAC pool-normal: `kplane + sum (base)` is effectively on par with `tri-plane(sum)` (`MAE/RMSE/IoU` nearly equal).
+- CPAC controls remain valid: both `testnone` and `testmismatch` degrade strongly from `pool normal`, confirming context dependence.
+
+Chain artifacts:
+
+- pipeline log: `logs/analysis/kplane_sum_chain/pipeline.log`
+- expected result prefixes:
+  - `results/ucpr_kplane_sum_s0_e50_*_tiefix.json`
+  - `results/ucpr_kplane_sum_large_s0_e50_*_tiefix.json`
+  - `results/cpac_kplane_sum_s0_e50_*.json`
+  - `results/cpac_kplane_sum_large_s0_e50_*.json`

@@ -28,9 +28,11 @@ MC_K="${MC_K:-1}"
 MAX_FILES="${MAX_FILES:-0}"
 # Pooling: eos / mean_a / mean_zhat
 POOLING="${POOLING:-eos}"
+TIE_BREAK_EPS="${TIE_BREAK_EPS:-1e-6}"
 # Optional ablations (0/1)
 ABLATE_POINT_XYZ="${ABLATE_POINT_XYZ:-0}"
 ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
+SANITY_CONSTANT_EMBED="${SANITY_CONSTANT_EMBED:-0}"
 OUT_JSON="${OUT_JSON:-results/ucpr_${QUERY_BACKEND}_to_${GALLERY_BACKEND}.json}"
 
 EXTRA_ARGS=""
@@ -39,6 +41,9 @@ if [ "${ABLATE_POINT_XYZ}" -eq 1 ]; then
 fi
 if [ "${ABLATE_POINT_DIST}" -eq 1 ]; then
   EXTRA_ARGS="${EXTRA_ARGS} --ablate_point_dist"
+fi
+if [ "${SANITY_CONSTANT_EMBED}" -eq 1 ]; then
+  EXTRA_ARGS="${EXTRA_ARGS} --sanity_constant_embed"
 fi
 
 "${PYTHON_BIN}" -m nepa3d.analysis.retrieval_ucpr \
@@ -52,5 +57,6 @@ fi
   --mc_k "${MC_K}" \
   --max_files "${MAX_FILES}" \
   --pooling "${POOLING}" \
+  --tie_break_eps "${TIE_BREAK_EPS}" \
   --out_json "${OUT_JSON}" \
   ${EXTRA_ARGS}
