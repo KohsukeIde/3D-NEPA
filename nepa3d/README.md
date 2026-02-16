@@ -8,12 +8,14 @@ This file is the active-run hub.
   - K-plane/Tri-plane baseline track on ShapeNet-unpaired cache (UCPR/CPAC)
 - As-of snapshot date: February 16, 2026
 
-Legacy means ModelNet40-era experiments only. See `nepa3d/docs/results_modelnet40_legacy.md`.
+Legacy means early/pre-review snapshots (including old ModelNet40-era runs). Current active ModelNet40 protocol is tracked separately.
 
 ## Quick Links
 
 - Results index: `nepa3d/docs/results_index.md`
 - ScanObjectNN core3 active tables: `nepa3d/docs/results_scanobjectnn_core3_active.md`
+- ScanObjectNN review tables (paper-safe core3, full-ft + linear-probe): `nepa3d/docs/results_scanobjectnn_review_active.md`
+- ModelNet40 PointGPT-style protocol (full + few-shot LP): `nepa3d/docs/results_modelnet40_pointgpt_active.md`
 - ScanObjectNN M1 legacy snapshot (`75/75`): `nepa3d/docs/results_scanobjectnn_m1_legacy.md`
 - UCPR/CPAC active results (incl. QA cycle): `nepa3d/docs/results_ucpr_cpac_active.md`
 - UCPR/CPAC planning doc: `nepa3d/docs/eccv_ucpr_cpac_tables.md`
@@ -275,40 +277,67 @@ bash scripts/logs/cleanup_stale_pids.sh
 
 ## 6) Current result snapshot
 
-### 6.1 Paper-safe ScanObjectNN core3 (active)
+### 6.1 ScanObjectNN review tables (active, complete)
 
-Status (as of February 15, 2026):
+Status (as of February 16, 2026):
 
-- completed jobs: `135 / 135`
+- full fine-tune: `225/225` complete
+- linear probe (`freeze_backbone=1`): `225/225` complete
 - variants: `obj_bg`, `obj_only`, `pb_t50_rs`
-- methods: `scratch`, `shapenet_nepa`, `shapenet_mesh_udf_nepa`
+- methods: `scratch`, `shapenet_nepa`, `shapenet_mesh_udf_nepa`, `shapenet_mix_nepa`, `shapenet_mix_mae`
 
-Best-by-K summary:
+Best-by-K (full fine-tune, selected):
 
 | Variant | K | best method | test_acc mean +- std |
 |---|---:|---|---:|
-| `obj_bg` | 0 | `shapenet_mesh_udf_nepa` | 0.6575 +- 0.0092 |
-| `obj_bg` | 20 | `shapenet_mesh_udf_nepa` | 0.4687 +- 0.0239 |
-| `obj_only` | 0 | `shapenet_mesh_udf_nepa` | 0.6621 +- 0.0165 |
-| `obj_only` | 20 | `shapenet_mesh_udf_nepa` | 0.4968 +- 0.0162 |
-| `pb_t50_rs` | 0 | `shapenet_mesh_udf_nepa` | 0.5228 +- 0.0092 |
-| `pb_t50_rs` | 20 | `shapenet_mesh_udf_nepa` | 0.2898 +- 0.0215 |
+| `obj_bg` | 0 | `shapenet_mix_nepa` | 0.6718 +- 0.0077 |
+| `obj_bg` | 20 | `shapenet_mix_nepa` | 0.4997 +- 0.0131 |
+| `obj_only` | 0 | `shapenet_mix_nepa` | 0.6690 +- 0.0029 |
+| `obj_only` | 20 | `shapenet_mix_nepa` | 0.4945 +- 0.0045 |
+| `pb_t50_rs` | 0 | `shapenet_mix_nepa` | 0.5501 +- 0.0023 |
+| `pb_t50_rs` | 20 | `shapenet_mix_nepa` | 0.3038 +- 0.0068 |
 
 Full tables:
 
-- `nepa3d/docs/results_scanobjectnn_core3_active.md`
+- `nepa3d/docs/results_scanobjectnn_review_active.md`
+- raw/summary CSV: `results/scan_variants_review_raw.csv`, `results/scan_variants_review_summary.csv`
 
-### 6.2 Legacy M1 (`75/75`) moved
+### 6.2 ModelNet40 PointGPT-style protocol (active, complete)
+
+Status (as of February 16, 2026):
+
+- full fine-tune: `15/15` complete (5 methods x 3 seeds)
+- few-shot linear-probe episodic: `200/200` complete (`N={5,10}`, `K={10,20}`, 10 trials)
+- total: `215/215` complete
+
+Best-by-setting:
+
+- full: `shapenet_mesh_udf_nepa` (`0.8633 +- 0.0059`)
+- few-shot LP `N=5, K=10`: `shapenet_nepa` (`0.5893 +- 0.1759`)
+- few-shot LP `N=5, K=20`: `shapenet_nepa` (`0.6031 +- 0.1612`)
+- few-shot LP `N=10, K=10`: `shapenet_nepa` (`0.4091 +- 0.0667`)
+- few-shot LP `N=10, K=20`: `shapenet_nepa` (`0.5151 +- 0.0824`)
+
+Full tables:
+
+- `nepa3d/docs/results_modelnet40_pointgpt_active.md`
+- raw/summary CSV: `results/modelnet40_pointgpt_protocol_raw.csv`, `results/modelnet40_pointgpt_protocol_summary.csv`
+
+### 6.3 Paper-safe ScanObjectNN core3 baseline snapshot
+
+- baseline snapshot (without mix methods): `nepa3d/docs/results_scanobjectnn_core3_active.md`
+
+### 6.4 Legacy M1 (`75/75`) moved
 
 - `nepa3d/docs/results_scanobjectnn_m1_legacy.md`
 
-### 6.3 UCPR/CPAC active details moved
+### 6.5 UCPR/CPAC active details moved
 
 - `nepa3d/docs/results_ucpr_cpac_active.md`
 - latest follow-up (`pooling/context controls`, Feb 15, 2026) is also tracked there
 - latest MAE parity + eval-seed variance follow-up (Feb 15, 2026) is tracked there
 
-### 6.4 K-plane/Tri-plane full run (active, e50)
+### 6.6 K-plane/Tri-plane full run (active, e50)
 
 - completed checkpoints:
   - `runs/eccv_kplane_product_s0/ckpt_ep049.pt`
@@ -326,7 +355,7 @@ Full tables:
 - full commands and pooling/ablation/control results are in:
   - `nepa3d/docs/results_ucpr_cpac_active.md`
 
-### 6.5 K-plane fusion sweep (completed, e50)
+### 6.7 K-plane fusion sweep (completed, e50)
 
 - completed checkpoints:
   - `runs/eccv_kplane_sum_s0/ckpt_ep049.pt` (`plane_type=kplane`, `fusion=sum`, `plane_res=64`, `ch=32`, `hid=128`)
@@ -359,3 +388,4 @@ Full tables:
 - ScanObjectNN classification should be treated as downstream/supporting evidence; core unpaired capability evidence is UCPR/CPAC.
 - Fine-tune launcher now defaults to `N_RAY=0` when `BACKEND=pointcloud_noray` and `N_RAY` is not explicitly set.
 - ModelNet40 few-shot protocol support was added to `finetune_cls.py` via `--fewshot_n_way` and `--fewshot_way_seed` (episodic N-way M-shot trials).
+- Current ModelNet40 protocol in this repo is `full fine-tune` + `few-shot linear probe`; LP-FT (two-stage linear-probe then full-unfreeze) is not included yet.
