@@ -13,6 +13,16 @@ Artifacts:
 
 - summary: `results/scan_variants_review_summary.csv`
 
+## Protocol notes (pretrain objective / masking)
+
+- These tables are downstream classification results (`finetune_cls.py`); no MAE-style token masking is applied during fine-tuning.
+- `shapenet_nepa`, `shapenet_mesh_udf_nepa`, `shapenet_mix_nepa` use pretrains with `objective=nepa` (next-embedding prediction, not token-masked MAE).
+- `shapenet_mix_mae` uses pretrain with `objective=mae` and token masking (`mask_ratio=0.4`; masked input tokens are zeroed during pretraining).
+- Checkpoints used in this table are pre-QA/dual-mask runs (`qa_tokens=0`, no dual-mask schedule).
+- For ScanObjectNN caches used here (`scanobjectnn_*_v2`), `pt_dist_pool` is observation-derived (KDTree nearest-neighbor distance to scan points), so this downstream table does not depend on mesh-derived distance labels.
+- `pt_dist_pc_pool` is not required for these ScanObjectNN caches: `pt_dist_pool` already stores pointcloud-derived distances by construction.
+- Caveat for ShapeNet pointcloud experiments (not this table): if pointcloud backend is used on `shapenet_cache_v0`, add `pt_dist_pc_pool` via migration to avoid falling back to mesh-derived `pt_dist_pool`.
+
 
 ## Full Fine-tune
 

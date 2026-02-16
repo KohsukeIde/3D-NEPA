@@ -385,8 +385,10 @@ Full tables:
 - For camera-ready classification tables, use split-specific cache (`main_split`) and protocol-variant tables.
 - Current classification tables are aggregated from `last.pt`; in this codebase `last.pt` is saved after reloading best-val state.
 - ScanObjectNN task here is query-token classification (`POINT xyz + dist`, optional ray), not raw point-set classification.
+- In ScanObjectNN caches used for active classification tables, `pt_dist_pool` is pointcloud-derived (KDTree to observed scan points), so this downstream setup is valid as point-observation-based query-token classification.
 - MC evaluation is used in current setup (`mc_eval_k_test=4`); report this explicitly against raw-point baselines.
 - ScanObjectNN classification should be treated as downstream/supporting evidence; core unpaired capability evidence is UCPR/CPAC.
+- In review classification tables, `shapenet_*_nepa` checkpoints are `objective=nepa` (non-MAE masking), while `shapenet_mix_mae` is `objective=mae` with token masking (`mask_ratio=0.4`); those tables use pre-QA/dual-mask checkpoints.
 - Fine-tune launcher now defaults to `N_RAY=0` when `BACKEND=pointcloud_noray` and `N_RAY` is not explicitly set.
 - ModelNet40 few-shot protocol support was added to `finetune_cls.py` via `--fewshot_n_way` and `--fewshot_way_seed` (episodic N-way M-shot trials).
 - Current ModelNet40 protocol in this repo is `full fine-tune` + `few-shot linear probe`; LP-FT (two-stage linear-probe then full-unfreeze) is not included yet.
