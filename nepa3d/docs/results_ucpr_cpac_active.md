@@ -1152,3 +1152,96 @@ UCPR ablation (`mesh -> udfgrid`, `pooling=mean_query`):
 - Both plane baselines remain below current NEPA QA+dualmask CPAC numbers in this repo.
 - The `k-plane(product)` `ablate_query_xyz` spike on `mesh->udfgrid` is likely a shortcut artifact and should not be used as main evidence without additional controls.
 - These are pilot numbers (`epochs=5`, single seed), not final table settings.
+
+## K-Plane / Tri-Plane Full Run (e50, Feb 16, 2026)
+
+This block records the full-budget run (`epochs=50`, `mix_num_samples=200000`, seed=`0`) and the auto-eval chain outputs.
+
+Training checkpoints:
+
+- `runs/eccv_kplane_product_s0/ckpt_ep049.pt`
+- `runs/eccv_triplane_sum_s0/ckpt_ep049.pt`
+
+Training logs:
+
+- `logs/pretrain/eccv_kplane_baseline/kplane_product_s0_bs96_e50.log`
+- `logs/pretrain/eccv_kplane_baseline/triplane_sum_s0_bs96_e50.log`
+
+### Commands used
+
+Pretrain (local, 2 GPUs):
+
+```bash
+CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.train.pretrain_kplane \
+  --mix_config nepa3d/configs/shapenet_unpaired_mix.yaml \
+  --mix_num_samples 200000 --mix_seed 0 \
+  --batch 96 --epochs 50 --lr 3e-4 --weight_decay 0.05 \
+  --num_workers 6 --n_context 256 --n_query 256 \
+  --query_source pool --target_mode backend --disjoint_context_query 1 \
+  --plane_type kplane --fusion product \
+  --plane_resolutions 64 --plane_channels 32 --hidden_dim 128 \
+  --voxel_grid 64 --voxel_dilate 1 --voxel_max_steps 0 \
+  --save_dir runs/eccv_kplane_product_s0 \
+  --save_every 1 --save_last 1 --auto_resume 1 --seed 0
+
+CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.train.pretrain_kplane \
+  --mix_config nepa3d/configs/shapenet_unpaired_mix.yaml \
+  --mix_num_samples 200000 --mix_seed 0 \
+  --batch 96 --epochs 50 --lr 3e-4 --weight_decay 0.05 \
+  --num_workers 6 --n_context 256 --n_query 256 \
+  --query_source pool --target_mode backend --disjoint_context_query 1 \
+  --plane_type triplane --fusion sum \
+  --plane_resolutions 64 --plane_channels 32 --hidden_dim 128 \
+  --voxel_grid 64 --voxel_dilate 1 --voxel_max_steps 0 \
+  --save_dir runs/eccv_triplane_sum_s0 \
+  --save_every 1 --save_last 1 --auto_resume 1 --seed 0
+```
+
+Auto evaluation chain (wait for `ckpt_ep049.pt`, then UCPR/CPAC):
+
+```bash
+bash scripts/analysis/launch_kplane_full_chain_local.sh
+```
+
+Chain scripts:
+
+- `scripts/analysis/run_kplane_full_chain_local.sh`
+- `scripts/analysis/launch_kplane_full_chain_local.sh`
+
+### Results (e50, single-seed)
+
+UCPR hard pairs:
+
+| Pair | Pooling | K-plane(product) R@1/R@5/R@10/mAP | Tri-plane(sum) R@1/R@5/R@10/mAP |
+|---|---|---|---|
+| `mesh -> udfgrid` | `mean_query` | `0.003 / 0.019 / 0.030 / 0.02029` | `0.049 / 0.140 / 0.214 / 0.11009` |
+| `mesh -> pointcloud_noray` | `mean_query` | `0.007 / 0.023 / 0.053 / 0.02678` | `0.051 / 0.169 / 0.249 / 0.11707` |
+| `mesh -> udfgrid` | `plane_gap` | `0.012 / 0.032 / 0.055 / 0.03146` | `0.031 / 0.102 / 0.166 / 0.07865` |
+| `mesh -> pointcloud_noray` | `plane_gap` | `0.020 / 0.046 / 0.079 / 0.04400` | `0.060 / 0.146 / 0.201 / 0.11397` |
+
+UCPR ablation (`mesh -> udfgrid`, `pooling=mean_query`):
+
+| Model | Base R@1/mAP | `ablate_query_xyz` R@1/mAP | `ablate_context_dist` R@1/mAP |
+|---|---|---|---|
+| K-plane(product) | `0.003 / 0.02029` | `0.364 / 0.36868` | `0.010 / 0.02969` |
+| Tri-plane(sum) | `0.049 / 0.11009` | `0.007 / 0.02146` | `0.049 / 0.11889` |
+
+CPAC-UDF (non-transductive controls, `head_train_split=train_udf`, `head_train_max_shapes=4000`):
+
+| Model / setting | MAE | RMSE | IoU@0.03 | Baseline (NN-copy) |
+|---|---:|---:|---:|---|
+| K-plane(product), `pool normal` | 0.17604 | 0.24831 | 0.61277 | `0.06151 / 0.09474 / 0.70891` |
+| Tri-plane(sum), `pool normal` | 0.09774 | 0.15701 | 0.75702 | `0.06151 / 0.09474 / 0.70891` |
+| K-plane(product), `pool testnone` | 0.28491 | 0.31325 | 0.00000 | - |
+| Tri-plane(sum), `pool testnone` | 0.37194 | 0.41228 | 0.00000 | - |
+| K-plane(product), `pool testmismatch` | 0.22691 | 0.27991 | 0.30185 | - |
+| Tri-plane(sum), `pool testmismatch` | 0.16289 | 0.22628 | 0.39990 | - |
+| K-plane(product), `grid normal` | 0.20849 | 0.25611 | 0.17028 | `0.10402 / 0.13157 / 0.12963` |
+| Tri-plane(sum), `grid normal` | 0.15981 | 0.20480 | 0.11956 | `0.10402 / 0.13157 / 0.12963` |
+
+### Readout (e50)
+
+- Full-budget run confirms tri-plane(sum) > k-plane(product) on hard-pair UCPR in this setup.
+- For CPAC pool-normal, tri-plane(sum) is substantially better than k-plane(product), but both remain behind the current NN-copy baseline on MAE/RMSE.
+- CPAC controls (`testnone`, `testmismatch`) degrade strongly for both models, so context dependence is present.
+- The `k-plane(product)` `ablate_query_xyz` spike persists at e50 and should be treated as a likely shortcut artifact, not main evidence.
