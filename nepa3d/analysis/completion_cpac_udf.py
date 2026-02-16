@@ -15,6 +15,7 @@ from ..backends.pointcloud_backend import (
 from ..backends.udfgrid_backend import UDFGridBackend
 from ..backends.voxel_backend import VoxelBackend
 from ..models.query_nepa import QueryNepa
+from ..utils.ckpt_utils import load_state_dict_flexible, maybe_resize_pos_emb_in_state_dict
 from ..token.ordering import morton3d
 from ..token.tokenizer import (
     TYPE_BOS,
@@ -59,7 +60,14 @@ def _sample_indices(n, k, rng):
     return rng.choice(n, size=k, replace=replace).astype(np.int64)
 
 
-def _sample_udf_grid_queries(d, rng, n_query):
+def _sample_udf_grid_queries(
+    d,
+    rng,
+    n_query,
+    mode="uniform",
+    near_tau=0.05,
+    near_frac=0.7,
+):
     if "udf_grid" not in d:
         raise RuntimeError("query_source=grid requires `udf_grid` in cache npz")
     udf = d["udf_grid"].astype(np.float32, copy=False)
@@ -68,7 +76,85 @@ def _sample_udf_grid_queries(d, rng, n_query):
     g = int(udf.shape[0])
     total = g * g * g
     n = int(min(int(n_query), total))
-    lin = rng.choice(total, size=n, replace=False).astype(np.int64)
+    if n <= 0:
+        return np.zeros((0, 3), dtype=np.float32), np.zeros((0,), dtype=np.float32)
+
+    mode = str(mode)
+    udf_flat = udf.reshape(-1)
+
+    if mode == "uniform":
+        lin = rng.choice(total, size=n, replace=False).astype(np.int64)
+    elif mode == "near_surface":
+        near_tau = float(near_tau)
+        near_frac = float(near_frac)
+        near_frac = min(max(near_frac, 0.0), 1.0)
+
+        near_idx = np.nonzero(udf_flat <= near_tau)[0]
+        far_idx = np.nonzero(udf_flat > near_tau)[0]
+
+        k_near = int(round(float(n) * near_frac))
+        k_near = max(0, min(k_near, n))
+
+        if near_idx.size <= 0:
+            k_near = 0
+        if far_idx.size <= 0:
+            k_near = n
+
+        k_near = min(k_near, int(near_idx.size))
+        k_far = n - k_near
+        k_far = min(k_far, int(far_idx.size))
+        rem = n - (k_near + k_far)
+        if rem > 0:
+            # Backfill from the larger pool first to avoid replacement.
+            add_near = min(rem, int(near_idx.size) - k_near)
+            k_near += add_near
+            rem -= add_near
+            if rem > 0:
+                add_far = min(rem, int(far_idx.size) - k_far)
+                k_far += add_far
+                rem -= add_far
+        if (k_near + k_far) < n:
+            # As a final fallback (very small grids), allow replacement.
+            idx = rng.choice(total, size=n, replace=True).astype(np.int64)
+            lin = idx
+        else:
+            parts = []
+            if k_near > 0:
+                parts.append(rng.choice(near_idx, size=k_near, replace=False).astype(np.int64))
+            if k_far > 0:
+                parts.append(rng.choice(far_idx, size=k_far, replace=False).astype(np.int64))
+            lin = np.concatenate(parts, axis=0)
+            rng.shuffle(lin)
+    elif mode == "stratified":
+        # Simple quantile-based stratified sampling over UDF magnitude.
+        q = np.quantile(udf_flat, [0.2, 0.4, 0.6, 0.8]).astype(np.float32)
+        bins = np.digitize(udf_flat, q, right=True)
+        n_bins = 5
+        per = n // n_bins
+        rem = n - per * n_bins
+        parts = []
+        for b in range(n_bins):
+            idx_b = np.nonzero(bins == b)[0]
+            kb = per + (1 if b < rem else 0)
+            if kb <= 0:
+                continue
+            if idx_b.size >= kb:
+                pick = rng.choice(idx_b, size=kb, replace=False).astype(np.int64)
+            else:
+                pick = rng.choice(total, size=kb, replace=False).astype(np.int64)
+            parts.append(pick)
+        if len(parts) == 0:
+            lin = rng.choice(total, size=n, replace=False).astype(np.int64)
+        else:
+            lin = np.concatenate(parts, axis=0).astype(np.int64, copy=False)
+            if lin.shape[0] > n:
+                lin = lin[:n]
+            elif lin.shape[0] < n:
+                add = rng.choice(total, size=(n - lin.shape[0]), replace=False).astype(np.int64)
+                lin = np.concatenate([lin, add], axis=0)
+            rng.shuffle(lin)
+    else:
+        raise ValueError(f"unknown grid_sample_mode: {mode}")
 
     i = lin // (g * g)
     j = (lin // g) % g
@@ -99,17 +185,38 @@ def _sample_ctx_query(
     disjoint_context_query=True,
     mismatch_path=None,
     query_source="pool",
+    query_pool_frac=0.5,
+    grid_sample_mode="uniform",
+    grid_near_tau=0.05,
+    grid_near_frac=0.7,
 ):
     rng = np.random.RandomState(_stable_seed(path, seed))
     d = np.load(path, allow_pickle=False)
     pt_xyz_pool = d["pt_xyz_pool"].astype(np.float32, copy=False)
     n_pool = int(pt_xyz_pool.shape[0])
 
+    query_source = str(query_source)
+    n_query_total = int(n_query)
+    if query_source == "pool":
+        n_query_pool = n_query_total
+        n_query_grid = 0
+    elif query_source == "grid":
+        n_query_pool = 0
+        n_query_grid = n_query_total
+    elif query_source == "hybrid":
+        p = float(query_pool_frac)
+        p = min(max(p, 0.0), 1.0)
+        n_query_pool = int(round(float(n_query_total) * p))
+        n_query_pool = max(0, min(n_query_pool, n_query_total))
+        n_query_grid = n_query_total - n_query_pool
+    else:
+        raise ValueError(f"unknown query_source: {query_source}")
+
     if context_mode == "normal" and bool(disjoint_context_query):
-        cidx, qidx_pool = _sample_disjoint_indices(n_pool, int(n_context), int(n_query), rng)
+        cidx, qidx_pool = _sample_disjoint_indices(n_pool, int(n_context), int(n_query_pool), rng)
     else:
         cidx = _sample_indices(n_pool, int(n_context), rng)
-        qidx_pool = _sample_indices(n_pool, int(n_query), rng)
+        qidx_pool = _sample_indices(n_pool, int(n_query_pool), rng)
 
     if context_mode == "none":
         n_ctx_eff = 0
@@ -134,7 +241,6 @@ def _sample_ctx_query(
             ctx_xyz = ctx_xyz[corder]
             ctx_dist = ctx_dist[corder]
 
-    query_source = str(query_source)
     if query_source == "pool":
         q_xyz = pt_xyz_pool[qidx_pool].astype(np.float32, copy=False)
         if "pt_dist_udf_pool" in d:
@@ -142,9 +248,35 @@ def _sample_ctx_query(
         else:
             q_dist = d["pt_dist_pool"].astype(np.float32, copy=False)[qidx_pool]
     elif query_source == "grid":
-        q_xyz, q_dist = _sample_udf_grid_queries(d, rng=rng, n_query=int(n_query))
-    else:
-        raise ValueError(f"unknown query_source: {query_source}")
+        q_xyz, q_dist = _sample_udf_grid_queries(
+            d,
+            rng=rng,
+            n_query=n_query_grid,
+            mode=grid_sample_mode,
+            near_tau=grid_near_tau,
+            near_frac=grid_near_frac,
+        )
+    elif query_source == "hybrid":
+        q_xyz_pool = pt_xyz_pool[qidx_pool].astype(np.float32, copy=False)
+        if "pt_dist_udf_pool" in d:
+            q_dist_pool = d["pt_dist_udf_pool"].astype(np.float32, copy=False)[qidx_pool]
+        else:
+            q_dist_pool = d["pt_dist_pool"].astype(np.float32, copy=False)[qidx_pool]
+        q_xyz_grid, q_dist_grid = _sample_udf_grid_queries(
+            d,
+            rng=rng,
+            n_query=n_query_grid,
+            mode=grid_sample_mode,
+            near_tau=grid_near_tau,
+            near_frac=grid_near_frac,
+        )
+        if q_xyz_pool.shape[0] <= 0:
+            q_xyz, q_dist = q_xyz_grid, q_dist_grid
+        elif q_xyz_grid.shape[0] <= 0:
+            q_xyz, q_dist = q_xyz_pool, q_dist_pool
+        else:
+            q_xyz = np.concatenate([q_xyz_pool, q_xyz_grid], axis=0)
+            q_dist = np.concatenate([q_dist_pool, q_dist_grid], axis=0)
 
     if q_xyz.shape[0] > 0:
         order = np.argsort(morton3d(q_xyz))
@@ -177,6 +309,10 @@ def _eval_nn_copy_baseline(
     disjoint_context_query=True,
     mismatch_shift=1,
     query_source="pool",
+    query_pool_frac=0.5,
+    grid_sample_mode="uniform",
+    grid_near_tau=0.05,
+    grid_near_frac=0.7,
 ):
     mismatch_paths = [None for _ in range(len(paths))]
     if context_mode == "mismatch" and len(paths) > 1:
@@ -201,6 +337,10 @@ def _eval_nn_copy_baseline(
             disjoint_context_query=bool(disjoint_context_query),
             mismatch_path=mismatch_paths[i],
             query_source=query_source,
+            query_pool_frac=query_pool_frac,
+            grid_sample_mode=grid_sample_mode,
+            grid_near_tau=grid_near_tau,
+            grid_near_frac=grid_near_frac,
         )
         yhat = _nn_copy_predict(ctx_xyz, ctx_dist, q_xyz)
         ys.append(q_dist.reshape(-1))
@@ -245,7 +385,7 @@ def infer_qa_tokens(ckpt, qa_tokens_arg):
     return bool(pre_args.get("qa_tokens", ckpt_n_types >= 9))
 
 
-def build_model_from_ckpt(ckpt_path, device):
+def build_model_from_ckpt(ckpt_path, device, max_len_override: int | None = None):
     ckpt = torch.load(ckpt_path, map_location="cpu")
     pre_args = ckpt.get("args", {})
     state = ckpt["model"]
@@ -253,7 +393,15 @@ def build_model_from_ckpt(ckpt_path, device):
     n_types = state["type_emb.weight"].shape[0]
     nhead = int(pre_args.get("heads", 6))
     num_layers = int(pre_args.get("layers", 8))
-    max_len = int(state["pos_emb"].shape[1])
+    ckpt_max_len = int(state["pos_emb"].shape[1])
+    max_len = (
+        ckpt_max_len
+        if (max_len_override is None or int(max_len_override) < 0)
+        else int(max_len_override)
+    )
+    if max_len != ckpt_max_len:
+        print(f"[ckpt] resizing pos_emb: ckpt_len={ckpt_max_len} -> max_len={max_len}")
+        state = maybe_resize_pos_emb_in_state_dict(dict(state), max_len)
 
     model = QueryNepa(
         feat_dim=15,
@@ -263,7 +411,7 @@ def build_model_from_ckpt(ckpt_path, device):
         num_layers=num_layers,
         max_len=max_len,
     )
-    model.load_state_dict(state, strict=True)
+    load_state_dict_flexible(model, state, strict=True)
     model.eval().to(device)
     return model, ckpt
 
@@ -286,6 +434,157 @@ def _ridge_pred(X, w):
     return (X @ w).astype(np.float32, copy=False)
 
 
+def _sample_intra_shape_pairs(group_indices, n_pairs, rng):
+    n_pairs = int(n_pairs)
+    if n_pairs <= 0:
+        return np.zeros((0,), dtype=np.int64), np.zeros((0,), dtype=np.int64)
+    valid = [g for g in group_indices if int(g.shape[0]) >= 2]
+    if len(valid) <= 0:
+        return np.zeros((0,), dtype=np.int64), np.zeros((0,), dtype=np.int64)
+
+    ii = np.empty((n_pairs,), dtype=np.int64)
+    jj = np.empty((n_pairs,), dtype=np.int64)
+    for t in range(n_pairs):
+        arr = valid[int(rng.randint(0, len(valid)))]
+        pick = rng.choice(arr, size=2, replace=False).astype(np.int64)
+        ii[t] = pick[0]
+        jj[t] = pick[1]
+    return ii, jj
+
+
+def _ridge_fit_lipschitz(
+    X,
+    y,
+    q_xyz,
+    group_id,
+    lam,
+    lip_lambda,
+    lip_pairs=2048,
+    lip_steps=200,
+    lip_lr=1e-2,
+    lip_batch=8192,
+    lip_max_points=200000,
+    lip_seed=0,
+):
+    # Closed-form ridge init (on the same data used for Lipschitz refinement).
+    lip_lambda = float(lip_lambda)
+    if lip_lambda <= 0.0:
+        return _ridge_fit(X, y, lam=lam), {"enabled": False}
+
+    X = X.astype(np.float32, copy=False)
+    y = y.astype(np.float32, copy=False)
+    q_xyz = q_xyz.astype(np.float32, copy=False)
+    group_id = group_id.astype(np.int64, copy=False).reshape(-1)
+
+    n = int(X.shape[0])
+    if n <= 1:
+        return _ridge_fit(X, y, lam=lam), {"enabled": True, "skipped": "too_few_points"}
+
+    rng = np.random.RandomState(int(lip_seed) & 0xFFFFFFFF)
+    if int(lip_max_points) > 0 and n > int(lip_max_points):
+        sel = rng.permutation(n)[: int(lip_max_points)]
+        X = X[sel]
+        y = y[sel]
+        q_xyz = q_xyz[sel]
+        group_id = group_id[sel]
+        n = int(X.shape[0])
+
+    # Build per-shape index pools for intra-shape pair sampling.
+    group_indices = []
+    for gid in np.unique(group_id):
+        idx = np.nonzero(group_id == gid)[0].astype(np.int64)
+        if int(idx.shape[0]) >= 2:
+            group_indices.append(idx)
+    if len(group_indices) <= 0:
+        return _ridge_fit(X, y, lam=lam), {"enabled": True, "skipped": "no_valid_groups"}
+
+    # Recompute ridge solution on the (possibly capped) training set.
+    w0 = _ridge_fit(X, y, lam=lam)
+
+    X_aug = np.concatenate([X, np.ones((n, 1), dtype=np.float32)], axis=1)
+    X_t = torch.from_numpy(X_aug)
+    y_t = torch.from_numpy(y.reshape(-1, 1).astype(np.float32, copy=False))
+    q_t = torch.from_numpy(q_xyz)
+
+    w_t = torch.nn.Parameter(torch.from_numpy(w0.astype(np.float32, copy=False)))
+    opt = torch.optim.Adam([w_t], lr=float(lip_lr))
+
+    lip_pairs = int(max(0, lip_pairs))
+    lip_steps = int(max(1, lip_steps))
+
+    # If ridge solution already satisfies sampled Lipschitz constraints, keep it.
+    with torch.no_grad():
+        init_lip = w_t.new_tensor(0.0)
+        if lip_pairs > 0:
+            ii0, jj0 = _sample_intra_shape_pairs(group_indices, lip_pairs, rng)
+            if ii0.shape[0] > 0:
+                ii0_t = torch.from_numpy(ii0)
+                jj0_t = torch.from_numpy(jj0)
+                di0 = (X_t[ii0_t] @ w_t).squeeze(-1)
+                dj0 = (X_t[jj0_t] @ w_t).squeeze(-1)
+                b0 = torch.norm(q_t[ii0_t] - q_t[jj0_t], dim=1)
+                init_lip = torch.relu(torch.abs(di0 - dj0) - b0).mean()
+        init_lip_val = float(init_lip.detach().cpu().item())
+    if init_lip_val <= 1e-12:
+        return w0, {
+            "enabled": True,
+            "skipped": "zero_violation_at_init",
+            "lip_lambda": float(lip_lambda),
+            "lip_pairs": int(lip_pairs),
+            "lip_steps": int(lip_steps),
+            "lip_lr": float(lip_lr),
+            "lip_batch": int(max(1, min(int(lip_batch), n))),
+            "lip_max_points": int(lip_max_points),
+            "n_train_points_after_cap": int(n),
+            "n_valid_groups": int(len(group_indices)),
+            "init_lip": init_lip_val,
+        }
+
+    last = {}
+    for _ in range(lip_steps):
+        pred_all = X_t @ w_t
+        mse = ((pred_all - y_t) ** 2).mean()
+        ridge = float(lam) * (w_t[:-1] ** 2).mean()
+
+        lip = w_t.new_tensor(0.0)
+        if lip_pairs > 0:
+            ii, jj = _sample_intra_shape_pairs(group_indices, lip_pairs, rng)
+            if ii.shape[0] > 0:
+                ii_t = torch.from_numpy(ii)
+                jj_t = torch.from_numpy(jj)
+                di = (X_t[ii_t] @ w_t).squeeze(-1)
+                dj = (X_t[jj_t] @ w_t).squeeze(-1)
+                bound = torch.norm(q_t[ii_t] - q_t[jj_t], dim=1)
+                lip = torch.relu(torch.abs(di - dj) - bound).mean()
+
+        loss = mse + ridge + lip_lambda * lip
+        opt.zero_grad(set_to_none=True)
+        loss.backward()
+        opt.step()
+        last = {
+            "mse": float(mse.detach().cpu().item()),
+            "ridge": float(ridge.detach().cpu().item()),
+            "lip": float(lip.detach().cpu().item()),
+            "loss": float(loss.detach().cpu().item()),
+        }
+
+    w = w_t.detach().cpu().numpy().astype(np.float32, copy=False)
+    info = {
+        "enabled": True,
+            "lip_lambda": float(lip_lambda),
+            "lip_pairs": int(lip_pairs),
+            "lip_steps": int(lip_steps),
+            "lip_lr": float(lip_lr),
+            "lip_batch": int(max(1, min(int(lip_batch), n))),
+            "lip_max_points": int(lip_max_points),
+            "n_train_points_after_cap": int(n),
+            "n_valid_groups": int(len(group_indices)),
+            "init_lip": init_lip_val,
+        }
+    info.update(last)
+    return w, info
+
+
 def _metrics(y_true, y_pred, tau):
     y_true = y_true.reshape(-1).astype(np.float32)
     y_pred = y_pred.reshape(-1).astype(np.float32)
@@ -297,6 +596,57 @@ def _metrics(y_true, y_pred, tau):
     union = np.sum(gt | pr) + 1e-9
     iou = float(inter / union)
     return {"mae": mae, "rmse": rmse, "iou@tau": iou}
+
+
+def _metrics_near(y_true, y_pred, tau, near_tau):
+    y_true = y_true.reshape(-1).astype(np.float32)
+    y_pred = y_pred.reshape(-1).astype(np.float32)
+    mask = y_true <= float(near_tau)
+    if int(mask.sum()) <= 0:
+        return {"n": 0, "mae": float("nan"), "rmse": float("nan"), "iou@tau": float("nan")}
+    m = _metrics(y_true[mask], y_pred[mask], tau=tau)
+    m["n"] = int(mask.sum())
+    return m
+
+
+def _transform_target(y, mode, trunc_max, log_scale):
+    mode = str(mode)
+    y = y.astype(np.float32, copy=False)
+    if mode == "none":
+        return y
+    if mode == "trunc":
+        return np.minimum(y, np.float32(trunc_max)).astype(np.float32, copy=False)
+    if mode == "log1p":
+        s = np.float32(max(float(log_scale), 1e-8))
+        return np.log1p(y / s).astype(np.float32, copy=False)
+    raise ValueError(f"unknown target_transform: {mode}")
+
+
+def _inverse_transform_target(y_t, mode, trunc_max, log_scale):
+    mode = str(mode)
+    y_t = y_t.astype(np.float32, copy=False)
+    if mode == "none":
+        return y_t
+    if mode == "trunc":
+        # information-losing transform; inverse is identity in transformed space.
+        return y_t
+    if mode == "log1p":
+        s = np.float32(max(float(log_scale), 1e-8))
+        return (np.expm1(y_t) * s).astype(np.float32, copy=False)
+    raise ValueError(f"unknown target_transform: {mode}")
+
+
+def _transform_tau(tau, mode, trunc_max, log_scale):
+    mode = str(mode)
+    t = float(tau)
+    if mode == "none":
+        return t
+    if mode == "trunc":
+        return min(t, float(trunc_max))
+    if mode == "log1p":
+        s = max(float(log_scale), 1e-8)
+        return float(np.log1p(t / s))
+    raise ValueError(f"unknown target_transform: {mode}")
 
 
 @torch.no_grad()
@@ -318,6 +668,10 @@ def extract_xy_for_path(
     mismatch_path=None,
     rep_source="h",
     query_source="pool",
+    query_pool_frac=0.5,
+    grid_sample_mode="uniform",
+    grid_near_tau=0.05,
+    grid_near_frac=0.7,
 ):
     if context_mode not in ("normal", "none", "mismatch"):
         raise ValueError(f"unknown context_mode: {context_mode}")
@@ -337,6 +691,10 @@ def extract_xy_for_path(
         disjoint_context_query=bool(disjoint_context_query),
         mismatch_path=mismatch_path,
         query_source=query_source,
+        query_pool_frac=query_pool_frac,
+        grid_sample_mode=grid_sample_mode,
+        grid_near_tau=grid_near_tau,
+        grid_near_frac=grid_near_frac,
     )
 
     bos = np.zeros((1, 15), dtype=np.float32)
@@ -433,7 +791,7 @@ def extract_xy_for_path(
         X = rep[q0:q1]
 
     y = q_dist.reshape(-1, 1).astype(np.float32, copy=False)
-    return X, y
+    return X, y, q_xyz.astype(np.float32, copy=False)
 
 
 def collect_xy(
@@ -455,6 +813,10 @@ def collect_xy(
     mismatch_shift=1,
     rep_source="h",
     query_source="pool",
+    query_pool_frac=0.5,
+    grid_sample_mode="uniform",
+    grid_near_tau=0.05,
+    grid_near_frac=0.7,
 ):
     mismatch_paths = [None for _ in range(len(paths))]
     if context_mode == "mismatch" and len(paths) > 1:
@@ -465,8 +827,10 @@ def collect_xy(
 
     xs = []
     ys = []
+    qxyzs = []
+    gids = []
     for i, p in enumerate(tqdm(paths, desc=desc)):
-        X, y = extract_xy_for_path(
+        X, y, q_xyz = extract_xy_for_path(
             model,
             p,
             context_backend,
@@ -484,10 +848,21 @@ def collect_xy(
             mismatch_path=mismatch_paths[i],
             rep_source=rep_source,
             query_source=query_source,
+            query_pool_frac=query_pool_frac,
+            grid_sample_mode=grid_sample_mode,
+            grid_near_tau=grid_near_tau,
+            grid_near_frac=grid_near_frac,
         )
         xs.append(X)
         ys.append(y)
-    return np.concatenate(xs, axis=0), np.concatenate(ys, axis=0)
+        qxyzs.append(q_xyz)
+        gids.append(np.full((q_xyz.shape[0],), i, dtype=np.int64))
+    return (
+        np.concatenate(xs, axis=0),
+        np.concatenate(ys, axis=0),
+        np.concatenate(qxyzs, axis=0),
+        np.concatenate(gids, axis=0),
+    )
 
 
 def main():
@@ -495,6 +870,15 @@ def main():
     ap.add_argument("--cache_root", type=str, required=True)
     ap.add_argument("--split", type=str, default="eval")
     ap.add_argument("--ckpt", type=str, required=True)
+    ap.add_argument(
+        "--max_len",
+        type=int,
+        default=-1,
+        help=(
+            "Override model max_len (pos-emb length). If set and differs from checkpoint, "
+            "pos_emb is resized by 1D interpolation."
+        ),
+    )
     ap.add_argument("--context_backend", type=str, default="pointcloud_noray")
     ap.add_argument("--n_context", type=int, default=256)
     ap.add_argument("--n_query", type=int, default=256)
@@ -531,6 +915,48 @@ def main():
         help="Optional cap on number of shapes used to train the head (0=all).",
     )
     ap.add_argument("--ridge_lambda", type=float, default=1e-3)
+    ap.add_argument(
+        "--ridge_lipschitz_lambda",
+        type=float,
+        default=0.0,
+        help="Optional Lipschitz hinge penalty weight for ridge probe fitting (default: off).",
+    )
+    ap.add_argument(
+        "--ridge_lipschitz_pairs",
+        type=int,
+        default=2048,
+        help="Number of intra-shape pairs sampled per optimization step when Lipschitz is enabled.",
+    )
+    ap.add_argument(
+        "--ridge_lipschitz_steps",
+        type=int,
+        default=200,
+        help="Number of optimization steps for Lipschitz-refined ridge fitting.",
+    )
+    ap.add_argument(
+        "--ridge_lipschitz_lr",
+        type=float,
+        default=1e-2,
+        help="Learning rate for Lipschitz-refined ridge fitting.",
+    )
+    ap.add_argument(
+        "--ridge_lipschitz_batch",
+        type=int,
+        default=8192,
+        help="MSE mini-batch size for Lipschitz-refined ridge fitting.",
+    )
+    ap.add_argument(
+        "--ridge_lipschitz_max_points",
+        type=int,
+        default=200000,
+        help="Optional cap on train points used during Lipschitz refinement (0=all).",
+    )
+    ap.add_argument(
+        "--ridge_lipschitz_seed",
+        type=int,
+        default=0,
+        help="Random seed for Lipschitz pair/mini-batch sampling.",
+    )
     ap.add_argument("--tau", type=float, default=0.03)
     ap.add_argument("--max_shapes", type=int, default=0)
     ap.add_argument("--voxel_grid", type=int, default=64)
@@ -573,8 +999,62 @@ def main():
         "--query_source",
         type=str,
         default="pool",
-        choices=["pool", "grid"],
-        help=("Query source: pool=sample from pt_xyz_pool; grid=sample voxel centers from udf_grid."),
+        choices=["pool", "grid", "hybrid"],
+        help=(
+            "Query source: pool=sample from pt_xyz_pool; "
+            "grid=sample voxel centers from udf_grid; "
+            "hybrid=pool+grid mixture."
+        ),
+    )
+    ap.add_argument(
+        "--query_pool_frac",
+        type=float,
+        default=0.5,
+        help="When query_source=hybrid, fraction assigned to pool sampling.",
+    )
+    ap.add_argument(
+        "--grid_sample_mode",
+        type=str,
+        default="uniform",
+        choices=["uniform", "near_surface", "stratified"],
+        help="Grid-query sampler mode.",
+    )
+    ap.add_argument(
+        "--grid_near_tau",
+        type=float,
+        default=0.05,
+        help="Near-surface threshold for grid_sample_mode=near_surface.",
+    )
+    ap.add_argument(
+        "--grid_near_frac",
+        type=float,
+        default=0.7,
+        help="Near-surface ratio for grid_sample_mode=near_surface.",
+    )
+    ap.add_argument(
+        "--target_transform",
+        type=str,
+        default="none",
+        choices=["none", "trunc", "log1p"],
+        help="Optional transform on training targets for ridge probe.",
+    )
+    ap.add_argument(
+        "--target_trunc_max",
+        type=float,
+        default=0.1,
+        help="d_max for target_transform=trunc.",
+    )
+    ap.add_argument(
+        "--target_log_scale",
+        type=float,
+        default=0.03,
+        help="scale sigma for target_transform=log1p: y_t = log(1 + y/sigma).",
+    )
+    ap.add_argument(
+        "--report_near_tau",
+        type=float,
+        default=0.05,
+        help="Also report metrics restricted to y_true <= report_near_tau.",
     )
     ap.add_argument(
         "--baseline",
@@ -597,7 +1077,7 @@ def main():
         args.eval_seed = int(args.seed)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model, ckpt = build_model_from_ckpt(args.ckpt, device)
+    model, ckpt = build_model_from_ckpt(args.ckpt, device, max_len_override=args.max_len)
     add_eos = infer_add_eos(ckpt, args.add_eos)
     qa_tokens = infer_qa_tokens(ckpt, args.qa_tokens)
 
@@ -652,6 +1132,10 @@ def main():
             disjoint_context_query=bool(args.disjoint_context_query),
             mismatch_shift=int(args.mismatch_shift),
             query_source=args.query_source,
+            query_pool_frac=float(args.query_pool_frac),
+            grid_sample_mode=str(args.grid_sample_mode),
+            grid_near_tau=float(args.grid_near_tau),
+            grid_near_frac=float(args.grid_near_frac),
         )
 
     if int(args.baseline_only) == 1:
@@ -665,6 +1149,10 @@ def main():
                 "n_context": int(args.n_context),
                 "n_query": int(args.n_query),
                 "query_source": str(args.query_source),
+                "query_pool_frac": float(args.query_pool_frac),
+                "grid_sample_mode": str(args.grid_sample_mode),
+                "grid_near_tau": float(args.grid_near_tau),
+                "grid_near_frac": float(args.grid_near_frac),
                 "eval_split": args.split,
                 "head_train_split": (head_split if not legacy_transductive else "legacy_transductive"),
                 "head_train_backend": head_backend,
@@ -674,12 +1162,23 @@ def main():
                 "n_shapes_head_train": int(len(tr_paths)),
                 "n_shapes_head_test": int(len(te_paths)),
                 "ridge_lambda": float(args.ridge_lambda),
+                "ridge_lipschitz_lambda": float(args.ridge_lipschitz_lambda),
+                "ridge_lipschitz_pairs": int(args.ridge_lipschitz_pairs),
+                "ridge_lipschitz_steps": int(args.ridge_lipschitz_steps),
+                "ridge_lipschitz_lr": float(args.ridge_lipschitz_lr),
+                "ridge_lipschitz_batch": int(args.ridge_lipschitz_batch),
+                "ridge_lipschitz_max_points": int(args.ridge_lipschitz_max_points),
+                "ridge_lipschitz_seed": int(args.ridge_lipschitz_seed),
                 "tau": float(args.tau),
                 "disjoint_context_query": bool(args.disjoint_context_query),
                 "context_mode_train": str(args.context_mode_train),
                 "context_mode_test": str(args.context_mode_test),
                 "mismatch_shift": int(args.mismatch_shift),
                 "rep_source": str(args.rep_source),
+                "target_transform": str(args.target_transform),
+                "target_trunc_max": float(args.target_trunc_max),
+                "target_log_scale": float(args.target_log_scale),
+                "report_near_tau": float(args.report_near_tau),
                 "add_eos": bool(add_eos),
                 "qa_tokens": bool(qa_tokens),
                 "ckpt": os.path.abspath(args.ckpt),
@@ -695,7 +1194,7 @@ def main():
             print(f"[saved] {args.out_json}")
         return
 
-    Xtr, Ytr = collect_xy(
+    Xtr, Ytr, Qtr, Gtr = collect_xy(
         model,
         tr_paths,
         head_backend,
@@ -714,15 +1213,51 @@ def main():
         mismatch_shift=int(args.mismatch_shift),
         rep_source=args.rep_source,
         query_source=args.query_source,
+        query_pool_frac=float(args.query_pool_frac),
+        grid_sample_mode=str(args.grid_sample_mode),
+        grid_near_tau=float(args.grid_near_tau),
+        grid_near_frac=float(args.grid_near_frac),
     )
     if args.head_train_n and args.head_train_n > 0 and Xtr.shape[0] > int(args.head_train_n):
         rng_cap = np.random.RandomState(int(args.eval_seed) & 0xFFFFFFFF)
         sel = rng_cap.permutation(Xtr.shape[0])[: int(args.head_train_n)]
         Xtr = Xtr[sel]
         Ytr = Ytr[sel]
-    w = _ridge_fit(Xtr, Ytr, lam=float(args.ridge_lambda))
+        Qtr = Qtr[sel]
+        Gtr = Gtr[sel]
+    Ytr_t = _transform_target(
+        Ytr,
+        mode=str(args.target_transform),
+        trunc_max=float(args.target_trunc_max),
+        log_scale=float(args.target_log_scale),
+    )
+    lip_lambda = float(args.ridge_lipschitz_lambda)
+    lip_info = {"enabled": False}
+    if lip_lambda > 0.0 and str(args.target_transform) != "none":
+        print(
+            "[warn] ridge_lipschitz_lambda > 0 with target_transform != none; "
+            "disabling Lipschitz refinement for this run."
+        )
+        lip_lambda = 0.0
+    if lip_lambda > 0.0:
+        w, lip_info = _ridge_fit_lipschitz(
+            Xtr,
+            Ytr_t,
+            Qtr,
+            Gtr,
+            lam=float(args.ridge_lambda),
+            lip_lambda=lip_lambda,
+            lip_pairs=int(args.ridge_lipschitz_pairs),
+            lip_steps=int(args.ridge_lipschitz_steps),
+            lip_lr=float(args.ridge_lipschitz_lr),
+            lip_batch=int(args.ridge_lipschitz_batch),
+            lip_max_points=int(args.ridge_lipschitz_max_points),
+            lip_seed=int(args.ridge_lipschitz_seed) ^ int(args.eval_seed),
+        )
+    else:
+        w = _ridge_fit(Xtr, Ytr_t, lam=float(args.ridge_lambda))
 
-    Xte, Yte = collect_xy(
+    Xte, Yte, _, _ = collect_xy(
         model,
         te_paths,
         args.context_backend,
@@ -741,10 +1276,42 @@ def main():
         mismatch_shift=int(args.mismatch_shift),
         rep_source=args.rep_source,
         query_source=args.query_source,
+        query_pool_frac=float(args.query_pool_frac),
+        grid_sample_mode=str(args.grid_sample_mode),
+        grid_near_tau=float(args.grid_near_tau),
+        grid_near_frac=float(args.grid_near_frac),
     )
-    Yhat = _ridge_pred(Xte, w)
+    Yhat_t = _ridge_pred(Xte, w)
+    Yhat = _inverse_transform_target(
+        Yhat_t,
+        mode=str(args.target_transform),
+        trunc_max=float(args.target_trunc_max),
+        log_scale=float(args.target_log_scale),
+    )
 
     out = _metrics(Yte, Yhat, tau=float(args.tau))
+    out["near@tau_report"] = _metrics_near(
+        Yte,
+        Yhat,
+        tau=float(args.tau),
+        near_tau=float(args.report_near_tau),
+    )
+    tau_t = _transform_tau(
+        float(args.tau),
+        mode=str(args.target_transform),
+        trunc_max=float(args.target_trunc_max),
+        log_scale=float(args.target_log_scale),
+    )
+    out["metrics_transformed"] = _metrics(
+        _transform_target(
+            Yte,
+            mode=str(args.target_transform),
+            trunc_max=float(args.target_trunc_max),
+            log_scale=float(args.target_log_scale),
+        ),
+        Yhat_t,
+        tau=float(tau_t),
+    )
     out.update(
         {
             "context_backend": args.context_backend,
@@ -752,6 +1319,10 @@ def main():
             "n_context": int(args.n_context),
             "n_query": int(args.n_query),
             "query_source": str(args.query_source),
+            "query_pool_frac": float(args.query_pool_frac),
+            "grid_sample_mode": str(args.grid_sample_mode),
+            "grid_near_tau": float(args.grid_near_tau),
+            "grid_near_frac": float(args.grid_near_frac),
             "eval_split": args.split,
             "head_train_split": (head_split if not legacy_transductive else "legacy_transductive"),
             "head_train_backend": head_backend,
@@ -761,12 +1332,24 @@ def main():
             "n_shapes_head_train": int(len(tr_paths)),
             "n_shapes_head_test": int(len(te_paths)),
             "ridge_lambda": float(args.ridge_lambda),
+            "ridge_lipschitz_lambda": float(args.ridge_lipschitz_lambda),
+            "ridge_lipschitz_pairs": int(args.ridge_lipschitz_pairs),
+            "ridge_lipschitz_steps": int(args.ridge_lipschitz_steps),
+            "ridge_lipschitz_lr": float(args.ridge_lipschitz_lr),
+            "ridge_lipschitz_batch": int(args.ridge_lipschitz_batch),
+            "ridge_lipschitz_max_points": int(args.ridge_lipschitz_max_points),
+            "ridge_lipschitz_seed": int(args.ridge_lipschitz_seed),
+            "ridge_lipschitz_info": lip_info,
             "tau": float(args.tau),
             "disjoint_context_query": bool(args.disjoint_context_query),
             "context_mode_train": str(args.context_mode_train),
             "context_mode_test": str(args.context_mode_test),
             "mismatch_shift": int(args.mismatch_shift),
             "rep_source": str(args.rep_source),
+            "target_transform": str(args.target_transform),
+            "target_trunc_max": float(args.target_trunc_max),
+            "target_log_scale": float(args.target_log_scale),
+            "report_near_tau": float(args.report_near_tau),
             "add_eos": bool(add_eos),
             "qa_tokens": bool(qa_tokens),
             "ckpt": os.path.abspath(args.ckpt),

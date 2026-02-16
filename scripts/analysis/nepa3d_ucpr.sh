@@ -26,6 +26,8 @@ EVAL_SEED="${EVAL_SEED:-0}"
 EVAL_SEED_GALLERY="${EVAL_SEED_GALLERY:-${EVAL_SEED}}"
 MC_K="${MC_K:-1}"
 MAX_FILES="${MAX_FILES:-0}"
+# Override model max_len (pos-emb length); -1 = use checkpoint max_len.
+MAX_LEN="${MAX_LEN:--1}"
 # Pooling: eos / mean_a / mean_zhat
 POOLING="${POOLING:-eos}"
 TIE_BREAK_EPS="${TIE_BREAK_EPS:-1e-6}"
@@ -50,6 +52,7 @@ fi
   --cache_root "${CACHE_ROOT}" \
   --split "${SPLIT}" \
   --ckpt "${CKPT}" \
+  --max_len "${MAX_LEN}" \
   --query_backend "${QUERY_BACKEND}" \
   --gallery_backend "${GALLERY_BACKEND}" \
   --eval_seed "${EVAL_SEED}" \

@@ -57,6 +57,22 @@ class ModelNet40QueryDataset(Dataset):
     def __len__(self):
         return len(self.paths)
 
+    # -------------------------
+    # Runtime scaling helpers
+    # -------------------------
+    def set_sizes(self, *, n_point: int | None = None, n_ray: int | None = None) -> None:
+        """Update sampling sizes at runtime.
+
+        Used by point/ray scaling curricula (e.g., 256 -> 512 -> 1024).
+        The dataloader keeps a reference to the dataset instance, so mutating
+        these fields affects subsequent __getitem__ calls.
+        """
+
+        if n_point is not None:
+            self.n_point = int(n_point)
+        if n_ray is not None:
+            self.n_ray = int(n_ray)
+
     def _make_backend(self, path):
         if self.backend == "mesh":
             return MeshBackend(path)

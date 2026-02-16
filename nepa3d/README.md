@@ -378,6 +378,7 @@ Full tables:
   - launcher: `scripts/analysis/launch_kplane_sum_chain_local.sh`
   - worker: `scripts/analysis/run_kplane_sum_chain_local.sh`
   - pipeline log: `logs/analysis/kplane_sum_chain/pipeline.log`
+  - final completion is tracked by `results/ucpr_kplane_sum*_e50*_tiefix.json` and `results/cpac_kplane_sum*_e50*.json`
 
 ## 7) Notes for paper
 

@@ -15,6 +15,7 @@ from ..backends.pointcloud_backend import (
 from ..backends.udfgrid_backend import UDFGridBackend
 from ..backends.voxel_backend import VoxelBackend
 from ..models.query_nepa import QueryNepa
+from ..utils.ckpt_utils import load_state_dict_flexible, maybe_resize_pos_emb_in_state_dict
 from ..token.tokenizer import (
     TYPE_BOS,
     TYPE_EOS,
@@ -79,7 +80,7 @@ def infer_qa_tokens(ckpt, qa_tokens_arg):
     return bool(pre_args.get("qa_tokens", ckpt_n_types >= 9))
 
 
-def build_model_from_ckpt(ckpt_path, device):
+def build_model_from_ckpt(ckpt_path, device, max_len_override: int | None = None):
     ckpt = torch.load(ckpt_path, map_location="cpu")
     pre_args = ckpt.get("args", {})
     state = ckpt["model"]
@@ -87,7 +88,15 @@ def build_model_from_ckpt(ckpt_path, device):
     n_types = state["type_emb.weight"].shape[0]
     nhead = int(pre_args.get("heads", 6))
     num_layers = int(pre_args.get("layers", 8))
-    max_len = int(state["pos_emb"].shape[1])
+    ckpt_max_len = int(state["pos_emb"].shape[1])
+    max_len = (
+        ckpt_max_len
+        if (max_len_override is None or int(max_len_override) < 0)
+        else int(max_len_override)
+    )
+    if max_len != ckpt_max_len:
+        print(f"[ckpt] resizing pos_emb: ckpt_len={ckpt_max_len} -> max_len={max_len}")
+        state = maybe_resize_pos_emb_in_state_dict(dict(state), max_len)
 
     model = QueryNepa(
         feat_dim=15,
@@ -97,7 +106,7 @@ def build_model_from_ckpt(ckpt_path, device):
         num_layers=num_layers,
         max_len=max_len,
     )
-    model.load_state_dict(state, strict=True)
+    load_state_dict_flexible(model, state, strict=True)
     model.eval().to(device)
     return model, ckpt
 
@@ -234,6 +243,15 @@ def main():
     ap.add_argument("--cache_root", type=str, required=True)
     ap.add_argument("--split", type=str, default="eval")
     ap.add_argument("--ckpt", type=str, required=True)
+    ap.add_argument(
+        "--max_len",
+        type=int,
+        default=-1,
+        help=(
+            "Override model max_len (pos-emb length). If set and differs from checkpoint, "
+            "pos_emb is resized by 1D interpolation."
+        ),
+    )
     ap.add_argument("--query_backend", type=str, required=True)
     ap.add_argument("--gallery_backend", type=str, required=True)
     ap.add_argument("--n_point", type=int, default=None)
@@ -286,7 +304,7 @@ def main():
     )
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model, ckpt = build_model_from_ckpt(args.ckpt, device)
+    model, ckpt = build_model_from_ckpt(args.ckpt, device, max_len_override=args.max_len)
     pre_args = ckpt.get("args", {})
 
     add_eos = infer_add_eos(ckpt, args.add_eos)

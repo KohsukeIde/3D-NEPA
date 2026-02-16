@@ -23,12 +23,20 @@ CKPT="${CKPT:?set CKPT=...}"
 CONTEXT_BACKEND="${CONTEXT_BACKEND:-pointcloud_noray}"
 N_CONTEXT="${N_CONTEXT:-256}"
 N_QUERY="${N_QUERY:-256}"
+MAX_LEN="${MAX_LEN:--1}"   # override model max_len (pos-emb length); -1 = use checkpoint
 HEAD_TRAIN_RATIO="${HEAD_TRAIN_RATIO:-0.2}"
 HEAD_TRAIN_N="${HEAD_TRAIN_N:-0}"
 HEAD_TRAIN_SPLIT="${HEAD_TRAIN_SPLIT:-}"
 HEAD_TRAIN_BACKEND="${HEAD_TRAIN_BACKEND:-}"
 HEAD_TRAIN_MAX_SHAPES="${HEAD_TRAIN_MAX_SHAPES:-0}"
 RIDGE_LAMBDA="${RIDGE_LAMBDA:-1e-3}"
+RIDGE_LIPSCHITZ_LAMBDA="${RIDGE_LIPSCHITZ_LAMBDA:-0}"
+RIDGE_LIPSCHITZ_PAIRS="${RIDGE_LIPSCHITZ_PAIRS:-2048}"
+RIDGE_LIPSCHITZ_STEPS="${RIDGE_LIPSCHITZ_STEPS:-200}"
+RIDGE_LIPSCHITZ_LR="${RIDGE_LIPSCHITZ_LR:-1e-2}"
+RIDGE_LIPSCHITZ_BATCH="${RIDGE_LIPSCHITZ_BATCH:-8192}"
+RIDGE_LIPSCHITZ_MAX_POINTS="${RIDGE_LIPSCHITZ_MAX_POINTS:-200000}"
+RIDGE_LIPSCHITZ_SEED="${RIDGE_LIPSCHITZ_SEED:-0}"
 TAU="${TAU:-0.03}"
 MAX_SHAPES="${MAX_SHAPES:-800}"
 # Eval seed (SEED alias supported)
@@ -44,11 +52,20 @@ CONTEXT_MODE_TEST="${CONTEXT_MODE_TEST:-normal}"     # normal / none / mismatch
 MISMATCH_SHIFT="${MISMATCH_SHIFT:-1}"
 REP_SOURCE="${REP_SOURCE:-h}"                        # h / zhat
 QUERY_SOURCE="${QUERY_SOURCE:-pool}"                 # pool / grid
+QUERY_POOL_FRAC="${QUERY_POOL_FRAC:-0.5}"           # used when QUERY_SOURCE=hybrid
+GRID_SAMPLE_MODE="${GRID_SAMPLE_MODE:-uniform}"      # uniform / near_surface / stratified
+GRID_NEAR_TAU="${GRID_NEAR_TAU:-0.05}"
+GRID_NEAR_FRAC="${GRID_NEAR_FRAC:-0.7}"
+TARGET_TRANSFORM="${TARGET_TRANSFORM:-none}"         # none / trunc / log1p
+TARGET_TRUNC_MAX="${TARGET_TRUNC_MAX:-0.1}"
+TARGET_LOG_SCALE="${TARGET_LOG_SCALE:-0.03}"
+REPORT_NEAR_TAU="${REPORT_NEAR_TAU:-0.05}"
 BASELINE="${BASELINE:-none}"                         # none / nn_copy
 BASELINE_ONLY="${BASELINE_ONLY:-0}"                  # 0 / 1
 OUT_JSON="${OUT_JSON:-results/cpac_${CONTEXT_BACKEND}_to_udf.json}"
 
 ARGS="--cache_root ${CACHE_ROOT} --split ${SPLIT} --ckpt ${CKPT} \
+--max_len ${MAX_LEN} \
 --context_backend ${CONTEXT_BACKEND} \
 --n_context ${N_CONTEXT} --n_query ${N_QUERY} \
 --max_shapes ${MAX_SHAPES} \
@@ -56,6 +73,13 @@ ARGS="--cache_root ${CACHE_ROOT} --split ${SPLIT} --ckpt ${CKPT} \
 --head_train_n ${HEAD_TRAIN_N} \
 --head_train_max_shapes ${HEAD_TRAIN_MAX_SHAPES} \
 --ridge_lambda ${RIDGE_LAMBDA} --tau ${TAU} \
+--ridge_lipschitz_lambda ${RIDGE_LIPSCHITZ_LAMBDA} \
+--ridge_lipschitz_pairs ${RIDGE_LIPSCHITZ_PAIRS} \
+--ridge_lipschitz_steps ${RIDGE_LIPSCHITZ_STEPS} \
+--ridge_lipschitz_lr ${RIDGE_LIPSCHITZ_LR} \
+--ridge_lipschitz_batch ${RIDGE_LIPSCHITZ_BATCH} \
+--ridge_lipschitz_max_points ${RIDGE_LIPSCHITZ_MAX_POINTS} \
+--ridge_lipschitz_seed ${RIDGE_LIPSCHITZ_SEED} \
 --eval_seed ${EVAL_SEED} \
 --disjoint_context_query ${DISJOINT_CONTEXT_QUERY} \
 --context_mode_train ${CONTEXT_MODE_TRAIN} \
@@ -63,6 +87,14 @@ ARGS="--cache_root ${CACHE_ROOT} --split ${SPLIT} --ckpt ${CKPT} \
 --mismatch_shift ${MISMATCH_SHIFT} \
 --rep_source ${REP_SOURCE} \
 --query_source ${QUERY_SOURCE} \
+--query_pool_frac ${QUERY_POOL_FRAC} \
+--grid_sample_mode ${GRID_SAMPLE_MODE} \
+--grid_near_tau ${GRID_NEAR_TAU} \
+--grid_near_frac ${GRID_NEAR_FRAC} \
+--target_transform ${TARGET_TRANSFORM} \
+--target_trunc_max ${TARGET_TRUNC_MAX} \
+--target_log_scale ${TARGET_LOG_SCALE} \
+--report_near_tau ${REPORT_NEAR_TAU} \
 --baseline ${BASELINE} \
 --baseline_only ${BASELINE_ONLY} \
 --out_json ${OUT_JSON}"

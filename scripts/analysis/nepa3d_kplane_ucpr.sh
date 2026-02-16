@@ -37,6 +37,8 @@ CONTEXT_MODE_GALLERY="${CONTEXT_MODE_GALLERY:-normal}"   # normal / none / misma
 MISMATCH_SHIFT_QUERY="${MISMATCH_SHIFT_QUERY:-1}"
 MISMATCH_SHIFT_GALLERY="${MISMATCH_SHIFT_GALLERY:-1}"
 TIE_BREAK_EPS="${TIE_BREAK_EPS:-1e-6}"
+SHUFFLE_GALLERY="${SHUFFLE_GALLERY:-0}"
+GALLERY_SHUFFLE_SEED="${GALLERY_SHUFFLE_SEED:--1}"
 SANITY_CONSTANT_EMBED="${SANITY_CONSTANT_EMBED:-0}"
 OUT_JSON="${OUT_JSON:-results/kplane_ucpr_${QUERY_BACKEND}_to_${GALLERY_BACKEND}.json}"
 
@@ -70,5 +72,7 @@ fi
   --mismatch_shift_query "${MISMATCH_SHIFT_QUERY}" \
   --mismatch_shift_gallery "${MISMATCH_SHIFT_GALLERY}" \
   --tie_break_eps "${TIE_BREAK_EPS}" \
+  --shuffle_gallery "${SHUFFLE_GALLERY}" \
+  --gallery_shuffle_seed "${GALLERY_SHUFFLE_SEED}" \
   --out_json "${OUT_JSON}" \
   ${EXTRA_ARGS}

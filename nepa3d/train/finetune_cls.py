@@ -16,6 +16,7 @@ from ..data.modelnet40_index import (
 )
 from ..models.query_nepa import QueryNepa
 from ..utils.seed import set_seed
+from ..utils.ckpt_utils import load_state_dict_flexible, maybe_resize_pos_emb_in_state_dict
 
 
 def stratified_kshot(paths, k, seed=0):
@@ -108,6 +109,24 @@ def main():
     ap.add_argument("--weight_decay", type=float, default=0.05)
     ap.add_argument("--n_point", type=int, default=None)
     ap.add_argument("--n_ray", type=int, default=None)
+    ap.add_argument(
+        "--allow_scale_up",
+        type=int,
+        default=0,
+        help=(
+            "Allow n_point/n_ray to exceed the pretrain checkpoint settings (requires resizing pos_emb). "
+            "Default keeps legacy behavior (cap to pretrain sizes)."
+        ),
+    )
+    ap.add_argument(
+        "--max_len",
+        type=int,
+        default=-1,
+        help=(
+            "Override model max_len (pos-emb length). If <0, auto = max(ckpt_max_len, required_seq_len). "
+            "If set and differs from checkpoint, pos_emb is resized by 1D interpolation."
+        ),
+    )
     ap.add_argument("--num_workers", type=int, default=4)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--val_ratio", type=float, default=0.1, help="stratified val split ratio from TRAIN")
@@ -210,19 +229,29 @@ def main():
     pre_n_point = int(pre_args["n_point"])
     pre_n_ray = int(pre_args["n_ray"])
 
+    allow_scale_up = bool(int(args.allow_scale_up))
+
     if args.n_point is None:
         args.n_point = pre_n_point
-    elif args.n_point > pre_n_point:
-        print(f"override n_point down to pretrain value ({pre_n_point})")
+    elif args.n_point > pre_n_point and (not allow_scale_up):
+        print(
+            f"[sizes] requested n_point={args.n_point} > pretrain n_point={pre_n_point}; capping (set --allow_scale_up 1 to override)"
+        )
         args.n_point = pre_n_point
+    elif args.n_point > pre_n_point and allow_scale_up:
+        print(f"[sizes] scale-up enabled: n_point {pre_n_point} -> {args.n_point}")
     elif args.n_point <= 0:
         raise ValueError(f"--n_point must be positive, got {args.n_point}")
 
     if args.n_ray is None:
         args.n_ray = pre_n_ray
-    elif args.n_ray > pre_n_ray:
-        print(f"override n_ray down to pretrain value ({pre_n_ray})")
+    elif args.n_ray > pre_n_ray and (not allow_scale_up):
+        print(
+            f"[sizes] requested n_ray={args.n_ray} > pretrain n_ray={pre_n_ray}; capping (set --allow_scale_up 1 to override)"
+        )
         args.n_ray = pre_n_ray
+    elif args.n_ray > pre_n_ray and allow_scale_up:
+        print(f"[sizes] scale-up enabled: n_ray {pre_n_ray} -> {args.n_ray}")
     elif args.n_ray < 0:
         raise ValueError(f"--n_ray must be >= 0, got {args.n_ray}")
 
@@ -316,17 +345,32 @@ def main():
         worker_init_fn=_worker_init_fn,
     )
 
-    # Keep model positional size equal to the checkpoint to allow
-    # fine-tune-time token-count reduction (e.g., n_ray=0 for no-ray backend).
-    if "pos_emb" in ckpt["model"]:
-        model_max_len = int(ckpt["model"]["pos_emb"].shape[1])
+    # Allow scale-up by resizing learned positional embeddings.
+    if "pos_emb" not in ckpt["model"]:
+        raise KeyError("checkpoint missing pos_emb; cannot infer/resize max_len")
+
+    ckpt_max_len = int(ckpt["model"]["pos_emb"].shape[1])
+    required_len = (
+        1 + 2 * int(args.n_point) + 2 * int(args.n_ray) + (1 if add_eos else 0)
+        if qa_tokens
+        else 1 + int(args.n_point) + int(args.n_ray) + (1 if add_eos else 0)
+    )
+
+    if int(args.max_len) >= 0:
+        model_max_len = int(args.max_len)
+        if model_max_len < required_len:
+            raise ValueError(
+                f"--max_len too small: max_len={model_max_len} < required_seq_len={required_len} "
+                f"(qa_tokens={qa_tokens}, add_eos={add_eos}, n_point={args.n_point}, n_ray={args.n_ray})."
+            )
     else:
-        pre_add_eos = bool(pre_args.get("add_eos", ckpt_n_types >= 5))
-        pre_qa_tokens = bool(pre_args.get("qa_tokens", ckpt_n_types >= 9))
-        if pre_qa_tokens:
-            model_max_len = 1 + 2 * pre_n_point + 2 * pre_n_ray + (1 if pre_add_eos else 0)
-        else:
-            model_max_len = 1 + pre_n_point + pre_n_ray + (1 if pre_add_eos else 0)
+        # Auto: keep ckpt length unless we need to scale up.
+        model_max_len = max(ckpt_max_len, required_len)
+
+    state = ckpt["model"]
+    if model_max_len != ckpt_max_len:
+        print(f"[ckpt] resizing pos_emb: ckpt_len={ckpt_max_len} -> max_len={model_max_len}")
+        state = maybe_resize_pos_emb_in_state_dict(dict(state), model_max_len)
 
     backbone = QueryNepa(
         feat_dim=15,
@@ -336,7 +380,7 @@ def main():
         num_layers=pre_args["layers"],
         max_len=model_max_len,
     )
-    backbone.load_state_dict(ckpt["model"], strict=True)
+    load_state_dict_flexible(backbone, state, strict=True)
     backbone.to(device)
 
     if args.freeze_backbone:
