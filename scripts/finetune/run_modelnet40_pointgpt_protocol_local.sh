@@ -30,6 +30,7 @@ NUM_WORKERS="${NUM_WORKERS:-8}"
 VAL_RATIO="${VAL_RATIO:-0.1}"
 VAL_SEED="${VAL_SEED:-0}"
 EVAL_SEED="${EVAL_SEED:-0}"
+ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
 
 # Full fine-tune defaults (PointGPT-like full table side)
 FULL_SEEDS="${FULL_SEEDS:-0 1 2}"
@@ -260,6 +261,9 @@ run_one() {
   if [ "${freeze}" = "1" ]; then
     extra_args+=(--freeze_backbone)
   fi
+  if [ "${ABLATE_POINT_DIST}" = "1" ]; then
+    extra_args+=(--ablate_point_dist)
+  fi
 
   CUDA_VISIBLE_DEVICES="${gpu}" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   "${PYTHON_BIN}" -u -m nepa3d.train.finetune_cls \
@@ -340,6 +344,7 @@ GPU1="${GPU1:-1}"
 
 echo "[info] total_jobs=${#JOBS[@]}"
 echo "[info] cache_root=${CACHE_ROOT} backend=${BACKEND} n_point=${N_POINT} n_ray=${N_RAY}"
+echo "[info] ablate_point_dist=${ABLATE_POINT_DIST}"
 echo "[info] methods=${METHODS}"
 echo "[info] full_seeds=${FULL_SEEDS} full_freeze=${FULL_FREEZE_BACKBONE}"
 echo "[info] fewshot_settings=${FEWSHOT_SETTINGS} trials=${FEWSHOT_TRIALS} few_freeze=${FEWSHOT_FREEZE_BACKBONE}"

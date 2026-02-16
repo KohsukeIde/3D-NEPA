@@ -33,6 +33,7 @@ class ModelNet40QueryDataset(Dataset):
         voxel_max_steps=0,
         return_label=False,
         label_map=None,
+        ablate_point_dist=False,
     ):
         self.paths = list(npz_paths)
         self.backend = backend
@@ -49,6 +50,7 @@ class ModelNet40QueryDataset(Dataset):
         self.voxel_dilate = int(voxel_dilate)
         self.voxel_max_steps = int(voxel_max_steps)
         self.return_label = return_label
+        self.ablate_point_dist = bool(ablate_point_dist)
         if return_label:
             self.label_map = label_map or build_label_map(self.paths)
         else:
@@ -113,11 +115,14 @@ class ModelNet40QueryDataset(Dataset):
             k = max(1, self.mc_eval_k)
             feats = []
             types = []
+            pt_dist = pools["pt_dist_pool"]
+            if self.ablate_point_dist:
+                pt_dist = np.zeros_like(pt_dist, dtype=np.float32)
             for i in range(k):
                 rng = np.random.RandomState((base + 1000003 * i) & 0xFFFFFFFF)
                 feat, type_id = build_sequence(
                     pools["pt_xyz_pool"],
-                    pools["pt_dist_pool"],
+                    pt_dist,
                     pools["ray_o_pool"],
                     pools["ray_d_pool"],
                     pools["ray_hit_pool"],
@@ -136,9 +141,12 @@ class ModelNet40QueryDataset(Dataset):
             feat = np.stack(feats, axis=0) if k > 1 else feats[0]
             type_id = np.stack(types, axis=0) if k > 1 else types[0]
         else:
+            pt_dist = pools["pt_dist_pool"]
+            if self.ablate_point_dist:
+                pt_dist = np.zeros_like(pt_dist, dtype=np.float32)
             feat, type_id = build_sequence(
                 pools["pt_xyz_pool"],
-                pools["pt_dist_pool"],
+                pt_dist,
                 pools["ray_o_pool"],
                 pools["ray_d_pool"],
                 pools["ray_hit_pool"],

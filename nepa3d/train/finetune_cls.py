@@ -172,6 +172,11 @@ def main():
         action="store_true",
         help="linear probe mode: freeze backbone, train classifier head only",
     )
+    ap.add_argument(
+        "--ablate_point_dist",
+        action="store_true",
+        help="ablation: zero out point-distance channel before tokenization",
+    )
     args = ap.parse_args()
 
     set_seed(args.seed)
@@ -267,6 +272,7 @@ def main():
         voxel_grid=args.voxel_grid,
         voxel_dilate=args.voxel_dilate,
         voxel_max_steps=args.voxel_max_steps,
+        ablate_point_dist=args.ablate_point_dist,
         return_label=True,
         label_map=label_map,
     )
@@ -286,6 +292,7 @@ def main():
         voxel_grid=args.voxel_grid,
         voxel_dilate=args.voxel_dilate,
         voxel_max_steps=args.voxel_max_steps,
+        ablate_point_dist=args.ablate_point_dist,
         return_label=True,
         label_map=label_map,
     )
@@ -305,6 +312,7 @@ def main():
         voxel_grid=args.voxel_grid,
         voxel_dilate=args.voxel_dilate,
         voxel_max_steps=args.voxel_max_steps,
+        ablate_point_dist=args.ablate_point_dist,
         return_label=True,
         label_map=label_map,
     )
@@ -429,6 +437,7 @@ def main():
         f"val_ratio={args.val_ratio} val_seed={args.val_seed} "
         f"mc_eval_k_val={mc_eval_k_val} mc_eval_k_test={mc_eval_k_test} "
         f"freeze_backbone={bool(args.freeze_backbone)} "
+        f"ablate_point_dist={bool(args.ablate_point_dist)} "
         f"n_point={args.n_point}/{pre_n_point} n_ray={args.n_ray}/{pre_n_ray} "
         f"model_max_len={model_max_len}"
     )

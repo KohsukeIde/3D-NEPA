@@ -16,6 +16,7 @@ cd "${ROOT_DIR}" || exit 1
 
 VARIANTS="${VARIANTS:-obj_bg obj_only pb_t50_rs}"
 METHODS="${METHODS:-scratch shapenet_nepa shapenet_mesh_udf_nepa}"
+ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
 
 BASE_RUN_ROOT="${BASE_RUN_ROOT:-runs/scan_variants}"
 BASE_LOG_ROOT="${BASE_LOG_ROOT:-logs/finetune/scan_variants}"
@@ -41,7 +42,6 @@ for v in ${VARIANTS}; do
   echo "  cache_root=${CACHE_ROOT}"
   echo "  run_root=${RUN_ROOT}"
   echo "  log_root=${LOG_ROOT}"
-  CACHE_ROOT="${CACHE_ROOT}" RUN_ROOT="${RUN_ROOT}" LOG_ROOT="${LOG_ROOT}" METHODS="${METHODS}" \
+  CACHE_ROOT="${CACHE_ROOT}" RUN_ROOT="${RUN_ROOT}" LOG_ROOT="${LOG_ROOT}" METHODS="${METHODS}" ABLATE_POINT_DIST="${ABLATE_POINT_DIST}" \
     bash scripts/finetune/run_scanobjectnn_m1_table_local.sh
 done
-

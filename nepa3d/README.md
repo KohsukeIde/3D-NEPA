@@ -179,6 +179,12 @@ Review-response chain (core3 with mix methods + `N_RAY=0` + linear-probe):
 bash scripts/finetune/launch_scanobjectnn_review_chain_local.sh
 ```
 
+Review follow-up chain (no `n_point` scaling; K=1 seed expansion + dist ablation + QA+dualmask spot-check):
+
+```bash
+bash scripts/finetune/launch_scanobjectnn_review_followups_chain_local.sh
+```
+
 ModelNet40 protocol run (full + episodic few-shot):
 
 ```bash

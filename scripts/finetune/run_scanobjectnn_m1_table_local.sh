@@ -39,9 +39,17 @@ if [ -z "${N_RAY}" ]; then
   fi
 fi
 FREEZE_BACKBONE="${FREEZE_BACKBONE:-0}"
+ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
 RUN_SUFFIX="${RUN_SUFFIX:-}"
-if [ "${FREEZE_BACKBONE}" = "1" ] && [ -z "${RUN_SUFFIX}" ]; then
-  RUN_SUFFIX="_lp"
+if [ "${ABLATE_POINT_DIST}" = "1" ] && [ -z "${RUN_SUFFIX}" ]; then
+  RUN_SUFFIX="_ablate_dist"
+fi
+if [ "${FREEZE_BACKBONE}" = "1" ]; then
+  if [ -z "${RUN_SUFFIX}" ]; then
+    RUN_SUFFIX="_lp"
+  elif [[ "${RUN_SUFFIX}" != *"_lp"* ]]; then
+    RUN_SUFFIX="${RUN_SUFFIX}_lp"
+  fi
 fi
 
 GPU0="${GPU0:-0}"
@@ -211,6 +219,9 @@ run_one() {
   if [ "${FREEZE_BACKBONE}" = "1" ]; then
     extra_args+=(--freeze_backbone)
   fi
+  if [ "${ABLATE_POINT_DIST}" = "1" ]; then
+    extra_args+=(--ablate_point_dist)
+  fi
 
   CUDA_VISIBLE_DEVICES="${gpu}" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   "${PYTHON_BIN}" -u -m nepa3d.train.finetune_cls \
@@ -290,7 +301,7 @@ echo "[info] gpu0=${GPU0} gpu1=${GPU1}"
 echo "[info] logs=${LOG_ROOT}"
 echo "[info] batch=${BATCH} workers=${NUM_WORKERS}"
 echo "[info] methods=${METHODS}"
-echo "[info] n_point=${N_POINT} n_ray=${N_RAY} freeze_backbone=${FREEZE_BACKBONE} run_suffix=${RUN_SUFFIX}"
+echo "[info] n_point=${N_POINT} n_ray=${N_RAY} freeze_backbone=${FREEZE_BACKBONE} ablate_point_dist=${ABLATE_POINT_DIST} run_suffix=${RUN_SUFFIX}"
 
 JOB_INDEX_FILE="$(mktemp)"
 JOB_LOCK_FILE="$(mktemp)"
