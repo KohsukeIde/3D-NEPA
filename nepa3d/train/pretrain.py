@@ -3,7 +3,9 @@ import os
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 
@@ -11,7 +13,15 @@ from ..data.dataset import ModelNet40QueryDataset, collate
 from ..data.mixed_pretrain import build_mixed_pretrain
 from ..data.modelnet40_index import list_npz
 from ..models.query_nepa import QueryNepa
-from ..token.tokenizer import TYPE_BOS, TYPE_EOS
+from ..token.tokenizer import (
+    TYPE_BOS,
+    TYPE_EOS,
+    TYPE_MISSING_RAY,
+    TYPE_POINT,
+    TYPE_RAY,
+    TYPE_A_POINT,
+    TYPE_A_RAY,
+)
 from ..utils.seed import set_seed
 from ..utils.ckpt_utils import load_state_dict_flexible, maybe_resize_pos_emb_in_state_dict
 
@@ -34,6 +44,128 @@ def build_token_mask(type_id, mask_ratio):
         perm = torch.randperm(n, device=type_id.device)[:k]
         mask[b, idx[perm]] = True
     return mask
+
+
+def _ray_rank_hinge_loss(pred_t, gt_t, hit_mask, n_pairs: int, margin: float):
+    """Pairwise ranking loss on ray depth order (smaller t should rank earlier)."""
+    n_pairs = int(n_pairs)
+    if n_pairs <= 0:
+        return pred_t.new_tensor(0.0)
+
+    bsz = int(pred_t.shape[0])
+    total = pred_t.new_tensor(0.0)
+    n_valid = 0
+    for b in range(bsz):
+        idx = torch.nonzero(hit_mask[b], as_tuple=False).flatten()
+        m = int(idx.numel())
+        if m < 2:
+            continue
+        ii = idx[torch.randint(0, m, (n_pairs,), device=pred_t.device)]
+        jj = idx[torch.randint(0, m, (n_pairs,), device=pred_t.device)]
+        ok = ii != jj
+        if not bool(ok.any()):
+            continue
+        ii = ii[ok]
+        jj = jj[ok]
+        gt_diff = gt_t[b, ii] - gt_t[b, jj]
+        sign = torch.sign(gt_diff)
+        ok2 = sign != 0
+        if not bool(ok2.any()):
+            continue
+        ii = ii[ok2]
+        jj = jj[ok2]
+        sign = sign[ok2]
+        pred_diff = pred_t[b, ii] - pred_t[b, jj]
+        loss_b = torch.relu(float(margin) - sign * pred_diff).mean()
+        total = total + loss_b
+        n_valid += 1
+    if n_valid <= 0:
+        return pred_t.new_tensor(0.0)
+    return total / float(n_valid)
+
+
+def _default_answer_mask(target_type: torch.Tensor) -> torch.Tensor:
+    """Mask used by NEPA answer-only training and optional distillation."""
+    valid = target_type != TYPE_MISSING_RAY
+    has_answer_types = (target_type == TYPE_A_POINT).any() or (target_type == TYPE_A_RAY).any()
+    if bool(has_answer_types):
+        valid = valid & ((target_type == TYPE_A_POINT) | (target_type == TYPE_A_RAY))
+    return valid
+
+
+def _default_answer_input_mask(type_id: torch.Tensor) -> torch.Tensor:
+    """Mask of input tokens that carry answer observations."""
+    return (
+        (type_id == TYPE_A_POINT)
+        | (type_id == TYPE_A_RAY)
+        | (type_id == TYPE_POINT)
+        | (type_id == TYPE_RAY)
+    )
+
+
+def _drop_answer_observations(feat: torch.Tensor, type_id: torch.Tensor, drop_prob: float) -> torch.Tensor:
+    """Randomly hide answer channels while keeping query channels intact.
+
+    - Point answer: drop distance channel (10).
+    - Ray answer: drop hit/t/normal/x_hit channels (0:3, 9, 11, 12:15).
+    """
+    p = float(drop_prob)
+    if p <= 0.0:
+        return feat
+    out = feat.clone()
+    ans_mask = _default_answer_input_mask(type_id)
+    if not bool(ans_mask.any()):
+        return out
+    sample_mask = torch.rand(type_id.shape, device=type_id.device) < p
+    drop_mask = ans_mask & sample_mask
+    if not bool(drop_mask.any()):
+        return out
+
+    point_mask = drop_mask & ((type_id == TYPE_A_POINT) | (type_id == TYPE_POINT))
+    ray_mask = drop_mask & ((type_id == TYPE_A_RAY) | (type_id == TYPE_RAY))
+
+    if bool(point_mask.any()):
+        out[..., 10] = torch.where(point_mask, torch.zeros_like(out[..., 10]), out[..., 10])
+    if bool(ray_mask.any()):
+        ray_mask_f = ray_mask.unsqueeze(-1)
+        out[..., 0:3] = torch.where(ray_mask_f, torch.zeros_like(out[..., 0:3]), out[..., 0:3])
+        out[..., 9] = torch.where(ray_mask, torch.zeros_like(out[..., 9]), out[..., 9])
+        out[..., 11] = torch.where(ray_mask, torch.zeros_like(out[..., 11]), out[..., 11])
+        out[..., 12:15] = torch.where(ray_mask_f, torch.zeros_like(out[..., 12:15]), out[..., 12:15])
+    return out
+
+
+def _hard_answer_topk_loss(
+    token_loss: torch.Tensor,
+    target_type: torch.Tensor,
+    top_frac: float,
+    min_tokens: int,
+) -> torch.Tensor:
+    """D: hard-query mining loss on the highest-error answer tokens."""
+    valid = _default_answer_mask(target_type)
+    if not bool(valid.any()):
+        return token_loss.new_tensor(0.0)
+
+    bsz = int(token_loss.shape[0])
+    total = token_loss.new_tensor(0.0)
+    n_valid = 0
+    frac = max(0.0, min(1.0, float(top_frac)))
+    min_tokens = max(1, int(min_tokens))
+    for b in range(bsz):
+        vals = token_loss[b][valid[b]]
+        n = int(vals.numel())
+        if n <= 0:
+            continue
+        k = max(int(np.ceil(frac * n)), min_tokens)
+        k = min(k, n)
+        if k <= 0:
+            continue
+        topk_vals = torch.topk(vals, k=k, largest=True, sorted=False).values
+        total = total + topk_vals.mean()
+        n_valid += 1
+    if n_valid <= 0:
+        return token_loss.new_tensor(0.0)
+    return total / float(n_valid)
 
 
 def main():
@@ -111,6 +243,61 @@ def main():
         type=int,
         default=0,
         help="If 1, apply dual-mask only to Query-like token pairs (Q/Q).",
+    )
+    # B-2: ray monotonicity / depth supervision aux loss.
+    ap.add_argument("--aux_b2_weight", type=float, default=0.0, help="Global weight for B-2 ray auxiliary loss (0=off).")
+    ap.add_argument("--aux_b2_hit_weight", type=float, default=1.0, help="Weight of ray hit BCE term inside B-2.")
+    ap.add_argument("--aux_b2_t_weight", type=float, default=1.0, help="Weight of ray depth regression term inside B-2.")
+    ap.add_argument("--aux_b2_rank_weight", type=float, default=1.0, help="Weight of ray depth rank hinge term inside B-2.")
+    ap.add_argument("--aux_b2_rank_pairs", type=int, default=128, help="Number of sampled ray-hit pairs per sample for B-2 ranking.")
+    ap.add_argument("--aux_b2_rank_margin", type=float, default=0.0, help="Margin for B-2 ranking hinge.")
+    # B-3: near-surface point distance auxiliary target.
+    ap.add_argument("--aux_b3_weight", type=float, default=0.0, help="Global weight for B-3 near-surface point auxiliary loss (0=off).")
+    ap.add_argument("--aux_b3_near_tau", type=float, default=0.05, help="Near-surface threshold for B-3 (distance <= tau).")
+    # C-0: teacher-student refresh (distillation) as a minimal pseudo-parallel prototype.
+    ap.add_argument("--teacher_ckpt", type=str, default="", help="Optional teacher checkpoint for refresh distillation (C-0).")
+    ap.add_argument("--teacher_distill_weight", type=float, default=0.0, help="Weight for teacher-student distillation loss (0=off).")
+    ap.add_argument(
+        "--teacher_answer_drop_prob",
+        type=float,
+        default=0.0,
+        help="C-1: drop answer observations in student input for teacher distillation.",
+    )
+    ap.add_argument(
+        "--cycle_weight",
+        type=float,
+        default=0.0,
+        help="C-2: answer-token consistency weight across two input views.",
+    )
+    ap.add_argument(
+        "--cycle_answer_drop_prob",
+        type=float,
+        default=0.3,
+        help="C-2: answer observation dropout prob for cycle view.",
+    )
+    ap.add_argument(
+        "--d_hard_weight",
+        type=float,
+        default=0.0,
+        help="D: weight for hard-query answer-token mining loss (0=off).",
+    )
+    ap.add_argument(
+        "--d_hard_top_frac",
+        type=float,
+        default=0.25,
+        help="D: top fraction of answer tokens (by current error) used per sample.",
+    )
+    ap.add_argument(
+        "--d_hard_min_tokens",
+        type=int,
+        default=32,
+        help="D: minimum number of hard answer tokens selected per sample.",
+    )
+    ap.add_argument(
+        "--aux_e_weight",
+        type=float,
+        default=0.0,
+        help="E: weight for decoder-side point-distance auxiliary head loss (0=off).",
     )
     ap.add_argument("--objective", type=str, default="nepa", choices=["nepa", "mae"])
     ap.add_argument("--mask_ratio", type=float, default=0.4)
@@ -278,7 +465,55 @@ def main():
         max_len=t,
     ).to(device)
 
-    opt = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.05)
+    teacher_model = None
+    teacher_on = (len(str(args.teacher_ckpt).strip()) > 0) and (float(args.teacher_distill_weight) > 0.0)
+    if teacher_on:
+        teacher_ckpt = torch.load(str(args.teacher_ckpt).strip(), map_location="cpu")
+        teacher_state = teacher_ckpt["model"]
+        teacher_pre_args = teacher_ckpt.get("args", {})
+        teacher_d_model = int(teacher_state["type_emb.weight"].shape[1])
+        teacher_n_types = int(teacher_state["type_emb.weight"].shape[0])
+        teacher_heads = int(teacher_pre_args.get("heads", args.heads))
+        teacher_layers = int(teacher_pre_args.get("layers", args.layers))
+        teacher_len = int(teacher_state["pos_emb"].shape[1])
+        if teacher_n_types != int(n_types):
+            raise RuntimeError(
+                f"teacher n_types mismatch: teacher={teacher_n_types}, student={n_types}. "
+                "Use a compatible checkpoint or disable teacher distillation."
+            )
+        if teacher_len != int(t):
+            print(f"[teacher] resizing pos_emb: ckpt_len={teacher_len} -> max_len={t}")
+            teacher_state = maybe_resize_pos_emb_in_state_dict(dict(teacher_state), int(t))
+        teacher_model = QueryNepa(
+            feat_dim=15,
+            d_model=teacher_d_model,
+            n_types=teacher_n_types,
+            nhead=teacher_heads,
+            num_layers=teacher_layers,
+            max_len=t,
+        ).to(device)
+        load_state_dict_flexible(teacher_model, teacher_state, strict=True)
+        teacher_model.eval()
+        for p in teacher_model.parameters():
+            p.requires_grad_(False)
+        print(f"[teacher] enabled: ckpt={os.path.abspath(str(args.teacher_ckpt).strip())} weight={float(args.teacher_distill_weight)}")
+
+    aux_heads_dict = {}
+    if float(args.aux_b2_weight) > 0.0:
+        aux_heads_dict["ray_hit"] = nn.Linear(args.d_model, 1)
+        aux_heads_dict["ray_t"] = nn.Linear(args.d_model, 1)
+    if float(args.aux_b3_weight) > 0.0:
+        aux_heads_dict["point_dist"] = nn.Linear(args.d_model, 1)
+    if float(args.aux_e_weight) > 0.0:
+        aux_heads_dict["e_point_dist"] = nn.Linear(args.d_model, 1)
+
+    aux_heads = nn.ModuleDict(aux_heads_dict).to(device) if len(aux_heads_dict) > 0 else None
+    aux_enabled = aux_heads is not None
+    params = list(model.parameters())
+    if aux_enabled:
+        params += list(aux_heads.parameters())
+
+    opt = optim.AdamW(params, lr=args.lr, weight_decay=0.05)
     scaler = GradScaler(enabled=use_amp)
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -324,8 +559,30 @@ def main():
             # Optimizer state tensors for pos_emb would mismatch.
             can_resume_opt = False
 
+        ckpt_aux = ckpt.get("aux_heads", None)
+        if aux_enabled:
+            if ckpt_aux is None:
+                # aux heads are newly enabled for this run.
+                can_resume_opt = False
+                print("[resume] aux_heads missing in checkpoint; using fresh aux head state")
+            else:
+                rep = aux_heads.load_state_dict(ckpt_aux, strict=False)
+                if len(rep.missing_keys) > 0 or len(rep.unexpected_keys) > 0:
+                    can_resume_opt = False
+                    print(
+                        "[resume] aux_heads mismatch; using fresh optimizer state "
+                        f"(missing={rep.missing_keys}, unexpected={rep.unexpected_keys})"
+                    )
+        elif ckpt_aux is not None:
+            # checkpoint contains aux params but current run disabled them.
+            can_resume_opt = False
+
         if can_resume_opt and ("opt" in ckpt):
-            opt.load_state_dict(ckpt["opt"])
+            try:
+                opt.load_state_dict(ckpt["opt"])
+            except Exception as e:
+                print(f"[resume] failed to load optimizer state ({e}); using fresh optimizer state")
+                can_resume_opt = False
         else:
             if "opt" not in ckpt:
                 print("[resume] optimizer state missing in checkpoint; using fresh optimizer state")
@@ -396,7 +653,7 @@ def main():
                     dm_far = float(args.dual_mask_far) * ramp
                     dm_seed = int(args.seed) * 1000003 + int(global_step)
 
-                    z, z_hat, _ = model(
+                    z, z_hat, h_main = model(
                         feat,
                         type_id,
                         dual_mask_near=dm_near,
@@ -405,7 +662,160 @@ def main():
                         dual_mask_seed=dm_seed,
                         dual_mask_type_aware=int(args.dual_mask_type_aware),
                     )
-                    loss = model.nepa_loss(z, z_hat, type_id=type_id)
+                    loss_main = model.nepa_loss(z, z_hat, type_id=type_id)
+
+                    b2_loss = loss_main.new_tensor(0.0)
+                    b3_loss = loss_main.new_tensor(0.0)
+                    aux_loss = loss_main.new_tensor(0.0)
+                    distill_loss = loss_main.new_tensor(0.0)
+                    cycle_loss = loss_main.new_tensor(0.0)
+                    d_loss = loss_main.new_tensor(0.0)
+                    e_loss = loss_main.new_tensor(0.0)
+                    if aux_enabled:
+                        pred_tok = z_hat[:, :-1, :]
+                        hid_tok = h_main[:, :-1, :]
+                        tgt_feat = feat[:, 1:, :]
+                        tgt_type = type_id[:, 1:]
+
+                        if float(args.aux_b2_weight) > 0.0:
+                            ray_mask = (tgt_type == TYPE_A_RAY) | (tgt_type == TYPE_RAY)
+                            if bool(ray_mask.any()):
+                                gt_hit = tgt_feat[..., 11].clamp(0.0, 1.0)
+                                gt_t = tgt_feat[..., 9].clamp_min(0.0)
+
+                                pred_hit_logit = aux_heads["ray_hit"](pred_tok).squeeze(-1)
+                                pred_t = F.softplus(aux_heads["ray_t"](pred_tok).squeeze(-1))
+
+                                hit_bce = F.binary_cross_entropy_with_logits(
+                                    pred_hit_logit[ray_mask], gt_hit[ray_mask]
+                                )
+                                hit_mask = ray_mask & (gt_hit > 0.5)
+                                if bool(hit_mask.any()):
+                                    t_reg = F.smooth_l1_loss(pred_t[hit_mask], gt_t[hit_mask])
+                                    rank = _ray_rank_hinge_loss(
+                                        pred_t,
+                                        gt_t,
+                                        hit_mask,
+                                        n_pairs=int(args.aux_b2_rank_pairs),
+                                        margin=float(args.aux_b2_rank_margin),
+                                    )
+                                else:
+                                    t_reg = loss_main.new_tensor(0.0)
+                                    rank = loss_main.new_tensor(0.0)
+
+                                b2_loss = (
+                                    float(args.aux_b2_hit_weight) * hit_bce
+                                    + float(args.aux_b2_t_weight) * t_reg
+                                    + float(args.aux_b2_rank_weight) * rank
+                                )
+
+                        if float(args.aux_b3_weight) > 0.0:
+                            point_mask = (tgt_type == TYPE_A_POINT) | (tgt_type == TYPE_POINT)
+                            if bool(point_mask.any()):
+                                gt_dist = tgt_feat[..., 10].clamp_min(0.0)
+                                near_mask = point_mask & (gt_dist <= float(args.aux_b3_near_tau))
+                                if bool(near_mask.any()):
+                                    pred_dist = F.softplus(aux_heads["point_dist"](pred_tok).squeeze(-1))
+                                    b3_loss = F.smooth_l1_loss(pred_dist[near_mask], gt_dist[near_mask])
+
+                        if float(args.aux_e_weight) > 0.0:
+                            point_mask_e = (tgt_type == TYPE_A_POINT) | (tgt_type == TYPE_POINT)
+                            if bool(point_mask_e.any()):
+                                gt_dist_e = tgt_feat[..., 10].clamp_min(0.0)
+                                pred_dist_e = F.softplus(aux_heads["e_point_dist"](hid_tok).squeeze(-1))
+                                e_loss = F.smooth_l1_loss(pred_dist_e[point_mask_e], gt_dist_e[point_mask_e])
+
+                        aux_loss = (
+                            float(args.aux_b2_weight) * b2_loss
+                            + float(args.aux_b3_weight) * b3_loss
+                            + float(args.aux_e_weight) * e_loss
+                        )
+
+                    if teacher_model is not None:
+                        s_pred = z_hat[:, :-1, :]
+                        if float(args.teacher_answer_drop_prob) > 0.0:
+                            feat_student = _drop_answer_observations(
+                                feat,
+                                type_id,
+                                drop_prob=float(args.teacher_answer_drop_prob),
+                            )
+                            _, z_hat_distill, _ = model(
+                                feat_student,
+                                type_id,
+                                dual_mask_near=dm_near,
+                                dual_mask_far=dm_far,
+                                dual_mask_window=int(args.dual_mask_window),
+                                dual_mask_seed=dm_seed,
+                                dual_mask_type_aware=int(args.dual_mask_type_aware),
+                            )
+                            s_pred = z_hat_distill[:, :-1, :]
+                        with torch.no_grad():
+                            _, t_z_hat, _ = teacher_model(
+                                feat,
+                                type_id,
+                                dual_mask_near=dm_near,
+                                dual_mask_far=dm_far,
+                                dual_mask_window=int(args.dual_mask_window),
+                                dual_mask_seed=dm_seed,
+                                dual_mask_type_aware=int(args.dual_mask_type_aware),
+                            )
+                        t_pred = t_z_hat[:, :-1, :].detach()
+                        target_type = type_id[:, 1:]
+                        dmask = _default_answer_mask(target_type)
+                        if bool(dmask.any()):
+                            distill_loss = (1.0 - F.cosine_similarity(s_pred[dmask], t_pred[dmask], dim=-1, eps=1e-8)).mean()
+
+                    if float(args.cycle_weight) > 0.0:
+                        feat_cycle = _drop_answer_observations(
+                            feat,
+                            type_id,
+                            drop_prob=float(args.cycle_answer_drop_prob),
+                        )
+                        _, z_hat_cycle, _ = model(
+                            feat_cycle,
+                            type_id,
+                            dual_mask_near=dm_near,
+                            dual_mask_far=dm_far,
+                            dual_mask_window=int(args.dual_mask_window),
+                            dual_mask_seed=dm_seed + 17,
+                            dual_mask_type_aware=int(args.dual_mask_type_aware),
+                        )
+                        s_pred = z_hat[:, :-1, :]
+                        c_pred = z_hat_cycle[:, :-1, :]
+                        target_type = type_id[:, 1:]
+                        cmask = _default_answer_mask(target_type)
+                        if bool(cmask.any()):
+                            cycle_loss = (
+                                1.0
+                                - F.cosine_similarity(
+                                    c_pred[cmask],
+                                    s_pred.detach()[cmask],
+                                    dim=-1,
+                                    eps=1e-8,
+                                )
+                            ).mean()
+
+                    if float(args.d_hard_weight) > 0.0:
+                        tok_loss = 1.0 - F.cosine_similarity(
+                            z_hat[:, :-1, :],
+                            z[:, 1:, :].detach(),
+                            dim=-1,
+                            eps=1e-8,
+                        )
+                        d_loss = _hard_answer_topk_loss(
+                            tok_loss,
+                            type_id[:, 1:],
+                            top_frac=float(args.d_hard_top_frac),
+                            min_tokens=int(args.d_hard_min_tokens),
+                        )
+
+                    loss = (
+                        loss_main
+                        + aux_loss
+                        + float(args.teacher_distill_weight) * distill_loss
+                        + float(args.cycle_weight) * cycle_loss
+                        + float(args.d_hard_weight) * d_loss
+                    )
                 else:
                     token_mask = build_token_mask(type_id, args.mask_ratio)
                     feat_in = feat.clone()
@@ -420,7 +830,40 @@ def main():
             scaler.update()
 
             if step % 100 == 0:
-                print(f"ep={ep} step={step} loss={loss.item():.4f}")
+                if args.objective == "nepa":
+                    print(
+                        "ep={} step={} loss={:.4f} main={:.4f} b2={:.4f} b3={:.4f} e={:.4f} d={:.4f} aux={:.4f}".format(
+                            ep,
+                            step,
+                            float(loss.item()),
+                            float(loss_main.item()),
+                            float(b2_loss.item()),
+                            float(b3_loss.item()),
+                            float(e_loss.item()),
+                            float(d_loss.item()),
+                            float(aux_loss.item()),
+                        )
+                    )
+                    if teacher_model is not None:
+                        print(
+                            "ep={} step={} distill={:.4f} w={:.4f}".format(
+                                ep,
+                                step,
+                                float(distill_loss.item()),
+                                float(args.teacher_distill_weight),
+                            )
+                        )
+                    if float(args.cycle_weight) > 0.0:
+                        print(
+                            "ep={} step={} cycle={:.4f} w={:.4f}".format(
+                                ep,
+                                step,
+                                float(cycle_loss.item()),
+                                float(args.cycle_weight),
+                            )
+                        )
+                else:
+                    print(f"ep={ep} step={step} loss={loss.item():.4f}")
             step += 1
             global_step += 1
 
@@ -429,6 +872,7 @@ def main():
         if should_save:
             ckpt = {
                 "model": model.state_dict(),
+                "aux_heads": (aux_heads.state_dict() if aux_enabled else None),
                 "opt": opt.state_dict(),
                 "scaler": scaler.state_dict() if use_amp else None,
                 "args": vars(args),

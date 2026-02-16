@@ -184,11 +184,25 @@ def _ranks_from_score_tieaware(score: np.ndarray, target_idx: np.ndarray) -> np.
     return inv[np.arange(order.shape[0]), target_idx.astype(np.int32)] + 1
 
 
-def retrieval_metrics(query, gallery, ks=(1, 5, 10), chunk=256, tie_seed=0, tie_break_eps=1e-6):
+def retrieval_metrics(
+    query,
+    gallery,
+    ks=(1, 5, 10),
+    chunk=256,
+    tie_seed=0,
+    tie_break_eps=1e-6,
+    target_idx=None,
+):
     q = query / (np.linalg.norm(query, axis=1, keepdims=True) + 1e-9)
     g = gallery / (np.linalg.norm(gallery, axis=1, keepdims=True) + 1e-9)
     n = q.shape[0]
     ranks = np.zeros((n,), dtype=np.int32)
+    if target_idx is None:
+        target_idx = np.arange(n, dtype=np.int32)
+    else:
+        target_idx = np.asarray(target_idx, dtype=np.int32)
+        if target_idx.shape[0] != n:
+            raise ValueError(f"target_idx length mismatch: got {target_idx.shape[0]} vs n={n}")
     rng = np.random.RandomState(int(tie_seed) & 0xFFFFFFFF)
 
     for s in range(0, n, chunk):
@@ -196,8 +210,7 @@ def retrieval_metrics(query, gallery, ks=(1, 5, 10), chunk=256, tie_seed=0, tie_
         score = q[s:e] @ g.T
         if float(tie_break_eps) > 0.0:
             score = score + float(tie_break_eps) * rng.standard_normal(score.shape).astype(np.float32, copy=False)
-        target_idx = np.arange(s, e, dtype=np.int32)
-        ranks[s:e] = _ranks_from_score_tieaware(score, target_idx)
+        ranks[s:e] = _ranks_from_score_tieaware(score, target_idx[s:e])
 
     out = {}
     for k in ks:
@@ -235,6 +248,19 @@ def main():
     ap.add_argument("--mismatch_shift_gallery", type=int, default=1)
     ap.add_argument("--tie_break_eps", type=float, default=1e-6)
     ap.add_argument(
+        "--shuffle_gallery",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="If 1, permute gallery order before embedding and evaluate with corrected target indices.",
+    )
+    ap.add_argument(
+        "--gallery_shuffle_seed",
+        type=int,
+        default=-1,
+        help="RNG seed for gallery permutation when --shuffle_gallery=1; -1 uses eval_seed_gallery.",
+    )
+    ap.add_argument(
         "--sanity_constant_embed",
         action="store_true",
         help="Sanity mode: replace all embeddings with a constant vector to verify rank behaves ~random.",
@@ -255,21 +281,38 @@ def main():
     if eval_seed_gallery < 0:
         eval_seed_gallery = int(args.eval_seed)
 
-    def _build_mismatch_paths(mode: str, shift: int):
-        out = [None for _ in range(len(paths))]
-        if mode == "mismatch" and len(paths) > 1:
-            s = int(shift) % len(paths)
+    query_paths = list(paths)
+    gallery_paths = list(paths)
+    if int(args.shuffle_gallery) == 1:
+        shuf_seed = (
+            int(args.gallery_shuffle_seed)
+            if int(args.gallery_shuffle_seed) >= 0
+            else int(eval_seed_gallery)
+        )
+        rng_shuf = np.random.RandomState(int(shuf_seed) & 0xFFFFFFFF)
+        perm = rng_shuf.permutation(len(gallery_paths))
+        gallery_paths = [gallery_paths[int(i)] for i in perm]
+    else:
+        shuf_seed = -1
+
+    gallery_index = {p: i for i, p in enumerate(gallery_paths)}
+    target_idx = np.asarray([gallery_index[p] for p in query_paths], dtype=np.int32)
+
+    def _build_mismatch_paths(base_paths, mode: str, shift: int):
+        out = [None for _ in range(len(base_paths))]
+        if mode == "mismatch" and len(base_paths) > 1:
+            s = int(shift) % len(base_paths)
             if s == 0:
                 s = 1
-            out = [paths[(i + s) % len(paths)] for i in range(len(paths))]
+            out = [base_paths[(i + s) % len(base_paths)] for i in range(len(base_paths))]
         return out
 
-    mismatch_q = _build_mismatch_paths(args.context_mode_query, int(args.mismatch_shift_query))
-    mismatch_g = _build_mismatch_paths(args.context_mode_gallery, int(args.mismatch_shift_gallery))
+    mismatch_q = _build_mismatch_paths(query_paths, args.context_mode_query, int(args.mismatch_shift_query))
+    mismatch_g = _build_mismatch_paths(gallery_paths, args.context_mode_gallery, int(args.mismatch_shift_gallery))
 
     Q = []
     G = []
-    for i, p in enumerate(tqdm(paths, desc=f"embed query={args.query_backend}")):
+    for i, p in enumerate(tqdm(query_paths, desc=f"embed query={args.query_backend}")):
         Q.append(
             embed_path(
                 model,
@@ -291,7 +334,7 @@ def main():
                 disjoint_context_query=bool(int(args.disjoint_context_query)),
             )
         )
-    for i, p in enumerate(tqdm(paths, desc=f"embed gallery={args.gallery_backend}")):
+    for i, p in enumerate(tqdm(gallery_paths, desc=f"embed gallery={args.gallery_backend}")):
         G.append(
             embed_path(
                 model,
@@ -328,6 +371,7 @@ def main():
         chunk=int(args.chunk),
         tie_seed=tie_seed,
         tie_break_eps=float(args.tie_break_eps),
+        target_idx=target_idx,
     )
     out.update(
         {
@@ -348,6 +392,8 @@ def main():
             "mismatch_shift_query": int(args.mismatch_shift_query),
             "mismatch_shift_gallery": int(args.mismatch_shift_gallery),
             "tie_break_eps": float(args.tie_break_eps),
+            "shuffle_gallery": bool(int(args.shuffle_gallery)),
+            "gallery_shuffle_seed": int(shuf_seed),
             "sanity_constant_embed": bool(args.sanity_constant_embed),
             "expected_random_r@1": float(1.0 / max(1, len(paths))),
             "ckpt": os.path.abspath(args.ckpt),

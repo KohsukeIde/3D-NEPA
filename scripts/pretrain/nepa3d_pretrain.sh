@@ -58,6 +58,26 @@ VOXEL_DILATE="${VOXEL_DILATE:-1}"
 VOXEL_MAX_STEPS="${VOXEL_MAX_STEPS:-0}"
 OBJECTIVE="${OBJECTIVE:-nepa}"
 MASK_RATIO="${MASK_RATIO:-0.4}"
+# B-2/B-3 auxiliary losses (default OFF)
+AUX_B2_WEIGHT="${AUX_B2_WEIGHT:-0.0}"
+AUX_B2_HIT_WEIGHT="${AUX_B2_HIT_WEIGHT:-1.0}"
+AUX_B2_T_WEIGHT="${AUX_B2_T_WEIGHT:-1.0}"
+AUX_B2_RANK_WEIGHT="${AUX_B2_RANK_WEIGHT:-1.0}"
+AUX_B2_RANK_PAIRS="${AUX_B2_RANK_PAIRS:-128}"
+AUX_B2_RANK_MARGIN="${AUX_B2_RANK_MARGIN:-0.0}"
+AUX_B3_WEIGHT="${AUX_B3_WEIGHT:-0.0}"
+AUX_B3_NEAR_TAU="${AUX_B3_NEAR_TAU:-0.05}"
+# C-0 teacher-student refresh
+TEACHER_CKPT="${TEACHER_CKPT:-}"
+TEACHER_DISTILL_WEIGHT="${TEACHER_DISTILL_WEIGHT:-0.0}"
+TEACHER_ANSWER_DROP_PROB="${TEACHER_ANSWER_DROP_PROB:-0.0}"
+CYCLE_WEIGHT="${CYCLE_WEIGHT:-0.0}"
+CYCLE_ANSWER_DROP_PROB="${CYCLE_ANSWER_DROP_PROB:-0.3}"
+# D/E auxiliaries (default OFF)
+D_HARD_WEIGHT="${D_HARD_WEIGHT:-0.0}"
+D_HARD_TOP_FRAC="${D_HARD_TOP_FRAC:-0.25}"
+D_HARD_MIN_TOKENS="${D_HARD_MIN_TOKENS:-32}"
+AUX_E_WEIGHT="${AUX_E_WEIGHT:-0.0}"
 
 EXTRA_FORCE=""
 if [ "${FORCE_MISSING_RAY}" = "1" ]; then
@@ -82,6 +102,23 @@ fi
   --add_eos "${ADD_EOS}" \
   --objective "${OBJECTIVE}" \
   --mask_ratio "${MASK_RATIO}" \
+  --aux_b2_weight "${AUX_B2_WEIGHT}" \
+  --aux_b2_hit_weight "${AUX_B2_HIT_WEIGHT}" \
+  --aux_b2_t_weight "${AUX_B2_T_WEIGHT}" \
+  --aux_b2_rank_weight "${AUX_B2_RANK_WEIGHT}" \
+  --aux_b2_rank_pairs "${AUX_B2_RANK_PAIRS}" \
+  --aux_b2_rank_margin "${AUX_B2_RANK_MARGIN}" \
+  --aux_b3_weight "${AUX_B3_WEIGHT}" \
+  --aux_b3_near_tau "${AUX_B3_NEAR_TAU}" \
+  --teacher_ckpt "${TEACHER_CKPT}" \
+  --teacher_distill_weight "${TEACHER_DISTILL_WEIGHT}" \
+  --teacher_answer_drop_prob "${TEACHER_ANSWER_DROP_PROB}" \
+  --cycle_weight "${CYCLE_WEIGHT}" \
+  --cycle_answer_drop_prob "${CYCLE_ANSWER_DROP_PROB}" \
+  --d_hard_weight "${D_HARD_WEIGHT}" \
+  --d_hard_top_frac "${D_HARD_TOP_FRAC}" \
+  --d_hard_min_tokens "${D_HARD_MIN_TOKENS}" \
+  --aux_e_weight "${AUX_E_WEIGHT}" \
   --save_every "${SAVE_EVERY}" \
   --save_last "${SAVE_LAST}" \
   --auto_resume "${AUTO_RESUME}" \
