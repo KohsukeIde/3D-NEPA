@@ -50,6 +50,7 @@ class QueryNepa(nn.Module):
         self,
         feat,
         type_id,
+        is_causal: bool = True,
         dual_mask_near: float = 0.0,
         dual_mask_far: float = 0.0,
         dual_mask_window: int = 0,
@@ -63,6 +64,7 @@ class QueryNepa(nn.Module):
         z = self.embed_tokens(feat, type_id)
         h = self.backbone(
             z,
+            is_causal=bool(is_causal),
             type_id=type_id,
             dual_mask_near=float(dual_mask_near),
             dual_mask_far=float(dual_mask_far),

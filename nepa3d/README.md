@@ -21,6 +21,22 @@ Legacy means early/pre-review snapshots (including old ModelNet40-era runs). Cur
 - UCPR/CPAC planning doc: `nepa3d/docs/eccv_ucpr_cpac_tables.md`
 - K-plane/Tri-plane results (pilot + full e50) are tracked in `nepa3d/docs/results_ucpr_cpac_active.md`
 
+## Classification Attention Mode (Important)
+
+- Historical classification tables were produced with **causal self-attention** (legacy fixed behavior, equivalent to `cls_is_causal=1`).
+- Current classification code supports both:
+  - `--cls_is_causal 1`: causal (legacy reproduction)
+  - `--cls_is_causal 0`: bidirectional (intended ViT-style fine-tuning, current default)
+- Classification pooling is configurable via `--cls_pooling {auto,eos,mean,mean_a}` (default: `mean_a`):
+  - `auto`: `qa_tokens=1` なら `mean_a`、それ以外は `eos`
+  - `eos`: 最終トークンプーリング（legacy）
+  - `mean`: 全トークン平均
+  - `mean_a`: Answerトークン平均（QA向け）
+- Ongoing reruns for bidirectional classification are tracked under:
+  - `runs/scan_variants_review_ft_bidir_nray0`
+  - `runs/scan_variants_review_lp_bidir_nray0`
+  - `runs/modelnet40_pointgpt_protocol_bidir`
+
 ## 1) Current experiment definition
 
 Pretrain corpora:
@@ -176,8 +192,14 @@ bash scripts/finetune/launch_scanobjectnn_variants_chain_local.sh
 Review-response chain (core3 with mix methods + `N_RAY=0` + linear-probe):
 
 ```bash
-bash scripts/finetune/launch_scanobjectnn_review_chain_local.sh
+CLS_IS_CAUSAL=0 bash scripts/finetune/launch_scanobjectnn_review_chain_local.sh
 ```
+
+Default review-chain eval policy:
+
+- `MC_EVAL_K_TEST=10` (vote-10)
+- `MC_EVAL_K_VAL=1`
+- `CLS_POOLING=mean_a` (pre-QA `qa_tokens=0` checkpoints fall back to EOS behavior)
 
 Review follow-up chain (no `n_point` scaling; K=1 seed expansion + dist ablation + QA+dualmask spot-check):
 
@@ -188,13 +210,13 @@ bash scripts/finetune/launch_scanobjectnn_review_followups_chain_local.sh
 ModelNet40 protocol run (full + episodic few-shot):
 
 ```bash
-bash scripts/finetune/launch_modelnet40_pointgpt_protocol_local.sh
+CLS_IS_CAUSAL=0 bash scripts/finetune/launch_modelnet40_pointgpt_protocol_local.sh
 ```
 
 Auto-chain (wait current review jobs, then start ModelNet40 protocol):
 
 ```bash
-bash scripts/finetune/launch_after_review_modelnet_chain_local.sh
+CLS_IS_CAUSAL=0 bash scripts/finetune/launch_after_review_modelnet_chain_local.sh
 ```
 
 UCPR template:

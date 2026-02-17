@@ -2,6 +2,14 @@
 
 This file stores the paper-safe ScanObjectNN protocol-variant results (OBJ-BG / OBJ-ONLY / PB-T50-RS).
 
+Status note (Feb 17, 2026):
+
+- This file is a **causal-attention baseline snapshot** (legacy classification behavior).
+- New bidirectional reruns (`cls_is_causal=0`) are running in:
+  - `runs/scan_variants_review_ft_bidir_nray0`
+  - `runs/scan_variants_review_lp_bidir_nray0`
+- Use `nepa3d/docs/results_scanobjectnn_review_active.md` as the primary active table page.
+
 - Run root: `runs/scan_variants_core3/`
 - Log root: `logs/finetune/scan_variants_core3/`
 - Status snapshot date: February 15, 2026

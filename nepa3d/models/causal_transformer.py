@@ -30,6 +30,7 @@ class CausalTransformer(nn.Module):
     def forward(
         self,
         x,
+        is_causal: bool = True,
         type_id=None,
         dual_mask_near: float = 0.0,
         dual_mask_far: float = 0.0,
@@ -39,7 +40,7 @@ class CausalTransformer(nn.Module):
     ):
         """Causal transformer with optional *dual masking* (PointGPT-style).
 
-        Base mask: standard causal (future tokens are masked).
+        Base mask: standard causal (future tokens are masked) when `is_causal=True`.
         Dual mask: additionally masks *some past tokens* stochastically, which reduces
         short-range redundancy / geometric shortcut incentives in AR settings.
 
@@ -50,11 +51,13 @@ class CausalTransformer(nn.Module):
             dual_mask_seed: optional seed for deterministic dual masking.
         """
         t = x.size(1)
-        # Base causal mask (True = blocked)
-        attn_mask = torch.triu(torch.ones(t, t, device=x.device, dtype=torch.bool), diagonal=1)
+        attn_mask = None
+        if bool(is_causal):
+            # Base causal mask (True = blocked)
+            attn_mask = torch.triu(torch.ones(t, t, device=x.device, dtype=torch.bool), diagonal=1)
 
-        # Dual masking only during training.
-        if self.training:
+        # Dual masking only during training with causal attention.
+        if bool(is_causal) and self.training:
             p_near = self._clamp01(dual_mask_near)
             p_far = self._clamp01(dual_mask_far)
             if (p_near > 0.0) or (p_far > 0.0):

@@ -39,6 +39,8 @@ if [ -z "${N_RAY}" ]; then
   fi
 fi
 FREEZE_BACKBONE="${FREEZE_BACKBONE:-0}"
+CLS_IS_CAUSAL="${CLS_IS_CAUSAL:-0}"
+CLS_POOLING="${CLS_POOLING:-mean_a}"
 ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
 RUN_SUFFIX="${RUN_SUFFIX:-}"
 if [ "${ABLATE_POINT_DIST}" = "1" ] && [ -z "${RUN_SUFFIX}" ]; then
@@ -243,6 +245,8 @@ run_one() {
     --mc_eval_k "${MC_EVAL_K}" \
     --mc_eval_k_val "${MC_EVAL_K_VAL}" \
     --mc_eval_k_test "${MC_EVAL_K_TEST}" \
+    --cls_is_causal "${CLS_IS_CAUSAL}" \
+    --cls_pooling "${CLS_POOLING}" \
     "${extra_args[@]}" \
     --save_dir "${save_dir}" \
     > "${job_log}" 2>&1
@@ -301,7 +305,7 @@ echo "[info] gpu0=${GPU0} gpu1=${GPU1}"
 echo "[info] logs=${LOG_ROOT}"
 echo "[info] batch=${BATCH} workers=${NUM_WORKERS}"
 echo "[info] methods=${METHODS}"
-echo "[info] n_point=${N_POINT} n_ray=${N_RAY} freeze_backbone=${FREEZE_BACKBONE} ablate_point_dist=${ABLATE_POINT_DIST} run_suffix=${RUN_SUFFIX}"
+echo "[info] n_point=${N_POINT} n_ray=${N_RAY} freeze_backbone=${FREEZE_BACKBONE} cls_is_causal=${CLS_IS_CAUSAL} cls_pooling=${CLS_POOLING} ablate_point_dist=${ABLATE_POINT_DIST} run_suffix=${RUN_SUFFIX}"
 
 JOB_INDEX_FILE="$(mktemp)"
 JOB_LOCK_FILE="$(mktemp)"

@@ -15,6 +15,7 @@ from ..data.modelnet40_index import (
     stratified_train_val_split,
 )
 from ..models.query_nepa import QueryNepa
+from ..token.tokenizer import TYPE_A_POINT, TYPE_A_RAY
 from ..utils.seed import set_seed
 from ..utils.ckpt_utils import load_state_dict_flexible, maybe_resize_pos_emb_in_state_dict
 
@@ -66,14 +67,35 @@ def stratified_nway(paths, n_way, seed=0):
 
 
 class ClsWrapper(nn.Module):
-    def __init__(self, backbone, n_classes):
+    def __init__(self, backbone, n_classes, cls_is_causal=False, cls_pooling="auto", qa_tokens=False):
         super().__init__()
         self.backbone = backbone
         self.head = nn.Linear(backbone.d_model, n_classes)
+        self.cls_is_causal = bool(cls_is_causal)
+        self.cls_pooling = str(cls_pooling)
+        self.qa_tokens = bool(qa_tokens)
+
+    def _resolved_pooling(self):
+        if self.cls_pooling == "auto":
+            return "mean_a" if self.qa_tokens else "eos"
+        return self.cls_pooling
 
     def forward(self, feat, type_id):
-        _, _, h = self.backbone(feat, type_id)
-        pooled = h[:, -1, :]
+        _, _, h = self.backbone(feat, type_id, is_causal=self.cls_is_causal)
+        pool = self._resolved_pooling()
+        if pool == "mean":
+            pooled = h.mean(dim=1)
+        elif pool == "mean_a":
+            a_mask = (type_id == TYPE_A_POINT) | (type_id == TYPE_A_RAY)
+            if a_mask.any():
+                w = a_mask.float().unsqueeze(-1)
+                pooled = (h * w).sum(dim=1) / w.sum(dim=1).clamp(min=1.0)
+            else:
+                # Fallback for non-QA sequences.
+                pooled = h[:, -1, :]
+        else:
+            # EOS/last-token pooling (legacy behavior).
+            pooled = h[:, -1, :]
         return self.head(pooled)
 
 
@@ -171,6 +193,19 @@ def main():
         "--freeze_backbone",
         action="store_true",
         help="linear probe mode: freeze backbone, train classifier head only",
+    )
+    ap.add_argument(
+        "--cls_is_causal",
+        type=int,
+        default=0,
+        help="classification attention mode: 1=causal (AR-style), 0=bidirectional",
+    )
+    ap.add_argument(
+        "--cls_pooling",
+        type=str,
+        default="mean_a",
+        choices=["auto", "eos", "mean", "mean_a"],
+        help="classification pooling (default=mean_a): auto(mean_a for qa_tokens else eos), eos, mean, mean_a",
     )
     ap.add_argument(
         "--ablate_point_dist",
@@ -396,7 +431,13 @@ def main():
             p.requires_grad = False
         backbone.eval()
 
-    model = ClsWrapper(backbone, n_classes=len(label_map)).to(device)
+    model = ClsWrapper(
+        backbone,
+        n_classes=len(label_map),
+        cls_is_causal=bool(int(args.cls_is_causal)),
+        cls_pooling=args.cls_pooling,
+        qa_tokens=qa_tokens,
+    ).to(device)
     opt_params = model.head.parameters() if args.freeze_backbone else model.parameters()
     opt = optim.AdamW(opt_params, lr=args.lr, weight_decay=args.weight_decay)
     ce = nn.CrossEntropyLoss()
@@ -437,6 +478,8 @@ def main():
         f"val_ratio={args.val_ratio} val_seed={args.val_seed} "
         f"mc_eval_k_val={mc_eval_k_val} mc_eval_k_test={mc_eval_k_test} "
         f"freeze_backbone={bool(args.freeze_backbone)} "
+        f"cls_is_causal={bool(int(args.cls_is_causal))} "
+        f"cls_pooling={args.cls_pooling}->{model._resolved_pooling()} "
         f"ablate_point_dist={bool(args.ablate_point_dist)} "
         f"n_point={args.n_point}/{pre_n_point} n_ray={args.n_ray}/{pre_n_ray} "
         f"model_max_len={model_max_len}"

@@ -1,5 +1,13 @@
 # ScanObjectNN Review Tables (paper-safe core3)
 
+Status note (Feb 17, 2026):
+
+- This page reports the completed **causal-attention classification baseline** (`cls_is_causal=1` behavior in legacy runs).
+- Bidirectional-attention rerun (`cls_is_causal=0`) is currently running at:
+  - `runs/scan_variants_review_ft_bidir_nray0`
+  - `runs/scan_variants_review_lp_bidir_nray0`
+  - logs: `logs/finetune/scan_variants_review_ft_bidir_nray0`, `logs/finetune/scan_variants_review_lp_bidir_nray0`
+
 Source run roots:
 
 - `runs/scan_variants_review_ft_nray0` (full fine-tune)
@@ -19,6 +27,11 @@ Artifacts:
 - `shapenet_nepa`, `shapenet_mesh_udf_nepa`, `shapenet_mix_nepa` use pretrains with `objective=nepa` (next-embedding prediction, not token-masked MAE).
 - `shapenet_mix_mae` uses pretrain with `objective=mae` and token masking (`mask_ratio=0.4`; masked input tokens are zeroed during pretraining).
 - Checkpoints used in this table are pre-QA/dual-mask runs (`qa_tokens=0`, no dual-mask schedule).
+- Classification uses the same `QueryNepa` backbone with causal mask (`CausalTransformer`); it is not bidirectional self-attention (`is_causal=False` is not used in this path).
+- Current rerun setting is `cls_is_causal=0` (bidirectional attention); this page remains the legacy causal baseline until rerun completion.
+- Current bidirectional rerun uses vote-10 at test time (`mc_eval_k_test=10`, `mc_eval_k_val=1`).
+- Current bidirectional rerun default is `cls_pooling=mean_a`; for pre-QA checkpoints (`qa_tokens=0`) this falls back to EOS behavior (no A-tokens).
+- Legacy table pooling is EOS/last-token (`cls_pooling=eos` 相当)。現在は `mean_a` を標準にし、`mean_a vs eos` は Stage C の単発アブレーションで確認します。
 - For ScanObjectNN caches used here (`scanobjectnn_*_v2`), `pt_dist_pool` is observation-derived (KDTree nearest-neighbor distance to scan points), so this downstream table does not depend on mesh-derived distance labels.
 - `pt_dist_pc_pool` is not required for these ScanObjectNN caches: `pt_dist_pool` already stores pointcloud-derived distances by construction.
 - Caveat for ShapeNet pointcloud experiments (not this table): if pointcloud backend is used on `shapenet_cache_v0`, add `pt_dist_pc_pool` via migration to avoid falling back to mesh-derived `pt_dist_pool`.
@@ -252,3 +265,72 @@ Artifacts:
 
 - `full_ft`: 225/225 complete
 - `linear_probe`: 225/225 complete
+
+## Follow-up Results (Feb 17, 2026)
+
+Artifacts:
+
+- `results/scan_variants_review_followups_summary.csv`
+- `results/scan_variants_review_followups_summary.json`
+
+### A) K=1 seed expansion (full fine-tune, n=10 seeds)
+
+Added seeds `3..9` to existing `0..2` for `K=1` on `obj_only` and `pb_t50_rs`.
+
+| Variant | Method | K | n(seed) | test_acc mean +- std |
+|---|---|---:|---:|---:|
+| `obj_only` | `scratch` | 1 | 10 | 0.1391 +- 0.0221 |
+| `obj_only` | `shapenet_nepa` | 1 | 10 | 0.1845 +- 0.0186 |
+| `obj_only` | `shapenet_mesh_udf_nepa` | 1 | 10 | 0.1785 +- 0.0201 |
+| `obj_only` | `shapenet_mix_nepa` | 1 | 10 | 0.1941 +- 0.0348 |
+| `obj_only` | `shapenet_mix_mae` | 1 | 10 | 0.2031 +- 0.0274 |
+| `pb_t50_rs` | `scratch` | 1 | 10 | 0.1509 +- 0.0199 |
+| `pb_t50_rs` | `shapenet_nepa` | 1 | 10 | 0.1502 +- 0.0209 |
+| `pb_t50_rs` | `shapenet_mesh_udf_nepa` | 1 | 10 | 0.1448 +- 0.0204 |
+| `pb_t50_rs` | `shapenet_mix_nepa` | 1 | 10 | 0.1536 +- 0.0286 |
+| `pb_t50_rs` | `shapenet_mix_mae` | 1 | 10 | 0.1612 +- 0.0161 |
+
+Readout:
+
+- `obj_only, K=1`: best is `shapenet_mix_mae`.
+- `pb_t50_rs, K=1`: best is `shapenet_mix_mae`; differences remain small and high-variance.
+
+### B) Dist-channel ablation (full fine-tune, `obj_bg`, `shapenet_mix_nepa`)
+
+`ablate_point_dist=1` (zero point-distance channel) with `K={0,20}`, seeds `0,1,2`.
+
+| K | Base (`xyz+dist`) mean +- std | Ablated (`xyz only`) mean +- std | Delta (ablated - base) |
+|---:|---:|---:|---:|
+| 0 | 0.6718 +- 0.0077 | 0.6328 +- 0.0045 | -0.0390 |
+| 20 | 0.4997 +- 0.0131 | 0.4372 +- 0.0064 | -0.0625 |
+
+Readout:
+
+- In this setup, removing `pt_dist` hurts both full and few-shot (`K=20`) classification.
+- Dist ablation confirms that `POINT xyz + dist` is a meaningful input channel in this benchmark.
+
+### C) Stage C (QA+dualmask classification spot-check) status
+
+Current status:
+
+- Stage C is **pending** on this machine.
+- Existing checkpoint state is partial (`runs/eccv_upmix_nepa_qa_dualmask_s0/last.pt`, `epoch=0`, `step=2084`), and `ckpt_ep049.pt` is not present.
+- Stale PID files from the interrupted attempt were archived by `scripts/logs/cleanup_stale_pids.sh`.
+
+Planned Stage C evaluation:
+
+- variant: `obj_bg`
+- method slot: `shapenet_mix_nepa` (ckpt overridden to QA+dualmask)
+- seeds: `0` (single-spot ablation)
+- `K={20}` (single-spot ablation)
+- pooling ablation: `mean_a` vs `eos`
+- run suffix base: `_qa_dualmask` (`_qa_dualmask_mean_a` / `_qa_dualmask_eos`)
+
+Launch note (current default behavior):
+
+```bash
+CLS_IS_CAUSAL=0 \
+bash scripts/finetune/launch_scanobjectnn_review_followups_chain_local.sh
+```
+
+If `runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt` is missing, Stage C now auto-resumes QA+dualmask pretrain before running the classification spot-check.

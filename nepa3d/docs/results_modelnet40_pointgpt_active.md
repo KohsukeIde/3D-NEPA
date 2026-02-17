@@ -1,5 +1,13 @@
 # ModelNet40 PointGPT-Style Protocol (Active)
 
+Status note (Feb 17, 2026):
+
+- Tables below are the completed **causal-attention baseline** (legacy behavior).
+- Bidirectional classification rerun (`cls_is_causal=0`) is queued/active at:
+  - `runs/modelnet40_pointgpt_protocol_bidir`
+  - logs: `logs/finetune/modelnet40_pointgpt_protocol_bidir/`
+- Until that rerun completes, treat this page as a reference baseline.
+
 Run root: `runs/modelnet40_pointgpt_protocol/`
 
 Artifacts:

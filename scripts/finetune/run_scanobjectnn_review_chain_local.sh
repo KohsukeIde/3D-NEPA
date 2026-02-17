@@ -9,6 +9,7 @@ set -eu
 #   - uses protocol variants (obj_bg/obj_only/pb_t50_rs)
 #   - includes mix methods in comparison
 #   - uses N_RAY=0 for pointcloud_noray backend (unless explicitly overridden)
+#   - uses vote-10 at test time by default (MC_EVAL_K_TEST=10)
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}" || exit 1
@@ -41,6 +42,9 @@ count_done() {
 VARIANTS="${VARIANTS:-obj_bg obj_only pb_t50_rs}"
 METHODS="${METHODS:-scratch shapenet_nepa shapenet_mesh_udf_nepa shapenet_mix_nepa shapenet_mix_mae}"
 EXPECTED_FULL="${EXPECTED_FULL:-225}"  # 3 variants x 5 methods x 5 K x 3 seeds
+MC_EVAL_K="${MC_EVAL_K:-10}"
+MC_EVAL_K_VAL="${MC_EVAL_K_VAL:-1}"
+MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-10}"
 
 # Stage1: full fine-tune
 FT_BASE_RUN_ROOT="${FT_BASE_RUN_ROOT:-runs/scan_variants_review_ft_nray0}"
@@ -61,6 +65,9 @@ if [ "${ft_done}" -lt "${EXPECTED_FULL}" ]; then
     LOG_DIR="${FT_BASE_LOG_ROOT}" \
     BACKEND="${BACKEND:-pointcloud_noray}" \
     N_RAY="${N_RAY:-0}" \
+    MC_EVAL_K="${MC_EVAL_K}" \
+    MC_EVAL_K_VAL="${MC_EVAL_K_VAL}" \
+    MC_EVAL_K_TEST="${MC_EVAL_K_TEST}" \
       bash scripts/finetune/launch_scanobjectnn_variant_tables_local.sh
   fi
   wait_for_pid_file "${FT_PIPELINE_PID}" "review_full_ft"
@@ -92,6 +99,9 @@ if [ "${lp_done}" -lt "${EXPECTED_FULL}" ]; then
     LOG_DIR="${LP_BASE_LOG_ROOT}" \
     BACKEND="${BACKEND:-pointcloud_noray}" \
     N_RAY="${N_RAY:-0}" \
+    MC_EVAL_K="${MC_EVAL_K}" \
+    MC_EVAL_K_VAL="${MC_EVAL_K_VAL}" \
+    MC_EVAL_K_TEST="${MC_EVAL_K_TEST}" \
     FREEZE_BACKBONE=1 \
     RUN_SUFFIX="${RUN_SUFFIX:-_lp}" \
       bash scripts/finetune/launch_scanobjectnn_variant_tables_local.sh
