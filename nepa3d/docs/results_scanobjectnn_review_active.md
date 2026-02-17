@@ -313,24 +313,45 @@ Readout:
 
 Current status:
 
-- Stage C is **pending** on this machine.
-- Existing checkpoint state is partial (`runs/eccv_upmix_nepa_qa_dualmask_s0/last.pt`, `epoch=0`, `step=2084`), and `ckpt_ep049.pt` is not present.
-- Stale PID files from the interrupted attempt were archived by `scripts/logs/cleanup_stale_pids.sh`.
+- Stage C is **completed** on this machine (Feb 17, 2026).
+- The follow-up chain auto-resumed QA+dualmask pretrain when needed, then ran both pooling settings.
+- Config:
+  - variant: `obj_bg`
+  - method slot: `shapenet_mix_nepa` (ckpt overridden to QA+dualmask)
+  - seeds: `0` (single-spot ablation)
+  - `K={20}` (single-spot ablation)
+  - pooling ablation: `mean_a` vs `eos`
+  - run suffix base: `_qa_dualmask` (`_qa_dualmask_mean_a` / `_qa_dualmask_eos`)
 
-Planned Stage C evaluation:
+Stage C results (`obj_bg`, `K=20`, `seed=0`):
 
-- variant: `obj_bg`
-- method slot: `shapenet_mix_nepa` (ckpt overridden to QA+dualmask)
-- seeds: `0` (single-spot ablation)
-- `K={20}` (single-spot ablation)
-- pooling ablation: `mean_a` vs `eos`
-- run suffix base: `_qa_dualmask` (`_qa_dualmask_mean_a` / `_qa_dualmask_eos`)
+| Pooling | best_val | best_ep | test_acc |
+|---|---:|---:|---:|
+| `mean_a` | 0.6323 | 66 | 0.5404 |
+| `eos` | 0.6368 | 58 | 0.5611 |
 
-Launch note (current default behavior):
+Reference baseline (same downstream setting, pre-QA checkpoint):
 
-```bash
-CLS_IS_CAUSAL=0 \
-bash scripts/finetune/launch_scanobjectnn_review_followups_chain_local.sh
-```
+- run: `runs/scan_variants_review_ft_bidir_nray0/obj_bg/scan_shapenet_mix_nepa_k20_s0/last.pt`
+- test_acc: `0.4596`
 
-If `runs/eccv_upmix_nepa_qa_dualmask_s0/ckpt_ep049.pt` is missing, Stage C now auto-resumes QA+dualmask pretrain before running the classification spot-check.
+Delta vs pre-QA baseline (`0.4596`):
+
+| Variant | test_acc | Delta |
+|---|---:|---:|
+| pre-QA (`shapenet_mix_nepa`, bidir, vote-10) | 0.4596 | +0.0000 |
+| QA+dualmask + `mean_a` | 0.5404 | +0.0809 |
+| QA+dualmask + `eos` | 0.5611 | +0.1015 |
+
+Readout:
+
+- In this single spot-check, `eos` is higher than `mean_a` by `+0.0207` test-acc.
+- QA+dualmask is higher than the matched pre-QA baseline in this spot-check (`+0.0809` with `mean_a`, `+0.1015` with `eos`).
+- For pre-QA checkpoints (`qa_tokens=0`), `cls_pooling=mean_a` resolves to EOS/last-token fallback (no A-tokens), so mean_a-only switching is not expected to help without QA tokens.
+- This is a single-seed ablation only; treat as a local check, not a final pooling conclusion.
+
+Primary logs/artifacts:
+
+- chain log: `logs/finetune/scan_variants_review_followups_chain_bidir/pipeline.log`
+- mean_a log: `logs/finetune/scan_variants_review_ft_bidir_qa_dualmask/obj_bg/jobs/shapenet_mix_nepa_qa_dualmask_mean_a_k20_s0.log`
+- eos log: `logs/finetune/scan_variants_review_ft_bidir_qa_dualmask/obj_bg/jobs/shapenet_mix_nepa_qa_dualmask_eos_k20_s0.log`
