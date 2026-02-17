@@ -38,7 +38,23 @@ def main():
 
     # Tri/K-plane baseline options.
     ap.add_argument("--plane_type", type=str, default="kplane", choices=["triplane", "kplane"])
-    ap.add_argument("--fusion", type=str, default="auto", choices=["auto", "sum", "product"])
+    ap.add_argument("--fusion", type=str, default="auto", choices=["auto", "sum", "product", "rg_product"])
+    ap.add_argument(
+        "--product_rank_groups",
+        type=int,
+        default=0,
+        help=(
+            "Only for fusion=rg_product. Number of rank groups R. "
+            "Must divide plane_channels. <=0 means plane_channels."
+        ),
+    )
+    ap.add_argument(
+        "--product_group_reduce",
+        type=str,
+        default="sum",
+        choices=["sum", "mean"],
+        help="Only for fusion=rg_product. Reduce within each rank group.",
+    )
     ap.add_argument("--plane_resolutions", type=str, default="64", help="Comma-separated, e.g. 64 or 32,64,128")
     ap.add_argument("--plane_channels", type=int, default=64)
     ap.add_argument("--hidden_dim", type=int, default=128)
@@ -70,6 +86,8 @@ def main():
         plane_channels=int(args.plane_channels),
         hidden_dim=int(args.hidden_dim),
         fusion=fusion,
+        product_rank_groups=int(args.product_rank_groups),
+        product_group_reduce=str(args.product_group_reduce),
     )
     model = KPlaneRegressor(cfg).to(device)
     opt = optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
@@ -100,7 +118,8 @@ def main():
     print(f"[mix] num_samples_per_epoch={len(dl.sampler)} replacement={mix_info['replacement']} seed={dl.sampler.seed}")
     print(
         f"[model] plane_type={args.plane_type} fusion={fusion} "
-        f"res={cfg.plane_resolutions} ch={cfg.plane_channels} hidden={cfg.hidden_dim}"
+        f"res={cfg.plane_resolutions} ch={cfg.plane_channels} hidden={cfg.hidden_dim} "
+        f"rg={cfg.product_rank_groups} rg_reduce={cfg.product_group_reduce}"
     )
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -177,6 +196,8 @@ def main():
                     "plane_channels": int(cfg.plane_channels),
                     "hidden_dim": int(cfg.hidden_dim),
                     "fusion": str(cfg.fusion),
+                    "product_rank_groups": int(cfg.product_rank_groups),
+                    "product_group_reduce": str(cfg.product_group_reduce),
                 },
                 "epoch": ep,
                 "step": step,

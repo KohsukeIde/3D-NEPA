@@ -88,7 +88,13 @@ class KPlaneConfig:
     plane_resolutions: Tuple[int, ...] = (64,)
     plane_channels: int = 64
     hidden_dim: int = 128
-    fusion: str = "product"  # sum | product
+    # sum | product | rg_product
+    fusion: str = "product"
+    # Only used when fusion == "rg_product".
+    # If <= 0, defaults to plane_channels (group_size = 1).
+    product_rank_groups: int = 0
+    # sum | mean (reduce across channels within each rank group)
+    product_group_reduce: str = "sum"
 
     @classmethod
     def from_args(
@@ -97,13 +103,25 @@ class KPlaneConfig:
         plane_channels: int,
         hidden_dim: int,
         fusion: str,
+        product_rank_groups: int = 0,
+        product_group_reduce: str = "sum",
     ) -> "KPlaneConfig":
         return cls(
             plane_resolutions=tuple(_parse_resolutions(plane_resolutions)),
             plane_channels=int(plane_channels),
             hidden_dim=int(hidden_dim),
             fusion=str(fusion),
+            product_rank_groups=int(product_rank_groups),
+            product_group_reduce=str(product_group_reduce),
         )
+
+    def fused_channels_per_plane(self) -> int:
+        if self.fusion in ("sum", "product"):
+            return int(self.plane_channels)
+        if self.fusion == "rg_product":
+            rg = int(self.product_rank_groups)
+            return int(self.plane_channels) if rg <= 0 else rg
+        raise ValueError(f"unknown fusion: {self.fusion}")
 
 
 class KPlaneRegressor(nn.Module):
@@ -118,12 +136,26 @@ class KPlaneRegressor(nn.Module):
 
     def __init__(self, cfg: KPlaneConfig):
         super().__init__()
-        if cfg.fusion not in ("sum", "product"):
+        if cfg.fusion not in ("sum", "product", "rg_product"):
             raise ValueError(f"unknown fusion: {cfg.fusion}")
+        if cfg.fusion == "rg_product":
+            ch = int(cfg.plane_channels)
+            rg = int(cfg.product_rank_groups) if int(cfg.product_rank_groups) > 0 else ch
+            if ch % max(1, rg) != 0:
+                raise ValueError(
+                    f"plane_channels ({ch}) must be divisible by product_rank_groups ({rg}) "
+                    "for fusion=rg_product"
+                )
+            if str(cfg.product_group_reduce) not in ("sum", "mean"):
+                raise ValueError(
+                    f"unknown product_group_reduce: {cfg.product_group_reduce} "
+                    "(expected sum|mean)"
+                )
         self.cfg = cfg
         c = int(cfg.plane_channels)
         h = int(cfg.hidden_dim)
-        in_q = c * len(cfg.plane_resolutions)
+        fused_c = int(cfg.fused_channels_per_plane())
+        in_q = fused_c * len(cfg.plane_resolutions)
 
         self.context_encoder = nn.Sequential(
             nn.Linear(4, h),
@@ -141,6 +173,48 @@ class KPlaneRegressor(nn.Module):
     @property
     def fusion(self) -> str:
         return self.cfg.fusion
+
+    def _rank_grouped_product(
+        self,
+        a: torch.Tensor,
+        b: torch.Tensor,
+        c: torch.Tensor,
+    ) -> torch.Tensor:
+        # Inputs: [..., C]
+        if a.shape != b.shape or a.shape != c.shape:
+            raise ValueError(f"shape mismatch: {a.shape=} {b.shape=} {c.shape=}")
+        ch = int(a.shape[-1])
+        rg = int(self.cfg.product_rank_groups) if int(self.cfg.product_rank_groups) > 0 else ch
+        if ch % max(1, rg) != 0:
+            raise ValueError(
+                f"plane_channels ({ch}) must be divisible by product_rank_groups ({rg})"
+            )
+        gsz = ch // max(1, rg)
+        # [..., R, G]
+        a_r = a.reshape(*a.shape[:-1], rg, gsz)
+        b_r = b.reshape(*b.shape[:-1], rg, gsz)
+        c_r = c.reshape(*c.shape[:-1], rg, gsz)
+        prod = a_r * b_r * c_r
+        red = str(self.cfg.product_group_reduce)
+        if red == "sum":
+            return prod.sum(dim=-1)
+        if red == "mean":
+            return prod.mean(dim=-1)
+        raise ValueError(f"unknown product_group_reduce: {red}")
+
+    def _fuse_planes(
+        self,
+        fxy: torch.Tensor,
+        fxz: torch.Tensor,
+        fyz: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.cfg.fusion == "sum":
+            return fxy + fxz + fyz
+        if self.cfg.fusion == "product":
+            return fxy * fxz * fyz
+        if self.cfg.fusion == "rg_product":
+            return self._rank_grouped_product(fxy, fxz, fyz)
+        raise ValueError(f"unknown fusion: {self.cfg.fusion}")
 
     def _encode_context_features(
         self,
@@ -198,10 +272,7 @@ class KPlaneRegressor(nn.Module):
             fxy = _sample_bilinear(pxy, qxy)
             fxz = _sample_bilinear(pxz, qxz)
             fyz = _sample_bilinear(pyz, qyz)
-            if self.cfg.fusion == "sum":
-                fs = fxy + fxz + fyz
-            else:
-                fs = fxy * fxz * fyz
+            fs = self._fuse_planes(fxy, fxz, fyz)
             per_scale.append(fs)
         return torch.cat(per_scale, dim=-1)
 
@@ -227,10 +298,7 @@ class KPlaneRegressor(nn.Module):
             gxy = pxy.mean(dim=(-1, -2))
             gxz = pxz.mean(dim=(-1, -2))
             gyz = pyz.mean(dim=(-1, -2))
-            if self.cfg.fusion == "sum":
-                g = gxy + gxz + gyz
-            else:
-                g = gxy * gxz * gyz
+            g = self._fuse_planes(gxy, gxz, gyz)
             desc.append(g)
         return torch.cat(desc, dim=-1)
 
@@ -265,6 +333,8 @@ def build_kplane_from_ckpt(ckpt_path: str, device: str | torch.device):
         plane_channels=int(meta.get("plane_channels", 64)),
         hidden_dim=int(meta.get("hidden_dim", 128)),
         fusion=str(meta.get("fusion", "product")),
+        product_rank_groups=int(meta.get("product_rank_groups", 0)),
+        product_group_reduce=str(meta.get("product_group_reduce", "sum")),
     )
     model = KPlaneRegressor(cfg)
     model.load_state_dict(ckpt["model"], strict=True)

@@ -56,6 +56,9 @@ QUERY_POOL_FRAC="${QUERY_POOL_FRAC:-0.5}"           # used when QUERY_SOURCE=hyb
 GRID_SAMPLE_MODE="${GRID_SAMPLE_MODE:-uniform}"      # uniform / near_surface / stratified
 GRID_NEAR_TAU="${GRID_NEAR_TAU:-0.05}"
 GRID_NEAR_FRAC="${GRID_NEAR_FRAC:-0.7}"
+GRID_RES_SCHEDULE="${GRID_RES_SCHEDULE:-16,32,64}"  # used when GRID_SAMPLE_MODE=coarse_to_fine
+GRID_C2F_EXPAND="${GRID_C2F_EXPAND:-1}"             # used when GRID_SAMPLE_MODE=coarse_to_fine
+GRID_C2F_STAGE_WEIGHTS="${GRID_C2F_STAGE_WEIGHTS:-auto}" # optional, comma-separated; "auto" = default weights
 TARGET_TRANSFORM="${TARGET_TRANSFORM:-none}"         # none / trunc / log1p
 TARGET_TRUNC_MAX="${TARGET_TRUNC_MAX:-0.1}"
 TARGET_LOG_SCALE="${TARGET_LOG_SCALE:-0.03}"
@@ -91,6 +94,9 @@ ARGS="--cache_root ${CACHE_ROOT} --split ${SPLIT} --ckpt ${CKPT} \
 --grid_sample_mode ${GRID_SAMPLE_MODE} \
 --grid_near_tau ${GRID_NEAR_TAU} \
 --grid_near_frac ${GRID_NEAR_FRAC} \
+--grid_res_schedule ${GRID_RES_SCHEDULE} \
+--grid_c2f_expand ${GRID_C2F_EXPAND} \
+--grid_c2f_stage_weights ${GRID_C2F_STAGE_WEIGHTS} \
 --target_transform ${TARGET_TRANSFORM} \
 --target_trunc_max ${TARGET_TRUNC_MAX} \
 --target_log_scale ${TARGET_LOG_SCALE} \

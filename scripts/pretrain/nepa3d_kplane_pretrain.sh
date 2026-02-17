@@ -36,7 +36,9 @@ QUERY_SOURCE="${QUERY_SOURCE:-pool}"
 TARGET_MODE="${TARGET_MODE:-backend}"
 DISJOINT_CONTEXT_QUERY="${DISJOINT_CONTEXT_QUERY:-1}"
 PLANE_TYPE="${PLANE_TYPE:-kplane}"            # triplane / kplane
-FUSION="${FUSION:-auto}"                       # auto / sum / product
+FUSION="${FUSION:-auto}"                       # auto / sum / product / rg_product
+PRODUCT_RANK_GROUPS="${PRODUCT_RANK_GROUPS:-0}" # only for rg_product
+PRODUCT_GROUP_REDUCE="${PRODUCT_GROUP_REDUCE:-sum}" # sum / mean (only for rg_product)
 PLANE_RESOLUTIONS="${PLANE_RESOLUTIONS:-64}"   # e.g. 64 or 32,64,128
 PLANE_CHANNELS="${PLANE_CHANNELS:-64}"
 HIDDEN_DIM="${HIDDEN_DIM:-128}"
@@ -66,6 +68,8 @@ SEED="${SEED:-0}"
   --disjoint_context_query "${DISJOINT_CONTEXT_QUERY}" \
   --plane_type "${PLANE_TYPE}" \
   --fusion "${FUSION}" \
+  --product_rank_groups "${PRODUCT_RANK_GROUPS}" \
+  --product_group_reduce "${PRODUCT_GROUP_REDUCE}" \
   --plane_resolutions "${PLANE_RESOLUTIONS}" \
   --plane_channels "${PLANE_CHANNELS}" \
   --hidden_dim "${HIDDEN_DIM}" \

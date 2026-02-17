@@ -1376,22 +1376,52 @@ Readout:
 - `mean_query` degrades under `ablate_query_xyz`, while `plane_gap` remains effectively unchanged.
 - For product fusion, `plane_gap` remains the safer retrieval descriptor for diagnostics.
 
-### Next training runs launched (in progress)
+### K-plane Product c64 Follow-Up (completed, Feb 17, 2026)
 
-Commands launched with detached local jobs:
+Completed checkpoints:
 
-- `runs/eccv_kplane_product_c64_s0` (`target_mode=backend`, `plane_channels=64`)
-- `runs/eccv_kplane_product_udf_c64_s0` (`target_mode=udf`, `plane_channels=64`)
+- `runs/eccv_kplane_product_c64_s0/ckpt_ep049.pt` (`target_mode=backend`, `plane_channels=64`)
+- `runs/eccv_kplane_product_udf_c64_s0/ckpt_ep049.pt` (`target_mode=udf`, `plane_channels=64`)
 
-Live logs:
+Logs:
 
 - `logs/pretrain/eccv_kplane_baseline/kplane_product_c64_s0_bs96_e50.log`
 - `logs/pretrain/eccv_kplane_baseline/kplane_product_udf_c64_s0_bs96_e50.log`
 
-Auto-eval wait chain (launched):
+Auto-eval chain:
 
-- runner: `scripts/analysis/run_kplane_sum_chain_local.sh` (retargeted via env for these two product checkpoints)
+- runner: `scripts/analysis/run_kplane_sum_chain_local.sh` (retargeted via env)
 - pipeline log: `logs/analysis/kplane_product_c64_chain/pipeline.log`
+- completion line confirmed: `all evaluations finished`
+
+UCPR hard pairs (`pooling=mean_query`, tie-aware, `max_files=1000`):
+
+| Pair | product s0 R@1/R@5/R@10/mAP | product c64 R@1/R@5/R@10/mAP | product udf-c64 R@1/R@5/R@10/mAP |
+|---|---|---|---|
+| `mesh -> udfgrid` | `0.002 / 0.019 / 0.029 / 0.01992` | `0.007 / 0.022 / 0.040 / 0.02321` | `0.003 / 0.021 / 0.040 / 0.02127` |
+| `mesh -> pointcloud_noray` | `0.006 / 0.025 / 0.050 / 0.02666` | `0.008 / 0.027 / 0.052 / 0.02766` | `0.010 / 0.024 / 0.043 / 0.02672` |
+
+CPAC-UDF (`head_train_split=train_udf`, `head_train_max_shapes=4000`, `max_shapes=800`):
+
+| Model / setting | MAE | RMSE | IoU@0.03 | Baseline (NN-copy) |
+|---|---:|---:|---:|---|
+| product s0, `pool normal` | 0.17604 | 0.24831 | 0.61277 | `0.06151 / 0.09474 / 0.70891` |
+| product c64, `pool normal` | 0.17617 | 0.24830 | 0.61118 | `0.06151 / 0.09474 / 0.70891` |
+| product udf-c64, `pool normal` | 0.17595 | 0.24832 | 0.61409 | `0.06151 / 0.09474 / 0.70891` |
+| product s0, `grid normal` | 0.20849 | 0.25611 | 0.17028 | `0.10402 / 0.13157 / 0.12963` |
+| product c64, `grid normal` | 0.20838 | 0.25607 | 0.15499 | `0.10402 / 0.13157 / 0.12963` |
+| product udf-c64, `grid normal` | 0.20852 | 0.25612 | 0.18067 | `0.10402 / 0.13157 / 0.12963` |
+
+CPAC controls:
+
+- all three product variants show `pool testnone` collapse (`IoU@0.03 = 0.00000`)
+- `pool testmismatch` remains degraded (around `IoU@0.03 ~ 0.297 to 0.302`)
+
+Readout:
+
+- `plane_channels=64` improves product-model UCPR slightly on hard pairs.
+- CPAC `pool normal` remains effectively unchanged and still below NN-copy.
+- CPAC `grid normal` shows a small gain only for `target_mode=udf` (`IoU@0.03: 0.17028 -> 0.18067`), but error metrics stay almost unchanged.
 
 ## K-plane Fusion Sweep (completed, Feb 16, 2026)
 
@@ -1465,6 +1495,104 @@ Chain artifacts:
   - `results/ucpr_kplane_sum_large_s0_e50_*_tiefix.json`
   - `results/cpac_kplane_sum_s0_e50_*.json`
   - `results/cpac_kplane_sum_large_s0_e50_*.json`
+
+## K-plane `rg_product` Integration (Feb 17, 2026)
+
+Implemented minimal rank-grouped product fusion for tri/k-plane baseline:
+
+- `nepa3d/models/kplane.py`
+  - new fusion: `rg_product`
+  - new config: `product_rank_groups`, `product_group_reduce`
+  - rank-grouped product reduction in both query features and plane-global descriptor paths
+  - backward-compatible ckpt load defaults for old checkpoints
+- `nepa3d/train/pretrain_kplane.py`
+  - CLI: `--fusion rg_product`, `--product_rank_groups`, `--product_group_reduce`
+  - saved `kplane_cfg` extended with new fields
+- `scripts/pretrain/nepa3d_kplane_pretrain.sh`
+  - forwards `PRODUCT_RANK_GROUPS`, `PRODUCT_GROUP_REDUCE`
+
+### Smoke commands
+
+```bash
+# smoke pretrain
+CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.train.pretrain_kplane \
+  --mix_config nepa3d/configs/shapenet_unpaired_mix.yaml \
+  --mix_num_samples 256 --mix_seed 0 \
+  --batch 8 --epochs 1 --lr 3e-4 --weight_decay 0.05 \
+  --num_workers 2 --n_context 64 --n_query 64 \
+  --query_source pool --target_mode backend --disjoint_context_query 1 \
+  --plane_type kplane --fusion rg_product \
+  --product_rank_groups 16 --product_group_reduce mean \
+  --plane_resolutions 64 --plane_channels 64 --hidden_dim 128 \
+  --voxel_grid 64 --voxel_dilate 1 --voxel_max_steps 0 \
+  --save_dir runs/_tmp_kplane_rg_product_smoke \
+  --save_every 1 --save_last 1 --auto_resume 0 --seed 0
+
+# smoke retrieval
+TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.retrieval_kplane \
+  --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+  --ckpt runs/_tmp_kplane_rg_product_smoke/ckpt_ep000.pt \
+  --query_backend mesh --gallery_backend udfgrid \
+  --eval_seed 0 --eval_seed_gallery 999 \
+  --max_files 200 --n_context 64 --n_query 64 \
+  --pooling mean_query \
+  --out_json results/ucpr_tmp_kplane_rgprod_smoke_mesh2udf_200_mean_query.json
+```
+
+### Smoke result
+
+| Model | Pair | R@1 | R@5 | R@10 | mAP |
+|---|---|---:|---:|---:|---:|
+| `rg_product` smoke (`ep000`) | `mesh -> udfgrid` | 0.005 | 0.025 | 0.070 | 0.03174 |
+
+Readout:
+
+- `rg_product` path compiles, trains, checkpoints, and evaluates end-to-end.
+- Existing checkpoints remain loadable via defaulted `kplane_cfg` fields.
+- Next step is full e50/eval-pack run with `rg_product` (e.g., `plane_channels=64`, `product_rank_groups=16`) for fair comparison against current `sum/product` lines.
+
+### `rg_product` e50 eval pack (completed, Feb 17, 2026)
+
+Evaluated checkpoint:
+
+- `runs/eccv_kplane_rg_product_c64_r16_mean_s0/ckpt_ep049.pt`
+
+Execution log:
+
+- `logs/analysis/kplane_rg_product_chain/kplane_rg_product_c64_r16_mean_s0_e50.log`
+
+Result JSON:
+
+- `results/ucpr_kplane_rg_product_c64_r16_mean_s0_e50_mesh2udf_1k_mean_query_tiefix.json`
+- `results/ucpr_kplane_rg_product_c64_r16_mean_s0_e50_mesh2pc_1k_mean_query_tiefix.json`
+- `results/ucpr_kplane_rg_product_c64_r16_mean_s0_e50_mesh2udf_1k_plane_gap_tiefix.json`
+- `results/ucpr_kplane_rg_product_c64_r16_mean_s0_e50_mesh2pc_1k_plane_gap_tiefix.json`
+- `results/cpac_kplane_rg_product_c64_r16_mean_s0_e50_pc2udf_800_pool_htrain4k_with_nncopy.json`
+- `results/cpac_kplane_rg_product_c64_r16_mean_s0_e50_pc2udf_800_testnone_h_htrain4k.json`
+- `results/cpac_kplane_rg_product_c64_r16_mean_s0_e50_pc2udf_800_testmismatch_h_htrain4k.json`
+- `results/cpac_kplane_rg_product_c64_r16_mean_s0_e50_pc2udf_800_grid_h_htrain4k_with_nncopy.json`
+
+UCPR hard pairs (`max_files=1000`, tie-aware):
+
+| Pair | Mean-query R@1/mAP | Plane-gap R@1/mAP |
+|---|---|---|
+| `mesh -> udfgrid` | `0.003 / 0.02077` | `0.012 / 0.03224` |
+| `mesh -> pointcloud_noray` | `0.006 / 0.02556` | `0.006 / 0.03320` |
+
+CPAC-UDF (`max_shapes=800`, `htrain4k`):
+
+| Setting | MAE | RMSE | IoU@0.03 | NN-copy IoU@0.03 |
+|---|---:|---:|---:|---:|
+| `pool normal` | 0.17612 | 0.24839 | 0.60960 | 0.70891 |
+| `pool testnone` | 0.28488 | 0.31323 | 0.00000 | - |
+| `pool testmismatch` | 0.22709 | 0.27996 | 0.29611 | - |
+| `grid normal` | 0.20857 | 0.25618 | 0.16240 | 0.12963 |
+
+Readout:
+
+- `rg_product` retrieval is better with `plane_gap` than with `mean_query` on both hard pairs.
+- CPAC `pool normal` remains below NN-copy, similar to existing `kplane(product)` behavior.
+- CPAC controls are valid (`testnone` collapse, `testmismatch` degraded), confirming context dependence.
 
 ## Progress-8 Merge + Scaling-6 Smoke (Feb 16, 2026)
 
@@ -3144,3 +3272,51 @@ CPAC full protocol (`n_context=256`, `n_query=256`, `max_shapes=800`, `htrain4k`
 - B-3 alone underperforms both ref and B-2 on this full protocol.
 - B-2+B-3 remains better than ref but does not beat B-2-only.
 - With this fill, A-E+6 now all have at least one full-protocol result set in the active log.
+
+## A-1 Octree/Coarse-to-Fine Grid Query (Feb 17, 2026)
+
+This cycle implements A-1 in `completion_cpac_udf.py` and runs it under the same full CPAC protocol.
+
+Added flags:
+
+- `--grid_sample_mode coarse_to_fine`
+- `--grid_res_schedule` (e.g., `16,32,64`)
+- `--grid_c2f_expand`
+- `--grid_c2f_stage_weights`
+
+### Commands used
+
+```bash
+for MODE in uniform near_surface coarse_to_fine; do
+  TQDM_DISABLE=1 CUDA_VISIBLE_DEVICES=0 .venv/bin/python -u -m nepa3d.analysis.completion_cpac_udf \
+    --cache_root data/shapenet_unpaired_cache_v1 --split eval \
+    --ckpt runs/eccv_upmix_nepa_qa_dualmask_b2c2_scalequick_s0/ckpt_ep051.pt \
+    --context_backend pointcloud_noray \
+    --head_train_split train_udf --head_train_backend udfgrid --head_train_max_shapes 4000 \
+    --n_context 512 --n_query 256 --disjoint_context_query 1 \
+    --context_mode_train normal --context_mode_test normal \
+    --rep_source h --query_source grid \
+    --grid_sample_mode ${MODE} \
+    --grid_near_tau 0.05 --grid_near_frac 0.8 \
+    --grid_res_schedule 16,32,64 --grid_c2f_expand 1 \
+    --max_shapes 800 --head_train_ratio 0.2 \
+    --ridge_lambda 1e-3 --tau 0.03 --eval_seed 0 \
+    --out_json results/cpac_nepa_qa_dualmask_b2c2scalequick_ep051_pc2udf_800_grid_${MODE}_h_htrain4k_seed0.json
+done
+```
+
+### Results
+
+CPAC full protocol (`max_shapes=800`, `htrain4k`, `eval_seed=0`, `n_context=512`, `n_query=256`):
+
+| grid_sample_mode | MAE | RMSE | IoU@0.03 | Near-IoU@0.03 (`y<=0.05`) |
+|---|---:|---:|---:|---:|
+| `uniform` | 0.03079 | 0.03889 | 0.28000 | 0.28817 |
+| `near_surface` | 0.02042 | 0.02657 | 0.48901 | 0.48943 |
+| `coarse_to_fine (16->32->64)` | 0.02318 | 0.02950 | 0.48444 | 0.49127 |
+
+### Readout (A-1)
+
+- A-1 is now **implemented and running** in this branch.
+- `coarse_to_fine` gives a large gain over uniform sampling on grid completion.
+- On this checkpoint/protocol, tuned `near_surface` remains slightly better on global IoU, while `coarse_to_fine` is comparable on near-surface IoU.

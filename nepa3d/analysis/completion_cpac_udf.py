@@ -60,6 +60,120 @@ def _sample_indices(n, k, rng):
     return rng.choice(n, size=k, replace=replace).astype(np.int64)
 
 
+def _parse_int_csv(text, default_vals):
+    vals = []
+    for tok in str(text or "").split(","):
+        t = tok.strip()
+        if not t:
+            continue
+        try:
+            vals.append(int(t))
+        except Exception:
+            continue
+    if len(vals) <= 0:
+        vals = [int(v) for v in default_vals]
+    return vals
+
+
+def _parse_float_csv(text):
+    vals = []
+    for tok in str(text or "").split(","):
+        t = tok.strip()
+        if not t:
+            continue
+        try:
+            vals.append(float(t))
+        except Exception:
+            continue
+    return vals
+
+
+def _alloc_counts_from_weights(n, weights):
+    n = int(max(0, n))
+    if n <= 0:
+        return [0 for _ in range(len(weights))]
+    w = np.asarray(weights, dtype=np.float64).reshape(-1)
+    if w.size <= 0 or float(np.sum(w)) <= 0:
+        w = np.ones((len(weights),), dtype=np.float64)
+    w = np.maximum(w, 0.0)
+    w = w / float(np.sum(w))
+    raw = w * float(n)
+    base = np.floor(raw).astype(np.int64)
+    rem = int(n - int(base.sum()))
+    if rem > 0:
+        order = np.argsort(-(raw - base.astype(np.float64)))
+        for i in range(rem):
+            base[int(order[i % order.shape[0]])] += 1
+    return [int(x) for x in base.tolist()]
+
+
+def _lin_to_ijk(lin, res):
+    lin = np.asarray(lin, dtype=np.int64).reshape(-1)
+    res = int(res)
+    i = lin // (res * res)
+    j = (lin // res) % res
+    k = lin % res
+    return np.stack([i, j, k], axis=1).astype(np.int64, copy=False)
+
+
+def _ijk_to_xyz(ijk, res):
+    ijk = np.asarray(ijk, dtype=np.float32).reshape(-1, 3)
+    voxel = np.float32(2.0 / float(res))
+    return (
+        np.float32(-1.0) + (ijk + np.float32(0.5)) * voxel
+    ).astype(np.float32, copy=False)
+
+
+def _ijk_to_udf_nearest(udf, ijk, res):
+    g = int(udf.shape[0])
+    ijk = np.asarray(ijk, dtype=np.float32).reshape(-1, 3)
+    # Map stage-grid centers to nearest source-grid centers.
+    u = ((ijk + np.float32(0.5)) * np.float32(g / float(res))) - np.float32(0.5)
+    gi = np.clip(np.rint(u[:, 0]).astype(np.int64), 0, g - 1)
+    gj = np.clip(np.rint(u[:, 1]).astype(np.int64), 0, g - 1)
+    gk = np.clip(np.rint(u[:, 2]).astype(np.int64), 0, g - 1)
+    return udf[gi, gj, gk].astype(np.float32, copy=False)
+
+
+def _sample_uniform_lin(total, n, rng):
+    total = int(total)
+    n = int(max(0, n))
+    if n <= 0:
+        return np.zeros((0,), dtype=np.int64)
+    replace = total < n
+    return rng.choice(total, size=n, replace=replace).astype(np.int64)
+
+
+def _sample_child_lin_from_parents(parent_ijk, parent_res, child_res, n, rng, expand=1):
+    n = int(max(0, n))
+    if n <= 0:
+        return np.zeros((0,), dtype=np.int64)
+    parent_ijk = np.asarray(parent_ijk, dtype=np.int64).reshape(-1, 3)
+    if parent_ijk.shape[0] <= 0:
+        return _sample_uniform_lin(int(child_res) ** 3, n, rng)
+
+    parent_res = int(parent_res)
+    child_res = int(child_res)
+    expand = int(max(0, expand))
+    pick = rng.randint(0, parent_ijk.shape[0], size=n)
+    cells = parent_ijk[pick].copy()
+    if expand > 0:
+        jit = rng.randint(-expand, expand + 1, size=(n, 3))
+        cells = np.clip(cells + jit, 0, parent_res - 1)
+
+    scale = float(child_res) / float(parent_res)
+    lo = np.floor(cells.astype(np.float64) * scale).astype(np.int64)
+    hi = np.ceil((cells.astype(np.float64) + 1.0) * scale).astype(np.int64) - 1
+    lo = np.clip(lo, 0, child_res - 1)
+    hi = np.clip(hi, 0, child_res - 1)
+    hi = np.maximum(hi, lo)
+
+    ii = lo[:, 0] + (rng.rand(n) * (hi[:, 0] - lo[:, 0] + 1).astype(np.float64)).astype(np.int64)
+    jj = lo[:, 1] + (rng.rand(n) * (hi[:, 1] - lo[:, 1] + 1).astype(np.float64)).astype(np.int64)
+    kk = lo[:, 2] + (rng.rand(n) * (hi[:, 2] - lo[:, 2] + 1).astype(np.float64)).astype(np.int64)
+    return (ii * child_res * child_res + jj * child_res + kk).astype(np.int64, copy=False)
+
+
 def _sample_udf_grid_queries(
     d,
     rng,
@@ -67,6 +181,9 @@ def _sample_udf_grid_queries(
     mode="uniform",
     near_tau=0.05,
     near_frac=0.7,
+    c2f_res_schedule="16,32,64",
+    c2f_expand=1,
+    c2f_stage_weights="",
 ):
     if "udf_grid" not in d:
         raise RuntimeError("query_source=grid requires `udf_grid` in cache npz")
@@ -153,6 +270,119 @@ def _sample_udf_grid_queries(
                 add = rng.choice(total, size=(n - lin.shape[0]), replace=False).astype(np.int64)
                 lin = np.concatenate([lin, add], axis=0)
             rng.shuffle(lin)
+    elif mode == "coarse_to_fine":
+        # Stage-wise adaptive sampling over increasingly fine query grids.
+        stage_res = _parse_int_csv(c2f_res_schedule, default_vals=[16, 32, 64])
+        stage_res = [int(max(2, min(g, r))) for r in stage_res]
+        # keep user-specified order but remove immediate duplicates
+        dedup = []
+        for r in stage_res:
+            if len(dedup) <= 0 or int(dedup[-1]) != int(r):
+                dedup.append(int(r))
+        stage_res = dedup if len(dedup) > 0 else [min(g, 64)]
+        k_stage = len(stage_res)
+
+        weight_vals = _parse_float_csv(c2f_stage_weights)
+        if len(weight_vals) != k_stage or float(sum(weight_vals)) <= 0.0:
+            # Favor finer stages by default: [1, 2, ..., K]
+            weight_vals = [float(i + 1) for i in range(k_stage)]
+        stage_counts = _alloc_counts_from_weights(n, weight_vals)
+
+        xyz_parts = []
+        dist_parts = []
+        parent_near = None
+        parent_res = None
+        near_tau = float(near_tau)
+
+        for si, res in enumerate(stage_res):
+            n_stage = int(stage_counts[si])
+            res_total = int(res) ** 3
+            if si == 0:
+                # Stage-1 guidance from full coarse grid.
+                all_lin = np.arange(res_total, dtype=np.int64)
+                all_ijk = _lin_to_ijk(all_lin, res)
+                all_dist = _ijk_to_udf_nearest(udf, all_ijk, res)
+                parent_near = all_ijk[all_dist <= near_tau]
+                parent_res = int(res)
+
+                if n_stage > 0:
+                    lin_stage = _sample_uniform_lin(res_total, n_stage, rng)
+                else:
+                    lin_stage = np.zeros((0,), dtype=np.int64)
+            else:
+                if n_stage > 0:
+                    lin_stage = _sample_child_lin_from_parents(
+                        parent_ijk=parent_near,
+                        parent_res=parent_res,
+                        child_res=res,
+                        n=n_stage,
+                        rng=rng,
+                        expand=int(c2f_expand),
+                    )
+                else:
+                    lin_stage = np.zeros((0,), dtype=np.int64)
+
+            ijk_stage = _lin_to_ijk(lin_stage, res) if lin_stage.shape[0] > 0 else np.zeros((0, 3), dtype=np.int64)
+            dist_stage = (
+                _ijk_to_udf_nearest(udf, ijk_stage, res)
+                if ijk_stage.shape[0] > 0
+                else np.zeros((0,), dtype=np.float32)
+            )
+            if ijk_stage.shape[0] > 0:
+                xyz_stage = _ijk_to_xyz(ijk_stage, res)
+                xyz_parts.append(xyz_stage)
+                dist_parts.append(dist_stage)
+
+            if si >= 1:
+                near_stage = ijk_stage[dist_stage <= near_tau]
+                if near_stage.shape[0] <= 0 and ijk_stage.shape[0] > 0:
+                    # Keep refinement alive even when current stage has no near hits.
+                    near_stage = ijk_stage
+                parent_near = near_stage
+                parent_res = int(res)
+
+        if len(xyz_parts) <= 0:
+            lin = _sample_uniform_lin(total, n, rng)
+            i = lin // (g * g)
+            j = (lin // g) % g
+            k = lin % g
+            voxel = np.float32(2.0 / float(g))
+            xyz = np.stack(
+                [
+                    np.float32(-1.0) + (i.astype(np.float32) + np.float32(0.5)) * voxel,
+                    np.float32(-1.0) + (j.astype(np.float32) + np.float32(0.5)) * voxel,
+                    np.float32(-1.0) + (k.astype(np.float32) + np.float32(0.5)) * voxel,
+                ],
+                axis=1,
+            ).astype(np.float32, copy=False)
+            dist = udf.reshape(-1)[lin].astype(np.float32, copy=False)
+            return xyz, dist
+
+        xyz = np.concatenate(xyz_parts, axis=0).astype(np.float32, copy=False)
+        dist = np.concatenate(dist_parts, axis=0).astype(np.float32, copy=False)
+        if xyz.shape[0] > n:
+            keep = rng.choice(xyz.shape[0], size=n, replace=False).astype(np.int64)
+            xyz = xyz[keep]
+            dist = dist[keep]
+        elif xyz.shape[0] < n:
+            n_add = n - int(xyz.shape[0])
+            lin_add = _sample_uniform_lin(total, n_add, rng)
+            ia = lin_add // (g * g)
+            ja = (lin_add // g) % g
+            ka = lin_add % g
+            voxel = np.float32(2.0 / float(g))
+            xyz_add = np.stack(
+                [
+                    np.float32(-1.0) + (ia.astype(np.float32) + np.float32(0.5)) * voxel,
+                    np.float32(-1.0) + (ja.astype(np.float32) + np.float32(0.5)) * voxel,
+                    np.float32(-1.0) + (ka.astype(np.float32) + np.float32(0.5)) * voxel,
+                ],
+                axis=1,
+            ).astype(np.float32, copy=False)
+            dist_add = udf.reshape(-1)[lin_add].astype(np.float32, copy=False)
+            xyz = np.concatenate([xyz, xyz_add], axis=0)
+            dist = np.concatenate([dist, dist_add], axis=0)
+        return xyz.astype(np.float32, copy=False), dist.astype(np.float32, copy=False)
     else:
         raise ValueError(f"unknown grid_sample_mode: {mode}")
 
@@ -189,6 +419,9 @@ def _sample_ctx_query(
     grid_sample_mode="uniform",
     grid_near_tau=0.05,
     grid_near_frac=0.7,
+    grid_res_schedule="16,32,64",
+    grid_c2f_expand=1,
+    grid_c2f_stage_weights="",
 ):
     rng = np.random.RandomState(_stable_seed(path, seed))
     d = np.load(path, allow_pickle=False)
@@ -255,6 +488,9 @@ def _sample_ctx_query(
             mode=grid_sample_mode,
             near_tau=grid_near_tau,
             near_frac=grid_near_frac,
+            c2f_res_schedule=grid_res_schedule,
+            c2f_expand=grid_c2f_expand,
+            c2f_stage_weights=grid_c2f_stage_weights,
         )
     elif query_source == "hybrid":
         q_xyz_pool = pt_xyz_pool[qidx_pool].astype(np.float32, copy=False)
@@ -269,6 +505,9 @@ def _sample_ctx_query(
             mode=grid_sample_mode,
             near_tau=grid_near_tau,
             near_frac=grid_near_frac,
+            c2f_res_schedule=grid_res_schedule,
+            c2f_expand=grid_c2f_expand,
+            c2f_stage_weights=grid_c2f_stage_weights,
         )
         if q_xyz_pool.shape[0] <= 0:
             q_xyz, q_dist = q_xyz_grid, q_dist_grid
@@ -313,6 +552,9 @@ def _eval_nn_copy_baseline(
     grid_sample_mode="uniform",
     grid_near_tau=0.05,
     grid_near_frac=0.7,
+    grid_res_schedule="16,32,64",
+    grid_c2f_expand=1,
+    grid_c2f_stage_weights="",
 ):
     mismatch_paths = [None for _ in range(len(paths))]
     if context_mode == "mismatch" and len(paths) > 1:
@@ -341,6 +583,9 @@ def _eval_nn_copy_baseline(
             grid_sample_mode=grid_sample_mode,
             grid_near_tau=grid_near_tau,
             grid_near_frac=grid_near_frac,
+            grid_res_schedule=grid_res_schedule,
+            grid_c2f_expand=grid_c2f_expand,
+            grid_c2f_stage_weights=grid_c2f_stage_weights,
         )
         yhat = _nn_copy_predict(ctx_xyz, ctx_dist, q_xyz)
         ys.append(q_dist.reshape(-1))
@@ -672,6 +917,9 @@ def extract_xy_for_path(
     grid_sample_mode="uniform",
     grid_near_tau=0.05,
     grid_near_frac=0.7,
+    grid_res_schedule="16,32,64",
+    grid_c2f_expand=1,
+    grid_c2f_stage_weights="",
 ):
     if context_mode not in ("normal", "none", "mismatch"):
         raise ValueError(f"unknown context_mode: {context_mode}")
@@ -695,6 +943,9 @@ def extract_xy_for_path(
         grid_sample_mode=grid_sample_mode,
         grid_near_tau=grid_near_tau,
         grid_near_frac=grid_near_frac,
+        grid_res_schedule=grid_res_schedule,
+        grid_c2f_expand=grid_c2f_expand,
+        grid_c2f_stage_weights=grid_c2f_stage_weights,
     )
 
     bos = np.zeros((1, 15), dtype=np.float32)
@@ -817,6 +1068,9 @@ def collect_xy(
     grid_sample_mode="uniform",
     grid_near_tau=0.05,
     grid_near_frac=0.7,
+    grid_res_schedule="16,32,64",
+    grid_c2f_expand=1,
+    grid_c2f_stage_weights="",
 ):
     mismatch_paths = [None for _ in range(len(paths))]
     if context_mode == "mismatch" and len(paths) > 1:
@@ -852,6 +1106,9 @@ def collect_xy(
             grid_sample_mode=grid_sample_mode,
             grid_near_tau=grid_near_tau,
             grid_near_frac=grid_near_frac,
+            grid_res_schedule=grid_res_schedule,
+            grid_c2f_expand=grid_c2f_expand,
+            grid_c2f_stage_weights=grid_c2f_stage_weights,
         )
         xs.append(X)
         ys.append(y)
@@ -1016,7 +1273,7 @@ def main():
         "--grid_sample_mode",
         type=str,
         default="uniform",
-        choices=["uniform", "near_surface", "stratified"],
+        choices=["uniform", "near_surface", "stratified", "coarse_to_fine"],
         help="Grid-query sampler mode.",
     )
     ap.add_argument(
@@ -1030,6 +1287,27 @@ def main():
         type=float,
         default=0.7,
         help="Near-surface ratio for grid_sample_mode=near_surface.",
+    )
+    ap.add_argument(
+        "--grid_res_schedule",
+        type=str,
+        default="16,32,64",
+        help="Resolution schedule for grid_sample_mode=coarse_to_fine (e.g., 16,32,64).",
+    )
+    ap.add_argument(
+        "--grid_c2f_expand",
+        type=int,
+        default=1,
+        help="Parent-cell neighborhood expansion used by coarse_to_fine refinement.",
+    )
+    ap.add_argument(
+        "--grid_c2f_stage_weights",
+        type=str,
+        default="",
+        help=(
+            "Optional stage allocation weights for coarse_to_fine (comma-separated). "
+            "If empty, defaults to increasing weights [1..K]."
+        ),
     )
     ap.add_argument(
         "--target_transform",
@@ -1136,6 +1414,9 @@ def main():
             grid_sample_mode=str(args.grid_sample_mode),
             grid_near_tau=float(args.grid_near_tau),
             grid_near_frac=float(args.grid_near_frac),
+            grid_res_schedule=str(args.grid_res_schedule),
+            grid_c2f_expand=int(args.grid_c2f_expand),
+            grid_c2f_stage_weights=str(args.grid_c2f_stage_weights),
         )
 
     if int(args.baseline_only) == 1:
@@ -1153,6 +1434,9 @@ def main():
                 "grid_sample_mode": str(args.grid_sample_mode),
                 "grid_near_tau": float(args.grid_near_tau),
                 "grid_near_frac": float(args.grid_near_frac),
+                "grid_res_schedule": str(args.grid_res_schedule),
+                "grid_c2f_expand": int(args.grid_c2f_expand),
+                "grid_c2f_stage_weights": str(args.grid_c2f_stage_weights),
                 "eval_split": args.split,
                 "head_train_split": (head_split if not legacy_transductive else "legacy_transductive"),
                 "head_train_backend": head_backend,
@@ -1217,6 +1501,9 @@ def main():
         grid_sample_mode=str(args.grid_sample_mode),
         grid_near_tau=float(args.grid_near_tau),
         grid_near_frac=float(args.grid_near_frac),
+        grid_res_schedule=str(args.grid_res_schedule),
+        grid_c2f_expand=int(args.grid_c2f_expand),
+        grid_c2f_stage_weights=str(args.grid_c2f_stage_weights),
     )
     if args.head_train_n and args.head_train_n > 0 and Xtr.shape[0] > int(args.head_train_n):
         rng_cap = np.random.RandomState(int(args.eval_seed) & 0xFFFFFFFF)
@@ -1280,6 +1567,9 @@ def main():
         grid_sample_mode=str(args.grid_sample_mode),
         grid_near_tau=float(args.grid_near_tau),
         grid_near_frac=float(args.grid_near_frac),
+        grid_res_schedule=str(args.grid_res_schedule),
+        grid_c2f_expand=int(args.grid_c2f_expand),
+        grid_c2f_stage_weights=str(args.grid_c2f_stage_weights),
     )
     Yhat_t = _ridge_pred(Xte, w)
     Yhat = _inverse_transform_target(
@@ -1323,6 +1613,9 @@ def main():
             "grid_sample_mode": str(args.grid_sample_mode),
             "grid_near_tau": float(args.grid_near_tau),
             "grid_near_frac": float(args.grid_near_frac),
+            "grid_res_schedule": str(args.grid_res_schedule),
+            "grid_c2f_expand": int(args.grid_c2f_expand),
+            "grid_c2f_stage_weights": str(args.grid_c2f_stage_weights),
             "eval_split": args.split,
             "head_train_split": (head_split if not legacy_transductive else "legacy_transductive"),
             "head_train_backend": head_backend,

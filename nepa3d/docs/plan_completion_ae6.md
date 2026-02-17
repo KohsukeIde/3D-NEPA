@@ -14,13 +14,19 @@ This plan converts the feedback into an execution order that matches current rep
 - `6-3 (Encoder-Decoder split for scaling)` is **not implemented yet** in this branch (current backbone is still single-stream causal transformer).
 - A-minimal eval controls are merged in `completion_cpac_udf.py`:
   - `query_source=hybrid`
-  - `grid_sample_mode={uniform,near_surface,stratified}`
+  - `grid_sample_mode={uniform,near_surface,stratified,coarse_to_fine}`
+  - `grid_res_schedule`, `grid_c2f_expand`, `grid_c2f_stage_weights`
   - `target_transform={none,trunc,log1p}`
   - near-only metrics (`near@tau_report`)
 - First smoke confirms:
   - `grid near_surface` > `grid uniform`
   - trunc helps near-surface metrics but changes raw-MAE interpretation.
 - Full A-minimal eval matrix (`max_shapes=800`, `htrain4k`, `eval_seed=0,1,2`) is completed and logged in `results_ucpr_cpac_active.md`.
+- A-1 (`octree/coarse-to-fine` query staging) is now implemented in eval-time grid sampling and quick-validated at full CPAC protocol (`seed0`, `max_shapes=800`, `htrain4k`, `n_context=512`, `n_query=256`):
+  - `uniform`: `MAE=0.03079`, `RMSE=0.03889`, `IoU@0.03=0.28000`
+  - `near_surface`: `MAE=0.02042`, `RMSE=0.02657`, `IoU@0.03=0.48901`
+  - `coarse_to_fine(16->32->64)`: `MAE=0.02318`, `RMSE=0.02950`, `IoU@0.03=0.48444`
+  - readout: A-1 gives a large gain over uniform and reaches near-surface-level IoU, but does not yet beat tuned `near_surface` on this checkpoint.
 - B-1 probe-time Lipschitz pilot is implemented in `completion_cpac_udf.py` and evaluated.
   - Status: no gain on current `grid_near08` setting; keep default OFF (`ridge_lipschitz_lambda=0`) for main runs.
 - B-2/B-3 pretrain hooks are integrated in `nepa3d/train/pretrain.py`:
