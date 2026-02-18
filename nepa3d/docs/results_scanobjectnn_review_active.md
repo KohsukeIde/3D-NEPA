@@ -32,6 +32,7 @@ Snapshot time: `2026-02-19 01:27 JST`
 - `v1` started at `2026-02-18 15:36` and finished `obj_bg` (`75/75`) at `2026-02-19 00:47`.
 - `v1` stage-2 did not proceed (pipeline script syntax error after stage-1 completion), so `obj_only` / `pb_t50_rs` remain `0/75`.
 - `v2` started at `2026-02-19 00:49` for `obj_bg`; this is the current comparison run against `v1`.
+- queued next chain (auto after `v2 obj_bg`): dist-enabled `v1(obj_bg)` then dist-enabled `v2(obj_bg)` at `logs/finetune/scan_variants_review_fair_ft_dist_after_v2_objbg_chain/pipeline.log`.
 
 ## Quick result gap (`obj_bg`, best-by-K)
 
