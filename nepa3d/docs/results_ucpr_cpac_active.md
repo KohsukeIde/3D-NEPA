@@ -1747,6 +1747,12 @@ This cycle adds minimal A-style controls to `completion_cpac_udf.py`:
 - `--target_trunc_max`, `--target_log_scale`
 - `--report_near_tau` (`near@tau_report` metrics block)
 
+Scope note (important for interpretation):
+
+- This A-pilot block is **evaluation-time query distribution control** in `completion_cpac_udf.py`.
+- It is **not** a pretrain-time query-mix experiment in `nepa3d/train/pretrain.py`.
+- Therefore, current A-2 readout should be interpreted as probe/eval protocol effects, not as learned query-mix training gains.
+
 Wrapper update:
 
 - `scripts/analysis/nepa3d_cpac_udf.sh` now forwards all options above.

@@ -18,6 +18,9 @@ This plan converts the feedback into an execution order that matches current rep
   - `grid_res_schedule`, `grid_c2f_expand`, `grid_c2f_stage_weights`
   - `target_transform={none,trunc,log1p}`
   - near-only metrics (`near@tau_report`)
+- A-2 status clarification:
+  - eval/probe-side query mix (`query_source=hybrid`) is implemented and evaluated.
+  - pretrain-side query-mix in `nepa3d/train/pretrain.py` is not implemented in this branch yet.
 - First smoke confirms:
   - `grid near_surface` > `grid uniform`
   - trunc helps near-surface metrics but changes raw-MAE interpretation.
