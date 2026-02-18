@@ -1733,3 +1733,84 @@ CPAC full protocol (`max_shapes=800`, `htrain4k`, `eval_seed=0`, `n_context=512`
 - A-1 is now **implemented and running** in this branch.
 - `coarse_to_fine` gives a large gain over uniform sampling on grid completion.
 - On this checkpoint/protocol, tuned `near_surface` remains slightly better on global IoU, while `coarse_to_fine` is comparable on near-surface IoU.
+
+## Impl-Update Baseline Readout + PlusGrad/Unc/Topo Chain Purpose (Feb 18, 2026)
+
+This section clarifies:
+
+1. the **previous completed impl-update result** (`nepa_impl_*_s0_e50`), and
+2. the **purpose/status of the currently running plus-grad/unc/topo chain** (`nepa_impl_*_plusgut_*`).
+
+### A) Previous completed impl-update result (`s0_e50`)
+
+Artifacts:
+
+- UCPR:
+  - `results/ucpr_nepa_impl_causal_s0_e50_mesh2udf_1k_indep_mean_a.json`
+  - `results/ucpr_nepa_impl_encdec_s0_e50_mesh2udf_1k_indep_mean_a.json`
+  - `results/ucpr_nepa_impl_causal_s0_e50_mesh2pc_1k_indep_mean_a.json`
+  - `results/ucpr_nepa_impl_encdec_s0_e50_mesh2pc_1k_indep_mean_a.json`
+- CPAC:
+  - `results/cpac_nepa_impl_causal_s0_e50_pc2udf_800_pool_h_htrain4k_with_nncopy.json`
+  - `results/cpac_nepa_impl_encdec_s0_e50_pc2udf_800_pool_h_htrain4k_with_nncopy.json`
+  - `results/cpac_nepa_impl_causal_s0_e50_pc2udf_800_grid_near08_h_htrain4k_with_nncopy.json`
+  - `results/cpac_nepa_impl_encdec_s0_e50_pc2udf_800_grid_near08_h_htrain4k_with_nncopy.json`
+
+UCPR summary (`pooling=mean_a`, independent sampling):
+
+| Pair | Causal R@1/R@5/R@10/MRR | EncDec R@1/R@5/R@10/MRR |
+|---|---|---|
+| `mesh -> udfgrid` | `0.155 / 0.380 / 0.472 / 0.26649` | `0.043 / 0.114 / 0.173 / 0.09006` |
+| `mesh -> pointcloud_noray` | `0.080 / 0.225 / 0.346 / 0.16342` | `0.006 / 0.015 / 0.026 / 0.01765` |
+
+CPAC summary:
+
+| Setting | Causal MAE/RMSE/IoU@0.03 | EncDec MAE/RMSE/IoU@0.03 | NN-copy IoU@0.03 |
+|---|---|---|---:|
+| pool normal | `0.03058 / 0.04112 / 0.76191` | `0.24096 / 0.28524 / 0.00082` | `0.70891` |
+| grid near08 | `0.02523 / 0.03413 / 0.45732` | `0.14268 / 0.21266 / 0.01009` | `0.37652` |
+
+Controls (pool):
+
+- causal:
+  - `testnone`: `MAE=0.18690`, `RMSE=0.25771`, `IoU=0.60336`
+  - `testmismatch`: `MAE=0.08607`, `RMSE=0.12696`, `IoU=0.44695`
+- encdec:
+  - `testnone`: `MAE=0.27475`, `RMSE=0.31121`, `IoU=0.00070`
+  - `testmismatch`: `MAE=0.23955`, `RMSE=0.28628`, `IoU=0.00130`
+
+Readout:
+
+- In this baseline impl-update run, causal is stable and strong on completion.
+- EncDec is severely degraded/collapsed under this setting.
+
+### B) Current chain objective (`plusgut`) and status
+
+Main runner:
+
+- `scripts/analysis/run_impl_update_plus_grad_unc_topo_chain_local.sh`
+
+Configured goal:
+
+- test whether EncDec can be recovered by enabling answer-token extensions and topology options:
+  - `--include_pt_grad 1`
+  - `--include_ray_unc 1`
+  - EncDec branch with `--topo_ray_coord proj`
+- compare against causal branch under the same +grad/+unc setup.
+
+Follow-up runner (waiting now):
+
+- `scripts/analysis/run_impl_update_plus_grad_unc_topo_bbox_chain_local.sh`
+- purpose: compare EncDec `topo_ray_coord=bbox` vs `proj` under the same +grad/+unc settings.
+
+Current status (in progress):
+
+- active chain:
+  - `logs/analysis/impl_update_plus_grad_unc_topo_chain/active.pid`
+- waiting chain:
+  - `logs/analysis/impl_update_plus_grad_unc_topo_bbox_chain/pipeline.log` (`waiting for plus-grad/unc/topo chain`)
+- checkpoints currently available:
+  - `runs/eccv_upmix_nepa_impl_causal_plusgut_s0/ckpt_ep020.pt`
+  - `runs/eccv_upmix_nepa_impl_encdec_plusgut_proj_s0/ckpt_ep020.pt`
+- note:
+  - plusgut evaluation JSON (`results/ucpr_*plusgut*`, `results/cpac_*plusgut*`) is not emitted yet; final readout will be added after chain completion.
