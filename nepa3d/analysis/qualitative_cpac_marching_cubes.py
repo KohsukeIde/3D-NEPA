@@ -74,6 +74,24 @@ def _trilinear_sample_grid(grid, xyz):
     return (c0 * (1.0 - xd) + c1 * xd).astype(np.float32, copy=False)
 
 
+def _nearest_udf_from_points(points_xyz, query_xyz, chunk=4096):
+    """Approximate unsigned distance by nearest observed point distance."""
+    pts = np.asarray(points_xyz, dtype=np.float32)
+    q = np.asarray(query_xyz, dtype=np.float32)
+    if pts.ndim != 2 or pts.shape[1] != 3:
+        raise ValueError(f"points_xyz must be [N,3], got shape={pts.shape}")
+    if q.ndim != 2 or q.shape[1] != 3:
+        raise ValueError(f"query_xyz must be [M,3], got shape={q.shape}")
+    out = np.empty((q.shape[0],), dtype=np.float32)
+    c = max(1, int(chunk))
+    for s in range(0, q.shape[0], c):
+        e = min(q.shape[0], s + c)
+        qq = q[s:e]
+        d2 = np.sum((qq[:, None, :] - pts[None, :, :]) ** 2, axis=2)
+        out[s:e] = np.sqrt(np.min(d2, axis=1)).astype(np.float32, copy=False)
+    return out
+
+
 def _save_obj(path, verts, faces):
     with open(path, "w", encoding="utf-8") as f:
         for v in verts:
@@ -252,6 +270,11 @@ def main():
     ap.add_argument("--voxel_max_steps", type=int, default=0)
     ap.add_argument("--save_volumes", type=int, default=1)
     ap.add_argument("--save_png", type=int, default=1)
+    ap.add_argument("--save_weak_naive_mesh", type=int, default=1)
+    ap.add_argument("--weak_naive_chunk", type=int, default=4096)
+    ap.add_argument("--save_observed_pc", type=int, default=1)
+    ap.add_argument("--save_observed_naive_mesh", type=int, default=1)
+    ap.add_argument("--observed_naive_chunk", type=int, default=4096)
     ap.add_argument("--out_dir", type=str, default="results/qual_mc")
     args = ap.parse_args()
 
@@ -273,7 +296,7 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
 
-    xtr, ytr = collect_xy(
+    xtr, ytr, _, _ = collect_xy(
         model=model,
         paths=tr_paths,
         context_backend=args.head_train_backend,
@@ -388,11 +411,93 @@ def main():
         name = os.path.splitext(os.path.basename(p))[0]
         out_shape = os.path.join(args.out_dir, f"{si:03d}_{name}")
         os.makedirs(out_shape, exist_ok=True)
-        _save_ply_points(os.path.join(out_shape, "context_pc.ply"), ctx_xyz)
+        context_ply_path = os.path.join(out_shape, "context_pc.ply")
+        _save_ply_points(context_ply_path, ctx_xyz)
+
+        entry = {
+            "name": name,
+            "path": os.path.abspath(p),
+            "mae_grid": mae,
+            "rmse_grid": rmse,
+            "iou@level": iou,
+            "out_dir": os.path.abspath(out_shape),
+            "context_pc_ply": os.path.abspath(context_ply_path),
+        }
+
+        observed_pc = d["pc_xyz"].astype(np.float32, copy=False) if "pc_xyz" in d else None
+        if int(args.save_observed_pc) == 1:
+            if observed_pc is None or observed_pc.shape[0] <= 0:
+                entry["observed_pc_error"] = "pc_xyz is missing or empty"
+            else:
+                observed_pc_path = os.path.join(out_shape, "observed_pc.ply")
+                _save_ply_points(observed_pc_path, observed_pc)
+                entry["observed_pc_ply"] = os.path.abspath(observed_pc_path)
 
         if int(args.save_volumes) == 1:
-            np.save(os.path.join(out_shape, "pred_udf.npy"), pred_vol.astype(np.float32))
-            np.save(os.path.join(out_shape, "gt_udf.npy"), gt_vol.astype(np.float32))
+            pred_vol_path = os.path.join(out_shape, "pred_udf.npy")
+            gt_vol_path = os.path.join(out_shape, "gt_udf.npy")
+            np.save(pred_vol_path, pred_vol.astype(np.float32))
+            np.save(gt_vol_path, gt_vol.astype(np.float32))
+            entry["pred_udf_npy"] = os.path.abspath(pred_vol_path)
+            entry["gt_udf_npy"] = os.path.abspath(gt_vol_path)
+
+        if int(args.save_weak_naive_mesh) == 1:
+            if ctx_xyz is None or ctx_xyz.shape[0] <= 0:
+                entry["weak_naive_mc_error"] = "context point cloud is missing or empty"
+            else:
+                try:
+                    weak_udf = _nearest_udf_from_points(
+                        ctx_xyz,
+                        grid_xyz,
+                        chunk=int(args.weak_naive_chunk),
+                    ).reshape(int(args.grid_res), int(args.grid_res), int(args.grid_res))
+                    voxel = 2.0 / float(int(args.grid_res))
+                    origin = -1.0 + 0.5 * voxel
+                    wv, wf, _, _ = marching_cubes(
+                        weak_udf.astype(np.float32),
+                        level=float(args.mc_level),
+                        spacing=(voxel, voxel, voxel),
+                    )
+                    wv = wv + np.array([origin, origin, origin], dtype=np.float32)
+                    weak_obj_path = os.path.join(out_shape, "weak_naive_mc.obj")
+                    _save_obj(weak_obj_path, wv.astype(np.float32), wf.astype(np.int64))
+                    weak_vertices_ply_path = os.path.join(out_shape, "weak_naive_mc_vertices.ply")
+                    _save_ply_points(weak_vertices_ply_path, wv.astype(np.float32))
+                    entry["weak_naive_mc_obj"] = os.path.abspath(weak_obj_path)
+                    entry["weak_naive_mc_vertices_ply"] = os.path.abspath(weak_vertices_ply_path)
+                    # Backward-compatible aliases used in earlier logs/scripts.
+                    entry["input_naive_mc_obj"] = entry["weak_naive_mc_obj"]
+                    entry["input_naive_mc_vertices_ply"] = entry["weak_naive_mc_vertices_ply"]
+                except Exception as e:
+                    entry["weak_naive_mc_error"] = str(e)
+                    entry["input_naive_mc_error"] = str(e)
+
+        if int(args.save_observed_naive_mesh) == 1:
+            if observed_pc is None or observed_pc.shape[0] <= 0:
+                entry["observed_naive_mc_error"] = "pc_xyz is missing or empty"
+            else:
+                try:
+                    obs_udf = _nearest_udf_from_points(
+                        observed_pc,
+                        grid_xyz,
+                        chunk=int(args.observed_naive_chunk),
+                    ).reshape(int(args.grid_res), int(args.grid_res), int(args.grid_res))
+                    voxel = 2.0 / float(int(args.grid_res))
+                    origin = -1.0 + 0.5 * voxel
+                    ov, of, _, _ = marching_cubes(
+                        obs_udf.astype(np.float32),
+                        level=float(args.mc_level),
+                        spacing=(voxel, voxel, voxel),
+                    )
+                    ov = ov + np.array([origin, origin, origin], dtype=np.float32)
+                    observed_obj_path = os.path.join(out_shape, "observed_naive_mc.obj")
+                    _save_obj(observed_obj_path, ov.astype(np.float32), of.astype(np.int64))
+                    entry["observed_naive_mc_obj"] = os.path.abspath(observed_obj_path)
+                    observed_vertices_ply_path = os.path.join(out_shape, "observed_naive_mc_vertices.ply")
+                    _save_ply_points(observed_vertices_ply_path, ov.astype(np.float32))
+                    entry["observed_naive_mc_vertices_ply"] = os.path.abspath(observed_vertices_ply_path)
+                except Exception as e:
+                    entry["observed_naive_mc_error"] = str(e)
 
         # Marching cubes; if level is outside value range, skip mesh export for this shape.
         try:
@@ -402,23 +507,27 @@ def main():
             gv, gf, _, _ = marching_cubes(gt_vol.astype(np.float32), level=float(args.mc_level), spacing=(voxel, voxel, voxel))
             pv = pv + np.array([origin, origin, origin], dtype=np.float32)
             gv = gv + np.array([origin, origin, origin], dtype=np.float32)
-            _save_obj(os.path.join(out_shape, "pred_mc.obj"), pv.astype(np.float32), pf.astype(np.int64))
-            _save_obj(os.path.join(out_shape, "gt_mc.obj"), gv.astype(np.float32), gf.astype(np.int64))
+            pred_obj_path = os.path.join(out_shape, "pred_mc.obj")
+            gt_obj_path = os.path.join(out_shape, "gt_mc.obj")
+            _save_obj(pred_obj_path, pv.astype(np.float32), pf.astype(np.int64))
+            _save_obj(gt_obj_path, gv.astype(np.float32), gf.astype(np.int64))
+            entry["pred_mc_obj"] = os.path.abspath(pred_obj_path)
+            entry["gt_mc_obj"] = os.path.abspath(gt_obj_path)
+            pred_vertices_ply_path = os.path.join(out_shape, "pred_mc_vertices.ply")
+            gt_vertices_ply_path = os.path.join(out_shape, "gt_mc_vertices.ply")
+            _save_ply_points(pred_vertices_ply_path, pv.astype(np.float32))
+            _save_ply_points(gt_vertices_ply_path, gv.astype(np.float32))
+            entry["pred_mc_vertices_ply"] = os.path.abspath(pred_vertices_ply_path)
+            entry["gt_mc_vertices_ply"] = os.path.abspath(gt_vertices_ply_path)
             if int(args.save_png) == 1:
-                _save_preview(os.path.join(out_shape, "preview.png"), ctx_xyz, pv, gv)
-        except Exception:
-            pass
+                preview_path = os.path.join(out_shape, "preview.png")
+                _save_preview(preview_path, ctx_xyz, pv, gv)
+                if os.path.isfile(preview_path):
+                    entry["preview_png"] = os.path.abspath(preview_path)
+        except Exception as e:
+            entry["mc_error"] = str(e)
 
-        summary["per_shape"].append(
-            {
-                "name": name,
-                "path": os.path.abspath(p),
-                "mae_grid": mae,
-                "rmse_grid": rmse,
-                "iou@level": iou,
-                "out_dir": os.path.abspath(out_shape),
-            }
-        )
+        summary["per_shape"].append(entry)
         print(f"[done] {out_shape} mae={mae:.5f} rmse={rmse:.5f} iou={iou:.5f}")
 
     if summary["per_shape"]:

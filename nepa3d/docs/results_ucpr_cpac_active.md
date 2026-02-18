@@ -3320,3 +3320,63 @@ CPAC full protocol (`max_shapes=800`, `htrain4k`, `eval_seed=0`, `n_context=512`
 - A-1 is now **implemented and running** in this branch.
 - `coarse_to_fine` gives a large gain over uniform sampling on grid completion.
 - On this checkpoint/protocol, tuned `near_surface` remains slightly better on global IoU, while `coarse_to_fine` is comparable on near-surface IoU.
+
+## Qualitative Mesh Compare (Pred/Weak/Strong + MC resolution sweep, Feb 19, 2026)
+
+Purpose:
+
+- separate qualitative claims into three mesh lines under the same shape subset:
+  - `Pred Mesh`: NEPA inference from noisy 256-point context
+  - `Weak Baseline`: naive reconstruction from the same noisy 256-point context (`context_pc`)
+  - `Strong Baseline`: naive reconstruction from clean 2048-point observed point cloud (`observed_pc`)
+
+Artifacts:
+
+- `grid_res=32`:
+  - `results/qual_mc_nepa_impl_causal_s0_compare_8/summary.json`
+  - `results/qual_mc_nepa_impl_causal_s0_compare_8/compare_manifest_pred_weak_strong.json`
+  - `results/qual_mc_nepa_impl_causal_s0_compare_8/mesh_metric_compare_pred_weak_strong.json`
+- `grid_res=64`:
+  - `results/qual_mc_nepa_impl_causal_s0_compare_8_res64/summary.json`
+  - `results/qual_mc_nepa_impl_causal_s0_compare_8_res64/compare_manifest_pred_weak_strong.json`
+  - `results/qual_mc_nepa_impl_causal_s0_compare_8_res64/mesh_metric_compare_pred_weak_strong.json`
+- `grid_res=128`:
+  - `results/qual_mc_nepa_impl_causal_s0_compare_8_res128/summary.json`
+  - `results/qual_mc_nepa_impl_causal_s0_compare_8_res128/compare_manifest_pred_weak_strong.json`
+  - `results/qual_mc_nepa_impl_causal_s0_compare_8_res128/mesh_metric_compare_pred_weak_strong.json`
+
+Protocol (shared):
+
+- ckpt: `runs/eccv_upmix_nepa_impl_causal_s0/ckpt_ep049.pt`
+- split: `eval`, first 8 shapes (`max_shapes=8`, `shape_offset=0`)
+- context: `pointcloud_noray`, `n_context=256`
+- head-train: `train_udf -> udfgrid`, `head_train_max_shapes=4000`
+- mesh metrics: Chamfer (`L2/L1`) + F-score (`tau=0.005,0.01,0.02,0.05`), `n_samples=20000`
+
+Resolution sweep summary (`mean` over 8 shapes):
+
+| grid_res | Pred CD-L2 | Pred F@0.02 | Weak CD-L2 | Weak F@0.02 | Strong CD-L2 | Strong F@0.02 |
+|---|---:|---:|---:|---:|---:|---:|
+| 32 | 0.00877 | 0.24626 | 0.09999 | 0.01331 | 0.00388 | 0.04871 |
+| 64 | 0.02416 | 0.29464 | 0.15580 | 0.07425 | 0.00149 | 0.25211 |
+| 128 | 0.05092 | 0.23038 | 0.16760 | 0.07447 | 0.00210 | 0.17862 |
+
+Win counts (shape-wise):
+
+- Pred vs Weak:
+  - `chamfer_l2`: `8/8` better for Pred at all resolutions
+  - `fscore@0.02`: `8/8` better for Pred at all resolutions
+- Pred vs Strong:
+  - `chamfer_l2`: `0/8` better for Pred at all resolutions (Strong always lower CD-L2)
+  - `fscore@0.02`: `8/8` (res32), `7/8` (res64), `7/8` (res128) better for Pred
+
+MC-resolution dependence (same 8-shape subset, same ckpt):
+
+- not monotonic in this setup:
+  - Pred `CD-L2`: `32 < 64 < 128` (worse with higher grid)
+  - Pred `F@0.02`: `64 > 32 > 128`
+- CPAC grid metrics in `summary.json` also show non-monotonic behavior (`mean_iou@level`: `32 > 128 > 64`).
+
+Implementation note:
+
+- `nepa3d/analysis/qualitative_cpac_marching_cubes.py` was updated for current `collect_xy` signature (`xtr, ytr, _, _ = collect_xy(...)`), so this sweep is reproducible in the active branch.
