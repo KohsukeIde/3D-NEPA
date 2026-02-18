@@ -15,7 +15,14 @@ from ..data.modelnet40_index import (
     stratified_train_val_split,
 )
 from ..models.query_nepa import QueryNepa
-from ..token.tokenizer import TYPE_A_POINT, TYPE_A_RAY
+from ..token.tokenizer import (
+    TYPE_BOS,
+    TYPE_EOS,
+    TYPE_POINT,
+    TYPE_Q_POINT,
+    TYPE_A_POINT,
+    TYPE_A_RAY,
+)
 from ..utils.seed import set_seed
 from ..utils.ckpt_utils import load_state_dict_flexible, maybe_resize_pos_emb_in_state_dict
 
@@ -83,16 +90,25 @@ class ClsWrapper(nn.Module):
     def forward(self, feat, type_id):
         _, _, h = self.backbone(feat, type_id, is_causal=self.cls_is_causal)
         pool = self._resolved_pooling()
+
+        def _masked_mean(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+            if mask.dtype != torch.bool:
+                mask = mask.bool()
+            w = mask.float().unsqueeze(-1)
+            denom = w.sum(dim=1).clamp(min=1.0)
+            return (x * w).sum(dim=1) / denom
+
         if pool == "mean":
             pooled = h.mean(dim=1)
+        elif pool == "mean_no_special":
+            ns_mask = (type_id != TYPE_BOS) & (type_id != TYPE_EOS)
+            pooled = _masked_mean(h, ns_mask) if ns_mask.any() else h[:, -1, :]
+        elif pool == "mean_pts":
+            pt_mask = (type_id == TYPE_POINT) | (type_id == TYPE_Q_POINT) | (type_id == TYPE_A_POINT)
+            pooled = _masked_mean(h, pt_mask) if pt_mask.any() else h[:, -1, :]
         elif pool == "mean_a":
             a_mask = (type_id == TYPE_A_POINT) | (type_id == TYPE_A_RAY)
-            if a_mask.any():
-                w = a_mask.float().unsqueeze(-1)
-                pooled = (h * w).sum(dim=1) / w.sum(dim=1).clamp(min=1.0)
-            else:
-                # Fallback for non-QA sequences.
-                pooled = h[:, -1, :]
+            pooled = _masked_mean(h, a_mask) if a_mask.any() else h[:, -1, :]
         else:
             # EOS/last-token pooling (legacy behavior).
             pooled = h[:, -1, :]
@@ -204,13 +220,25 @@ def main():
         "--cls_pooling",
         type=str,
         default="mean_a",
-        choices=["auto", "eos", "mean", "mean_a"],
-        help="classification pooling (default=mean_a): auto(mean_a for qa_tokens else eos), eos, mean, mean_a",
+        choices=["auto", "eos", "mean", "mean_no_special", "mean_pts", "mean_a"],
+        help="classification pooling (default=mean_a): auto(mean_a for qa_tokens else eos), eos, mean, mean_no_special, mean_pts, mean_a",
     )
     ap.add_argument(
         "--ablate_point_dist",
         action="store_true",
         help="ablation: zero out point-distance channel before tokenization",
+    )
+    ap.add_argument(
+        "--pt_xyz_key",
+        type=str,
+        default="pt_xyz_pool",
+        help="npz key for point xyz pool (default: pt_xyz_pool; set pc_xyz for surface-point protocols)",
+    )
+    ap.add_argument(
+        "--pt_dist_key",
+        type=str,
+        default="pt_dist_pool",
+        help="npz key for point dist pool (default: pt_dist_pool). Missing/mismatched key falls back to zeros.",
     )
     args = ap.parse_args()
 
@@ -307,6 +335,8 @@ def main():
         voxel_grid=args.voxel_grid,
         voxel_dilate=args.voxel_dilate,
         voxel_max_steps=args.voxel_max_steps,
+        pt_xyz_key=args.pt_xyz_key,
+        pt_dist_key=args.pt_dist_key,
         ablate_point_dist=args.ablate_point_dist,
         return_label=True,
         label_map=label_map,
@@ -327,6 +357,8 @@ def main():
         voxel_grid=args.voxel_grid,
         voxel_dilate=args.voxel_dilate,
         voxel_max_steps=args.voxel_max_steps,
+        pt_xyz_key=args.pt_xyz_key,
+        pt_dist_key=args.pt_dist_key,
         ablate_point_dist=args.ablate_point_dist,
         return_label=True,
         label_map=label_map,
@@ -347,6 +379,8 @@ def main():
         voxel_grid=args.voxel_grid,
         voxel_dilate=args.voxel_dilate,
         voxel_max_steps=args.voxel_max_steps,
+        pt_xyz_key=args.pt_xyz_key,
+        pt_dist_key=args.pt_dist_key,
         ablate_point_dist=args.ablate_point_dist,
         return_label=True,
         label_map=label_map,
@@ -480,6 +514,7 @@ def main():
         f"freeze_backbone={bool(args.freeze_backbone)} "
         f"cls_is_causal={bool(int(args.cls_is_causal))} "
         f"cls_pooling={args.cls_pooling}->{model._resolved_pooling()} "
+        f"pt_xyz_key={args.pt_xyz_key} pt_dist_key={args.pt_dist_key} "
         f"ablate_point_dist={bool(args.ablate_point_dist)} "
         f"n_point={args.n_point}/{pre_n_point} n_ray={args.n_ray}/{pre_n_ray} "
         f"model_max_len={model_max_len}"
@@ -492,6 +527,11 @@ def main():
             # keep frozen backbone deterministic even in train loop
             model.backbone.eval()
 
+        train_loss_sum = 0.0
+        train_correct = 0
+        train_total = 0
+        train_steps = 0
+
         for batch in train_dl:
             feat = batch["feat"].to(device).float()
             type_id = batch["type_id"].to(device).long()
@@ -503,7 +543,16 @@ def main():
             loss.backward()
             opt.step()
 
+            train_loss_sum += float(loss.detach().item())
+            train_steps += 1
+            with torch.no_grad():
+                pred = logits.argmax(dim=-1)
+                train_correct += int((pred == y).sum().item())
+                train_total += int(y.numel())
+
         val_acc = eval_acc(val_dl)
+        train_loss = train_loss_sum / max(train_steps, 1)
+        train_acc = train_correct / max(train_total, 1)
         improved = val_acc > best_val + 1e-12
         if improved:
             best_val = val_acc
@@ -522,7 +571,10 @@ def main():
                     os.path.join(args.save_dir, "best.pt"),
                 )
 
-        print(f"ep={ep} val_acc={val_acc:.4f} best_val={best_val:.4f} best_ep={best_ep}")
+        print(
+            f"ep={ep} train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
+            f"val_acc={val_acc:.4f} best_val={best_val:.4f} best_ep={best_ep}"
+        )
 
     # Final test evaluation on the best VAL checkpoint.
     if best_state is not None:

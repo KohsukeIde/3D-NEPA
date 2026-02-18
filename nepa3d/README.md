@@ -14,7 +14,8 @@ Legacy means early/pre-review snapshots (including old ModelNet40-era runs). Cur
 
 - Results index: `nepa3d/docs/results_index.md`
 - ScanObjectNN core3 active tables: `nepa3d/docs/results_scanobjectnn_core3_active.md`
-- ScanObjectNN review tables (paper-safe core3, full-ft + linear-probe): `nepa3d/docs/results_scanobjectnn_review_active.md`
+- ScanObjectNN review tables (bidir + vote10 active): `nepa3d/docs/results_scanobjectnn_review_active.md`
+- ScanObjectNN review legacy snapshot: `nepa3d/docs/results_scanobjectnn_review_legacy.md`
 - ModelNet40 PointGPT-style protocol (full + few-shot LP): `nepa3d/docs/results_modelnet40_pointgpt_active.md`
 - ScanObjectNN M1 legacy snapshot (`75/75`): `nepa3d/docs/results_scanobjectnn_m1_legacy.md`
 - UCPR/CPAC active results (incl. QA cycle): `nepa3d/docs/results_ucpr_cpac_active.md`
@@ -305,30 +306,10 @@ bash scripts/logs/cleanup_stale_pids.sh
 
 ## 6) Current result snapshot
 
-### 6.1 ScanObjectNN review tables (active, complete)
+### 6.1 ScanObjectNN review tables
 
-Status (as of February 16, 2026):
-
-- full fine-tune: `225/225` complete
-- linear probe (`freeze_backbone=1`): `225/225` complete
-- variants: `obj_bg`, `obj_only`, `pb_t50_rs`
-- methods: `scratch`, `shapenet_nepa`, `shapenet_mesh_udf_nepa`, `shapenet_mix_nepa`, `shapenet_mix_mae`
-
-Best-by-K (full fine-tune, selected):
-
-| Variant | K | best method | test_acc mean +- std |
-|---|---:|---|---:|
-| `obj_bg` | 0 | `shapenet_mix_nepa` | 0.6718 +- 0.0077 |
-| `obj_bg` | 20 | `shapenet_mix_nepa` | 0.4997 +- 0.0131 |
-| `obj_only` | 0 | `shapenet_mix_nepa` | 0.6690 +- 0.0029 |
-| `obj_only` | 20 | `shapenet_mix_nepa` | 0.4945 +- 0.0045 |
-| `pb_t50_rs` | 0 | `shapenet_mix_nepa` | 0.5501 +- 0.0023 |
-| `pb_t50_rs` | 20 | `shapenet_mix_nepa` | 0.3038 +- 0.0068 |
-
-Full tables:
-
-- `nepa3d/docs/results_scanobjectnn_review_active.md`
-- raw/summary CSV: `results/scan_variants_review_raw.csv`, `results/scan_variants_review_summary.csv`
+- Active (corrected protocol; bidirectional + vote10): `nepa3d/docs/results_scanobjectnn_review_active.md`
+- Legacy snapshot (causal baseline + mixed interim notes): `nepa3d/docs/results_scanobjectnn_review_legacy.md`
 
 ### 6.2 ModelNet40 PointGPT-style protocol (active, complete)
 

@@ -33,6 +33,8 @@ class ModelNet40QueryDataset(Dataset):
         voxel_max_steps=0,
         return_label=False,
         label_map=None,
+        pt_xyz_key="pt_xyz_pool",
+        pt_dist_key="pt_dist_pool",
         ablate_point_dist=False,
     ):
         self.paths = list(npz_paths)
@@ -50,6 +52,8 @@ class ModelNet40QueryDataset(Dataset):
         self.voxel_dilate = int(voxel_dilate)
         self.voxel_max_steps = int(voxel_max_steps)
         self.return_label = return_label
+        self.pt_xyz_key = str(pt_xyz_key)
+        self.pt_dist_key = None if pt_dist_key is None else str(pt_dist_key)
         self.ablate_point_dist = bool(ablate_point_dist)
         if return_label:
             self.label_map = label_map or build_label_map(self.paths)
@@ -100,6 +104,27 @@ class ModelNet40QueryDataset(Dataset):
         path = self.paths[idx]
         be = self._make_backend(path)
         pools = be.get_pools()
+        # Select point pools from configurable keys (legacy defaults keep behavior unchanged).
+        pt_xyz_pool = pools.get(self.pt_xyz_key)
+        if pt_xyz_pool is None:
+            pt_xyz_pool = pools.get("pt_xyz_pool")
+        if pt_xyz_pool is None:
+            pt_xyz_pool = pools.get("pc_xyz")
+        if pt_xyz_pool is None:
+            raise KeyError(
+                f"point xyz pool not found: pt_xyz_key={self.pt_xyz_key} available={list(pools.keys())}"
+            )
+
+        pt_dist_pool = None
+        if self.pt_dist_key:
+            pt_dist_pool = pools.get(self.pt_dist_key)
+        if (
+            pt_dist_pool is None
+            or getattr(pt_dist_pool, "shape", None) is None
+            or pt_dist_pool.shape[0] != pt_xyz_pool.shape[0]
+        ):
+            pt_dist_pool = np.zeros((pt_xyz_pool.shape[0], 1), dtype=np.float32)
+
         ray_available = bool(pools.get("ray_available", True))
         if self.force_missing_ray:
             ray_available = False
@@ -115,13 +140,13 @@ class ModelNet40QueryDataset(Dataset):
             k = max(1, self.mc_eval_k)
             feats = []
             types = []
-            pt_dist = pools["pt_dist_pool"]
+            pt_dist = pt_dist_pool
             if self.ablate_point_dist:
                 pt_dist = np.zeros_like(pt_dist, dtype=np.float32)
             for i in range(k):
                 rng = np.random.RandomState((base + 1000003 * i) & 0xFFFFFFFF)
                 feat, type_id = build_sequence(
-                    pools["pt_xyz_pool"],
+                    pt_xyz_pool,
                     pt_dist,
                     pools["ray_o_pool"],
                     pools["ray_d_pool"],
@@ -141,11 +166,11 @@ class ModelNet40QueryDataset(Dataset):
             feat = np.stack(feats, axis=0) if k > 1 else feats[0]
             type_id = np.stack(types, axis=0) if k > 1 else types[0]
         else:
-            pt_dist = pools["pt_dist_pool"]
+            pt_dist = pt_dist_pool
             if self.ablate_point_dist:
                 pt_dist = np.zeros_like(pt_dist, dtype=np.float32)
             feat, type_id = build_sequence(
-                pools["pt_xyz_pool"],
+                pt_xyz_pool,
                 pt_dist,
                 pools["ray_o_pool"],
                 pools["ray_d_pool"],

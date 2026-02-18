@@ -32,6 +32,8 @@ VAL_SEED="${VAL_SEED:-0}"
 EVAL_SEED="${EVAL_SEED:-0}"
 CLS_IS_CAUSAL="${CLS_IS_CAUSAL:-0}"
 CLS_POOLING="${CLS_POOLING:-mean_a}"
+PT_XYZ_KEY="${PT_XYZ_KEY:-pt_xyz_pool}"
+PT_DIST_KEY="${PT_DIST_KEY:-pt_dist_pool}"
 ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
 
 # Full fine-tune defaults (PointGPT-like full table side)
@@ -290,6 +292,8 @@ run_one() {
     --mc_eval_k_test "${mc_test}" \
     --cls_is_causal "${CLS_IS_CAUSAL}" \
     --cls_pooling "${CLS_POOLING}" \
+    --pt_xyz_key "${PT_XYZ_KEY}" \
+    --pt_dist_key "${PT_DIST_KEY}" \
     "${extra_args[@]}" \
     --save_dir "${save_dir}" \
     > "${job_log}" 2>&1
@@ -350,6 +354,7 @@ echo "[info] total_jobs=${#JOBS[@]}"
 echo "[info] cache_root=${CACHE_ROOT} backend=${BACKEND} n_point=${N_POINT} n_ray=${N_RAY}"
 echo "[info] cls_is_causal=${CLS_IS_CAUSAL}"
 echo "[info] cls_pooling=${CLS_POOLING}"
+echo "[info] pt_xyz_key=${PT_XYZ_KEY} pt_dist_key=${PT_DIST_KEY}"
 echo "[info] ablate_point_dist=${ABLATE_POINT_DIST}"
 echo "[info] methods=${METHODS}"
 echo "[info] full_seeds=${FULL_SEEDS} full_freeze=${FULL_FREEZE_BACKBONE}"
