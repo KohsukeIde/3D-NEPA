@@ -15,6 +15,58 @@ Fair-FT run status:
 - run root: `runs/scan_variants_review_ft_fair_pcxyz2k_v1`
 - protocol: `pt_xyz_key=pc_xyz`, `ablate_point_dist=1`, `n_point=2048`, `allow_scale_up=1`, `cls_is_causal=0`, `cls_pooling=mean_pts`, `aug_preset=scanobjectnn`, `mc_eval_k_test=1`
 
+## Fair FT update (`pcxyz2k`, xyz-only)
+
+- `v1` (`runs/scan_variants_review_ft_fair_pcxyz2k_v1`) is finalized for `obj_bg` only: `75/75`.
+- `v1` `obj_only` / `pb_t50_rs` were intentionally not executed (`0/75`, `0/75`) to prioritize `v2`.
+- `v1` sampling note: checkpoints do not include `pt_sample_mode_*` args, so train/eval used legacy random sampling.
+- `v2` is now running for `obj_bg` with explicit sampling modes:
+  - run root: `runs/scan_variants_review_ft_fair_pcxyz2k_fps_v2`
+  - chain log: `logs/finetune/scan_variants_review_fair_ft_chain_v2_objbg/pipeline.log`
+  - key protocol delta: `pt_sample_mode_train=random`, `pt_sample_mode_eval=fps`, `pt_fps_key=pt_fps_order`
+
+### Fair FT v1 (`obj_bg`, complete)
+
+Source: `runs/scan_variants_review_ft_fair_pcxyz2k_v1/obj_bg/scan_<method>_ablate_dist_k<K>_s<seed>/last.pt` (`n(seed)=3`).
+
+| Method | K | n(seed) | test_acc mean +- std |
+|---|---:|---:|---:|
+| `scratch` | 0 | 3 | 0.1612 +- 0.0201 |
+| `scratch` | 1 | 3 | 0.1325 +- 0.0024 |
+| `scratch` | 5 | 3 | 0.1268 +- 0.0072 |
+| `scratch` | 10 | 3 | 0.1343 +- 0.0000 |
+| `scratch` | 20 | 3 | 0.1343 +- 0.0000 |
+| `shapenet_nepa` | 0 | 3 | 0.4274 +- 0.0123 |
+| `shapenet_nepa` | 1 | 3 | 0.1228 +- 0.0297 |
+| `shapenet_nepa` | 5 | 3 | 0.1767 +- 0.0191 |
+| `shapenet_nepa` | 10 | 3 | 0.2020 +- 0.0008 |
+| `shapenet_nepa` | 20 | 3 | 0.2238 +- 0.0446 |
+| `shapenet_mesh_udf_nepa` | 0 | 3 | 0.4550 +- 0.0168 |
+| `shapenet_mesh_udf_nepa` | 1 | 3 | 0.1348 +- 0.0149 |
+| `shapenet_mesh_udf_nepa` | 5 | 3 | 0.1738 +- 0.0243 |
+| `shapenet_mesh_udf_nepa` | 10 | 3 | 0.2020 +- 0.0239 |
+| `shapenet_mesh_udf_nepa` | 20 | 3 | 0.2266 +- 0.0556 |
+| `shapenet_mix_nepa` | 0 | 3 | 0.4360 +- 0.0133 |
+| `shapenet_mix_nepa` | 1 | 3 | 0.1113 +- 0.0138 |
+| `shapenet_mix_nepa` | 5 | 3 | 0.1756 +- 0.0049 |
+| `shapenet_mix_nepa` | 10 | 3 | 0.2123 +- 0.0154 |
+| `shapenet_mix_nepa` | 20 | 3 | 0.2197 +- 0.0404 |
+| `shapenet_mix_mae` | 0 | 3 | 0.4131 +- 0.0156 |
+| `shapenet_mix_mae` | 1 | 3 | 0.1262 +- 0.0179 |
+| `shapenet_mix_mae` | 5 | 3 | 0.1595 +- 0.0059 |
+| `shapenet_mix_mae` | 10 | 3 | 0.1836 +- 0.0296 |
+| `shapenet_mix_mae` | 20 | 3 | 0.1910 +- 0.0169 |
+
+### Fair FT v1 best-by-K (`obj_bg`)
+
+| K | best method | test_acc mean +- std |
+|---:|---|---:|
+| 0 | `shapenet_mesh_udf_nepa` | 0.4550 +- 0.0168 |
+| 1 | `shapenet_mesh_udf_nepa` | 0.1348 +- 0.0149 |
+| 5 | `shapenet_nepa` | 0.1767 +- 0.0191 |
+| 10 | `shapenet_mix_nepa` | 0.2123 +- 0.0154 |
+| 20 | `shapenet_mesh_udf_nepa` | 0.2266 +- 0.0556 |
+
 ## TODO (next steps)
 
 - [x] Add per-epoch training diagnostics to classification logs (`train_loss`, `train_acc`) in `nepa3d/train/finetune_cls.py`.

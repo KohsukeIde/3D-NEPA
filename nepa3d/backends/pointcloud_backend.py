@@ -43,7 +43,7 @@ class PointCloudBackend:
             ray_t = self.d["ray_t_pool"].astype(np.float32, copy=False)
             ray_n = self.d["ray_n_pool"].astype(np.float32, copy=False)
 
-        return {
+        pools = {
             "pt_xyz_pool": pt_xyz,
             "pt_dist_pool": pt_dist,
             "ray_o_pool": self.d["ray_o_pool"].astype(np.float32, copy=False),
@@ -53,6 +53,9 @@ class PointCloudBackend:
             "ray_n_pool": ray_n,
             "ray_available": True,
         }
+        if "pt_fps_order" in self.d:
+            pools["pt_fps_order"] = self.d["pt_fps_order"].astype(np.int32, copy=False)
+        return pools
 
 
 class PointCloudMeshRayBackend(PointCloudBackend):
@@ -76,7 +79,7 @@ class PointCloudMeshRayBackend(PointCloudBackend):
                 self.kdt = cKDTree(self.pc)
             dist, _ = self.kdt.query(pt_xyz, k=1)
             pt_dist = dist.astype(np.float32, copy=False)
-        return {
+        pools = {
             "pt_xyz_pool": pt_xyz,
             "pt_dist_pool": pt_dist,
             "ray_o_pool": self.d["ray_o_pool"].astype(np.float32, copy=False),
@@ -86,6 +89,9 @@ class PointCloudMeshRayBackend(PointCloudBackend):
             "ray_n_pool": self.d["ray_n_pool"].astype(np.float32, copy=False),
             "ray_available": True,
         }
+        if "pt_fps_order" in self.d:
+            pools["pt_fps_order"] = self.d["pt_fps_order"].astype(np.int32, copy=False)
+        return pools
 
 
 class PointCloudNoRayBackend(PointCloudBackend):

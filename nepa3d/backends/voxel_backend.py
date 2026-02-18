@@ -153,7 +153,7 @@ class VoxelBackend:
         ray_d = self.d["ray_d_pool"].astype(np.float32, copy=False)
         ray_hit, ray_t, ray_n = self._ray_answers_from_grid(ray_o, ray_d)
 
-        return {
+        pools = {
             "pt_xyz_pool": pt_xyz,
             "pt_dist_pool": pt_dist,
             "ray_o_pool": ray_o,
@@ -163,3 +163,6 @@ class VoxelBackend:
             "ray_n_pool": ray_n,
             "ray_available": True,
         }
+        if "pt_fps_order" in self.d:
+            pools["pt_fps_order"] = self.d["pt_fps_order"].astype(np.int32, copy=False)
+        return pools

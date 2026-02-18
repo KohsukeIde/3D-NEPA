@@ -40,6 +40,10 @@ FEWSHOT_SEED="${FEWSHOT_SEED:-0}"
 VAL_RATIO="${VAL_RATIO:-0.1}"
 VAL_SEED="${VAL_SEED:-0}"
 ADD_EOS="${ADD_EOS:--1}"
+PT_SAMPLE_MODE_TRAIN="${PT_SAMPLE_MODE_TRAIN:-random}"
+PT_SAMPLE_MODE_EVAL="${PT_SAMPLE_MODE_EVAL:-fps}"
+PT_FPS_KEY="${PT_FPS_KEY:-pt_fps_order}"
+PT_RFPS_M="${PT_RFPS_M:-4096}"
 
 "${PYTHON_BIN}" -m nepa3d.train.finetune_cls \
   --cache_root "${CACHE_ROOT}" \
@@ -58,4 +62,8 @@ ADD_EOS="${ADD_EOS:--1}"
   --val_ratio "${VAL_RATIO}" \
   --val_seed "${VAL_SEED}" \
   --fewshot_k "${FEWSHOT_K}" \
-  --fewshot_seed "${FEWSHOT_SEED}"
+  --fewshot_seed "${FEWSHOT_SEED}" \
+  --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN}" \
+  --pt_sample_mode_eval "${PT_SAMPLE_MODE_EVAL}" \
+  --pt_fps_key "${PT_FPS_KEY}" \
+  --pt_rfps_m "${PT_RFPS_M}"

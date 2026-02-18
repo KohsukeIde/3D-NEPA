@@ -35,6 +35,10 @@ CLS_IS_CAUSAL="${CLS_IS_CAUSAL:-0}"
 CLS_POOLING="${CLS_POOLING:-mean_a}"
 PT_XYZ_KEY="${PT_XYZ_KEY:-pt_xyz_pool}"
 PT_DIST_KEY="${PT_DIST_KEY:-pt_dist_pool}"
+PT_SAMPLE_MODE_TRAIN="${PT_SAMPLE_MODE_TRAIN:-random}"
+PT_SAMPLE_MODE_EVAL="${PT_SAMPLE_MODE_EVAL:-fps}"
+PT_FPS_KEY="${PT_FPS_KEY:-pt_fps_order}"
+PT_RFPS_M="${PT_RFPS_M:-4096}"
 ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
 AUG_PRESET="${AUG_PRESET:-none}"
 AUG_SCALE_MIN="${AUG_SCALE_MIN:-1.0}"
@@ -311,6 +315,10 @@ run_one() {
     --cls_pooling "${CLS_POOLING}" \
     --pt_xyz_key "${PT_XYZ_KEY}" \
     --pt_dist_key "${PT_DIST_KEY}" \
+    --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN}" \
+    --pt_sample_mode_eval "${PT_SAMPLE_MODE_EVAL}" \
+    --pt_fps_key "${PT_FPS_KEY}" \
+    --pt_rfps_m "${PT_RFPS_M}" \
     --aug_preset "${AUG_PRESET}" \
     --aug_scale_min "${AUG_SCALE_MIN}" \
     --aug_scale_max "${AUG_SCALE_MAX}" \
@@ -377,7 +385,7 @@ echo "[info] total_jobs=${#JOBS[@]}"
 echo "[info] cache_root=${CACHE_ROOT} backend=${BACKEND} n_point=${N_POINT} n_ray=${N_RAY} allow_scale_up=${ALLOW_SCALE_UP}"
 echo "[info] cls_is_causal=${CLS_IS_CAUSAL}"
 echo "[info] cls_pooling=${CLS_POOLING}"
-echo "[info] pt_xyz_key=${PT_XYZ_KEY} pt_dist_key=${PT_DIST_KEY}"
+echo "[info] pt_xyz_key=${PT_XYZ_KEY} pt_dist_key=${PT_DIST_KEY} pt_sample_mode_train=${PT_SAMPLE_MODE_TRAIN} pt_sample_mode_eval=${PT_SAMPLE_MODE_EVAL} pt_fps_key=${PT_FPS_KEY} pt_rfps_m=${PT_RFPS_M}"
 echo "[info] ablate_point_dist=${ABLATE_POINT_DIST}"
 echo "[info] aug_preset=${AUG_PRESET} aug_rotate_z=${AUG_ROTATE_Z} aug_scale=[${AUG_SCALE_MIN},${AUG_SCALE_MAX}] aug_translate=${AUG_TRANSLATE} aug_jitter_sigma=${AUG_JITTER_SIGMA} aug_jitter_clip=${AUG_JITTER_CLIP} aug_eval=${AUG_EVAL}"
 echo "[info] methods=${METHODS}"

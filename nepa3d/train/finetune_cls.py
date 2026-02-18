@@ -244,6 +244,32 @@ def main():
         default="pt_dist_pool",
         help="npz key for point dist pool (default: pt_dist_pool). If missing or length-mismatch, zeros are used.",
     )
+    ap.add_argument(
+        "--pt_sample_mode_train",
+        type=str,
+        default="random",
+        choices=["random", "fps", "rfps"],
+        help="Point sampling for TRAIN sequences.",
+    )
+    ap.add_argument(
+        "--pt_sample_mode_eval",
+        type=str,
+        default="fps",
+        choices=["random", "fps", "rfps"],
+        help="Point sampling for EVAL sequences.",
+    )
+    ap.add_argument(
+        "--pt_fps_key",
+        type=str,
+        default="pt_fps_order",
+        help="npz key for precomputed FPS order.",
+    )
+    ap.add_argument(
+        "--pt_rfps_m",
+        type=int,
+        default=4096,
+        help="RFPS candidate count when fps key is unavailable.",
+    )
 
     # --- Data augmentation (classification protocol alignment) ---
     ap.add_argument(
@@ -381,6 +407,9 @@ def main():
         pt_xyz_key=args.pt_xyz_key,
         pt_dist_key=args.pt_dist_key,
         ablate_point_dist=args.ablate_point_dist,
+        pt_sample_mode=args.pt_sample_mode_train,
+        pt_fps_key=args.pt_fps_key,
+        pt_rfps_m=args.pt_rfps_m,
         aug_rotate_z=args.aug_rotate_z,
         aug_scale_min=args.aug_scale_min,
         aug_scale_max=args.aug_scale_max,
@@ -410,6 +439,9 @@ def main():
         pt_xyz_key=args.pt_xyz_key,
         pt_dist_key=args.pt_dist_key,
         ablate_point_dist=args.ablate_point_dist,
+        pt_sample_mode=args.pt_sample_mode_eval,
+        pt_fps_key=args.pt_fps_key,
+        pt_rfps_m=args.pt_rfps_m,
         aug_rotate_z=args.aug_rotate_z,
         aug_scale_min=args.aug_scale_min,
         aug_scale_max=args.aug_scale_max,
@@ -439,6 +471,9 @@ def main():
         pt_xyz_key=args.pt_xyz_key,
         pt_dist_key=args.pt_dist_key,
         ablate_point_dist=args.ablate_point_dist,
+        pt_sample_mode=args.pt_sample_mode_eval,
+        pt_fps_key=args.pt_fps_key,
+        pt_rfps_m=args.pt_rfps_m,
         aug_rotate_z=args.aug_rotate_z,
         aug_scale_min=args.aug_scale_min,
         aug_scale_max=args.aug_scale_max,
@@ -579,6 +614,8 @@ def main():
         f"cls_is_causal={bool(int(args.cls_is_causal))} "
         f"cls_pooling={args.cls_pooling}->{model._resolved_pooling()} "
         f"pt_xyz_key={args.pt_xyz_key} pt_dist_key={args.pt_dist_key} "
+        f"pt_sample_mode_train={args.pt_sample_mode_train} pt_sample_mode_eval={args.pt_sample_mode_eval} "
+        f"pt_fps_key={args.pt_fps_key} pt_rfps_m={args.pt_rfps_m} "
         f"ablate_point_dist={bool(args.ablate_point_dist)} "
         f"n_point={args.n_point}/{pre_n_point} n_ray={args.n_ray}/{pre_n_ray} "
         f"model_max_len={model_max_len}"

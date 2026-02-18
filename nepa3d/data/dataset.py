@@ -149,6 +149,9 @@ class ModelNet40QueryDataset(Dataset):
         pt_xyz_key="pt_xyz_pool",
         pt_dist_key="pt_dist_pool",
         ablate_point_dist=False,
+        pt_sample_mode="random",
+        pt_fps_key="pt_fps_order",
+        pt_rfps_m=4096,
         # Augmentations
         aug_rotate_z=False,
         aug_scale_min=1.0,
@@ -176,6 +179,9 @@ class ModelNet40QueryDataset(Dataset):
         self.pt_xyz_key = str(pt_xyz_key)
         self.pt_dist_key = None if pt_dist_key is None else str(pt_dist_key)
         self.ablate_point_dist = bool(ablate_point_dist)
+        self.pt_sample_mode = str(pt_sample_mode)
+        self.pt_fps_key = str(pt_fps_key)
+        self.pt_rfps_m = int(pt_rfps_m)
 
         self.aug_rotate_z = bool(aug_rotate_z)
         self.aug_scale_min = float(aug_scale_min)
@@ -313,6 +319,8 @@ class ModelNet40QueryDataset(Dataset):
             if self.ablate_point_dist:
                 dist = np.zeros_like(dist, dtype=np.float32)
 
+            pt_fps_order = local_pools.get(self.pt_fps_key, None) if isinstance(local_pools, dict) else None
+
             feat, type_id = build_sequence(
                 xyz,
                 dist,
@@ -327,6 +335,9 @@ class ModelNet40QueryDataset(Dataset):
                 ray_available=ray_available,
                 add_eos=self.add_eos,
                 qa_tokens=self.qa_tokens,
+                pt_sample_mode=self.pt_sample_mode,
+                pt_fps_order=pt_fps_order,
+                pt_rfps_m=self.pt_rfps_m,
                 rng=rng,
             )
             return feat, type_id

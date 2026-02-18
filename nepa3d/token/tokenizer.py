@@ -37,6 +37,48 @@ def _rand01(rng):
     return float(rng.random())
 
 
+def _sample_point_indices(
+    pt_xyz_pool: np.ndarray,
+    n_point: int,
+    rng: np.random.Generator,
+    pt_sample_mode: str = "random",
+    pt_fps_order: np.ndarray | None = None,
+    pt_rfps_m: int = 4096,
+) -> np.ndarray:
+    """Select point indices according to a sampling policy."""
+    n_pool = int(pt_xyz_pool.shape[0])
+    n_point = int(n_point)
+    if n_point <= 0:
+        return np.empty((0,), dtype=np.int64)
+    if n_pool <= 0:
+        raise ValueError("pt_xyz_pool is empty but n_point > 0")
+    k = min(n_point, n_pool)
+    mode = str(pt_sample_mode).lower()
+
+    if mode == "fps":
+        if pt_fps_order is not None:
+            order = np.asarray(pt_fps_order).reshape(-1)
+            k0 = min(k, order.shape[0])
+            chosen = order[:k0].astype(np.int64, copy=False)
+            if k0 == k:
+                return chosen
+            used = np.zeros((n_pool,), dtype=bool)
+            used[chosen] = True
+            rest = np.flatnonzero(~used)
+            extra = rng.choice(rest, size=(k - k0), replace=False)
+            return np.concatenate([chosen, extra.astype(np.int64)], axis=0)
+        # fall back to RFPS when cached order is unavailable
+        mode = "rfps"
+
+    if mode == "rfps":
+        from nepa3d.utils.fps import rfps_order
+
+        m = min(int(pt_rfps_m), n_pool)
+        return rfps_order(pt_xyz_pool, k=k, m=m, rng=rng).astype(np.int64, copy=False)
+
+    return rng.choice(n_pool, size=k, replace=False).astype(np.int64, copy=False)
+
+
 def _build_sequence_legacy(
     pt_xyz,
     pt_dist,
@@ -51,6 +93,9 @@ def _build_sequence_legacy(
     ray_available=True,
     add_eos=True,
     rng=None,
+    pt_sample_mode="random",
+    pt_fps_order=None,
+    pt_rfps_m=4096,
 ):
     """Legacy tokenization: [BOS] + POINT* + RAY* (+ [EOS]).
 
@@ -63,7 +108,14 @@ def _build_sequence_legacy(
     pt_dist = np.asarray(pt_dist)
     pt_dist_1d = pt_dist[:, 0] if pt_dist.ndim == 2 else pt_dist
 
-    p_idx = _choice(pt_xyz.shape[0], n_point, rng=rng)
+    p_idx = _sample_point_indices(
+        pt_xyz_pool=pt_xyz,
+        n_point=n_point,
+        rng=rng,
+        pt_sample_mode=pt_sample_mode,
+        pt_fps_order=pt_fps_order,
+        pt_rfps_m=pt_rfps_m,
+    )
 
     pt_xyz_s = pt_xyz[p_idx]
     pt_dist_s = pt_dist_1d[p_idx]
@@ -158,6 +210,9 @@ def _build_sequence_qa(
     ray_available=True,
     add_eos=True,
     rng=None,
+    pt_sample_mode="random",
+    pt_fps_order=None,
+    pt_rfps_m=4096,
 ):
     """Q/A separated tokenization: [BOS] + (Qp,Ap)* + (Qr,Ar)* (+ [EOS]).
 
@@ -176,7 +231,14 @@ def _build_sequence_qa(
     pt_dist = np.asarray(pt_dist)
     pt_dist_1d = pt_dist[:, 0] if pt_dist.ndim == 2 else pt_dist
 
-    p_idx = _choice(pt_xyz.shape[0], n_point, rng=rng)
+    p_idx = _sample_point_indices(
+        pt_xyz_pool=pt_xyz,
+        n_point=n_point,
+        rng=rng,
+        pt_sample_mode=pt_sample_mode,
+        pt_fps_order=pt_fps_order,
+        pt_rfps_m=pt_rfps_m,
+    )
 
     pt_xyz_s = pt_xyz[p_idx]
     pt_dist_s = pt_dist_1d[p_idx]
@@ -299,6 +361,9 @@ def build_sequence(
     add_eos=True,
     rng=None,
     qa_tokens=False,
+    pt_sample_mode="random",
+    pt_fps_order=None,
+    pt_rfps_m=4096,
 ):
     """Build a token sequence from pooled queries/answers.
 
@@ -325,6 +390,9 @@ def build_sequence(
             ray_available=ray_available,
             add_eos=add_eos,
             rng=rng,
+            pt_sample_mode=pt_sample_mode,
+            pt_fps_order=pt_fps_order,
+            pt_rfps_m=pt_rfps_m,
         )
     return _build_sequence_legacy(
         pt_xyz,
@@ -340,4 +408,7 @@ def build_sequence(
         ray_available=ray_available,
         add_eos=add_eos,
         rng=rng,
+        pt_sample_mode=pt_sample_mode,
+        pt_fps_order=pt_fps_order,
+        pt_rfps_m=pt_rfps_m,
     )

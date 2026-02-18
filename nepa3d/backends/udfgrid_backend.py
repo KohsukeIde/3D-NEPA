@@ -40,7 +40,7 @@ class UDFGridBackend:
         ray_t = np.zeros((m,), dtype=np.float32)
         ray_n = np.zeros((m, 3), dtype=np.float32)
 
-        return {
+        pools = {
             "pt_xyz_pool": pt_xyz,
             "pt_dist_pool": pt_dist,
             "ray_o_pool": ray_o,
@@ -50,3 +50,6 @@ class UDFGridBackend:
             "ray_n_pool": ray_n,
             "ray_available": False,
         }
+        if "pt_fps_order" in self.d:
+            pools["pt_fps_order"] = self.d["pt_fps_order"].astype(np.int32, copy=False)
+        return pools
