@@ -1,29 +1,46 @@
-# ScanObjectNN Review Tables (Bidir + Vote10 + Poolfix Active)
+# ScanObjectNN Review Tables (Active)
 
-This page tracks the current active ScanObjectNN reruns after pooling/readout fixes.
+This page tracks active ScanObjectNN classification reruns and keeps the run lineage (`v0 -> v1 -> v2`) explicit.
 
 Legacy mixed/causal history:
 
 - `nepa3d/docs/results_scanobjectnn_review_legacy.md`
 
-Snapshot time: `2026-02-18 14:51`
+Snapshot time: `2026-02-19 01:27 JST`
 
-Fair-FT run status:
+## Run lineage (`v0 -> v1 -> v2`)
 
-- launched: `2026-02-18 15:36`
-- chain log: `logs/finetune/scan_variants_review_fair_ft_chain/pipeline.log`
-- run root: `runs/scan_variants_review_ft_fair_pcxyz2k_v1`
-- protocol: `pt_xyz_key=pc_xyz`, `ablate_point_dist=1`, `n_point=2048`, `allow_scale_up=1`, `cls_is_causal=0`, `cls_pooling=mean_pts`, `aug_preset=scanobjectnn`, `mc_eval_k_test=1`
+| Version | Purpose | Key protocol | Status | Run root | Main log |
+|---|---|---|---|---|---|
+| `v0` | poolfix baseline | `n_point=256`, `pt_xyz_key=pt_xyz_pool`, `pt_dist` enabled, `cls_is_causal=0`, `cls_pooling=mean_no_special`, `mc_eval_k_test=10` | FT complete (`225/225`) | `runs/scan_variants_review_ft_bidir_poolfix_v1` | `logs/finetune/scan_variants_review_lp_bidir_poolfix_resume/pipeline.log` |
+| `v1` | fair FT (pc-xyz 2k, xyz-only) | `n_point=2048`, `allow_scale_up=1`, `pt_xyz_key=pc_xyz`, `ablate_point_dist=1`, `cls_is_causal=0`, `cls_pooling=mean_pts`, `mc_eval_k_test=1` | `obj_bg` complete (`75/75`), others not run | `runs/scan_variants_review_ft_fair_pcxyz2k_v1` | `logs/finetune/scan_variants_review_fair_ft_chain/pipeline.log` |
+| `v2` | fair FT + explicit FPS eval | `v1` + `pt_sample_mode_train=random`, `pt_sample_mode_eval=fps`, `pt_fps_key=pt_fps_order` | running (`obj_bg 0/75` at snapshot) | `runs/scan_variants_review_ft_fair_pcxyz2k_fps_v2` | `logs/finetune/scan_variants_review_fair_ft_chain_v2_objbg/pipeline.log` |
 
-## Fair FT update (`pcxyz2k`, xyz-only)
+## What changed between versions
 
-- `v1` (`runs/scan_variants_review_ft_fair_pcxyz2k_v1`) is finalized for `obj_bg` only: `75/75`.
-- `v1` `obj_only` / `pb_t50_rs` were intentionally not executed (`0/75`, `0/75`) to prioritize `v2`.
-- `v1` sampling note: checkpoints do not include `pt_sample_mode_*` args, so train/eval used legacy random sampling.
-- `v2` is now running for `obj_bg` with explicit sampling modes:
-  - run root: `runs/scan_variants_review_ft_fair_pcxyz2k_fps_v2`
-  - chain log: `logs/finetune/scan_variants_review_fair_ft_chain_v2_objbg/pipeline.log`
-  - key protocol delta: `pt_sample_mode_train=random`, `pt_sample_mode_eval=fps`, `pt_fps_key=pt_fps_order`
+- `v0 -> v1`:
+  - input tokens switched from pool query (`pt_xyz_pool`) to observed point cloud (`pc_xyz`)
+  - point count scaled from `256` to `2048` (`allow_scale_up=1`)
+  - switched to xyz-only (`ablate_point_dist=1`)
+  - voting changed from `mc_eval_k_test=10` to `mc_eval_k_test=1`
+- `v1 -> v2`:
+  - sampling behavior made explicit with FPS at eval (`pt_sample_mode_eval=fps`)
+  - train sampling kept random (`pt_sample_mode_train=random`)
+
+## Current run status
+
+- `v1` started at `2026-02-18 15:36` and finished `obj_bg` (`75/75`) at `2026-02-19 00:47`.
+- `v1` stage-2 did not proceed (pipeline script syntax error after stage-1 completion), so `obj_only` / `pb_t50_rs` remain `0/75`.
+- `v2` started at `2026-02-19 00:49` for `obj_bg`; this is the current comparison run against `v1`.
+
+## Quick result gap (`obj_bg`, best-by-K)
+
+| K | `v0` poolfix best | `v1` fair-random best | Delta (`v1-v0`) |
+|---:|---:|---:|---:|
+| 0 | 0.6644 | 0.4550 | -0.2094 |
+| 20 | 0.4274 | 0.2266 | -0.2008 |
+
+## Fair FT v1 update (`pcxyz2k`, xyz-only, random sampling)
 
 ### Fair FT v1 (`obj_bg`, complete)
 
@@ -75,12 +92,17 @@ Source: `runs/scan_variants_review_ft_fair_pcxyz2k_v1/obj_bg/scan_<method>_ablat
   - dataset-side point augmentation and key-select support
   - tokenizer robustness for point-only (`n_ray=0`) runs while keeping legacy token ids
 - [x] Pause LP for now (FT-first policy).
-- [ ] Run a fair FT rerun (`pc_xyz`, xyz-only, `n_point=2048`, `allow_scale_up=1`, bidirectional, ScanObjectNN aug, LP disabled):
+- [x] Run fair FT `v1` (`pc_xyz`, xyz-only, `n_point=2048`, bidirectional) for `obj_bg`.
+- [x] Launch fair FT `v2` (`obj_bg`) with explicit FPS eval sampling.
+- [ ] Aggregate `v2 obj_bg` results and compare against `v1 obj_bg` (same K/seed grid).
+- [ ] Decide go/no-go for expanding `v2` to `obj_only` and `pb_t50_rs`.
+- [ ] If FT still underperforms after `v2`, then re-open LP and model/head-side comparisons.
+- [ ] Keep completion-side TODOs tracked separately (this page is classification-focused).
+- [ ] Keep launcher references up to date:
   - launcher: `scripts/finetune/launch_scanobjectnn_review_fair_ft_chain_local.sh`
   - runner: `scripts/finetune/run_scanobjectnn_review_fair_ft_chain_local.sh`
-- [ ] If FT still underperforms, then re-open LP and model/head-side comparisons.
 
-## Protocol (poolfix rerun)
+## Protocol reference (`v0` poolfix rerun)
 
 - attention: `cls_is_causal=0` (bidirectional)
 - backend: `pointcloud_noray`
