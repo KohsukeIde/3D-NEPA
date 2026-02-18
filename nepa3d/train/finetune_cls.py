@@ -92,6 +92,10 @@ class ClsWrapper(nn.Module):
         pool = self._resolved_pooling()
 
         def _masked_mean(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+            """Mean over token dim with boolean mask.
+
+            x: (B,T,C), mask: (B,T)
+            """
             if mask.dtype != torch.bool:
                 mask = mask.bool()
             w = mask.float().unsqueeze(-1)
@@ -232,15 +236,54 @@ def main():
         "--pt_xyz_key",
         type=str,
         default="pt_xyz_pool",
-        help="npz key for point xyz pool (default: pt_xyz_pool; set pc_xyz for surface-point protocols)",
+        help="npz key for point xyz pool (default: pt_xyz_pool; use pc_xyz to match surface-point protocols)",
     )
     ap.add_argument(
         "--pt_dist_key",
         type=str,
         default="pt_dist_pool",
-        help="npz key for point dist pool (default: pt_dist_pool). Missing/mismatched key falls back to zeros.",
+        help="npz key for point dist pool (default: pt_dist_pool). If missing or length-mismatch, zeros are used.",
     )
+
+    # --- Data augmentation (classification protocol alignment) ---
+    ap.add_argument(
+        "--aug_preset",
+        type=str,
+        default="none",
+        choices=["none", "modelnet40", "scanobjectnn"],
+        help="Augmentation preset (train): none | modelnet40 (scale+translate) | scanobjectnn (rotate-z).",
+    )
+    ap.add_argument("--aug_rotate_z", action="store_true", help="Train-time: random rotation around Z axis")
+    ap.add_argument("--aug_scale_min", type=float, default=1.0, help="Train-time: random scale min")
+    ap.add_argument("--aug_scale_max", type=float, default=1.0, help="Train-time: random scale max")
+    ap.add_argument("--aug_translate", type=float, default=0.0, help="Train-time: random translation range (uniform in [-t,t])")
+    ap.add_argument("--aug_jitter_sigma", type=float, default=0.0, help="Train-time: jitter sigma")
+    ap.add_argument("--aug_jitter_clip", type=float, default=0.0, help="Train-time: jitter clip")
+    ap.add_argument(
+        "--aug_eval",
+        action="store_true",
+        help="Apply the same augmentation pipeline during eval (useful for vote-style TTA). Default off.",
+    )
+
     args = ap.parse_args()
+
+    # Apply augmentation presets (override individual aug_* defaults).
+    if args.aug_preset == "modelnet40":
+        # Matches common ModelNet40 protocols: scale+translate. (Rotation is often omitted.)
+        args.aug_rotate_z = False
+        args.aug_scale_min = 0.8
+        args.aug_scale_max = 1.25
+        args.aug_translate = 0.1
+        args.aug_jitter_sigma = 0.0
+        args.aug_jitter_clip = 0.0
+    elif args.aug_preset == "scanobjectnn":
+        # Matches common ScanObjectNN protocols: simple rotation augmentation.
+        args.aug_rotate_z = True
+        args.aug_scale_min = 1.0
+        args.aug_scale_max = 1.0
+        args.aug_translate = 0.0
+        args.aug_jitter_sigma = 0.0
+        args.aug_jitter_clip = 0.0
 
     set_seed(args.seed)
 
@@ -338,6 +381,13 @@ def main():
         pt_xyz_key=args.pt_xyz_key,
         pt_dist_key=args.pt_dist_key,
         ablate_point_dist=args.ablate_point_dist,
+        aug_rotate_z=args.aug_rotate_z,
+        aug_scale_min=args.aug_scale_min,
+        aug_scale_max=args.aug_scale_max,
+        aug_translate=args.aug_translate,
+        aug_jitter_sigma=args.aug_jitter_sigma,
+        aug_jitter_clip=args.aug_jitter_clip,
+        aug_eval=args.aug_eval,
         return_label=True,
         label_map=label_map,
     )
@@ -360,6 +410,13 @@ def main():
         pt_xyz_key=args.pt_xyz_key,
         pt_dist_key=args.pt_dist_key,
         ablate_point_dist=args.ablate_point_dist,
+        aug_rotate_z=args.aug_rotate_z,
+        aug_scale_min=args.aug_scale_min,
+        aug_scale_max=args.aug_scale_max,
+        aug_translate=args.aug_translate,
+        aug_jitter_sigma=args.aug_jitter_sigma,
+        aug_jitter_clip=args.aug_jitter_clip,
+        aug_eval=args.aug_eval,
         return_label=True,
         label_map=label_map,
     )
@@ -382,6 +439,13 @@ def main():
         pt_xyz_key=args.pt_xyz_key,
         pt_dist_key=args.pt_dist_key,
         ablate_point_dist=args.ablate_point_dist,
+        aug_rotate_z=args.aug_rotate_z,
+        aug_scale_min=args.aug_scale_min,
+        aug_scale_max=args.aug_scale_max,
+        aug_translate=args.aug_translate,
+        aug_jitter_sigma=args.aug_jitter_sigma,
+        aug_jitter_clip=args.aug_jitter_clip,
+        aug_eval=args.aug_eval,
         return_label=True,
         label_map=label_map,
     )

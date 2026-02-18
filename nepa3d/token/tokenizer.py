@@ -59,17 +59,35 @@ def _build_sequence_legacy(
     if rng is None:
         rng = np.random
 
+    pt_xyz = np.asarray(pt_xyz)
+    pt_dist = np.asarray(pt_dist)
+    pt_dist_1d = pt_dist[:, 0] if pt_dist.ndim == 2 else pt_dist
+
     p_idx = _choice(pt_xyz.shape[0], n_point, rng=rng)
-    r_idx = _choice(ray_o.shape[0], n_ray, rng=rng)
 
     pt_xyz_s = pt_xyz[p_idx]
-    pt_dist_s = pt_dist[p_idx]
+    pt_dist_s = pt_dist_1d[p_idx]
 
-    ray_o_s = ray_o[r_idx]
-    ray_d_s = ray_d[r_idx]
-    ray_hit_s = ray_hit[r_idx]
-    ray_t_s = ray_t[r_idx]
-    ray_n_s = ray_n[r_idx]
+    if int(n_ray) > 0:
+        if ray_o is None or ray_d is None or ray_hit is None or ray_t is None or ray_n is None:
+            raise ValueError("ray pools are required when n_ray > 0")
+        ray_o = np.asarray(ray_o)
+        ray_d = np.asarray(ray_d)
+        ray_hit = np.asarray(ray_hit)
+        ray_t = np.asarray(ray_t)
+        ray_n = np.asarray(ray_n)
+        r_idx = _choice(ray_o.shape[0], n_ray, rng=rng)
+        ray_o_s = ray_o[r_idx]
+        ray_d_s = ray_d[r_idx]
+        ray_hit_s = ray_hit[r_idx].reshape(-1)
+        ray_t_s = ray_t[r_idx].reshape(-1)
+        ray_n_s = ray_n[r_idx]
+    else:
+        ray_o_s = np.zeros((0, 3), dtype=np.float32)
+        ray_d_s = np.zeros((0, 3), dtype=np.float32)
+        ray_hit_s = np.zeros((0,), dtype=np.float32)
+        ray_t_s = np.zeros((0,), dtype=np.float32)
+        ray_n_s = np.zeros((0, 3), dtype=np.float32)
 
     if pt_xyz_s.shape[0] > 0:
         p_order = np.argsort(morton3d(pt_xyz_s))
@@ -102,7 +120,7 @@ def _build_sequence_legacy(
         ray_feat[:, 12:15] = ray_n_s * hit_mask[:, None]
 
     ray_missing = (not bool(ray_available)) or (
-        float(drop_ray_prob) > 0.0 and _rand01(rng) < float(drop_ray_prob)
+        int(n_ray) > 0 and float(drop_ray_prob) > 0.0 and _rand01(rng) < float(drop_ray_prob)
     )
     ray_type = TYPE_MISSING_RAY if ray_missing else TYPE_RAY
     if ray_missing and n_ray > 0:
@@ -154,17 +172,35 @@ def _build_sequence_qa(
     if rng is None:
         rng = np.random
 
+    pt_xyz = np.asarray(pt_xyz)
+    pt_dist = np.asarray(pt_dist)
+    pt_dist_1d = pt_dist[:, 0] if pt_dist.ndim == 2 else pt_dist
+
     p_idx = _choice(pt_xyz.shape[0], n_point, rng=rng)
-    r_idx = _choice(ray_o.shape[0], n_ray, rng=rng)
 
     pt_xyz_s = pt_xyz[p_idx]
-    pt_dist_s = pt_dist[p_idx]
+    pt_dist_s = pt_dist_1d[p_idx]
 
-    ray_o_s = ray_o[r_idx]
-    ray_d_s = ray_d[r_idx]
-    ray_hit_s = ray_hit[r_idx]
-    ray_t_s = ray_t[r_idx]
-    ray_n_s = ray_n[r_idx]
+    if int(n_ray) > 0:
+        if ray_o is None or ray_d is None or ray_hit is None or ray_t is None or ray_n is None:
+            raise ValueError("ray pools are required when n_ray > 0")
+        ray_o = np.asarray(ray_o)
+        ray_d = np.asarray(ray_d)
+        ray_hit = np.asarray(ray_hit)
+        ray_t = np.asarray(ray_t)
+        ray_n = np.asarray(ray_n)
+        r_idx = _choice(ray_o.shape[0], n_ray, rng=rng)
+        ray_o_s = ray_o[r_idx]
+        ray_d_s = ray_d[r_idx]
+        ray_hit_s = ray_hit[r_idx].reshape(-1)
+        ray_t_s = ray_t[r_idx].reshape(-1)
+        ray_n_s = ray_n[r_idx]
+    else:
+        ray_o_s = np.zeros((0, 3), dtype=np.float32)
+        ray_d_s = np.zeros((0, 3), dtype=np.float32)
+        ray_hit_s = np.zeros((0,), dtype=np.float32)
+        ray_t_s = np.zeros((0,), dtype=np.float32)
+        ray_n_s = np.zeros((0, 3), dtype=np.float32)
 
     # ordering (same as legacy)
     if pt_xyz_s.shape[0] > 0:
@@ -215,7 +251,7 @@ def _build_sequence_qa(
         ray_a[:, 12:15] = ray_n_s * hit_mask[:, None]
 
     ray_missing = (not bool(ray_available)) or (
-        float(drop_ray_prob) > 0.0 and _rand01(rng) < float(drop_ray_prob)
+        int(n_ray) > 0 and float(drop_ray_prob) > 0.0 and _rand01(rng) < float(drop_ray_prob)
     )
 
     ray_qa = np.zeros((2 * n_ray, feat_dim), dtype=np.float32)

@@ -38,12 +38,21 @@ if [ -z "${N_RAY}" ]; then
     N_RAY=256
   fi
 fi
+ALLOW_SCALE_UP="${ALLOW_SCALE_UP:-0}"
 FREEZE_BACKBONE="${FREEZE_BACKBONE:-0}"
 CLS_IS_CAUSAL="${CLS_IS_CAUSAL:-0}"
 CLS_POOLING="${CLS_POOLING:-mean_a}"
 PT_XYZ_KEY="${PT_XYZ_KEY:-pt_xyz_pool}"
 PT_DIST_KEY="${PT_DIST_KEY:-pt_dist_pool}"
 ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
+AUG_PRESET="${AUG_PRESET:-none}"
+AUG_SCALE_MIN="${AUG_SCALE_MIN:-1.0}"
+AUG_SCALE_MAX="${AUG_SCALE_MAX:-1.0}"
+AUG_TRANSLATE="${AUG_TRANSLATE:-0.0}"
+AUG_JITTER_SIGMA="${AUG_JITTER_SIGMA:-0.0}"
+AUG_JITTER_CLIP="${AUG_JITTER_CLIP:-0.0}"
+AUG_ROTATE_Z="${AUG_ROTATE_Z:-0}"
+AUG_EVAL="${AUG_EVAL:-0}"
 RUN_SUFFIX="${RUN_SUFFIX:-}"
 if [ "${ABLATE_POINT_DIST}" = "1" ] && [ -z "${RUN_SUFFIX}" ]; then
   RUN_SUFFIX="_ablate_dist"
@@ -226,6 +235,12 @@ run_one() {
   if [ "${ABLATE_POINT_DIST}" = "1" ]; then
     extra_args+=(--ablate_point_dist)
   fi
+  if [ "${AUG_ROTATE_Z}" = "1" ]; then
+    extra_args+=(--aug_rotate_z)
+  fi
+  if [ "${AUG_EVAL}" = "1" ]; then
+    extra_args+=(--aug_eval)
+  fi
 
   CUDA_VISIBLE_DEVICES="${gpu}" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   "${PYTHON_BIN}" -u -m nepa3d.train.finetune_cls \
@@ -237,6 +252,7 @@ run_one() {
     --lr "${LR}" \
     --n_point "${N_POINT}" \
     --n_ray "${N_RAY}" \
+    --allow_scale_up "${ALLOW_SCALE_UP}" \
     --num_workers "${NUM_WORKERS}" \
     --seed "${seed}" \
     --fewshot_k "${k}" \
@@ -251,6 +267,12 @@ run_one() {
     --cls_pooling "${CLS_POOLING}" \
     --pt_xyz_key "${PT_XYZ_KEY}" \
     --pt_dist_key "${PT_DIST_KEY}" \
+    --aug_preset "${AUG_PRESET}" \
+    --aug_scale_min "${AUG_SCALE_MIN}" \
+    --aug_scale_max "${AUG_SCALE_MAX}" \
+    --aug_translate "${AUG_TRANSLATE}" \
+    --aug_jitter_sigma "${AUG_JITTER_SIGMA}" \
+    --aug_jitter_clip "${AUG_JITTER_CLIP}" \
     "${extra_args[@]}" \
     --save_dir "${save_dir}" \
     > "${job_log}" 2>&1
@@ -309,7 +331,7 @@ echo "[info] gpu0=${GPU0} gpu1=${GPU1}"
 echo "[info] logs=${LOG_ROOT}"
 echo "[info] batch=${BATCH} workers=${NUM_WORKERS}"
 echo "[info] methods=${METHODS}"
-echo "[info] n_point=${N_POINT} n_ray=${N_RAY} freeze_backbone=${FREEZE_BACKBONE} cls_is_causal=${CLS_IS_CAUSAL} cls_pooling=${CLS_POOLING} pt_xyz_key=${PT_XYZ_KEY} pt_dist_key=${PT_DIST_KEY} ablate_point_dist=${ABLATE_POINT_DIST} run_suffix=${RUN_SUFFIX}"
+echo "[info] n_point=${N_POINT} n_ray=${N_RAY} allow_scale_up=${ALLOW_SCALE_UP} freeze_backbone=${FREEZE_BACKBONE} cls_is_causal=${CLS_IS_CAUSAL} cls_pooling=${CLS_POOLING} pt_xyz_key=${PT_XYZ_KEY} pt_dist_key=${PT_DIST_KEY} ablate_point_dist=${ABLATE_POINT_DIST} aug_preset=${AUG_PRESET} aug_rotate_z=${AUG_ROTATE_Z} aug_scale=[${AUG_SCALE_MIN},${AUG_SCALE_MAX}] aug_translate=${AUG_TRANSLATE} aug_jitter_sigma=${AUG_JITTER_SIGMA} aug_jitter_clip=${AUG_JITTER_CLIP} aug_eval=${AUG_EVAL} run_suffix=${RUN_SUFFIX}"
 
 JOB_INDEX_FILE="$(mktemp)"
 JOB_LOCK_FILE="$(mktemp)"

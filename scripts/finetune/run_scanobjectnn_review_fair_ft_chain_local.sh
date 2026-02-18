@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -eu
 
-# Pooling/readout-fix rerun chain for ScanObjectNN review tables.
+# ScanObjectNN fair-protocol FT chain (no linear probe)
 #
-# Stage1: full FT on obj_bg only (sanity-first).
-# Stage2: full FT on obj_only + pb_t50_rs.
-# Stage3: optional linear-probe on all three variants.
-#
-# All stages use explicit bidirectional settings by default.
+# Defaults are aligned to reviewer feedback / recent protocols:
+# - point-only input from observed surface points: pt_xyz_key=pc_xyz
+# - xyz-only channel for fair baseline: --ablate_point_dist
+# - bidirectional attention, pointcloud_noray
+# - n_point=2048 with allow_scale_up=1
+# - simple rotation augmentation preset for ScanObjectNN
+# - vote disabled by default (mc_eval_k_test=1)
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}" || exit 1
@@ -45,51 +47,41 @@ count_done_variants() {
   echo "${total}"
 }
 
-WAIT_PID_FILES="${WAIT_PID_FILES:-logs/finetune/scan_variants_review_chain_bidir/pipeline.pid logs/finetune/scan_variants_review_followups_chain_bidir/pipeline.pid}"
+WAIT_PID_FILES="${WAIT_PID_FILES:-logs/finetune/scan_variants_review_poolfix_chain/pipeline.pid logs/finetune/scan_variants_review_followups_chain_bidir/pipeline.pid}"
 for f in ${WAIT_PID_FILES}; do
   wait_for_pid_file "${f}" "$(basename "$(dirname "${f}")")"
 done
 
 METHODS="${METHODS:-scratch shapenet_nepa shapenet_mesh_udf_nepa shapenet_mix_nepa shapenet_mix_mae}"
-ALL_VARIANTS="${ALL_VARIANTS:-obj_bg obj_only pb_t50_rs}"
-RUN_LINEAR_PROBE="${RUN_LINEAR_PROBE:-0}"
 
-# Explicit settings for the rerun.
 COMMON_ENV=(
   "BACKEND=${BACKEND:-pointcloud_noray}"
-  "N_POINT=${N_POINT:-256}"
+  "N_POINT=${N_POINT:-2048}"
   "N_RAY=${N_RAY:-0}"
-  "ALLOW_SCALE_UP=${ALLOW_SCALE_UP:-0}"
+  "ALLOW_SCALE_UP=${ALLOW_SCALE_UP:-1}"
   "CLS_IS_CAUSAL=${CLS_IS_CAUSAL:-0}"
-  "CLS_POOLING=${CLS_POOLING:-mean_no_special}"
-  "MC_EVAL_K=${MC_EVAL_K:-10}"
+  "CLS_POOLING=${CLS_POOLING:-mean_pts}"
+  "MC_EVAL_K=${MC_EVAL_K:-1}"
   "MC_EVAL_K_VAL=${MC_EVAL_K_VAL:-1}"
-  "MC_EVAL_K_TEST=${MC_EVAL_K_TEST:-10}"
-  "PT_XYZ_KEY=${PT_XYZ_KEY:-pt_xyz_pool}"
+  "MC_EVAL_K_TEST=${MC_EVAL_K_TEST:-1}"
+  "PT_XYZ_KEY=${PT_XYZ_KEY:-pc_xyz}"
   "PT_DIST_KEY=${PT_DIST_KEY:-pt_dist_pool}"
-  "AUG_PRESET=${AUG_PRESET:-none}"
-  "AUG_SCALE_MIN=${AUG_SCALE_MIN:-1.0}"
-  "AUG_SCALE_MAX=${AUG_SCALE_MAX:-1.0}"
-  "AUG_TRANSLATE=${AUG_TRANSLATE:-0.0}"
-  "AUG_JITTER_SIGMA=${AUG_JITTER_SIGMA:-0.0}"
-  "AUG_JITTER_CLIP=${AUG_JITTER_CLIP:-0.0}"
+  "ABLATE_POINT_DIST=${ABLATE_POINT_DIST:-1}"
+  "AUG_PRESET=${AUG_PRESET:-scanobjectnn}"
   "AUG_ROTATE_Z=${AUG_ROTATE_Z:-0}"
   "AUG_EVAL=${AUG_EVAL:-0}"
 )
 
-FT_BASE_RUN_ROOT="${FT_BASE_RUN_ROOT:-runs/scan_variants_review_ft_bidir_poolfix_v1}"
-FT_BASE_LOG_ROOT="${FT_BASE_LOG_ROOT:-logs/finetune/scan_variants_review_ft_bidir_poolfix_v1}"
-LP_BASE_RUN_ROOT="${LP_BASE_RUN_ROOT:-runs/scan_variants_review_lp_bidir_poolfix_v1}"
-LP_BASE_LOG_ROOT="${LP_BASE_LOG_ROOT:-logs/finetune/scan_variants_review_lp_bidir_poolfix_v1}"
+FT_BASE_RUN_ROOT="${FT_BASE_RUN_ROOT:-runs/scan_variants_review_ft_fair_pcxyz2k_v1}"
+FT_BASE_LOG_ROOT="${FT_BASE_LOG_ROOT:-logs/finetune/scan_variants_review_ft_fair_pcxyz2k_v1}"
 
 STAGE1_VARIANTS="${STAGE1_VARIANTS:-obj_bg}"
 STAGE2_VARIANTS="${STAGE2_VARIANTS:-obj_only pb_t50_rs}"
 
 STAGE1_EXPECTED="${STAGE1_EXPECTED:-75}"   # 1 variant x 5 methods x 5 K x 3 seeds
 STAGE2_EXPECTED="${STAGE2_EXPECTED:-150}"  # 2 variants x 5 methods x 5 K x 3 seeds
-STAGE3_EXPECTED="${STAGE3_EXPECTED:-225}"  # 3 variants x 5 methods x 5 K x 3 seeds
 
-echo "[stage1] full FT (obj_bg first)"
+echo "[stage1] full FT fair protocol (obj_bg first)"
 done1="$(count_done_variants "${FT_BASE_RUN_ROOT}" ${STAGE1_VARIANTS})"
 echo "[stage1] done=${done1}/${STAGE1_EXPECTED}"
 if [ "${done1}" -lt "${STAGE1_EXPECTED}" ]; then
@@ -108,7 +100,7 @@ if [ "${done1}" -lt "${STAGE1_EXPECTED}" ]; then
   exit 1
 fi
 
-echo "[stage2] full FT (obj_only + pb_t50_rs)"
+echo "[stage2] full FT fair protocol (obj_only + pb_t50_rs)"
 done2="$(count_done_variants "${FT_BASE_RUN_ROOT}" ${STAGE2_VARIANTS})"
 echo "[stage2] done=${done2}/${STAGE2_EXPECTED}"
 if [ "${done2}" -lt "${STAGE2_EXPECTED}" ]; then
@@ -127,29 +119,4 @@ if [ "${done2}" -lt "${STAGE2_EXPECTED}" ]; then
   exit 1
 fi
 
-if [ "${RUN_LINEAR_PROBE}" = "1" ]; then
-  echo "[stage3] linear probe (all variants)"
-  done3="$(count_done_variants "${LP_BASE_RUN_ROOT}" ${ALL_VARIANTS})"
-  echo "[stage3] done=${done3}/${STAGE3_EXPECTED}"
-  if [ "${done3}" -lt "${STAGE3_EXPECTED}" ]; then
-    env \
-      "${COMMON_ENV[@]}" \
-      VARIANTS="${ALL_VARIANTS}" \
-      METHODS="${METHODS}" \
-      BASE_RUN_ROOT="${LP_BASE_RUN_ROOT}" \
-      BASE_LOG_ROOT="${LP_BASE_LOG_ROOT}" \
-      FREEZE_BACKBONE=1 \
-      RUN_SUFFIX="${RUN_SUFFIX:-_lp}" \
-      bash scripts/finetune/run_scanobjectnn_variant_tables_local.sh
-  fi
-  done3="$(count_done_variants "${LP_BASE_RUN_ROOT}" ${ALL_VARIANTS})"
-  echo "[stage3] done=${done3}/${STAGE3_EXPECTED}"
-  if [ "${done3}" -lt "${STAGE3_EXPECTED}" ]; then
-    echo "[error] stage3 incomplete"
-    exit 1
-  fi
-else
-  echo "[stage3] skipped (RUN_LINEAR_PROBE=${RUN_LINEAR_PROBE})"
-fi
-
-echo "[done] poolfix rerun chain completed"
+echo "[done] fair-protocol FT chain completed"

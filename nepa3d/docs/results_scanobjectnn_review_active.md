@@ -8,12 +8,25 @@ Legacy mixed/causal history:
 
 Snapshot time: `2026-02-18 14:51`
 
+Fair-FT run status:
+
+- launched: `2026-02-18 15:36`
+- chain log: `logs/finetune/scan_variants_review_fair_ft_chain/pipeline.log`
+- run root: `runs/scan_variants_review_ft_fair_pcxyz2k_v1`
+- protocol: `pt_xyz_key=pc_xyz`, `ablate_point_dist=1`, `n_point=2048`, `allow_scale_up=1`, `cls_is_causal=0`, `cls_pooling=mean_pts`, `aug_preset=scanobjectnn`, `mc_eval_k_test=1`
+
 ## TODO (next steps)
 
 - [x] Add per-epoch training diagnostics to classification logs (`train_loss`, `train_acc`) in `nepa3d/train/finetune_cls.py`.
-- [ ] Run a surface-point input variant (`pt_xyz_key=pc_xyz`) under the same bidirectional/vote10 protocol.
-- [ ] Run point-count scaling ablation (`n_point=256 -> 1024` and optionally `2048`).
-- [ ] Add a stronger optimization/head variant for classification-only comparison (augmentation + LR scheduler + MLP head), then compare against current linear-head baseline.
+- [x] Merge v05 patch features needed for fair classification reruns:
+  - `--aug_preset` / augmentation knobs in `finetune_cls.py`
+  - dataset-side point augmentation and key-select support
+  - tokenizer robustness for point-only (`n_ray=0`) runs while keeping legacy token ids
+- [x] Pause LP for now (FT-first policy).
+- [ ] Run a fair FT rerun (`pc_xyz`, xyz-only, `n_point=2048`, `allow_scale_up=1`, bidirectional, ScanObjectNN aug, LP disabled):
+  - launcher: `scripts/finetune/launch_scanobjectnn_review_fair_ft_chain_local.sh`
+  - runner: `scripts/finetune/run_scanobjectnn_review_fair_ft_chain_local.sh`
+- [ ] If FT still underperforms, then re-open LP and model/head-side comparisons.
 
 ## Protocol (poolfix rerun)
 
@@ -34,7 +47,7 @@ Run/log roots:
 
 - Full FT: `225/225` (`obj_bg=75`, `obj_only=75`, `pb_t50_rs=75`)
 - Linear probe: `182/225` (`obj_bg=75`, `obj_only=75`, `pb_t50_rs=32`)
-- LP `pb_t50_rs` is still running; `n(seed)` may be `<3` in this snapshot.
+- LP was intentionally stopped at this snapshot (`FT-first` policy); `pb_t50_rs` LP remains partial.
 
 ## A) Full FT (poolfix)
 
