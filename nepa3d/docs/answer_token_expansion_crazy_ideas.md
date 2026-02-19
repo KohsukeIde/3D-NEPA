@@ -66,3 +66,34 @@
 - util:
   - `nepa3d/utils/grid.py`: trilinear + finite-diff gradient + pseudo-normal
 
+---
+
+## 4) 実験解釈メモ（Feb 19, 2026）
+
+- Answer 構造強化は pool completion に効く一方、grid 側に副作用が出る構成がある（例: C-2 単体）。
+- grid 側の安定化は query 設計（A-1/A-2）と ray 系補助（B-2）を併用したほうが再現性が高い。
+- したがって主張は「Answer を増やせば常に改善」ではなく、
+  「Answer 拡張 + Query 設計 + 安定化の組合せで completion を押し上げる」が現時点の妥当な整理。
+
+---
+
+## 5) +grad/+unc/topo 連鎖の現状メモ（Feb 19, 2026）
+
+- `plusgut` 連鎖（`causal_plusgut` / `encdec_plusgut_proj` / `encdec_plusgut_bbox`）は評価完了済み。
+- 現時点の要点:
+  - CPACでは encdec が以前の collapse から回復（pool/grid とも NN-copy 近傍〜上回る設定あり）。
+  - ただし UCPR（hard pair）は encdec が依然として near-random で、causal を大きく下回る。
+- 注意:
+  - `encdec_plusgut_bbox` は現状「diagnostic ckpt-path variant」として扱う（独立再学習ラインではない）。
+  - `causal_plusgut_ref` と `causal_plusgut` は同一 ckpt を参照しており、結果は一致する。
+
+---
+
+## 6) 記載運用メモ（Feb 19, 2026）
+
+- `loss=0.0000` は表示丸め（4桁）を含むため、これ単体で改善判断しない。
+- `b2/b3/e/d` は重み未指定時に 0 のままなので、ログ解釈時は実行引数と合わせて読む。
+- docs へ結果を記載する際は、必ず以下を突合する:
+  1. `logs/pretrain/*.log`（学習条件/挙動）
+  2. `results/*.json`（最終評価値）
+  3. JSON 内 `ckpt`（参照チェックポイントの一致）

@@ -911,3 +911,26 @@ Current logs:
 
 Resume note:
 - old checkpoints did not contain optimizer state, so resume starts from loaded model weights with fresh optimizer (`[resume] optimizer state missing ...` is expected).
+
+## 13) Feedback Sync Memo (Feb 19, 2026)
+
+This memo mirrors active docs so legacy readers do not misread recent completion results.
+
+Confirmed observations:
+
+- A-1 (`coarse_to_fine 16->32->64`) is effective versus `grid uniform`; it is close to tuned `near_surface` on grid IoU.
+- C-2 improves pool completion strongly, but can degrade grid completion when used alone.
+- B-2 helps recover grid degradation and improves B-2+C-2 balance.
+- `256->512` scale quick run improved, while naive continuation to `1024` showed instability/regression.
+
+Interpretation caution:
+
+- `encdec_plusgut_bbox` should be treated as a topology-coordinate diagnostic unless explicitly retrained as an independent line.
+- Do not interpret this as a finalized fair main-table model line by itself.
+
+Fix priority aligned with feedback:
+
+1. Stabilize `512->1024` transition (optimizer-state handling around `pos_emb` resize + transition diagnostics).
+2. Re-check encdec training path (decoder causal behavior / leakage checks / `qa_layout=split` metadata consistency).
+3. Keep A-1 reported as query-design gain vs uniform, not unconditional win over tuned near-surface.
+4. Keep UCPR table naming as `MRR (= single-positive mAP)` for clarity.

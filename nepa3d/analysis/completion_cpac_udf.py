@@ -630,6 +630,11 @@ def infer_qa_tokens(ckpt, qa_tokens_arg):
     return bool(pre_args.get("qa_tokens", ckpt_n_types >= 9))
 
 
+def infer_qa_layout(ckpt):
+    pre_args = ckpt.get("args", {})
+    return str(pre_args.get("qa_layout", "interleave"))
+
+
 def build_model_from_ckpt(ckpt_path, device, max_len_override: int | None = None):
     ckpt = torch.load(ckpt_path, map_location="cpu")
     pre_args = ckpt.get("args", {})
@@ -655,6 +660,11 @@ def build_model_from_ckpt(ckpt_path, device, max_len_override: int | None = None
         nhead=nhead,
         num_layers=num_layers,
         max_len=max_len,
+        arch=str(pre_args.get("arch", "causal")),
+        topo_k=int(pre_args.get("topo_k", 0)),
+        topo_include_bos=bool(int(pre_args.get("topo_include_bos", 1))),
+        topo_ray_coord=str(pre_args.get("topo_ray_coord", "origin")),
+        topo_ray_bbox=float(pre_args.get("topo_ray_bbox", 0.5)),
     )
     load_state_dict_flexible(model, state, strict=True)
     model.eval().to(device)
@@ -908,6 +918,7 @@ def extract_xy_for_path(
     voxel_max_steps,
     device,
     qa_tokens,
+    qa_layout="interleave",
     context_mode="normal",
     disjoint_context_query=True,
     mismatch_path=None,
@@ -954,6 +965,10 @@ def extract_xy_for_path(
     n_q_eff = int(q_xyz.shape[0])
 
     if bool(qa_tokens):
+        layout = str(qa_layout).lower()
+        if layout not in ("interleave", "split"):
+            raise ValueError(f"unknown qa_layout: {qa_layout}")
+
         ctx_q = np.zeros((int(n_ctx_eff), 15), dtype=np.float32)
         ctx_a = np.zeros((int(n_ctx_eff), 15), dtype=np.float32)
         if n_ctx_eff > 0:
@@ -964,35 +979,61 @@ def extract_xy_for_path(
         qry_a = np.zeros((n_q_eff, 15), dtype=np.float32)
         qry_q[:, 0:3] = q_xyz
         qry_a[:, 10] = 0.0
+        if layout == "interleave":
+            ctx_qa = np.zeros((2 * int(n_ctx_eff), 15), dtype=np.float32)
+            qry_qa = np.zeros((2 * n_q_eff, 15), dtype=np.float32)
+            if n_ctx_eff > 0:
+                ctx_qa[0::2], ctx_qa[1::2] = ctx_q, ctx_a
+            if n_q_eff > 0:
+                qry_qa[0::2], qry_qa[1::2] = qry_q, qry_a
 
-        ctx_qa = np.zeros((2 * int(n_ctx_eff), 15), dtype=np.float32)
-        qry_qa = np.zeros((2 * n_q_eff, 15), dtype=np.float32)
-        if n_ctx_eff > 0:
-            ctx_qa[0::2], ctx_qa[1::2] = ctx_q, ctx_a
-        if n_q_eff > 0:
-            qry_qa[0::2], qry_qa[1::2] = qry_q, qry_a
-
-        if add_eos:
-            feat = np.concatenate([bos, ctx_qa, qry_qa, eos], axis=0)
-            type_id = np.concatenate(
-                [
-                    np.array([TYPE_BOS], dtype=np.int64),
-                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), int(n_ctx_eff)),
-                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), n_q_eff),
-                    np.array([TYPE_EOS], dtype=np.int64),
-                ],
-                axis=0,
-            )
+            if add_eos:
+                feat = np.concatenate([bos, ctx_qa, qry_qa, eos], axis=0)
+                type_id = np.concatenate(
+                    [
+                        np.array([TYPE_BOS], dtype=np.int64),
+                        np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), int(n_ctx_eff)),
+                        np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), n_q_eff),
+                        np.array([TYPE_EOS], dtype=np.int64),
+                    ],
+                    axis=0,
+                )
+            else:
+                feat = np.concatenate([bos, ctx_qa, qry_qa], axis=0)
+                type_id = np.concatenate(
+                    [
+                        np.array([TYPE_BOS], dtype=np.int64),
+                        np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), int(n_ctx_eff)),
+                        np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), n_q_eff),
+                    ],
+                    axis=0,
+                )
         else:
-            feat = np.concatenate([bos, ctx_qa, qry_qa], axis=0)
-            type_id = np.concatenate(
-                [
-                    np.array([TYPE_BOS], dtype=np.int64),
-                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), int(n_ctx_eff)),
-                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), n_q_eff),
-                ],
-                axis=0,
-            )
+            q_part = np.concatenate([ctx_q, qry_q], axis=0)
+            a_part = np.concatenate([ctx_a, qry_a], axis=0)
+            q_type = np.full((q_part.shape[0],), TYPE_Q_POINT, dtype=np.int64)
+            a_type = np.full((a_part.shape[0],), TYPE_A_POINT, dtype=np.int64)
+            if add_eos:
+                feat = np.concatenate([bos, q_part, a_part, eos], axis=0)
+                type_id = np.concatenate(
+                    [
+                        np.array([TYPE_BOS], dtype=np.int64),
+                        q_type,
+                        a_type,
+                        np.array([TYPE_EOS], dtype=np.int64),
+                    ],
+                    axis=0,
+                )
+            else:
+                feat = np.concatenate([bos, q_part, a_part], axis=0)
+                type_id = np.concatenate(
+                    [
+                        np.array([TYPE_BOS], dtype=np.int64),
+                        q_type,
+                        a_type,
+                    ],
+                    axis=0,
+                )
     else:
         ctx_feat = np.zeros((int(n_ctx_eff), 15), dtype=np.float32)
         if n_ctx_eff > 0:
@@ -1033,9 +1074,14 @@ def extract_xy_for_path(
     rep = rep.squeeze(0).detach().cpu().numpy().astype(np.float32)
 
     if bool(qa_tokens):
-        q_start = 1 + 2 * int(n_ctx_eff)
-        q_pos = q_start + 2 * np.arange(n_q_eff, dtype=np.int64)
-        X = rep[q_pos]
+        if str(qa_layout).lower() == "split":
+            q_start = 1 + int(n_ctx_eff)
+            q_pos = q_start + np.arange(n_q_eff, dtype=np.int64)
+            X = rep[q_pos]
+        else:
+            q_start = 1 + 2 * int(n_ctx_eff)
+            q_pos = q_start + 2 * np.arange(n_q_eff, dtype=np.int64)
+            X = rep[q_pos]
     else:
         q0 = 1 + int(n_ctx_eff)
         q1 = q0 + n_q_eff
@@ -1058,6 +1104,7 @@ def collect_xy(
     voxel_max_steps,
     device,
     qa_tokens,
+    qa_layout,
     desc,
     context_mode="normal",
     disjoint_context_query=True,
@@ -1097,6 +1144,7 @@ def collect_xy(
             voxel_max_steps,
             device,
             qa_tokens,
+            qa_layout,
             context_mode=context_mode,
             disjoint_context_query=bool(disjoint_context_query),
             mismatch_path=mismatch_paths[i],
@@ -1358,6 +1406,7 @@ def main():
     model, ckpt = build_model_from_ckpt(args.ckpt, device, max_len_override=args.max_len)
     add_eos = infer_add_eos(ckpt, args.add_eos)
     qa_tokens = infer_qa_tokens(ckpt, args.qa_tokens)
+    qa_layout = infer_qa_layout(ckpt)
 
     # Evaluation shapes (never used to train the probe head in the default protocol).
     eval_paths = list_npz(args.cache_root, args.split)
@@ -1465,6 +1514,7 @@ def main():
                 "report_near_tau": float(args.report_near_tau),
                 "add_eos": bool(add_eos),
                 "qa_tokens": bool(qa_tokens),
+                "qa_layout": str(qa_layout),
                 "ckpt": os.path.abspath(args.ckpt),
                 "baseline": baseline,
                 "baseline_only": True,
@@ -1491,6 +1541,7 @@ def main():
         args.voxel_max_steps,
         device,
         qa_tokens,
+        qa_layout,
         desc="collect train",
         context_mode=args.context_mode_train,
         disjoint_context_query=bool(args.disjoint_context_query),
@@ -1557,6 +1608,7 @@ def main():
         args.voxel_max_steps,
         device,
         qa_tokens,
+        qa_layout,
         desc="collect test",
         context_mode=args.context_mode_test,
         disjoint_context_query=bool(args.disjoint_context_query),
@@ -1645,6 +1697,7 @@ def main():
             "report_near_tau": float(args.report_near_tau),
             "add_eos": bool(add_eos),
             "qa_tokens": bool(qa_tokens),
+            "qa_layout": str(qa_layout),
             "ckpt": os.path.abspath(args.ckpt),
             "baseline": baseline,
         }

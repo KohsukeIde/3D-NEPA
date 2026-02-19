@@ -6,15 +6,18 @@ cd "${ROOT_DIR}" || exit 1
 
 WAIT_PID_FILE="${WAIT_PID_FILE:-logs/analysis/impl_update_plus_grad_unc_topo_chain/active.pid}"
 WAIT_POLL_SEC="${WAIT_POLL_SEC:-120}"
+WAIT_FOR_PRIOR="${WAIT_FOR_PRIOR:-0}"
 
-if [ -f "${WAIT_PID_FILE}" ]; then
-  wait_pid="$(cat "${WAIT_PID_FILE}" 2>/dev/null || true)"
-  if [ -n "${wait_pid}" ] && kill -0 "${wait_pid}" 2>/dev/null; then
-    echo "[$(date +"%F %T")] waiting for plus-grad/unc/topo chain pid=${wait_pid}"
-    while kill -0 "${wait_pid}" 2>/dev/null; do
-      sleep "${WAIT_POLL_SEC}"
-    done
-    echo "[$(date +"%F %T")] plus-grad/unc/topo chain finished; launching bbox comparison chain"
+if [ "${WAIT_FOR_PRIOR}" = "1" ]; then
+  if [ -f "${WAIT_PID_FILE}" ]; then
+    wait_pid="$(cat "${WAIT_PID_FILE}" 2>/dev/null || true)"
+    if [ -n "${wait_pid}" ] && kill -0 "${wait_pid}" 2>/dev/null; then
+      echo "[$(date +"%F %T")] waiting for plus-grad/unc/topo chain pid=${wait_pid}"
+      while kill -0 "${wait_pid}" 2>/dev/null; do
+        sleep "${WAIT_POLL_SEC}"
+      done
+      echo "[$(date +"%F %T")] plus-grad/unc/topo chain finished; launching bbox comparison chain"
+    fi
   fi
 fi
 

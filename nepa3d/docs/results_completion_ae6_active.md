@@ -1798,19 +1798,116 @@ Configured goal:
   - EncDec branch with `--topo_ray_coord proj`
 - compare against causal branch under the same +grad/+unc setup.
 
-Follow-up runner (waiting now):
+Follow-up runner:
 
 - `scripts/analysis/run_impl_update_plus_grad_unc_topo_bbox_chain_local.sh`
 - purpose: compare EncDec `topo_ray_coord=bbox` vs `proj` under the same +grad/+unc settings.
 
-Current status (in progress):
+Current status (finalized):
 
-- active chain:
-  - `logs/analysis/impl_update_plus_grad_unc_topo_chain/active.pid`
-- waiting chain:
-  - `logs/analysis/impl_update_plus_grad_unc_topo_bbox_chain/pipeline.log` (`waiting for plus-grad/unc/topo chain`)
-- checkpoints currently available:
-  - `runs/eccv_upmix_nepa_impl_causal_plusgut_s0/ckpt_ep020.pt`
-  - `runs/eccv_upmix_nepa_impl_encdec_plusgut_proj_s0/ckpt_ep020.pt`
-- note:
-  - plusgut evaluation JSON (`results/ucpr_*plusgut*`, `results/cpac_*plusgut*`) is not emitted yet; final readout will be added after chain completion.
+- both chains finished (no active PID):
+  - `logs/analysis/impl_update_plus_grad_unc_topo_chain/pipeline.log`
+  - `logs/analysis/impl_update_plus_grad_unc_topo_bbox_chain/pipeline.log`
+- generated artifacts:
+  - UCPR JSON x8: `results/ucpr_nepa_impl_*plusgut*_s0_e50_*.json`
+  - CPAC JSON x16: `results/cpac_nepa_impl_*plusgut*_s0_e50_*.json`
+  - qualitative MC summaries:
+    - `results/qual_mc_nepa_impl_causal_plusgut_ref_s0_e50/summary.json`
+    - `results/qual_mc_nepa_impl_causal_plusgut_s0_e50/summary.json`
+    - `results/qual_mc_nepa_impl_encdec_plusgut_proj_s0_e50/summary.json`
+    - `results/qual_mc_nepa_impl_encdec_plusgut_bbox_s0_e50/summary.json`
+
+Result summary (single-seed, independent UCPR, `pooling=mean_a`):
+
+| Model line | UCPR `mesh->udfgrid` R@1/R@5/R@10/MRR | UCPR `mesh->pointcloud_noray` R@1/R@5/R@10/MRR |
+|---|---|---|
+| `causal_plusgut_ref` | `0.048 / 0.157 / 0.229 / 0.11376` | `0.048 / 0.128 / 0.211 / 0.10442` |
+| `causal_plusgut` | `0.048 / 0.157 / 0.229 / 0.11376` | `0.048 / 0.128 / 0.211 / 0.10442` |
+| `encdec_plusgut_proj` | `0.001 / 0.004 / 0.012 / 0.00765` | `0.001 / 0.005 / 0.010 / 0.00790` |
+| `encdec_plusgut_bbox` | `0.001 / 0.004 / 0.011 / 0.00766` | `0.001 / 0.005 / 0.011 / 0.00790` |
+
+CPAC summary (`max_shapes=800`, `htrain4k`):
+
+| Model line | pool normal MAE/RMSE/IoU | pool `testnone` MAE/RMSE/IoU | pool `testmismatch` MAE/RMSE/IoU | grid near08 MAE/RMSE/IoU |
+|---|---|---|---|---|
+| `causal_plusgut_ref` | `0.03047 / 0.04099 / 0.69146` | `0.29427 / 0.38066 / 0.56442` | `0.08257 / 0.12239 / 0.44388` | `0.02595 / 0.03499 / 0.39956` |
+| `causal_plusgut` | `0.03047 / 0.04099 / 0.69146` | `0.29427 / 0.38066 / 0.56442` | `0.08257 / 0.12239 / 0.44388` | `0.02595 / 0.03499 / 0.39956` |
+| `encdec_plusgut_proj` | `0.04512 / 0.06317 / 0.70690` | `0.07376 / 0.10107 / 0.40442` | `0.05745 / 0.08241 / 0.65486` | `0.02905 / 0.04225 / 0.40924` |
+| `encdec_plusgut_bbox` | `0.04512 / 0.06317 / 0.70690` | `0.07376 / 0.10107 / 0.40442` | `0.05745 / 0.08241 / 0.65486` | `0.02905 / 0.04225 / 0.40924` |
+
+Qualitative MC (8-shape mean IoU@level):
+
+- `causal_plusgut_ref`: `0.12757`
+- `causal_plusgut`: `0.12757`
+- `encdec_plusgut_proj`: `0.15488`
+- `encdec_plusgut_bbox`: `0.15488`
+
+Immediate readout:
+
+- `causal_plusgut_ref` and `causal_plusgut` are identical in this run (same ckpt path).
+- `encdec_plusgut_proj` and `encdec_plusgut_bbox` are identical in this run (diagnostic bbox ckpt cloned from proj).
+- under `+pt_grad/+ray_unc`, encdec no longer collapses on CPAC (vs prior impl-update baseline), but UCPR retrieval remains near-random.
+- for CPAC completion, both encdec variants beat NN-copy on `grid_near08` IoU (`0.409 > 0.377`) but are still weaker than causal on MAE/RMSE.
+
+### C) Feedback-based interpretation memo (Feb 19, 2026)
+
+This memo separates **confirmed observations** from **working hypotheses** so main-table interpretation stays robust.
+
+Confirmed observations from completed runs:
+
+- A-1 (`coarse_to_fine 16->32->64`) is not a failure mode:
+  - it is much better than `grid uniform` and close to `grid near_surface` on IoU.
+- C-2 improves pool completion strongly, but hurts grid completion when used alone.
+- B-2 helps recover grid-side degradation and improves B-2+C-2 balance.
+- scaling to `512` (quick) helps; naive continuation to `1024` can regress badly.
+
+Working hypotheses (not yet finalized as causal proof):
+
+- `1024` regressions are likely a transition-stability issue, not pure capacity failure.
+  - suspected factor: resume-time state mismatch around `pos_emb` resize and optimizer dynamics.
+- previous encdec collapse is likely implementation/training-path sensitivity rather than a definitive architectural limit.
+
+Active-chain caution (must be kept in captions/notes):
+
+- `encdec_plusgut_bbox` is currently evaluated as a **diagnostic topology-coordinate variant**.
+- unless explicitly retrained from scratch with `topo_ray_coord=bbox`, treat bbox numbers as coordinate-path diagnostics, not as a fair independent pretrain line.
+
+### D) Re-run setup (independent launch, no auto-chain)
+
+Current scripts are now configured so waiting is opt-in (`WAIT_FOR_PRIOR=1` only).
+For next rerun, launch explicitly and independently:
+
+```bash
+# 1) topo/proj line (no wait)
+RUN_ID=$(date +%Y%m%d_%H%M%S) WAIT_FOR_PRIOR=0 \
+  bash scripts/analysis/launch_impl_update_plus_grad_unc_topo_chain_local.sh
+
+# 2) bbox line (no wait; launch when GPU is free)
+RUN_ID=$(date +%Y%m%d_%H%M%S) WAIT_FOR_PRIOR=0 \
+  bash scripts/analysis/launch_impl_update_plus_grad_unc_topo_bbox_chain_local.sh
+```
+
+Operational notes:
+
+- both chains use GPU0/GPU1 internally; do not run them concurrently unless you intentionally oversubscribe.
+- when `RUN_ID` is set, logs/pids are written to `pipeline_<RUN_ID>.{log,pid}` so prior runs are preserved.
+
+### E) Lossログ解釈メモ + 記載運用ルール（Feb 19, 2026）
+
+`plusgut` pretrainログで見える `loss=0.0000 main=0.0000` について:
+
+- これは「4桁丸め表示」の影響を含む（`{:.4f}` 表示のため、十分小さい値は `0.0000` に見える）。
+- 同時に、現行 `plusgut` チェインでは `aux_b2/b3/e/d` の重みを渡していないため、`b2/b3/e/d/aux` は仕様どおり `0.0000` になる。
+- 従って、`0.0000` 表示だけで「学習完了/改善」と判断しない。必ず UCPR/CPAC JSON で確認する。
+
+今回の運用ルール（結果記載の前提）:
+
+1. **ログ確認**: `logs/pretrain/*.log` で run の実行条件・途中挙動を確認。
+2. **JSON確認**: 対応する `results/ucpr_*.json`, `results/cpac_*.json` の最終数値を確認。
+3. **ckpt対応確認**: JSON の `ckpt` が想定 run と一致していることを確認。
+4. **記載条件**: 上記 1-3 の突合が取れた結果のみ docs に反映する。
+
+補足:
+
+- `causal_plusgut_ref` と `causal_plusgut` は同一 ckpt 参照ライン。
+- `encdec_plusgut_bbox` は現状 diagnostic 扱い（独立 pretrain ラインとしては未確定）。

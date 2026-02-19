@@ -12,6 +12,7 @@ from .completion_cpac_udf import (
     build_model_from_ckpt,
     collect_xy,
     infer_add_eos,
+    infer_qa_layout,
     infer_qa_tokens,
     list_npz,
 )
@@ -115,13 +116,17 @@ def _save_ply_points(path, xyz):
             f.write(f"{float(p[0]):.6f} {float(p[1]):.6f} {float(p[2]):.6f}\n")
 
 
-def _extract_rep_for_queries(model, ctx_xyz, ctx_dist, q_xyz, add_eos, qa_tokens, rep_source, device):
+def _extract_rep_for_queries(model, ctx_xyz, ctx_dist, q_xyz, add_eos, qa_tokens, qa_layout, rep_source, device):
     n_ctx = int(ctx_xyz.shape[0])
     n_q = int(q_xyz.shape[0])
     bos = np.zeros((1, 15), dtype=np.float32)
     eos = np.zeros((1, 15), dtype=np.float32)
 
     if bool(qa_tokens):
+        layout = str(qa_layout).lower()
+        if layout not in ("interleave", "split"):
+            raise ValueError(f"unknown qa_layout: {qa_layout}")
+
         ctx_q = np.zeros((n_ctx, 15), dtype=np.float32)
         ctx_a = np.zeros((n_ctx, 15), dtype=np.float32)
         if n_ctx > 0:
@@ -133,34 +138,61 @@ def _extract_rep_for_queries(model, ctx_xyz, ctx_dist, q_xyz, add_eos, qa_tokens
         qry_q[:, 0:3] = q_xyz
         qry_a[:, 10] = 0.0
 
-        ctx_qa = np.zeros((2 * n_ctx, 15), dtype=np.float32)
-        qry_qa = np.zeros((2 * n_q, 15), dtype=np.float32)
-        if n_ctx > 0:
-            ctx_qa[0::2], ctx_qa[1::2] = ctx_q, ctx_a
-        if n_q > 0:
-            qry_qa[0::2], qry_qa[1::2] = qry_q, qry_a
+        if layout == "interleave":
+            ctx_qa = np.zeros((2 * n_ctx, 15), dtype=np.float32)
+            qry_qa = np.zeros((2 * n_q, 15), dtype=np.float32)
+            if n_ctx > 0:
+                ctx_qa[0::2], ctx_qa[1::2] = ctx_q, ctx_a
+            if n_q > 0:
+                qry_qa[0::2], qry_qa[1::2] = qry_q, qry_a
 
-        if add_eos:
-            feat = np.concatenate([bos, ctx_qa, qry_qa, eos], axis=0)
-            type_id = np.concatenate(
-                [
-                    np.array([TYPE_BOS], dtype=np.int64),
-                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), n_ctx),
-                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), n_q),
-                    np.array([TYPE_EOS], dtype=np.int64),
-                ],
-                axis=0,
-            )
+            if add_eos:
+                feat = np.concatenate([bos, ctx_qa, qry_qa, eos], axis=0)
+                type_id = np.concatenate(
+                    [
+                        np.array([TYPE_BOS], dtype=np.int64),
+                        np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), n_ctx),
+                        np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), n_q),
+                        np.array([TYPE_EOS], dtype=np.int64),
+                    ],
+                    axis=0,
+                )
+            else:
+                feat = np.concatenate([bos, ctx_qa, qry_qa], axis=0)
+                type_id = np.concatenate(
+                    [
+                        np.array([TYPE_BOS], dtype=np.int64),
+                        np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), n_ctx),
+                        np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), n_q),
+                    ],
+                    axis=0,
+                )
         else:
-            feat = np.concatenate([bos, ctx_qa, qry_qa], axis=0)
-            type_id = np.concatenate(
-                [
-                    np.array([TYPE_BOS], dtype=np.int64),
-                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), n_ctx),
-                    np.tile(np.array([TYPE_Q_POINT, TYPE_A_POINT], dtype=np.int64), n_q),
-                ],
-                axis=0,
-            )
+            q_part = np.concatenate([ctx_q, qry_q], axis=0)
+            a_part = np.concatenate([ctx_a, qry_a], axis=0)
+            q_type = np.full((q_part.shape[0],), TYPE_Q_POINT, dtype=np.int64)
+            a_type = np.full((a_part.shape[0],), TYPE_A_POINT, dtype=np.int64)
+            if add_eos:
+                feat = np.concatenate([bos, q_part, a_part, eos], axis=0)
+                type_id = np.concatenate(
+                    [
+                        np.array([TYPE_BOS], dtype=np.int64),
+                        q_type,
+                        a_type,
+                        np.array([TYPE_EOS], dtype=np.int64),
+                    ],
+                    axis=0,
+                )
+            else:
+                feat = np.concatenate([bos, q_part, a_part], axis=0)
+                type_id = np.concatenate(
+                    [
+                        np.array([TYPE_BOS], dtype=np.int64),
+                        q_type,
+                        a_type,
+                    ],
+                    axis=0,
+                )
     else:
         ctx_feat = np.zeros((n_ctx, 15), dtype=np.float32)
         if n_ctx > 0:
@@ -200,6 +232,10 @@ def _extract_rep_for_queries(model, ctx_xyz, ctx_dist, q_xyz, add_eos, qa_tokens
     rep = rep.squeeze(0).detach().cpu().numpy().astype(np.float32, copy=False)
 
     if bool(qa_tokens):
+        if str(qa_layout).lower() == "split":
+            q_start = 1 + n_ctx
+            q_pos = q_start + np.arange(n_q, dtype=np.int64)
+            return rep[q_pos]
         q_start = 1 + 2 * n_ctx
         q_pos = q_start + 2 * np.arange(n_q, dtype=np.int64)
         return rep[q_pos]
@@ -260,6 +296,9 @@ def main():
     ap.add_argument("--n_query_probe", type=int, default=256)
     ap.add_argument("--grid_res", type=int, default=32)
     ap.add_argument("--mc_level", type=float, default=0.02)
+    ap.add_argument("--mesh_metrics", type=int, default=0)
+    ap.add_argument("--mesh_samples", type=int, default=20000)
+    ap.add_argument("--fscore_taus", type=str, default="0.005,0.01,0.02")
     ap.add_argument("--ridge_lambda", type=float, default=1e-3)
     ap.add_argument("--rep_source", type=str, default="h", choices=["h", "zhat"])
     ap.add_argument("--eval_seed", type=int, default=0)
@@ -282,6 +321,7 @@ def main():
     model, ckpt = build_model_from_ckpt(args.ckpt, device, max_len_override=args.max_len)
     add_eos = infer_add_eos(ckpt, -1)
     qa_tokens = infer_qa_tokens(ckpt, -1)
+    qa_layout = infer_qa_layout(ckpt)
 
     tr_paths = list_npz(args.cache_root, args.head_train_split)
     if args.head_train_max_shapes and args.head_train_max_shapes > 0:
@@ -309,6 +349,7 @@ def main():
         voxel_max_steps=args.voxel_max_steps,
         device=device,
         qa_tokens=qa_tokens,
+        qa_layout=qa_layout,
         desc="collect train(grid)",
         context_mode="normal",
         disjoint_context_query=True,
@@ -341,6 +382,7 @@ def main():
         "mc_level": float(args.mc_level),
         "rep_source": str(args.rep_source),
         "qa_tokens": bool(qa_tokens),
+        "qa_layout": str(qa_layout),
         "add_eos": bool(add_eos),
         "max_query_per_pass": int(max_q),
         "per_shape": [],
@@ -384,6 +426,7 @@ def main():
                 q_xyz=q,
                 add_eos=add_eos,
                 qa_tokens=qa_tokens,
+                qa_layout=qa_layout,
                 rep_source=args.rep_source,
                 device=device,
             )

@@ -130,3 +130,38 @@ Next immediate run:
 - Keep `scale_long(ep054)` and `scale_stab(ep053)` as reference runs (not promotion targets).
 - Multi-seed remains intentionally deferred in the current policy.
 - Next run should therefore focus on a new algorithmic delta (A/B/C/D/E) on top of `ep051`, not another scale-only continuation.
+
+## Feedback-driven fix priority (added Feb 19, 2026)
+
+Before expanding ablations, prioritize these fixes to reduce interpretation risk:
+
+1. Scale-transition stability at `512 -> 1024`
+- keep optimizer state for non-resized parameters when `pos_emb` is resized.
+- avoid full optimizer-state reset unless explicitly intended.
+- add transition diagnostics in logs: token length, gradient norms, and per-stage schedule state.
+
+2. EncDec training-path sanity
+- enforce decoder causal behavior for answer decoding path.
+- verify no unintended answer-token leakage path in training/eval extraction.
+- keep `qa_layout=split` explicit in metadata and result rows.
+
+3. A-1 interpretation guardrail
+- report A-1 as a query-design gain vs `grid uniform`, not as an unconditional win over tuned `near_surface`.
+- keep `grid_res_schedule`, `grid_c2f_expand`, and `query budget` in protocol signatures for all A-1 rows.
+
+4. Reporting hygiene
+- keep retrieval column naming as `MRR (= single-positive mAP)` in all new tables.
+- include protocol signatures in captions/row notes (`eval_seed_gallery`, `head_train_split`, `query_source`, `grid_sample_mode`, etc.).
+
+### Fix status (Feb 19, 2026 update)
+
+- Implemented:
+  - resume-time optimizer partial restore for `pos_emb` resize
+    - new arg: `--resume_optimizer_partial` (default `1`)
+    - behavior: drop only shape-mismatched optimizer slots; keep others.
+  - plusgut chain launch is now independent by default
+    - `WAIT_FOR_PRIOR=0` default in plusgut chain runners.
+    - launchers support `RUN_ID` suffix to keep rerun logs/pids separate.
+- Remaining:
+  - add explicit scale-transition diagnostics (token length / grad norms) to training logs.
+  - run dedicated fresh pretrain for `encdec_plusgut_bbox` (current bbox is diagnostic ckpt-path variant).

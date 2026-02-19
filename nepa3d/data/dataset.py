@@ -141,6 +141,15 @@ class ModelNet40QueryDataset(Dataset):
         force_missing_ray=False,
         add_eos=True,
         qa_tokens=0,
+        qa_layout="interleave",
+        include_pt_grad=False,
+        pt_grad_mode="raw",
+        pt_grad_eps=1e-3,
+        pt_grad_clip=10.0,
+        pt_grad_orient="none",
+        include_ray_unc=False,
+        ray_unc_k=8,
+        ray_unc_mode="normal_var",
         voxel_grid=64,
         voxel_dilate=1,
         voxel_max_steps=0,
@@ -172,6 +181,15 @@ class ModelNet40QueryDataset(Dataset):
         self.force_missing_ray = bool(force_missing_ray)
         self.add_eos = bool(add_eos)
         self.qa_tokens = int(qa_tokens)
+        self.qa_layout = str(qa_layout)
+        self.include_pt_grad = bool(include_pt_grad)
+        self.pt_grad_mode = str(pt_grad_mode)
+        self.pt_grad_eps = float(pt_grad_eps)
+        self.pt_grad_clip = float(pt_grad_clip)
+        self.pt_grad_orient = str(pt_grad_orient)
+        self.include_ray_unc = bool(include_ray_unc)
+        self.ray_unc_k = int(ray_unc_k)
+        self.ray_unc_mode = str(ray_unc_mode)
         self.voxel_grid = int(voxel_grid)
         self.voxel_dilate = int(voxel_dilate)
         self.voxel_max_steps = int(voxel_max_steps)
@@ -335,9 +353,18 @@ class ModelNet40QueryDataset(Dataset):
                 ray_available=ray_available,
                 add_eos=self.add_eos,
                 qa_tokens=self.qa_tokens,
+                qa_layout=self.qa_layout,
                 pt_sample_mode=self.pt_sample_mode,
                 pt_fps_order=pt_fps_order,
                 pt_rfps_m=self.pt_rfps_m,
+                include_pt_grad=self.include_pt_grad,
+                pt_grad_mode=self.pt_grad_mode,
+                pt_grad_eps=self.pt_grad_eps,
+                pt_grad_clip=self.pt_grad_clip,
+                pt_grad_orient=self.pt_grad_orient,
+                include_ray_unc=self.include_ray_unc,
+                ray_unc_k=self.ray_unc_k,
+                ray_unc_mode=self.ray_unc_mode,
                 rng=rng,
             )
             return feat, type_id

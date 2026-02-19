@@ -80,6 +80,11 @@ def infer_qa_tokens(ckpt, qa_tokens_arg):
     return bool(pre_args.get("qa_tokens", ckpt_n_types >= 9))
 
 
+def infer_qa_layout(ckpt):
+    pre_args = ckpt.get("args", {})
+    return str(pre_args.get("qa_layout", "interleave"))
+
+
 def build_model_from_ckpt(ckpt_path, device, max_len_override: int | None = None):
     ckpt = torch.load(ckpt_path, map_location="cpu")
     pre_args = ckpt.get("args", {})
@@ -105,6 +110,11 @@ def build_model_from_ckpt(ckpt_path, device, max_len_override: int | None = None
         nhead=nhead,
         num_layers=num_layers,
         max_len=max_len,
+        arch=str(pre_args.get("arch", "causal")),
+        topo_k=int(pre_args.get("topo_k", 0)),
+        topo_include_bos=bool(int(pre_args.get("topo_include_bos", 1))),
+        topo_ray_coord=str(pre_args.get("topo_ray_coord", "origin")),
+        topo_ray_bbox=float(pre_args.get("topo_ray_bbox", 0.5)),
     )
     load_state_dict_flexible(model, state, strict=True)
     model.eval().to(device)
@@ -126,6 +136,7 @@ def embed_path(
     voxel_max_steps,
     device,
     qa_tokens: bool = False,
+    qa_layout: str = "interleave",
     pooling: str = "eos",
     ablate_point_xyz: bool = False,
     ablate_point_dist: bool = False,
@@ -151,6 +162,7 @@ def embed_path(
             ray_available=ray_available,
             add_eos=add_eos,
             qa_tokens=qa_tokens,
+            qa_layout=qa_layout,
             rng=rng,
         )
 
@@ -309,6 +321,7 @@ def main():
 
     add_eos = infer_add_eos(ckpt, args.add_eos)
     qa_tokens = infer_qa_tokens(ckpt, args.qa_tokens)
+    qa_layout = infer_qa_layout(ckpt)
     n_point = int(pre_args.get("n_point", 256) if args.n_point is None else args.n_point)
     n_ray = int(pre_args.get("n_ray", 256) if args.n_ray is None else args.n_ray)
 
@@ -336,6 +349,7 @@ def main():
             args.voxel_max_steps,
             device,
             qa_tokens,
+            qa_layout,
             args.pooling,
             args.ablate_point_xyz,
             args.ablate_point_dist,
@@ -356,6 +370,7 @@ def main():
             args.voxel_max_steps,
             device,
             qa_tokens,
+            qa_layout,
             args.pooling,
             args.ablate_point_xyz,
             args.ablate_point_dist,
@@ -383,6 +398,7 @@ def main():
             "n_ray": int(n_ray),
             "add_eos": bool(add_eos),
             "qa_tokens": bool(qa_tokens),
+            "qa_layout": str(qa_layout),
             "mc_k": int(args.mc_k),
             "eval_seed": int(args.eval_seed),
             "eval_seed_gallery": int(eval_seed_gallery),

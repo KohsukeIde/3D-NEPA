@@ -1,4 +1,5 @@
 import argparse
+import copy
 import os
 
 import numpy as np
@@ -168,6 +169,46 @@ def _hard_answer_topk_loss(
     return total / float(n_valid)
 
 
+def _prune_optimizer_state_for_shape_mismatch(
+    opt: optim.Optimizer,
+    saved_opt_state: dict,
+) -> tuple[dict, int, int]:
+    """Drop per-parameter optimizer slots whose tensor shape mismatches current params.
+
+    This is mainly used when `pos_emb` length changes across resume.
+    We keep state for unchanged parameters and only reset mismatched ones.
+    """
+    pruned = copy.deepcopy(saved_opt_state)
+    saved_groups = pruned.get("param_groups", [])
+    cur_groups = opt.param_groups
+    if len(saved_groups) != len(cur_groups):
+        return pruned, 0, 0
+
+    state = pruned.get("state", {})
+    dropped = 0
+    checked = 0
+    for cur_g, sav_g in zip(cur_groups, saved_groups):
+        cur_params = list(cur_g.get("params", []))
+        sav_ids = list(sav_g.get("params", []))
+        if len(cur_params) != len(sav_ids):
+            continue
+        for p_cur, sid in zip(cur_params, sav_ids):
+            st = state.get(sid, None)
+            if not isinstance(st, dict):
+                continue
+            checked += 1
+            mismatch = False
+            for v in st.values():
+                if torch.is_tensor(v) and v.ndim > 0 and tuple(v.shape) != tuple(p_cur.shape):
+                    mismatch = True
+                    break
+            if mismatch:
+                state[sid] = {}
+                dropped += 1
+    pruned["state"] = state
+    return pruned, dropped, checked
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache_root", type=str, default="data/modelnet40_cache")
@@ -218,7 +259,16 @@ def main():
         default=1,
         help=(
             "When --resume is set, also load optimizer/scaler state (1) or not (0). "
-            "If max_len changes (pos_emb resize), optimizer state is automatically skipped."
+            "If max_len changes (pos_emb resize), optimizer state is partially restored by default."
+        ),
+    )
+    ap.add_argument(
+        "--resume_optimizer_partial",
+        type=int,
+        default=1,
+        help=(
+            "If 1 and --resume_optimizer=1, attempt partial optimizer restore when parameter shapes change "
+            "(drop mismatched per-parameter states, keep others)."
         ),
     )
     ap.add_argument("--d_model", type=int, default=384)
@@ -234,6 +284,41 @@ def main():
     ap.add_argument("--force_missing_ray", action="store_true")
     ap.add_argument("--add_eos", type=int, default=1)
     ap.add_argument("--qa_tokens", type=int, default=0, help="Use Q/A separated tokenization (v2).")
+    ap.add_argument(
+        "--qa_layout",
+        type=str,
+        default="interleave",
+        choices=["interleave", "split"],
+        help="Token layout when qa_tokens=1.",
+    )
+    ap.add_argument(
+        "--include_pt_grad",
+        type=int,
+        default=0,
+        help="Enable explicit point-gradient feature slots in tokenizer.",
+    )
+    ap.add_argument("--pt_grad_mode", type=str, default="raw", choices=["raw", "log"])
+    ap.add_argument("--pt_grad_eps", type=float, default=1e-3)
+    ap.add_argument("--pt_grad_clip", type=float, default=10.0)
+    ap.add_argument("--pt_grad_orient", type=str, default="none", choices=["none", "ray"])
+    ap.add_argument(
+        "--include_ray_unc",
+        type=int,
+        default=0,
+        help="Enable ray-answer uncertainty feature slot in tokenizer.",
+    )
+    ap.add_argument("--ray_unc_k", type=int, default=8)
+    ap.add_argument("--ray_unc_mode", type=str, default="normal_var", choices=["normal_var"])
+    ap.add_argument(
+        "--arch",
+        type=str,
+        default="causal",
+        choices=["causal", "encdec"],
+        help="Backbone architecture.",
+    )
+    ap.add_argument("--topo_k", type=int, default=0, help="kNN size for encoder topology attention (encdec).")
+    ap.add_argument("--topo_ray_coord", type=str, default="origin", choices=["origin", "proj", "bbox"])
+    ap.add_argument("--topo_ray_bbox", type=float, default=0.5)
     ap.add_argument("--dual_mask_near", type=float, default=0.0, help="Dual masking prob for *near* past tokens (PointGPT-style).")
     ap.add_argument("--dual_mask_far", type=float, default=0.0, help="Dual masking prob for *far* past tokens.")
     ap.add_argument("--dual_mask_window", type=int, default=32, help="Near-window size in token steps for dual masking.")
@@ -306,6 +391,14 @@ def main():
     ap.add_argument("--voxel_max_steps", type=int, default=0)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
+
+    if str(args.arch) == "encdec":
+        if int(args.qa_tokens) != 1:
+            print("[WARN] --arch encdec implies --qa_tokens=1")
+            args.qa_tokens = 1
+        if str(args.qa_layout) != "split":
+            print("[WARN] --arch encdec implies --qa_layout=split")
+            args.qa_layout = "split"
 
     set_seed(args.seed)
 
@@ -395,12 +488,21 @@ def main():
         ds, sampler, mix_info = build_mixed_pretrain(
             args.mix_config,
             qa_tokens=bool(args.qa_tokens),
+            qa_layout=str(args.qa_layout),
             n_point=args.n_point,
             n_ray=args.n_ray,
             mode="train",
             drop_ray_prob=args.drop_ray_prob,
             force_missing_ray=args.force_missing_ray,
             add_eos=bool(args.add_eos),
+            include_pt_grad=bool(args.include_pt_grad),
+            pt_grad_mode=str(args.pt_grad_mode),
+            pt_grad_eps=float(args.pt_grad_eps),
+            pt_grad_clip=float(args.pt_grad_clip),
+            pt_grad_orient=str(args.pt_grad_orient),
+            include_ray_unc=bool(args.include_ray_unc),
+            ray_unc_k=int(args.ray_unc_k),
+            ray_unc_mode=str(args.ray_unc_mode),
             voxel_grid=args.voxel_grid,
             voxel_dilate=args.voxel_dilate,
             voxel_max_steps=args.voxel_max_steps,
@@ -437,6 +539,15 @@ def main():
             force_missing_ray=args.force_missing_ray,
             add_eos=bool(args.add_eos),
             qa_tokens=bool(args.qa_tokens),
+            qa_layout=str(args.qa_layout),
+            include_pt_grad=bool(args.include_pt_grad),
+            pt_grad_mode=str(args.pt_grad_mode),
+            pt_grad_eps=float(args.pt_grad_eps),
+            pt_grad_clip=float(args.pt_grad_clip),
+            pt_grad_orient=str(args.pt_grad_orient),
+            include_ray_unc=bool(args.include_ray_unc),
+            ray_unc_k=int(args.ray_unc_k),
+            ray_unc_mode=str(args.ray_unc_mode),
             voxel_grid=args.voxel_grid,
             voxel_dilate=args.voxel_dilate,
             voxel_max_steps=args.voxel_max_steps,
@@ -463,6 +574,10 @@ def main():
         nhead=args.heads,
         num_layers=args.layers,
         max_len=t,
+        arch=str(args.arch),
+        topo_k=int(args.topo_k),
+        topo_ray_coord=str(args.topo_ray_coord),
+        topo_ray_bbox=float(args.topo_ray_bbox),
     ).to(device)
 
     teacher_model = None
@@ -475,6 +590,10 @@ def main():
         teacher_n_types = int(teacher_state["type_emb.weight"].shape[0])
         teacher_heads = int(teacher_pre_args.get("heads", args.heads))
         teacher_layers = int(teacher_pre_args.get("layers", args.layers))
+        teacher_arch = str(teacher_pre_args.get("arch", "causal"))
+        teacher_topo_k = int(teacher_pre_args.get("topo_k", 0))
+        teacher_topo_ray_coord = str(teacher_pre_args.get("topo_ray_coord", "origin"))
+        teacher_topo_ray_bbox = float(teacher_pre_args.get("topo_ray_bbox", 0.5))
         teacher_len = int(teacher_state["pos_emb"].shape[1])
         if teacher_n_types != int(n_types):
             raise RuntimeError(
@@ -491,6 +610,10 @@ def main():
             nhead=teacher_heads,
             num_layers=teacher_layers,
             max_len=t,
+            arch=teacher_arch,
+            topo_k=teacher_topo_k,
+            topo_ray_coord=teacher_topo_ray_coord,
+            topo_ray_bbox=teacher_topo_ray_bbox,
         ).to(device)
         load_state_dict_flexible(teacher_model, teacher_state, strict=True)
         teacher_model.eval()
@@ -555,8 +678,9 @@ def main():
         load_state_dict_flexible(model, ckpt_model, strict=True)
 
         can_resume_opt = bool(int(args.resume_optimizer))
-        if ckpt_pos_len is not None and ckpt_pos_len != int(t):
-            # Optimizer state tensors for pos_emb would mismatch.
+        pos_emb_resized = bool(ckpt_pos_len is not None and ckpt_pos_len != int(t))
+        partial_resume_opt = bool(int(args.resume_optimizer_partial))
+        if pos_emb_resized and (not partial_resume_opt):
             can_resume_opt = False
 
         ckpt_aux = ckpt.get("aux_heads", None)
@@ -579,7 +703,14 @@ def main():
 
         if can_resume_opt and ("opt" in ckpt):
             try:
-                opt.load_state_dict(ckpt["opt"])
+                opt_state = ckpt["opt"]
+                if pos_emb_resized and partial_resume_opt:
+                    opt_state, dropped, checked = _prune_optimizer_state_for_shape_mismatch(opt, opt_state)
+                    print(
+                        "[resume] pos_emb resized; partial optimizer restore enabled "
+                        f"(dropped_states={dropped}/{checked})"
+                    )
+                opt.load_state_dict(opt_state)
             except Exception as e:
                 print(f"[resume] failed to load optimizer state ({e}); using fresh optimizer state")
                 can_resume_opt = False

@@ -40,9 +40,9 @@ qsub -v CACHE_ROOT=data/shapenet_cache_v0,SPLITS=train,test,WORKERS=16 \
 
 ### Columns (retrieval pairs)
 
-- `mesh -> pointcloud_noray` (`R@1/5/10`, `mAP`)
-- `mesh -> udfgrid` (`R@1/5/10`, `mAP`)
-- `pointcloud_noray -> udfgrid` (`R@1/5/10`, `mAP`) as easy/sanity pair
+- `mesh -> pointcloud_noray` (`R@1/5/10`, `MRR`)
+- `mesh -> udfgrid` (`R@1/5/10`, `MRR`)
+- `pointcloud_noray -> udfgrid` (`R@1/5/10`, `MRR`) as easy/sanity pair
 
 Command template:
 
@@ -58,6 +58,11 @@ MUST-1 diagnostics (recommended before paper table freeze):
 - feature ablations:
   - `ABLATE_POINT_XYZ=1`
   - `ABLATE_POINT_DIST=1`
+
+UCPR metric naming note:
+
+- Current evaluator is single-positive retrieval; reported `mAP` is equivalent to reciprocal-rank average.
+- In tables/captions, use `MRR (= single-positive mAP)` to avoid ambiguity.
 
 Example:
 
