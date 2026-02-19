@@ -1808,9 +1808,11 @@ Current status (finalized):
 - both chains finished (no active PID):
   - `logs/analysis/impl_update_plus_grad_unc_topo_chain/pipeline.log`
   - `logs/analysis/impl_update_plus_grad_unc_topo_bbox_chain/pipeline.log`
+- follow-up fresh rerun also finished:
+  - `logs/analysis/impl_update_plus_grad_unc_topo_chain/pipeline_projfresh_fix_20260220_060204.log`
 - generated artifacts:
-  - UCPR JSON x8: `results/ucpr_nepa_impl_*plusgut*_s0_e50_*.json`
-  - CPAC JSON x16: `results/cpac_nepa_impl_*plusgut*_s0_e50_*.json`
+  - UCPR JSON: `results/ucpr_nepa_impl_*plusgut*_s0_e50_*.json`
+  - CPAC JSON: `results/cpac_nepa_impl_*plusgut*_s0_e50_*.json`
   - qualitative MC summaries:
     - `results/qual_mc_nepa_impl_causal_plusgut_ref_s0_e50/summary.json`
     - `results/qual_mc_nepa_impl_causal_plusgut_s0_e50/summary.json`
@@ -1911,3 +1913,96 @@ Operational notes:
 
 - `causal_plusgut_ref` と `causal_plusgut` は同一 ckpt 参照ライン。
 - `encdec_plusgut_bbox` は現状 diagnostic 扱い（独立 pretrain ラインとしては未確定）。
+
+### F) PlusGUT ProjFresh Re-run (Feb 20, 2026)
+
+Purpose:
+
+- complete the previously missing `encdec_plusgut_projfresh` eval pack under the same chain protocol.
+
+Execution log:
+
+- `logs/analysis/impl_update_plus_grad_unc_topo_chain/pipeline_projfresh_fix_20260220_060204.log`
+- completion line confirmed: `all model chains finished` (timestamp `2026-02-20 06:11:31`)
+
+Primary artifacts (new in this rerun):
+
+- UCPR:
+  - `results/ucpr_nepa_impl_encdec_plusgut_projfresh_s0_e50_mesh2udf_1k_indep_mean_a.json`
+  - `results/ucpr_nepa_impl_encdec_plusgut_projfresh_s0_e50_mesh2pc_1k_indep_mean_a.json`
+- CPAC:
+  - `results/cpac_nepa_impl_encdec_plusgut_projfresh_s0_e50_pc2udf_800_pool_h_htrain4k_with_nncopy.json`
+  - `results/cpac_nepa_impl_encdec_plusgut_projfresh_s0_e50_pc2udf_800_pool_testnone_h_htrain4k.json`
+  - `results/cpac_nepa_impl_encdec_plusgut_projfresh_s0_e50_pc2udf_800_pool_testmismatch_h_htrain4k.json`
+  - `results/cpac_nepa_impl_encdec_plusgut_projfresh_s0_e50_pc2udf_800_grid_near08_h_htrain4k_with_nncopy.json`
+- qualitative MC:
+  - `results/qual_mc_nepa_impl_encdec_plusgut_projfresh_s0_e50/summary.json`
+
+UCPR summary (single-seed, independent, `pooling=mean_a`):
+
+| Model line | UCPR `mesh->udfgrid` R@1/R@5/R@10/MRR | UCPR `mesh->pointcloud_noray` R@1/R@5/R@10/MRR |
+|---|---|---|
+| `causal_plusgut_ref` | `0.048 / 0.157 / 0.229 / 0.11376` | `0.048 / 0.128 / 0.211 / 0.10442` |
+| `encdec_plusgut_projfresh` | `0.003 / 0.008 / 0.016 / 0.01158` | `0.003 / 0.009 / 0.015 / 0.01129` |
+
+CPAC summary (`max_shapes=800`, `htrain4k`):
+
+| Model line | pool normal MAE/RMSE/IoU | pool `testnone` MAE/RMSE/IoU | pool `testmismatch` MAE/RMSE/IoU | grid near08 MAE/RMSE/IoU |
+|---|---|---|---|---|
+| `causal_plusgut_ref` | `0.03047 / 0.04099 / 0.69146` | `0.29427 / 0.38066 / 0.56442` | `0.08257 / 0.12239 / 0.44388` | `0.02595 / 0.03499 / 0.39956` |
+| `encdec_plusgut_projfresh` | `0.05099 / 0.07430 / 0.69089` | `0.15214 / 0.18904 / 0.07326` | `0.06562 / 0.09597 / 0.57092` | `0.03342 / 0.05092 / 0.37056` |
+
+Qualitative MC (8-shape mean IoU@level):
+
+- `causal_plusgut_ref`: `0.12757`
+- `encdec_plusgut_projfresh`: `0.05894`
+
+Readout:
+
+- `encdec_plusgut_projfresh` remained near-random on UCPR hard pairs.
+- CPAC `pool normal` IoU is close to causal (`0.6909` vs `0.6915`) but MAE/RMSE are worse.
+- CPAC controls show strong context dependence for encdec (`testnone` severe drop).
+- On `grid_near08`, `encdec_plusgut_projfresh` is below both causal and NN-copy (`0.3706 < 0.3996` and `< 0.3765`).
+
+### G) 6 Scale Retry v3 (dual-mask-window/lr sweep, Feb 20, 2026)
+
+Objective:
+
+- retry the `512 -> 1024` scale continuation with two stability-oriented settings in parallel:
+  - `w64_lr2e-4` (GPU0)
+  - `w96_lr1e-4` (GPU1)
+
+Runner:
+
+- `scripts/analysis/run_scale_retry_variant_local.sh`
+
+Run logs:
+
+- `logs/analysis/eccv_upmix_nepa_qa_dualmask_b2c2_scale_retry_w64_lr2e4_v3_s0_launch.log`
+- `logs/analysis/eccv_upmix_nepa_qa_dualmask_b2c2_scale_retry_w96_lr1e4_v3_s0_launch.log`
+
+Checkpoints:
+
+- `runs/eccv_upmix_nepa_qa_dualmask_b2c2_scale_retry_w64_lr2e4_v3_s0/ckpt_ep054.pt`
+- `runs/eccv_upmix_nepa_qa_dualmask_b2c2_scale_retry_w96_lr1e4_v3_s0/ckpt_ep054.pt`
+
+CPAC summary (`max_shapes=800`, `htrain4k`, `n_query=256`):
+
+| Run | `n_context=512` pool MAE/RMSE/IoU | `n_context=512` grid_near08 MAE/RMSE/IoU | `n_context=1024` pool MAE/RMSE/IoU | `n_context=1024` grid_near08 MAE/RMSE/IoU |
+|---|---|---|---|---|
+| `w64_lr2e-4_v3` | `0.03073 / 0.03929 / 0.60628` | `0.02832 / 0.03576 / 0.30284` | `0.02820 / 0.03605 / 0.67920` | `0.02614 / 0.03296 / 0.36808` |
+| `w96_lr1e-4_v3` | `0.03068 / 0.03921 / 0.59791` | `0.02789 / 0.03542 / 0.31301` | `0.02747 / 0.03513 / 0.68766` | `0.02506 / 0.03180 / 0.39038` |
+
+UCPR hard-pair guardrail (`max_files=1000`, independent, `pooling=mean_a`):
+
+| Run | `mesh->udfgrid` R@1/MRR | `mesh->pointcloud_noray` R@1/MRR |
+|---|---|---|
+| `w64_lr2e-4_v3` | `0.003 / 0.02783` | `0.014 / 0.04051` |
+| `w96_lr1e-4_v3` | `0.005 / 0.02890` | `0.017 / 0.04516` |
+
+Readout:
+
+- both v3 retries completed successfully with full CPAC+UCPR outputs.
+- `w96_lr1e-4_v3` is consistently better than `w64_lr2e-4_v3`.
+- however, both retries remain below prior scale references (`scalequick ep051`, `scale_stab ep053`), especially on CPAC IoU.
+- therefore these v3 retries are diagnostic and not promotion candidates for the main line.

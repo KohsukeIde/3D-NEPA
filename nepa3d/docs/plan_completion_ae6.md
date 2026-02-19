@@ -72,6 +72,11 @@ This plan converts the feedback into an execution order that matches current rep
 - 6 stability-adjusted scale retry (`ep053`) was executed from `scalequick(ep051)`:
   - error metrics recovered vs the unstable long attempt on most settings.
   - `512/pool` IoU stayed below quick-scale, so overall best seed0 remains `ep051`.
+- 6 additional scale retry sweep (Feb 20, 2026, `v3`) completed in parallel:
+  - `w64_lr2e-4_v3` and `w96_lr1e-4_v3` from `scalequick(ep051)` to `ep054`.
+  - both runs completed full CPAC (`pc512/pc1024`, pool + grid_near08) and UCPR guardrail.
+  - `w96_lr1e-4_v3` > `w64_lr2e-4_v3`, but both are below prior `scalequick(ep051)` and `scale_stab(ep053)`.
+  - keep as diagnostic references; do not promote to main candidate.
 - Coverage status:
   - A/B/C/D/E/6 all have at least one seed0 full-protocol result set recorded.
 
@@ -128,6 +133,7 @@ Next immediate run:
 
 - Freeze `B-2+C-2 + scalequick(ep051)` as the current best seed0 direction.
 - Keep `scale_long(ep054)` and `scale_stab(ep053)` as reference runs (not promotion targets).
+- Keep `scale_retry_v3` (`w64_lr2e-4`, `w96_lr1e-4`) as additional reference-only runs.
 - Multi-seed remains intentionally deferred in the current policy.
 - Next run should therefore focus on a new algorithmic delta (A/B/C/D/E) on top of `ep051`, not another scale-only continuation.
 

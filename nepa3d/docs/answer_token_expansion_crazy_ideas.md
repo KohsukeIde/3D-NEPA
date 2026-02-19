@@ -87,6 +87,19 @@
   - `encdec_plusgut_bbox` は現状「diagnostic ckpt-path variant」として扱う（独立再学習ラインではない）。
   - `causal_plusgut_ref` と `causal_plusgut` は同一 ckpt を参照しており、結果は一致する。
 
+Feb 20 follow-up (`encdec_plusgut_projfresh`) で追加確認:
+
+- fresh ckpt でも UCPR hard pair は near-randomのまま:
+  - `mesh->udf`: `R@1=0.003`, `MRR=0.01158`
+  - `mesh->pc`: `R@1=0.003`, `MRR=0.01129`
+- CPAC pool は IoU が causal に近いが、誤差は悪化:
+  - `pool normal`: `MAE/RMSE/IoU = 0.05099 / 0.07430 / 0.69089`
+  - (causal ref: `0.03047 / 0.04099 / 0.69146`)
+- grid near08 は causal/NN-copy より下:
+  - encdec projfresh: `IoU=0.37056`
+  - causal ref: `IoU=0.39956`
+  - NN-copy: `IoU=0.37652`
+
 ---
 
 ## 6) 記載運用メモ（Feb 19, 2026）
