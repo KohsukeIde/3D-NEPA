@@ -6,7 +6,7 @@ Legacy mixed/causal history:
 
 - `nepa3d/docs/results_scanobjectnn_review_legacy.md`
 
-Snapshot time: `2026-02-19 01:27 JST`
+Snapshot time: `2026-02-20 05:54 JST`
 
 ## Run lineage (`v0 -> v1 -> v2`)
 
@@ -14,7 +14,7 @@ Snapshot time: `2026-02-19 01:27 JST`
 |---|---|---|---|---|---|
 | `v0` | poolfix baseline | `n_point=256`, `pt_xyz_key=pt_xyz_pool`, `pt_dist` enabled, `cls_is_causal=0`, `cls_pooling=mean_no_special`, `mc_eval_k_test=10` | FT complete (`225/225`) | `runs/scan_variants_review_ft_bidir_poolfix_v1` | `logs/finetune/scan_variants_review_lp_bidir_poolfix_resume/pipeline.log` |
 | `v1` | fair FT (pc-xyz 2k, xyz-only) | `n_point=2048`, `allow_scale_up=1`, `pt_xyz_key=pc_xyz`, `ablate_point_dist=1`, `cls_is_causal=0`, `cls_pooling=mean_pts`, `mc_eval_k_test=1` | `obj_bg` complete (`75/75`), others not run | `runs/scan_variants_review_ft_fair_pcxyz2k_v1` | `logs/finetune/scan_variants_review_fair_ft_chain/pipeline.log` |
-| `v2` | fair FT + explicit FPS eval | `v1` + `pt_sample_mode_train=random`, `pt_sample_mode_eval=fps`, `pt_fps_key=pt_fps_order` | running (`obj_bg 0/75` at snapshot) | `runs/scan_variants_review_ft_fair_pcxyz2k_fps_v2` | `logs/finetune/scan_variants_review_fair_ft_chain_v2_objbg/pipeline.log` |
+| `v2` | fair FT + explicit FPS eval | `v1` + `pt_sample_mode_train=random`, `pt_sample_mode_eval=fps`, `pt_fps_key=pt_fps_order` | `obj_bg` complete (`75/75`) | `runs/scan_variants_review_ft_fair_pcxyz2k_fps_v2` | `logs/finetune/scan_variants_review_fair_ft_chain_v2_objbg/pipeline.log` |
 
 ## What changed between versions
 
@@ -31,8 +31,11 @@ Snapshot time: `2026-02-19 01:27 JST`
 
 - `v1` started at `2026-02-18 15:36` and finished `obj_bg` (`75/75`) at `2026-02-19 00:47`.
 - `v1` stage-2 did not proceed (pipeline script syntax error after stage-1 completion), so `obj_only` / `pb_t50_rs` remain `0/75`.
-- `v2` started at `2026-02-19 00:49` for `obj_bg`; this is the current comparison run against `v1`.
-- queued next chain (auto after `v2 obj_bg`): dist-enabled `v1(obj_bg)` then dist-enabled `v2(obj_bg)` at `logs/finetune/scan_variants_review_fair_ft_dist_after_v2_objbg_chain/pipeline.log`.
+- `v2` started at `2026-02-19 00:49` for `obj_bg` and completed `75/75` at `2026-02-19 08:35`.
+- dist-enabled follow-up chain is complete:
+  - stage D1 (dist-enabled `v1-style`, `obj_bg`): `75/75`
+  - stage D2 (dist-enabled `v2-style`, `obj_bg`): `75/75`
+  - chain log: `logs/finetune/scan_variants_review_fair_ft_dist_after_v2_objbg_chain/pipeline.log`
 
 ## Quick result gap (`obj_bg`, best-by-K)
 
@@ -40,6 +43,158 @@ Snapshot time: `2026-02-19 01:27 JST`
 |---:|---:|---:|---:|
 | 0 | 0.6644 | 0.4550 | -0.2094 |
 | 20 | 0.4274 | 0.2266 | -0.2008 |
+
+## Fair FT v2 update (`pcxyz2k`, xyz-only, explicit FPS eval)
+
+Status:
+
+- `v2 obj_bg` is complete (`75/75`).
+- `dist`-enabled chain (`D1` and `D2`) is complete; results are recorded below.
+
+### Fair FT v2 (`obj_bg`, complete)
+
+Source: `runs/scan_variants_review_ft_fair_pcxyz2k_fps_v2/obj_bg/scan_<method>_ablate_dist_k<K>_s<seed>/last.pt` (`n(seed)=3`).
+
+| Method | K | n(seed) | test_acc mean +- std |
+|---|---:|---:|---:|
+| `scratch` | 0 | 3 | 0.1343 +- 0.0000 |
+| `scratch` | 1 | 3 | 0.1325 +- 0.0024 |
+| `scratch` | 5 | 3 | 0.1325 +- 0.0024 |
+| `scratch` | 10 | 3 | 0.1343 +- 0.0000 |
+| `scratch` | 20 | 3 | 0.1343 +- 0.0000 |
+| `shapenet_nepa` | 0 | 3 | 0.2215 +- 0.0090 |
+| `shapenet_nepa` | 1 | 3 | 0.0843 +- 0.0354 |
+| `shapenet_nepa` | 5 | 3 | 0.1142 +- 0.0150 |
+| `shapenet_nepa` | 10 | 3 | 0.1526 +- 0.0072 |
+| `shapenet_nepa` | 20 | 3 | 0.1681 +- 0.0089 |
+| `shapenet_mesh_udf_nepa` | 0 | 3 | 0.1974 +- 0.0199 |
+| `shapenet_mesh_udf_nepa` | 1 | 3 | 0.0786 +- 0.0213 |
+| `shapenet_mesh_udf_nepa` | 5 | 3 | 0.1245 +- 0.0113 |
+| `shapenet_mesh_udf_nepa` | 10 | 3 | 0.1618 +- 0.0162 |
+| `shapenet_mesh_udf_nepa` | 20 | 3 | 0.1561 +- 0.0114 |
+| `shapenet_mix_nepa` | 0 | 3 | 0.1819 +- 0.0146 |
+| `shapenet_mix_nepa` | 1 | 3 | 0.0993 +- 0.0128 |
+| `shapenet_mix_nepa` | 5 | 3 | 0.1050 +- 0.0236 |
+| `shapenet_mix_nepa` | 10 | 3 | 0.1492 +- 0.0175 |
+| `shapenet_mix_nepa` | 20 | 3 | 0.1698 +- 0.0066 |
+| `shapenet_mix_mae` | 0 | 3 | 0.1836 +- 0.0057 |
+| `shapenet_mix_mae` | 1 | 3 | 0.1234 +- 0.0181 |
+| `shapenet_mix_mae` | 5 | 3 | 0.1107 +- 0.0157 |
+| `shapenet_mix_mae` | 10 | 3 | 0.1503 +- 0.0399 |
+| `shapenet_mix_mae` | 20 | 3 | 0.1589 +- 0.0117 |
+
+### Fair FT v2 best-by-K (`obj_bg`)
+
+| K | best method | test_acc mean +- std |
+|---:|---|---:|
+| 0 | `shapenet_nepa` | 0.2215 +- 0.0090 |
+| 1 | `scratch` | 0.1325 +- 0.0024 |
+| 5 | `scratch` | 0.1325 +- 0.0024 |
+| 10 | `shapenet_mesh_udf_nepa` | 0.1618 +- 0.0162 |
+| 20 | `shapenet_mix_nepa` | 0.1698 +- 0.0066 |
+
+### Quick gap (`v1 -> v2`, `obj_bg`)
+
+| K | `v1` best | `v2` best | Delta (`v2-v1`) |
+|---:|---:|---:|---:|
+| 0 | 0.4550 | 0.2215 | -0.2335 |
+| 20 | 0.2266 | 0.1698 | -0.0568 |
+
+## Dist-Enabled Results (`ablate_point_dist=0`, complete)
+
+### D1: `dist_v1` (`eval=random`, `obj_bg`, complete)
+
+Source: `runs/scan_variants_review_ft_fair_pcxyz2k_dist_v1/obj_bg/scan_<method>_k<K>_s<seed>/last.pt` (`n(seed)=3`).
+
+| Method | K | n(seed) | test_acc mean +- std |
+|---|---:|---:|---:|
+| `scratch` | 0 | 3 | 0.2960 +- 0.0292 |
+| `scratch` | 1 | 3 | 0.1624 +- 0.0043 |
+| `scratch` | 5 | 3 | 0.1939 +- 0.0135 |
+| `scratch` | 10 | 3 | 0.1595 +- 0.0187 |
+| `scratch` | 20 | 3 | 0.1675 +- 0.0107 |
+| `shapenet_nepa` | 0 | 3 | 0.4705 +- 0.0189 |
+| `shapenet_nepa` | 1 | 3 | 0.1440 +- 0.0160 |
+| `shapenet_nepa` | 5 | 3 | 0.2129 +- 0.0255 |
+| `shapenet_nepa` | 10 | 3 | 0.2421 +- 0.0231 |
+| `shapenet_nepa` | 20 | 3 | 0.3029 +- 0.0092 |
+| `shapenet_mesh_udf_nepa` | 0 | 3 | 0.5020 +- 0.0141 |
+| `shapenet_mesh_udf_nepa` | 1 | 3 | 0.1509 +- 0.0154 |
+| `shapenet_mesh_udf_nepa` | 5 | 3 | 0.2146 +- 0.0234 |
+| `shapenet_mesh_udf_nepa` | 10 | 3 | 0.2513 +- 0.0221 |
+| `shapenet_mesh_udf_nepa` | 20 | 3 | 0.3184 +- 0.0162 |
+| `shapenet_mix_nepa` | 0 | 3 | 0.4911 +- 0.0029 |
+| `shapenet_mix_nepa` | 1 | 3 | 0.1463 +- 0.0244 |
+| `shapenet_mix_nepa` | 5 | 3 | 0.1796 +- 0.0281 |
+| `shapenet_mix_nepa` | 10 | 3 | 0.2387 +- 0.0211 |
+| `shapenet_mix_nepa` | 20 | 3 | 0.2949 +- 0.0163 |
+| `shapenet_mix_mae` | 0 | 3 | 0.4538 +- 0.0008 |
+| `shapenet_mix_mae` | 1 | 3 | 0.1469 +- 0.0181 |
+| `shapenet_mix_mae` | 5 | 3 | 0.2014 +- 0.0184 |
+| `shapenet_mix_mae` | 10 | 3 | 0.2306 +- 0.0138 |
+| `shapenet_mix_mae` | 20 | 3 | 0.2484 +- 0.0164 |
+
+### D1 best-by-K (`dist_v1`)
+
+| K | best method | test_acc mean +- std |
+|---:|---|---:|
+| 0 | `shapenet_mesh_udf_nepa` | 0.5020 +- 0.0141 |
+| 1 | `scratch` | 0.1624 +- 0.0043 |
+| 5 | `shapenet_mesh_udf_nepa` | 0.2146 +- 0.0234 |
+| 10 | `shapenet_mesh_udf_nepa` | 0.2513 +- 0.0221 |
+| 20 | `shapenet_mesh_udf_nepa` | 0.3184 +- 0.0162 |
+
+### D2: `dist_v2` (`eval=fps`, `obj_bg`, complete)
+
+Source: `runs/scan_variants_review_ft_fair_pcxyz2k_dist_fps_v2/obj_bg/scan_<method>_k<K>_s<seed>/last.pt` (`n(seed)=3`).
+
+| Method | K | n(seed) | test_acc mean +- std |
+|---|---:|---:|---:|
+| `scratch` | 0 | 3 | 0.2983 +- 0.0183 |
+| `scratch` | 1 | 3 | 0.1589 +- 0.0288 |
+| `scratch` | 5 | 3 | 0.1870 +- 0.0130 |
+| `scratch` | 10 | 3 | 0.1750 +- 0.0203 |
+| `scratch` | 20 | 3 | 0.1388 +- 0.0414 |
+| `shapenet_nepa` | 0 | 3 | 0.4498 +- 0.0144 |
+| `shapenet_nepa` | 1 | 3 | 0.1371 +- 0.0275 |
+| `shapenet_nepa` | 5 | 3 | 0.2180 +- 0.0226 |
+| `shapenet_nepa` | 10 | 3 | 0.2272 +- 0.0112 |
+| `shapenet_nepa` | 20 | 3 | 0.2880 +- 0.0224 |
+| `shapenet_mesh_udf_nepa` | 0 | 3 | 0.4509 +- 0.0173 |
+| `shapenet_mesh_udf_nepa` | 1 | 3 | 0.1365 +- 0.0190 |
+| `shapenet_mesh_udf_nepa` | 5 | 3 | 0.2054 +- 0.0265 |
+| `shapenet_mesh_udf_nepa` | 10 | 3 | 0.2691 +- 0.0104 |
+| `shapenet_mesh_udf_nepa` | 20 | 3 | 0.2880 +- 0.0144 |
+| `shapenet_mix_nepa` | 0 | 3 | 0.4550 +- 0.0200 |
+| `shapenet_mix_nepa` | 1 | 3 | 0.1377 +- 0.0221 |
+| `shapenet_mix_nepa` | 5 | 3 | 0.1928 +- 0.0440 |
+| `shapenet_mix_nepa` | 10 | 3 | 0.2295 +- 0.0216 |
+| `shapenet_mix_nepa` | 20 | 3 | 0.3001 +- 0.0114 |
+| `shapenet_mix_mae` | 0 | 3 | 0.3339 +- 0.0343 |
+| `shapenet_mix_mae` | 1 | 3 | 0.1377 +- 0.0123 |
+| `shapenet_mix_mae` | 5 | 3 | 0.1773 +- 0.0085 |
+| `shapenet_mix_mae` | 10 | 3 | 0.2100 +- 0.0136 |
+| `shapenet_mix_mae` | 20 | 3 | 0.2306 +- 0.0536 |
+
+### D2 best-by-K (`dist_v2`)
+
+| K | best method | test_acc mean +- std |
+|---:|---|---:|
+| 0 | `shapenet_mix_nepa` | 0.4550 +- 0.0200 |
+| 1 | `scratch` | 0.1589 +- 0.0288 |
+| 5 | `shapenet_nepa` | 0.2180 +- 0.0226 |
+| 10 | `shapenet_mesh_udf_nepa` | 0.2691 +- 0.0104 |
+| 20 | `shapenet_mix_nepa` | 0.3001 +- 0.0114 |
+
+### Dist effect summary (`obj_bg`, best-by-K)
+
+| K | no-dist v1 best | dist v1 best | Delta (dist-no_dist) | no-dist v2 best | dist v2 best | Delta (dist-no_dist) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 0 | 0.4550 | 0.5020 | +0.0470 | 0.2215 | 0.4550 | +0.2335 |
+| 1 | 0.1348 | 0.1624 | +0.0275 | 0.1325 | 0.1589 | +0.0264 |
+| 5 | 0.1767 | 0.2146 | +0.0379 | 0.1325 | 0.2180 | +0.0855 |
+| 10 | 0.2123 | 0.2513 | +0.0390 | 0.1618 | 0.2691 | +0.1073 |
+| 20 | 0.2266 | 0.3184 | +0.0918 | 0.1698 | 0.3001 | +0.1302 |
 
 ## Fair FT v1 update (`pcxyz2k`, xyz-only, random sampling)
 
@@ -95,7 +250,10 @@ Source: `runs/scan_variants_review_ft_fair_pcxyz2k_v1/obj_bg/scan_<method>_ablat
 - [x] Pause LP for now (FT-first policy).
 - [x] Run fair FT `v1` (`pc_xyz`, xyz-only, `n_point=2048`, bidirectional) for `obj_bg`.
 - [x] Launch fair FT `v2` (`obj_bg`) with explicit FPS eval sampling.
-- [ ] Aggregate `v2 obj_bg` results and compare against `v1 obj_bg` (same K/seed grid).
+- [x] Aggregate `v2 obj_bg` results and compare against `v1 obj_bg` (same K/seed grid).
+- [x] Complete dist-enabled follow-up on `obj_bg`:
+  - D1: `runs/scan_variants_review_ft_fair_pcxyz2k_dist_v1`
+  - D2: `runs/scan_variants_review_ft_fair_pcxyz2k_dist_fps_v2`
 - [ ] Decide go/no-go for expanding `v2` to `obj_only` and `pb_t50_rs`.
 - [ ] If FT still underperforms after `v2`, then re-open LP and model/head-side comparisons.
 - [ ] Keep completion-side TODOs tracked separately (this page is classification-focused).
