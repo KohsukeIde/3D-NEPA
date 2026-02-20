@@ -6,7 +6,7 @@ Legacy mixed/causal history:
 
 - `nepa3d/docs/results_scanobjectnn_review_legacy.md`
 
-Snapshot time: `2026-02-20 08:24 JST`
+Snapshot time: `2026-02-20 17:30 JST`
 
 ## Protocol integrity note (Feb 20, 2026)
 
@@ -19,10 +19,10 @@ Snapshot time: `2026-02-20 08:24 JST`
   - tokenizer enforces FPS semantics with on-the-fly FPS fallback (warning)
   - `pc_fps_order` was migrated into `data/scanobjectnn_obj_bg_v2` (`ok=2890, fail=0`)
 - No new pretrain was run for `v1/v2/v3`; all are fine-tuning reruns from existing pretrain checkpoints.
-- New rerun in progress:
-  - run root: `runs/scan_variants_review_ft_fair_pcxyz2k_fpsfix_v3/obj_bg`
-  - logs: `logs/finetune/scan_variants_review_ft_fair_pcxyz2k_fpsfix_v3_objbg/pipeline.log`
-- Post-`v3` fixed-grid diagnostic chain is launched (waits for `v3 obj_bg` completion):
+- `v3 obj_bg` is now complete (`75/75`).
+- Post-`v3` fixed-grid diagnostic chain is now complete:
+  - G1 (`fixed_grid + mean_no_special`): `15/15`
+  - G2 (`fixed_grid + bos`): `15/15`
   - pipeline: `logs/finetune/scan_variants_review_fixedgrid_after_v3_objbg_chain/pipeline.log`
 
 ## Run lineage (`v0 -> v1 -> v2 -> v3`)
@@ -32,7 +32,7 @@ Snapshot time: `2026-02-20 08:24 JST`
 | `v0` | poolfix baseline | `n_point=256`, `pt_xyz_key=pt_xyz_pool`, `pt_dist` enabled, `cls_is_causal=0`, `cls_pooling=mean_no_special`, `mc_eval_k_test=10` | FT complete (`225/225`) | `runs/scan_variants_review_ft_bidir_poolfix_v1` | `logs/finetune/scan_variants_review_lp_bidir_poolfix_resume/pipeline.log` |
 | `v1` | intended fair FT (pc-xyz 2k, xyz-only) | `n_point=2048`, `allow_scale_up=1`, `pt_xyz_key=pc_xyz`, `ablate_point_dist=1`, `cls_is_causal=0`, `cls_pooling=mean_pts`, `mc_eval_k_test=1` | `obj_bg` complete (`75/75`) but **provisional** | `runs/scan_variants_review_ft_fair_pcxyz2k_v1` | `logs/finetune/scan_variants_review_fair_ft_chain/pipeline.log` |
 | `v2` | intended fair FT + explicit FPS eval | `v1` + `pt_sample_mode_train=random`, `pt_sample_mode_eval=fps`, `pt_fps_key=pt_fps_order` | `obj_bg` complete (`75/75`) but **provisional** | `runs/scan_variants_review_ft_fair_pcxyz2k_fps_v2` | `logs/finetune/scan_variants_review_fair_ft_chain_v2_objbg/pipeline.log` |
-| `v3` | corrected fair FT (`pc_xyz` + aligned FPS key) | `n_point=2048`, `pt_xyz_key=pc_xyz`, `pt_fps_key=auto`, `pt_sample_mode_eval=fps`, `ablate_point_dist=1`, `cls_is_causal=0`, `cls_pooling=mean_pts` | `obj_bg` running | `runs/scan_variants_review_ft_fair_pcxyz2k_fpsfix_v3/obj_bg` | `logs/finetune/scan_variants_review_ft_fair_pcxyz2k_fpsfix_v3_objbg/pipeline.log` |
+| `v3` | corrected fair FT (`pc_xyz` + aligned FPS key) | `n_point=2048`, `pt_xyz_key=pc_xyz`, `pt_fps_key=auto`, `pt_sample_mode_eval=fps`, `ablate_point_dist=1`, `cls_is_causal=0`, `cls_pooling=mean_pts` | `obj_bg` complete (`75/75`) | `runs/scan_variants_review_ft_fair_pcxyz2k_fpsfix_v3/obj_bg` | `logs/finetune/scan_variants_review_ft_fair_pcxyz2k_fpsfix_v3_objbg/pipeline.log` |
 
 ## What changed between versions
 
@@ -55,17 +55,16 @@ Snapshot time: `2026-02-20 08:24 JST`
 - `v1` started at `2026-02-18 15:36` and finished `obj_bg` (`75/75`) at `2026-02-19 00:47`.
 - `v1` stage-2 did not proceed (pipeline script syntax error after stage-1 completion), so `obj_only` / `pb_t50_rs` remain `0/75`.
 - `v2` started at `2026-02-19 00:49` for `obj_bg` and completed `75/75` at `2026-02-19 08:35`.
-- `v3` started at `2026-02-20 07:48` for `obj_bg` (`75 jobs` total) and is currently running.
-- `v3` progress at this snapshot: `0/75` `last.pt` complete (running jobs are mid-epoch).
-- Fixed-grid post-chain status:
-  - launcher pid: `logs/finetune/scan_variants_review_fixedgrid_after_v3_objbg_chain/pipeline.pid`
-  - current state: waiting for `v3 obj_bg` completion (`[wait-v3] done=0/75`)
+- `v3` started at `2026-02-20 07:48` for `obj_bg`, and completed `75/75` at `2026-02-20 15:31`.
+- Fixed-grid post-chain completed after `v3`:
+  - `G1` (`mean_no_special`): `15/15` complete at `2026-02-20 16:18`
+  - `G2` (`bos`): `15/15` complete at `2026-02-20 17:02`
 - dist-enabled follow-up chain is complete:
   - stage D1 (dist-enabled `v1-style`, `obj_bg`): `75/75`
   - stage D2 (dist-enabled `v2-style`, `obj_bg`): `75/75`
   - chain log: `logs/finetune/scan_variants_review_fair_ft_dist_after_v2_objbg_chain/pipeline.log`
 
-## Scheduled Post-`v3` Diagnostic Chain (fixed-grid query)
+## Completed Post-`v3` Diagnostic Chain (fixed-grid query)
 
 Purpose:
 
@@ -78,7 +77,7 @@ Chain:
 - launcher: `scripts/finetune/launch_scanobjectnn_review_fixedgrid_after_v3_objbg_local.sh`
 - pipeline log: `logs/finetune/scan_variants_review_fixedgrid_after_v3_objbg_chain/pipeline.log`
 
-Stages (auto-resume by `last.pt`):
+Stages (auto-resume by `last.pt`, now complete):
 
 - `G1` (`fixed_grid` + `cls_pooling=mean_no_special`)
   - run root: `runs/scan_variants_review_ft_bidir_poolfix_fixedgrid_v0diag`
@@ -87,7 +86,7 @@ Stages (auto-resume by `last.pt`):
   - run root: `runs/scan_variants_review_ft_bidir_poolfix_fixedgrid_bos_v0diag`
   - log root: `logs/finetune/scan_variants_review_ft_bidir_poolfix_fixedgrid_bos_v0diag`
 
-Default sweep:
+Default sweep (complete):
 
 - variant=`obj_bg`, methods=`5`, `K=0`, seeds=`0,1,2` (expected `15` jobs per stage).
 - baseline protocol: `n_point=256`, `n_ray=0`, `pt_xyz_key=pt_xyz_pool`, `pt_dist_key=pt_dist_pool`, `mc_eval_k_test=10`, bidirectional FT.
@@ -107,19 +106,121 @@ When adding/aggregating results in this file, always perform and record log chec
 5. Completeness check
    - Count `last.pt` and state exact completion ratio (e.g., `x/75`).
 
-## Log Findings (v3 interim, from running jobs)
+## Log Findings (v3 final + fixed-grid)
 
 - Scope: fine-tune only. No new pretrain was launched in this cycle.
 - Verified in `logs/finetune/scan_variants_review_ft_fair_pcxyz2k_fpsfix_v3_objbg/pipeline.log`:
   - `pt_xyz_key=pc_xyz`, `pt_sample_mode_eval=fps`, `pt_fps_key=auto`, `ablate_point_dist=1`, `n_point=2048`, `n_ray=0`.
-- Size/embedding checks from job logs:
-  - Pretrained methods show `scale-up enabled: n_point 256 -> 2048` and `resizing pos_emb: ckpt_len=514 -> max_len=2050`.
-  - Scratch init run (`scratch_ablate_dist_k0_s0`) shows `n_point=2048/2048`, `n_ray=0/0` (no resize from 256-base ckpt).
-- Warning scan (so far):
-  - No FPS fallback warning and no dist-key mismatch warning observed in current `v3` job logs.
-- Early learning-curve observation:
-  - `shapenet_nepa_ablate_dist_k0_s0` shows stable train loss decrease and improving `val_acc` (already >0.4 at early epochs).
-  - `scratch_ablate_dist_k0_s0` remains low and unstable (near collapse regime).
+- Size/embedding checks from `v3` job logs:
+  - Pretrained runs: `scale-up enabled: n_point 256 -> 2048` and `resizing pos_emb: ckpt_len=514 -> max_len=2050` appear in `60/75` jobs.
+  - Scratch runs: no `scale-up`/`pos_emb` resize line (`0/15`), as expected.
+- Warning scan:
+  - No FPS fallback warning (`pt_sample_mode='fps' but ...`) in `v3` logs.
+  - No dist-key mismatch warning (`pt_dist_pool is missing or length-mismatched`) in `v3` logs.
+  - PyTorch nested-tensor `UserWarning` is present, but this warning is unrelated to data-key/FPS integrity.
+- Learning-curve sanity:
+  - `shapenet_nepa_ablate_dist_k0_s0`: train loss keeps decreasing; best summary line is `best_val=0.5336 ... test_acc=0.4647`.
+  - `scratch_ablate_dist_k0_s0`: weaker learning regime; best summary line is `best_val=0.3094 ... test_acc=0.2737`.
+- Completeness check:
+  - `v3`: `75/75` (`runs/scan_variants_review_ft_fair_pcxyz2k_fpsfix_v3/obj_bg`)
+  - `G1`: `15/15` (`runs/scan_variants_review_ft_bidir_poolfix_fixedgrid_v0diag/obj_bg`)
+  - `G2`: `15/15` (`runs/scan_variants_review_ft_bidir_poolfix_fixedgrid_bos_v0diag/obj_bg`)
+
+## Fair FT v3 (`pcxyz2k`, xyz-only, aligned FPS, complete)
+
+Status:
+
+- `v3 obj_bg` is complete (`75/75`).
+- This is the first corrected run where `pc_xyz` key propagation and FPS-key alignment are both fixed.
+
+Source: `runs/scan_variants_review_ft_fair_pcxyz2k_fpsfix_v3/obj_bg/scan_<method>_ablate_dist_k<K>_s<seed>/last.pt` (`n(seed)=3`).
+
+| Method | K | n(seed) | test_acc mean +- std |
+|---|---:|---:|---:|
+| `scratch` | 0 | 3 | 0.2765 +- 0.0053 |
+| `scratch` | 1 | 3 | 0.1583 +- 0.0134 |
+| `scratch` | 5 | 3 | 0.1486 +- 0.0169 |
+| `scratch` | 10 | 3 | 0.1440 +- 0.0138 |
+| `scratch` | 20 | 3 | 0.1343 +- 0.0000 |
+| `shapenet_nepa` | 0 | 3 | 0.4653 +- 0.0105 |
+| `shapenet_nepa` | 1 | 3 | 0.1561 +- 0.0382 |
+| `shapenet_nepa` | 5 | 3 | 0.1951 +- 0.0105 |
+| `shapenet_nepa` | 10 | 3 | 0.2301 +- 0.0292 |
+| `shapenet_nepa` | 20 | 3 | 0.2851 +- 0.0213 |
+| `shapenet_mesh_udf_nepa` | 0 | 3 | 0.4825 +- 0.0128 |
+| `shapenet_mesh_udf_nepa` | 1 | 3 | 0.1377 +- 0.0267 |
+| `shapenet_mesh_udf_nepa` | 5 | 3 | 0.1951 +- 0.0141 |
+| `shapenet_mesh_udf_nepa` | 10 | 3 | 0.2042 +- 0.0071 |
+| `shapenet_mesh_udf_nepa` | 20 | 3 | 0.2697 +- 0.0228 |
+| `shapenet_mix_nepa` | 0 | 3 | 0.4859 +- 0.0071 |
+| `shapenet_mix_nepa` | 1 | 3 | 0.1377 +- 0.0037 |
+| `shapenet_mix_nepa` | 5 | 3 | 0.1819 +- 0.0072 |
+| `shapenet_mix_nepa` | 10 | 3 | 0.2048 +- 0.0115 |
+| `shapenet_mix_nepa` | 20 | 3 | 0.2719 +- 0.0136 |
+| `shapenet_mix_mae` | 0 | 3 | 0.4722 +- 0.0224 |
+| `shapenet_mix_mae` | 1 | 3 | 0.1331 +- 0.0215 |
+| `shapenet_mix_mae` | 5 | 3 | 0.1698 +- 0.0114 |
+| `shapenet_mix_mae` | 10 | 3 | 0.2140 +- 0.0274 |
+| `shapenet_mix_mae` | 20 | 3 | 0.2599 +- 0.0134 |
+
+### Fair FT v3 best-by-K (`obj_bg`)
+
+| K | best method | test_acc mean +- std |
+|---:|---|---:|
+| 0 | `shapenet_mix_nepa` | 0.4859 +- 0.0071 |
+| 1 | `scratch` | 0.1583 +- 0.0134 |
+| 5 | `shapenet_mesh_udf_nepa` | 0.1951 +- 0.0141 |
+| 10 | `shapenet_nepa` | 0.2301 +- 0.0292 |
+| 20 | `shapenet_nepa` | 0.2851 +- 0.0213 |
+
+### Quick gap (`v1/v2 -> v3`, best-by-K, `obj_bg`)
+
+| K | `v1` best | `v2` best | `v3` best | Delta (`v3-v1`) | Delta (`v3-v2`) |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 0.4550 | 0.2215 | 0.4859 | +0.0309 | +0.2644 |
+| 20 | 0.2266 | 0.1698 | 0.2851 | +0.0585 | +0.1153 |
+
+## Fixed-Grid Diagnostic Results (`obj_bg`, K=0 only, complete)
+
+Goal:
+
+- Internal diagnostic under `v0`-style query-token setting (`pt_xyz_pool`, `n_point=256`), comparing fixed-grid behavior across pooling choices.
+
+### G1: `fixed_grid + mean_no_special` (`15/15`)
+
+Source: `runs/scan_variants_review_ft_bidir_poolfix_fixedgrid_v0diag/obj_bg/scan_<method>_fixed_grid_k0_s<seed>/last.pt` (`n(seed)=3`).
+
+| Method | n(seed) | test_acc mean +- std |
+|---|---:|---:|
+| `scratch` | 3 | 0.3024 +- 0.0117 |
+| `shapenet_nepa` | 3 | 0.4624 +- 0.0181 |
+| `shapenet_mesh_udf_nepa` | 3 | 0.4808 +- 0.0105 |
+| `shapenet_mix_nepa` | 3 | 0.4596 +- 0.0085 |
+| `shapenet_mix_mae` | 3 | 0.4481 +- 0.0029 |
+
+### G2: `fixed_grid + bos` (`15/15`)
+
+Source: `runs/scan_variants_review_ft_bidir_poolfix_fixedgrid_bos_v0diag/obj_bg/scan_<method>_fixed_grid_bos_k0_s<seed>/last.pt` (`n(seed)=3`).
+
+| Method | n(seed) | test_acc mean +- std |
+|---|---:|---:|
+| `scratch` | 3 | 0.2674 +- 0.0155 |
+| `shapenet_nepa` | 3 | 0.4550 +- 0.0131 |
+| `shapenet_mesh_udf_nepa` | 3 | 0.4676 +- 0.0164 |
+| `shapenet_mix_nepa` | 3 | 0.4750 +- 0.0120 |
+| `shapenet_mix_mae` | 3 | 0.4389 +- 0.0226 |
+
+### G1 vs G2 summary (`obj_bg`, K=0)
+
+| Setting | best method | best test_acc mean +- std |
+|---|---|---:|
+| `G1` (`fixed_grid + mean_no_special`) | `shapenet_mesh_udf_nepa` | 0.4808 +- 0.0105 |
+| `G2` (`fixed_grid + bos`) | `shapenet_mix_nepa` | 0.4750 +- 0.0120 |
+
+Readout:
+
+- In this diagnostic sweep, `G2` did not outperform `G1` at best-point level (`0.4750 - 0.4808 = -0.0057`).
+- Both fixed-grid settings remain below `v0 obj_bg K=0` best (`0.6644`), so this path is currently diagnostic-only.
 
 ## Quick result gap (`obj_bg`, best-by-K)
 
@@ -340,13 +441,14 @@ Source: `runs/scan_variants_review_ft_fair_pcxyz2k_v1/obj_bg/scan_<method>_ablat
   - D2: `runs/scan_variants_review_ft_fair_pcxyz2k_dist_fps_v2`
 - [ ] Decide go/no-go for expanding `v2` to `obj_only` and `pb_t50_rs`.
 - [ ] If FT still underperforms after `v2`, then re-open LP and model/head-side comparisons.
-- [ ] After `v3 obj_bg` completion, decide go/no-go for expanding corrected fair protocol to `obj_only` / `pb_t50_rs`.
+- [ ] Decide go/no-go for expanding corrected fair protocol (`v3`) to `obj_only` / `pb_t50_rs`.
 - [x] Launch post-`v3` fixed-grid diagnostic chain (`obj_bg`, `K=0`, seeds `0,1,2`):
   - pipeline: `logs/finetune/scan_variants_review_fixedgrid_after_v3_objbg_chain/pipeline.log`
-- [ ] Optional diagnostic result aggregation (separate from fair-comparison main table): `v0`-style fixed-grid query ablation.
+- [x] Aggregate optional diagnostic results (separate from fair-comparison main table): `v0`-style fixed-grid query ablation (`G1/G2`, `obj_bg`, `K=0`).
   - Aim: reduce random-query variance in query-token classification.
   - Keep this as internal diagnostic only (not PointGPT-style fair comparison mainline).
-  - First sweep now scheduled as two stages: `G1` (`mean_no_special`) and `G2` (`bos`).
+  - First sweep completed as two stages: `G1` (`mean_no_special`) and `G2` (`bos`).
+- [ ] Decide whether fixed-grid query (and/or `bos` pooling) should be expanded beyond diagnostic scope.
 - [ ] Keep completion-side TODOs tracked separately (this page is classification-focused).
 - [ ] Keep launcher references up to date:
   - launcher: `scripts/finetune/launch_scanobjectnn_review_fair_ft_chain_local.sh`
