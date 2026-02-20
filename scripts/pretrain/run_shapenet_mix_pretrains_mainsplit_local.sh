@@ -15,6 +15,14 @@ GPU1="${GPU1:-1}"
 BATCH="${BATCH:-32}"
 EPOCHS="${EPOCHS:-50}"
 LR="${LR:-3e-4}"
+# 2D NEPA style linear LR scaling:
+#   LEARNING_RATE = BASE_LEARNING_RATE * TOTAL_BATCH_SIZE / 256
+# Single-GPU local runner uses TOTAL_BATCH_SIZE=BATCH by default.
+LR_SCALE_ENABLE="${LR_SCALE_ENABLE:-1}"
+LR_SCALE_REF_BATCH="${LR_SCALE_REF_BATCH:-256}"
+LR_BASE_TOTAL_BATCH="${LR_BASE_TOTAL_BATCH:-32}"
+BASE_LEARNING_RATE="${BASE_LEARNING_RATE:-}"
+TOTAL_BATCH_SIZE="${TOTAL_BATCH_SIZE:-${BATCH}}"
 N_POINT="${N_POINT:-256}"
 N_RAY="${N_RAY:-256}"
 D_MODEL="${D_MODEL:-384}"
@@ -44,6 +52,16 @@ fi
 if [ ! -f "${CFG_MIX}" ]; then
   echo "[error] missing mix config: ${CFG_MIX}"
   exit 1
+fi
+
+if [ "${LR_SCALE_ENABLE}" = "1" ]; then
+  if [ -z "${BASE_LEARNING_RATE}" ]; then
+    BASE_LEARNING_RATE="$("${PYTHON_BIN}" -c "print(float('${LR}') * float('${LR_BASE_TOTAL_BATCH}') / 256.0)")"
+  fi
+  LR="$("${PYTHON_BIN}" -c "print(float('${BASE_LEARNING_RATE}') * float('${TOTAL_BATCH_SIZE}') / float('${LR_SCALE_REF_BATCH}'))")"
+  echo "[lr-scale] enabled: base_lr=${BASE_LEARNING_RATE} total_batch=${TOTAL_BATCH_SIZE} ref_batch=${LR_SCALE_REF_BATCH} lr=${LR}"
+else
+  echo "[lr-scale] disabled: lr=${LR}"
 fi
 
 run_one() {
@@ -121,4 +139,3 @@ echo "[info] completed rc_gpu${GPU0}=${rc0} rc_gpu${GPU1}=${rc1}"
 if [ "${rc0}" -ne 0 ] || [ "${rc1}" -ne 0 ]; then
   exit 1
 fi
-

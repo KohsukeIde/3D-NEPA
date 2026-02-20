@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from torch.cuda.amp import GradScaler, autocast
+from accelerate import Accelerator
 from torch.utils.data import DataLoader
 
 from ..data.dataset import ModelNet40QueryDataset, collate
@@ -259,7 +259,7 @@ def main():
         type=int,
         default=1,
         help=(
-            "When --resume is set, also load optimizer/scaler state (1) or not (0). "
+            "When --resume is set, also load optimizer state (1) or not (0). "
             "If max_len changes (pos_emb resize), optimizer state is partially restored by default."
         ),
     )
@@ -413,19 +413,45 @@ def main():
     )
     ap.add_argument("--objective", type=str, default="nepa", choices=["nepa", "mae"])
     ap.add_argument("--mask_ratio", type=float, default=0.4)
+    ap.add_argument(
+        "--mixed_precision",
+        type=str,
+        default="auto",
+        choices=["auto", "no", "fp16", "bf16"],
+        help="Mixed precision mode for Accelerate (auto/no/fp16/bf16).",
+    )
     ap.add_argument("--voxel_grid", type=int, default=64)
     ap.add_argument("--voxel_dilate", type=int, default=1)
     ap.add_argument("--voxel_max_steps", type=int, default=0)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
+    arch_warns: list[str] = []
     if str(args.arch) == "encdec":
         if int(args.qa_tokens) != 1:
-            print("[WARN] --arch encdec implies --qa_tokens=1")
+            arch_warns.append("[WARN] --arch encdec implies --qa_tokens=1")
             args.qa_tokens = 1
         if str(args.qa_layout) != "split":
-            print("[WARN] --arch encdec implies --qa_layout=split")
+            arch_warns.append("[WARN] --arch encdec implies --qa_layout=split")
             args.qa_layout = "split"
+
+    req_mp = str(args.mixed_precision)
+    if req_mp == "auto":
+        if not torch.cuda.is_available():
+            req_mp = "no"
+        elif torch.cuda.is_bf16_supported():
+            req_mp = "bf16"
+        else:
+            req_mp = "fp16"
+    accelerator = Accelerator(mixed_precision=req_mp)
+    args.mixed_precision = str(accelerator.mixed_precision)
+    mprint = accelerator.print
+    mprint(
+        f"[accelerate] num_processes={accelerator.num_processes} "
+        f"distributed_type={accelerator.distributed_type} mixed_precision={accelerator.mixed_precision}"
+    )
+    for _w in arch_warns:
+        mprint(_w)
 
     set_seed(args.seed)
 
@@ -436,9 +462,7 @@ def main():
         np.random.seed(base)
         random.seed(base)
 
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    use_amp = device == "cuda"
+    device = accelerator.device
 
     # -------------------------
     # Point/ray scaling schedule (curriculum)
@@ -530,7 +554,7 @@ def main():
     n_point_init = _schedule_value(n_point_sched, 0, args.n_point)
     n_ray_init = _schedule_value(n_ray_sched, 0, args.n_ray)
     if n_point_init != args.n_point or n_ray_init != args.n_ray:
-        print(
+        mprint(
             f"[schedule:init] overriding dataset sizes at epoch0: n_point {args.n_point}->{n_point_init}, "
             f"n_ray {args.n_ray}->{n_ray_init}"
         )
@@ -574,10 +598,13 @@ def main():
         if args.mix_seed and args.mix_seed != mix_info.get("seed", 0):
             sampler.seed = int(args.mix_seed)
 
-        print("[mix] components:")
+        mprint("[mix] components:")
         for n, w, sz in zip(mix_info["names"], mix_info["weights"], mix_info["sizes"]):
-            print(f"  - {n}: weight={w:.3f} size={sz}")
-        print(f"[mix] num_samples_per_epoch={len(sampler)} replacement={mix_info['replacement']} seed={sampler.seed}")
+            mprint(f"  - {n}: weight={w:.3f} size={sz}")
+        mprint(
+            f"[mix] num_samples_per_epoch={len(sampler)} replacement={mix_info['replacement']} "
+            f"seed={sampler.seed}"
+        )
 
         dl = DataLoader(
             ds,
@@ -664,7 +691,7 @@ def main():
                 "Use a compatible checkpoint or disable teacher distillation."
             )
         if teacher_len != int(t):
-            print(f"[teacher] resizing pos_emb: ckpt_len={teacher_len} -> max_len={t}")
+            mprint(f"[teacher] resizing pos_emb: ckpt_len={teacher_len} -> max_len={t}")
             teacher_state = maybe_resize_pos_emb_in_state_dict(dict(teacher_state), int(t))
         teacher_model = QueryNepa(
             feat_dim=15,
@@ -683,7 +710,10 @@ def main():
         teacher_model.eval()
         for p in teacher_model.parameters():
             p.requires_grad_(False)
-        print(f"[teacher] enabled: ckpt={os.path.abspath(str(args.teacher_ckpt).strip())} weight={float(args.teacher_distill_weight)}")
+        mprint(
+            f"[teacher] enabled: ckpt={os.path.abspath(str(args.teacher_ckpt).strip())} "
+            f"weight={float(args.teacher_distill_weight)}"
+        )
 
     aux_heads_dict = {}
     if float(args.aux_b2_weight) > 0.0:
@@ -701,9 +731,17 @@ def main():
         params += list(aux_heads.parameters())
 
     opt = optim.AdamW(params, lr=args.lr, weight_decay=0.05)
-    scaler = GradScaler(enabled=use_amp)
+    if aux_enabled:
+        model, aux_heads, opt, dl = accelerator.prepare(model, aux_heads, opt, dl)
+        raw_aux_heads = accelerator.unwrap_model(aux_heads)
+    else:
+        model, opt, dl = accelerator.prepare(model, opt, dl)
+        raw_aux_heads = None
+    raw_model = accelerator.unwrap_model(model)
 
-    os.makedirs(args.save_dir, exist_ok=True)
+    if accelerator.is_main_process:
+        os.makedirs(args.save_dir, exist_ok=True)
+    accelerator.wait_for_everyone()
     save_every = max(1, int(args.save_every))
     save_last = bool(int(args.save_last))
     auto_resume = bool(int(args.auto_resume))
@@ -719,7 +757,7 @@ def main():
     if resume_path:
         if not os.path.isfile(resume_path):
             if auto_resume:
-                print(f"[resume] checkpoint not found ({resume_path}); starting fresh")
+                mprint(f"[resume] checkpoint not found ({resume_path}); starting fresh")
                 resume_path = ""
             else:
                 raise FileNotFoundError(f"resume checkpoint not found: {resume_path}")
@@ -736,10 +774,10 @@ def main():
         ):
             ckpt_pos_len = int(ckpt_model["pos_emb"].shape[1])
             if ckpt_pos_len != int(t):
-                print(f"[resume] resizing pos_emb: ckpt_len={ckpt_pos_len} -> max_len={t}")
+                mprint(f"[resume] resizing pos_emb: ckpt_len={ckpt_pos_len} -> max_len={t}")
                 ckpt_model = maybe_resize_pos_emb_in_state_dict(dict(ckpt_model), int(t))
 
-        load_state_dict_flexible(model, ckpt_model, strict=True)
+        load_state_dict_flexible(raw_model, ckpt_model, strict=True)
 
         can_resume_opt = bool(int(args.resume_optimizer))
         pos_emb_resized = bool(ckpt_pos_len is not None and ckpt_pos_len != int(t))
@@ -752,12 +790,12 @@ def main():
             if ckpt_aux is None:
                 # aux heads are newly enabled for this run.
                 can_resume_opt = False
-                print("[resume] aux_heads missing in checkpoint; using fresh aux head state")
+                mprint("[resume] aux_heads missing in checkpoint; using fresh aux head state")
             else:
-                rep = aux_heads.load_state_dict(ckpt_aux, strict=False)
+                rep = raw_aux_heads.load_state_dict(ckpt_aux, strict=False)
                 if len(rep.missing_keys) > 0 or len(rep.unexpected_keys) > 0:
                     can_resume_opt = False
-                    print(
+                    mprint(
                         "[resume] aux_heads mismatch; using fresh optimizer state "
                         f"(missing={rep.missing_keys}, unexpected={rep.unexpected_keys})"
                     )
@@ -770,34 +808,29 @@ def main():
                 opt_state = ckpt["opt"]
                 if pos_emb_resized and partial_resume_opt:
                     opt_state, dropped, checked = _prune_optimizer_state_for_shape_mismatch(opt, opt_state)
-                    print(
+                    mprint(
                         "[resume] pos_emb resized; partial optimizer restore enabled "
                         f"(dropped_states={dropped}/{checked})"
                     )
                 opt.load_state_dict(opt_state)
             except Exception as e:
-                print(f"[resume] failed to load optimizer state ({e}); using fresh optimizer state")
+                mprint(f"[resume] failed to load optimizer state ({e}); using fresh optimizer state")
                 can_resume_opt = False
         else:
             if "opt" not in ckpt:
-                print("[resume] optimizer state missing in checkpoint; using fresh optimizer state")
+                mprint("[resume] optimizer state missing in checkpoint; using fresh optimizer state")
             elif not can_resume_opt:
-                print("[resume] skipping optimizer state load")
-
-        if use_amp and can_resume_opt and ("scaler" in ckpt) and (ckpt["scaler"] is not None):
-            try:
-                scaler.load_state_dict(ckpt["scaler"])
-            except Exception as e:
-                print(f"[resume] failed to load scaler state ({e}); using fresh scaler state")
+                mprint("[resume] skipping optimizer state load")
 
         start_epoch = int(ckpt.get("epoch", -1)) + 1
         step = int(ckpt.get("step", start_epoch * len(dl)))
-        print(f"[resume] loaded={resume_path} start_epoch={start_epoch} step={step}")
+        mprint(f"[resume] loaded={resume_path} start_epoch={start_epoch} step={step}")
     else:
-        print("[resume] disabled (no checkpoint found/requested)")
+        mprint("[resume] disabled (no checkpoint found/requested)")
 
     if start_epoch >= args.epochs:
-        print(f"[resume] checkpoint already reached target epochs: start_epoch={start_epoch} >= epochs={args.epochs}")
+        mprint(f"[resume] checkpoint already reached target epochs: start_epoch={start_epoch} >= epochs={args.epochs}")
+        accelerator.end_training()
         return
 
     # Dual-masking schedule (PointGPT-style) for AR shortcut mitigation.
@@ -827,7 +860,7 @@ def main():
                     )
                 ds.set_sizes(n_point=new_n_point, n_ray=new_n_ray)
                 cur_n_point, cur_n_ray = int(new_n_point), int(new_n_ray)
-                print(f"[schedule] epoch {ep}: n_point={cur_n_point}, n_ray={cur_n_ray}")
+                mprint(f"[schedule] epoch {ep}: n_point={cur_n_point}, n_ray={cur_n_ray}")
 
         # Dual-mask window scaling for larger point/ray counts.
         cur_total = int(cur_n_point) + int(cur_n_ray)
@@ -839,7 +872,7 @@ def main():
         )
         if last_dm_window is None or int(dm_window) != int(last_dm_window):
             if str(args.dual_mask_window_scale) != "none":
-                print(
+                mprint(
                     f"[dual_mask] epoch {ep}: window {int(args.dual_mask_window)}->{int(dm_window)} "
                     f"(scale={args.dual_mask_window_scale}, ref_total={dual_mask_ref_total}, cur_total={cur_total})"
                 )
@@ -847,6 +880,11 @@ def main():
 
         if args.mix_config:
             # Deterministic per-epoch sampler.
+            if hasattr(dl, "set_epoch"):
+                try:
+                    dl.set_epoch(ep)
+                except Exception:
+                    pass
             try:
                 dl.sampler.set_epoch(ep)
             except Exception:
@@ -856,7 +894,7 @@ def main():
             type_id = batch["type_id"].to(device, non_blocking=True).long()
 
             opt.zero_grad(set_to_none=True)
-            with autocast(enabled=use_amp):
+            with accelerator.autocast():
                 if args.objective == "nepa":
                     # Dual masking only affects the causal attention during training.
                     # Note: we keep it off for MAE objective to avoid confounding baselines.
@@ -874,7 +912,7 @@ def main():
                         dual_mask_seed=dm_seed,
                         dual_mask_type_aware=int(args.dual_mask_type_aware),
                     )
-                    loss_main = model.nepa_loss(z, z_hat, type_id=type_id)
+                    loss_main = raw_model.nepa_loss(z, z_hat, type_id=type_id)
 
                     b2_loss = loss_main.new_tensor(0.0)
                     b3_loss = loss_main.new_tensor(0.0)
@@ -1033,17 +1071,16 @@ def main():
                     feat_in = feat.clone()
                     feat_in[token_mask] = 0.0
                     with torch.no_grad():
-                        z_target = model.embed_tokens(feat, type_id)
+                        z_target = raw_model.embed_tokens(feat, type_id)
                     _, z_hat, _ = model(feat_in, type_id)
-                    loss = model.mae_loss(z_hat, z_target, token_mask)
+                    loss = raw_model.mae_loss(z_hat, z_target, token_mask)
 
-            scaler.scale(loss).backward()
-            scaler.step(opt)
-            scaler.update()
+            accelerator.backward(loss)
+            opt.step()
 
             if step % 100 == 0:
                 if args.objective == "nepa":
-                    print(
+                    mprint(
                         "ep={} step={} loss={:.4f} main={:.4f} b2={:.4f} b3={:.4f} e={:.4f} d={:.4f} aux={:.4f}".format(
                             ep,
                             step,
@@ -1057,7 +1094,7 @@ def main():
                         )
                     )
                     if teacher_model is not None:
-                        print(
+                        mprint(
                             "ep={} step={} distill={:.4f} w={:.4f}".format(
                                 ep,
                                 step,
@@ -1066,7 +1103,7 @@ def main():
                             )
                         )
                     if float(args.cycle_weight) > 0.0:
-                        print(
+                        mprint(
                             "ep={} step={} cycle={:.4f} w={:.4f}".format(
                                 ep,
                                 step,
@@ -1075,18 +1112,18 @@ def main():
                             )
                         )
                 else:
-                    print(f"ep={ep} step={step} loss={loss.item():.4f}")
+                    mprint(f"ep={ep} step={step} loss={loss.item():.4f}")
             step += 1
             global_step += 1
 
         is_last = ep == (args.epochs - 1)
         should_save = (ep % save_every == 0) or is_last
-        if should_save:
+        if should_save and accelerator.is_main_process:
             ckpt = {
-                "model": model.state_dict(),
-                "aux_heads": (aux_heads.state_dict() if aux_enabled else None),
+                "model": raw_model.state_dict(),
+                "aux_heads": (raw_aux_heads.state_dict() if aux_enabled else None),
                 "opt": opt.state_dict(),
-                "scaler": scaler.state_dict() if use_amp else None,
+                "scaler": None,
                 "args": vars(args),
                 "epoch": ep,
                 "step": step,
@@ -1095,6 +1132,8 @@ def main():
             torch.save(ckpt, ckpt_path)
             if save_last:
                 torch.save(ckpt, os.path.join(args.save_dir, "last.pt"))
+        accelerator.wait_for_everyone()
+    accelerator.end_training()
 
 
 if __name__ == "__main__":

@@ -284,7 +284,26 @@ Qualitative CPAC (grid query + marching cubes):
 Pretrain:
 
 - `pretrain.py` supports `--resume` and `--auto_resume`
+- `pretrain.py` / `pretrain_kplane.py` support Accelerate-based multi-GPU DDP via `--mixed_precision {auto,no,fp16,bf16}`
 - launchers pass `--resume <save_dir>/last.pt`
+- multi-GPU launch example:
+
+```bash
+accelerate launch --num_processes 4 -m nepa3d.train.pretrain \
+  --mix_config nepa3d/configs/pretrain_mixed_shapenet_mesh_udf_scan.yaml \
+  --n_point 2048 --n_ray 0 --batch 4 --epochs 50 --save_dir runs/pretrain_ddp_2k
+```
+
+- PBS wrappers also support Accelerate when `NUM_PROCESSES>1`:
+  - `scripts/pretrain/nepa3d_pretrain.sh`
+  - `scripts/pretrain/nepa3d_pretrain_pointcloud.sh`
+  - `scripts/pretrain/nepa3d_kplane_pretrain.sh`
+  - wrappers default to `${PYTHON_BIN} -m accelerate.commands.launch` (override via `ACCELERATE_PYTHON` / `ACCELERATE_LAUNCH_MODULE`)
+  - wrappers now apply 2D-NEPA-style linear LR scaling by default:
+    - `LEARNING_RATE = BASE_LEARNING_RATE * TOTAL_BATCH_SIZE / 256`
+    - `TOTAL_BATCH_SIZE` defaults to `BATCH * NUM_PROCESSES`
+    - override controls: `LR_SCALE_ENABLE`, `BASE_LEARNING_RATE`, `LR_SCALE_REF_BATCH`, `TOTAL_BATCH_SIZE`, `LR_BASE_TOTAL_BATCH`
+  - local pretrain runners (`scripts/pretrain/run_shapenet_*_local.sh`) also use the same scaling rule (with default `TOTAL_BATCH_SIZE=BATCH`).
 
 Fine-tune:
 

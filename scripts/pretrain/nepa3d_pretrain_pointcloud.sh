@@ -28,6 +28,13 @@ BACKEND="${BACKEND:-pointcloud}"
 BATCH="${BATCH:-32}"
 EPOCHS="${EPOCHS:-50}"
 LR="${LR:-3e-4}"
+# 2D NEPA style linear LR scaling:
+#   LEARNING_RATE = BASE_LEARNING_RATE * TOTAL_BATCH_SIZE / 256
+# Backward-compatible default keeps LR at current default when TOTAL_BATCH_SIZE=32.
+LR_SCALE_ENABLE="${LR_SCALE_ENABLE:-1}"          # 1: enable linear scaling, 0: disable
+LR_SCALE_REF_BATCH="${LR_SCALE_REF_BATCH:-256}"  # denominator in scaling rule
+LR_BASE_TOTAL_BATCH="${LR_BASE_TOTAL_BATCH:-32}" # baseline total batch for deriving BASE_LEARNING_RATE
+BASE_LEARNING_RATE="${BASE_LEARNING_RATE:-}"     # if empty, derived from LR and LR_BASE_TOTAL_BATCH
 N_POINT="${N_POINT:-256}"
 N_RAY="${N_RAY:-256}"
 D_MODEL="${D_MODEL:-384}"
@@ -39,8 +46,36 @@ SAVE_LAST="${SAVE_LAST:-1}"
 AUTO_RESUME="${AUTO_RESUME:-1}"
 RESUME="${RESUME:-}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
+MIXED_PRECISION="${MIXED_PRECISION:-auto}" # auto/no/fp16/bf16
+NUM_PROCESSES="${NUM_PROCESSES:-1}"       # >1 enables Accelerate DDP
+NUM_MACHINES="${NUM_MACHINES:-1}"
+MACHINE_RANK="${MACHINE_RANK:-0}"
+MAIN_PROCESS_IP="${MAIN_PROCESS_IP:-127.0.0.1}"
+MAIN_PROCESS_PORT="${MAIN_PROCESS_PORT:-29500}"
+ACCELERATE_PYTHON="${ACCELERATE_PYTHON:-${PYTHON_BIN}}"
+ACCELERATE_LAUNCH_MODULE="${ACCELERATE_LAUNCH_MODULE:-accelerate.commands.launch}"
 
-"${PYTHON_BIN}" -m nepa3d.train.pretrain \
+TOTAL_BATCH_SIZE="${TOTAL_BATCH_SIZE:-$((BATCH * NUM_PROCESSES))}"
+if [ "${LR_SCALE_ENABLE}" = "1" ]; then
+  if [ -z "${BASE_LEARNING_RATE}" ]; then
+    BASE_LEARNING_RATE="$("${PYTHON_BIN}" -c "print(float('${LR}') * float('${LR_BASE_TOTAL_BATCH}') / 256.0)")"
+  fi
+  LR="$("${PYTHON_BIN}" -c "print(float('${BASE_LEARNING_RATE}') * float('${TOTAL_BATCH_SIZE}') / float('${LR_SCALE_REF_BATCH}'))")"
+  echo "[lr-scale] enabled: base_lr=${BASE_LEARNING_RATE} total_batch=${TOTAL_BATCH_SIZE} ref_batch=${LR_SCALE_REF_BATCH} lr=${LR}"
+else
+  echo "[lr-scale] disabled: lr=${LR}"
+fi
+
+if [ "${NUM_PROCESSES}" -gt 1 ]; then
+  "${ACCELERATE_PYTHON}" -m "${ACCELERATE_LAUNCH_MODULE}" \
+    --multi_gpu \
+    --num_processes "${NUM_PROCESSES}" \
+    --num_machines "${NUM_MACHINES}" \
+    --machine_rank "${MACHINE_RANK}" \
+    --main_process_ip "${MAIN_PROCESS_IP}" \
+    --main_process_port "${MAIN_PROCESS_PORT}" \
+    --mixed_precision "${MIXED_PRECISION}" \
+    -m nepa3d.train.pretrain \
   --cache_root "${CACHE_ROOT}" \
   --backend "${BACKEND}" \
   --batch "${BATCH}" --epochs "${EPOCHS}" \
@@ -48,8 +83,25 @@ NUM_WORKERS="${NUM_WORKERS:-4}"
   --n_point "${N_POINT}" --n_ray "${N_RAY}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
   --num_workers "${NUM_WORKERS}" \
+  --mixed_precision "${MIXED_PRECISION}" \
   --save_every "${SAVE_EVERY}" \
   --save_last "${SAVE_LAST}" \
   --auto_resume "${AUTO_RESUME}" \
   --resume "${RESUME}" \
   --save_dir "${SAVE_DIR}"
+else
+  "${PYTHON_BIN}" -m nepa3d.train.pretrain \
+  --cache_root "${CACHE_ROOT}" \
+  --backend "${BACKEND}" \
+  --batch "${BATCH}" --epochs "${EPOCHS}" \
+  --lr "${LR}" \
+  --n_point "${N_POINT}" --n_ray "${N_RAY}" \
+  --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
+  --num_workers "${NUM_WORKERS}" \
+  --mixed_precision "${MIXED_PRECISION}" \
+  --save_every "${SAVE_EVERY}" \
+  --save_last "${SAVE_LAST}" \
+  --auto_resume "${AUTO_RESUME}" \
+  --resume "${RESUME}" \
+  --save_dir "${SAVE_DIR}"
+fi

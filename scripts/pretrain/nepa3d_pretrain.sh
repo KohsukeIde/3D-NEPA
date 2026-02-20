@@ -34,6 +34,13 @@ BACKEND="${BACKEND:-mesh}"
 BATCH="${BATCH:-32}"
 EPOCHS="${EPOCHS:-50}"
 LR="${LR:-3e-4}"
+# 2D NEPA style linear LR scaling:
+#   LEARNING_RATE = BASE_LEARNING_RATE * TOTAL_BATCH_SIZE / 256
+# Backward-compatible default keeps LR at current default when TOTAL_BATCH_SIZE=32.
+LR_SCALE_ENABLE="${LR_SCALE_ENABLE:-1}"          # 1: enable linear scaling, 0: disable
+LR_SCALE_REF_BATCH="${LR_SCALE_REF_BATCH:-256}"  # denominator in scaling rule
+LR_BASE_TOTAL_BATCH="${LR_BASE_TOTAL_BATCH:-32}" # baseline total batch for deriving BASE_LEARNING_RATE
+BASE_LEARNING_RATE="${BASE_LEARNING_RATE:-}"     # if empty, derived from LR and LR_BASE_TOTAL_BATCH
 N_POINT="${N_POINT:-256}"
 N_RAY="${N_RAY:-256}"
 MAX_LEN="${MAX_LEN:--1}"  # -1 = auto from (qa_tokens/add_eos/n_point/n_ray/schedules)
@@ -50,6 +57,14 @@ RESUME="${RESUME:-}"
 RESUME_OPTIMIZER="${RESUME_OPTIMIZER:-1}"
 NUM_WORKERS="${NUM_WORKERS:-4}"
 SEED="${SEED:-0}"
+MIXED_PRECISION="${MIXED_PRECISION:-auto}" # auto/no/fp16/bf16
+NUM_PROCESSES="${NUM_PROCESSES:-1}"       # >1 enables Accelerate DDP
+NUM_MACHINES="${NUM_MACHINES:-1}"
+MACHINE_RANK="${MACHINE_RANK:-0}"
+MAIN_PROCESS_IP="${MAIN_PROCESS_IP:-127.0.0.1}"
+MAIN_PROCESS_PORT="${MAIN_PROCESS_PORT:-29500}"
+ACCELERATE_PYTHON="${ACCELERATE_PYTHON:-${PYTHON_BIN}}"
+ACCELERATE_LAUNCH_MODULE="${ACCELERATE_LAUNCH_MODULE:-accelerate.commands.launch}"
 DROP_RAY_PROB="${DROP_RAY_PROB:-0.0}"
 FORCE_MISSING_RAY="${FORCE_MISSING_RAY:-0}"
 ADD_EOS="${ADD_EOS:-1}"
@@ -84,7 +99,27 @@ if [ "${FORCE_MISSING_RAY}" = "1" ]; then
   EXTRA_FORCE="--force_missing_ray"
 fi
 
-"${PYTHON_BIN}" -m nepa3d.train.pretrain \
+TOTAL_BATCH_SIZE="${TOTAL_BATCH_SIZE:-$((BATCH * NUM_PROCESSES))}"
+if [ "${LR_SCALE_ENABLE}" = "1" ]; then
+  if [ -z "${BASE_LEARNING_RATE}" ]; then
+    BASE_LEARNING_RATE="$("${PYTHON_BIN}" -c "print(float('${LR}') * float('${LR_BASE_TOTAL_BATCH}') / 256.0)")"
+  fi
+  LR="$("${PYTHON_BIN}" -c "print(float('${BASE_LEARNING_RATE}') * float('${TOTAL_BATCH_SIZE}') / float('${LR_SCALE_REF_BATCH}'))")"
+  echo "[lr-scale] enabled: base_lr=${BASE_LEARNING_RATE} total_batch=${TOTAL_BATCH_SIZE} ref_batch=${LR_SCALE_REF_BATCH} lr=${LR}"
+else
+  echo "[lr-scale] disabled: lr=${LR}"
+fi
+
+if [ "${NUM_PROCESSES}" -gt 1 ]; then
+  "${ACCELERATE_PYTHON}" -m "${ACCELERATE_LAUNCH_MODULE}" \
+    --multi_gpu \
+    --num_processes "${NUM_PROCESSES}" \
+    --num_machines "${NUM_MACHINES}" \
+    --machine_rank "${MACHINE_RANK}" \
+    --main_process_ip "${MAIN_PROCESS_IP}" \
+    --main_process_port "${MAIN_PROCESS_PORT}" \
+    --mixed_precision "${MIXED_PRECISION}" \
+    -m nepa3d.train.pretrain \
   --cache_root "${CACHE_ROOT}" \
   --mix_config "${MIX_CONFIG}" \
   --mix_num_samples "${MIX_NUM_SAMPLES}" \
@@ -102,6 +137,7 @@ fi
   --add_eos "${ADD_EOS}" \
   --objective "${OBJECTIVE}" \
   --mask_ratio "${MASK_RATIO}" \
+  --mixed_precision "${MIXED_PRECISION}" \
   --aux_b2_weight "${AUX_B2_WEIGHT}" \
   --aux_b2_hit_weight "${AUX_B2_HIT_WEIGHT}" \
   --aux_b2_t_weight "${AUX_B2_T_WEIGHT}" \
@@ -130,3 +166,52 @@ fi
   --seed "${SEED}" \
   ${EXTRA_FORCE} \
   --save_dir "${SAVE_DIR}"
+else
+  "${PYTHON_BIN}" -m nepa3d.train.pretrain \
+  --cache_root "${CACHE_ROOT}" \
+  --mix_config "${MIX_CONFIG}" \
+  --mix_num_samples "${MIX_NUM_SAMPLES}" \
+  --mix_seed "${MIX_SEED}" \
+  --backend "${BACKEND}" \
+  --batch "${BATCH}" --epochs "${EPOCHS}" \
+  --lr "${LR}" \
+  --n_point "${N_POINT}" --n_ray "${N_RAY}" \
+  --max_len "${MAX_LEN}" \
+  --n_point_schedule "${N_POINT_SCHEDULE}" \
+  --n_ray_schedule "${N_RAY_SCHEDULE}" \
+  --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
+  --num_workers "${NUM_WORKERS}" \
+  --drop_ray_prob "${DROP_RAY_PROB}" \
+  --add_eos "${ADD_EOS}" \
+  --objective "${OBJECTIVE}" \
+  --mask_ratio "${MASK_RATIO}" \
+  --mixed_precision "${MIXED_PRECISION}" \
+  --aux_b2_weight "${AUX_B2_WEIGHT}" \
+  --aux_b2_hit_weight "${AUX_B2_HIT_WEIGHT}" \
+  --aux_b2_t_weight "${AUX_B2_T_WEIGHT}" \
+  --aux_b2_rank_weight "${AUX_B2_RANK_WEIGHT}" \
+  --aux_b2_rank_pairs "${AUX_B2_RANK_PAIRS}" \
+  --aux_b2_rank_margin "${AUX_B2_RANK_MARGIN}" \
+  --aux_b3_weight "${AUX_B3_WEIGHT}" \
+  --aux_b3_near_tau "${AUX_B3_NEAR_TAU}" \
+  --teacher_ckpt "${TEACHER_CKPT}" \
+  --teacher_distill_weight "${TEACHER_DISTILL_WEIGHT}" \
+  --teacher_answer_drop_prob "${TEACHER_ANSWER_DROP_PROB}" \
+  --cycle_weight "${CYCLE_WEIGHT}" \
+  --cycle_answer_drop_prob "${CYCLE_ANSWER_DROP_PROB}" \
+  --d_hard_weight "${D_HARD_WEIGHT}" \
+  --d_hard_top_frac "${D_HARD_TOP_FRAC}" \
+  --d_hard_min_tokens "${D_HARD_MIN_TOKENS}" \
+  --aux_e_weight "${AUX_E_WEIGHT}" \
+  --save_every "${SAVE_EVERY}" \
+  --save_last "${SAVE_LAST}" \
+  --auto_resume "${AUTO_RESUME}" \
+  --resume "${RESUME}" \
+  --resume_optimizer "${RESUME_OPTIMIZER}" \
+  --voxel_grid "${VOXEL_GRID}" \
+  --voxel_dilate "${VOXEL_DILATE}" \
+  --voxel_max_steps "${VOXEL_MAX_STEPS}" \
+  --seed "${SEED}" \
+  ${EXTRA_FORCE} \
+  --save_dir "${SAVE_DIR}"
+fi
