@@ -12,6 +12,7 @@ class PointCloudBackend:
 
     def get_pools(self):
         pt_xyz = self.d["pt_xyz_pool"].astype(np.float32, copy=False)
+        pc_xyz = self.pc
         # Prefer observation-derived distances if available (pc->query).
         # This avoids leaking mesh-derived distances (pt_dist_pool) into pointcloud experiments.
         if "pt_dist_pc_pool" in self.d:
@@ -45,6 +46,7 @@ class PointCloudBackend:
 
         pools = {
             "pt_xyz_pool": pt_xyz,
+            "pc_xyz": pc_xyz,
             "pt_dist_pool": pt_dist,
             "ray_o_pool": self.d["ray_o_pool"].astype(np.float32, copy=False),
             "ray_d_pool": self.d["ray_d_pool"].astype(np.float32, copy=False),
@@ -54,7 +56,13 @@ class PointCloudBackend:
             "ray_available": True,
         }
         if "pt_fps_order" in self.d:
-            pools["pt_fps_order"] = self.d["pt_fps_order"].astype(np.int32, copy=False)
+            pfo = self.d["pt_fps_order"].astype(np.int32, copy=False)
+            pools["pt_fps_order"] = pfo
+            pools["pt_xyz_pool_fps_order"] = pfo
+        if "pc_fps_order" in self.d:
+            pco = self.d["pc_fps_order"].astype(np.int32, copy=False)
+            pools["pc_fps_order"] = pco
+            pools["pc_xyz_fps_order"] = pco
         return pools
 
 
@@ -63,6 +71,7 @@ class PointCloudMeshRayBackend(PointCloudBackend):
 
     def get_pools(self):
         pt_xyz = self.d["pt_xyz_pool"].astype(np.float32, copy=False)
+        pc_xyz = self.pc
         # Prefer observation-derived distances if available (pc->query).
         if "pt_dist_pc_pool" in self.d:
             pt_dist = self.d["pt_dist_pc_pool"].astype(np.float32, copy=False)
@@ -81,6 +90,7 @@ class PointCloudMeshRayBackend(PointCloudBackend):
             pt_dist = dist.astype(np.float32, copy=False)
         pools = {
             "pt_xyz_pool": pt_xyz,
+            "pc_xyz": pc_xyz,
             "pt_dist_pool": pt_dist,
             "ray_o_pool": self.d["ray_o_pool"].astype(np.float32, copy=False),
             "ray_d_pool": self.d["ray_d_pool"].astype(np.float32, copy=False),
@@ -90,7 +100,13 @@ class PointCloudMeshRayBackend(PointCloudBackend):
             "ray_available": True,
         }
         if "pt_fps_order" in self.d:
-            pools["pt_fps_order"] = self.d["pt_fps_order"].astype(np.int32, copy=False)
+            pfo = self.d["pt_fps_order"].astype(np.int32, copy=False)
+            pools["pt_fps_order"] = pfo
+            pools["pt_xyz_pool_fps_order"] = pfo
+        if "pc_fps_order" in self.d:
+            pco = self.d["pc_fps_order"].astype(np.int32, copy=False)
+            pools["pc_fps_order"] = pco
+            pools["pc_xyz_fps_order"] = pco
         return pools
 
 

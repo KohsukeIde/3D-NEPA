@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import warnings
 from torch.utils.data import Dataset
 
 from .modelnet40_index import label_from_path, build_label_map
@@ -199,6 +200,8 @@ class ModelNet40QueryDataset(Dataset):
         self.ablate_point_dist = bool(ablate_point_dist)
         self.pt_sample_mode = str(pt_sample_mode)
         self.pt_fps_key = str(pt_fps_key)
+        self._warned_missing_fps_order = False
+        self._warned_dist_mismatch = False
         self.pt_rfps_m = int(pt_rfps_m)
 
         self.aug_rotate_z = bool(aug_rotate_z)
@@ -291,6 +294,12 @@ class ModelNet40QueryDataset(Dataset):
         if (pt_dist_pool is None) or (getattr(pt_dist_pool, "shape", None) is None) or (
             pt_dist_pool.shape[0] != pt_xyz_pool.shape[0]
         ):
+            if (not self.ablate_point_dist) and (not self._warned_dist_mismatch):
+                warnings.warn(
+                    f"pt_dist_key='{self.pt_dist_key}' is missing or incompatible with "
+                    f"pt_xyz_key='{self.pt_xyz_key}' (path={path}). Falling back to zeros."
+                )
+                self._warned_dist_mismatch = True
             pt_dist_pool = np.zeros((pt_xyz_pool.shape[0], 1), dtype=np.float32)
         else:
             # enforce (N,1)
@@ -337,7 +346,35 @@ class ModelNet40QueryDataset(Dataset):
             if self.ablate_point_dist:
                 dist = np.zeros_like(dist, dtype=np.float32)
 
-            pt_fps_order = local_pools.get(self.pt_fps_key, None) if isinstance(local_pools, dict) else None
+            pt_fps_order = None
+            resolved_fps_key = None
+            if isinstance(local_pools, dict):
+                fps_key = self.pt_fps_key
+                if str(fps_key).lower() == "auto":
+                    candidates = [
+                        f"{self.pt_xyz_key}_fps_order",
+                        "pc_fps_order" if str(self.pt_xyz_key).startswith("pc_") else None,
+                        "pt_fps_order",
+                    ]
+                    fps_key = None
+                    for ck in candidates:
+                        if ck is not None and ck in local_pools:
+                            fps_key = ck
+                            break
+                resolved_fps_key = fps_key
+                if fps_key is not None:
+                    pt_fps_order = local_pools.get(fps_key, None)
+                if (
+                    str(self.pt_sample_mode).lower() == "fps"
+                    and pt_fps_order is None
+                    and not self._warned_missing_fps_order
+                ):
+                    warnings.warn(
+                        f"pt_sample_mode='fps' but FPS order key is missing "
+                        f"(pt_fps_key={self.pt_fps_key}, resolved={resolved_fps_key}, path={path}). "
+                        "Falling back to on-the-fly FPS in tokenizer (slower)."
+                    )
+                    self._warned_missing_fps_order = True
 
             feat, type_id = build_sequence(
                 xyz,

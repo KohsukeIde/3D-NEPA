@@ -53,7 +53,7 @@ COMMON_ENV=(
   "MC_EVAL_K_TEST=${MC_EVAL_K_TEST:-1}"
   "PT_XYZ_KEY=${PT_XYZ_KEY:-pc_xyz}"
   "PT_DIST_KEY=${PT_DIST_KEY:-pt_dist_pool}"
-  "PT_FPS_KEY=${PT_FPS_KEY:-pt_fps_order}"
+  "PT_FPS_KEY=${PT_FPS_KEY:-auto}"
   "PT_RFPS_M=${PT_RFPS_M:-4096}"
   "ABLATE_POINT_DIST=${ABLATE_POINT_DIST:-0}"
   "AUG_PRESET=${AUG_PRESET:-scanobjectnn}"
@@ -112,4 +112,3 @@ if [ "${d2_done}" -lt "${EXPECTED}" ]; then
 fi
 
 echo "[done] dist-enabled v1/v2 obj_bg chain completed"
-

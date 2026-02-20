@@ -104,6 +104,8 @@ class ClsWrapper(nn.Module):
 
         if pool == "mean":
             pooled = h.mean(dim=1)
+        elif pool == "bos":
+            pooled = h[:, 0, :]
         elif pool == "mean_no_special":
             ns_mask = (type_id != TYPE_BOS) & (type_id != TYPE_EOS)
             pooled = _masked_mean(h, ns_mask) if ns_mask.any() else h[:, -1, :]
@@ -224,8 +226,8 @@ def main():
         "--cls_pooling",
         type=str,
         default="mean_a",
-        choices=["auto", "eos", "mean", "mean_no_special", "mean_pts", "mean_a"],
-        help="classification pooling (default=mean_a): auto(mean_a for qa_tokens else eos), eos, mean, mean_no_special, mean_pts, mean_a",
+        choices=["auto", "eos", "bos", "mean", "mean_no_special", "mean_pts", "mean_a"],
+        help="classification pooling (default=mean_a): auto(mean_a for qa_tokens else eos), eos, bos, mean, mean_no_special, mean_pts, mean_a",
     )
     ap.add_argument(
         "--ablate_point_dist",
@@ -248,14 +250,14 @@ def main():
         "--pt_sample_mode_train",
         type=str,
         default="random",
-        choices=["random", "fps", "rfps"],
+        choices=["random", "fps", "rfps", "grid", "fixed_grid"],
         help="Point sampling for TRAIN sequences.",
     )
     ap.add_argument(
         "--pt_sample_mode_eval",
         type=str,
         default="fps",
-        choices=["random", "fps", "rfps"],
+        choices=["random", "fps", "rfps", "grid", "fixed_grid"],
         help="Point sampling for EVAL sequences.",
     )
     ap.add_argument(

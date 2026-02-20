@@ -1,20 +1,38 @@
 # ScanObjectNN Review Tables (Active)
 
-This page tracks active ScanObjectNN classification reruns and keeps the run lineage (`v0 -> v1 -> v2`) explicit.
+This page tracks active ScanObjectNN classification reruns and keeps the run lineage (`v0 -> v1 -> v2 -> v3`) explicit.
 
 Legacy mixed/causal history:
 
 - `nepa3d/docs/results_scanobjectnn_review_legacy.md`
 
-Snapshot time: `2026-02-20 05:54 JST`
+Snapshot time: `2026-02-20 08:24 JST`
 
-## Run lineage (`v0 -> v1 -> v2`)
+## Protocol integrity note (Feb 20, 2026)
+
+- `v1/v2` were intended to run with `pt_xyz_key=pc_xyz`, but `pointcloud_*` backends did not expose `pc_xyz` in `get_pools()`. As a result, dataset-side key selection fell back to `pt_xyz_pool`.
+- `v2` used `pt_sample_mode_eval=fps` with `pt_fps_key=pt_fps_order`; this key is aligned to `pt_xyz_pool` (size `4000`), not `pc_xyz` (size `2048`).
+- Therefore, `v1/v2` and downstream `D1/D2` should be treated as **provisional** for fair `pc_xyz-2k` claims.
+- Code was fixed on Feb 20:
+  - backends now expose `pc_xyz` and FPS aliases
+  - dataset supports `pt_fps_key=auto` resolution with warnings
+  - tokenizer enforces FPS semantics with on-the-fly FPS fallback (warning)
+  - `pc_fps_order` was migrated into `data/scanobjectnn_obj_bg_v2` (`ok=2890, fail=0`)
+- No new pretrain was run for `v1/v2/v3`; all are fine-tuning reruns from existing pretrain checkpoints.
+- New rerun in progress:
+  - run root: `runs/scan_variants_review_ft_fair_pcxyz2k_fpsfix_v3/obj_bg`
+  - logs: `logs/finetune/scan_variants_review_ft_fair_pcxyz2k_fpsfix_v3_objbg/pipeline.log`
+- Post-`v3` fixed-grid diagnostic chain is launched (waits for `v3 obj_bg` completion):
+  - pipeline: `logs/finetune/scan_variants_review_fixedgrid_after_v3_objbg_chain/pipeline.log`
+
+## Run lineage (`v0 -> v1 -> v2 -> v3`)
 
 | Version | Purpose | Key protocol | Status | Run root | Main log |
 |---|---|---|---|---|---|
 | `v0` | poolfix baseline | `n_point=256`, `pt_xyz_key=pt_xyz_pool`, `pt_dist` enabled, `cls_is_causal=0`, `cls_pooling=mean_no_special`, `mc_eval_k_test=10` | FT complete (`225/225`) | `runs/scan_variants_review_ft_bidir_poolfix_v1` | `logs/finetune/scan_variants_review_lp_bidir_poolfix_resume/pipeline.log` |
-| `v1` | fair FT (pc-xyz 2k, xyz-only) | `n_point=2048`, `allow_scale_up=1`, `pt_xyz_key=pc_xyz`, `ablate_point_dist=1`, `cls_is_causal=0`, `cls_pooling=mean_pts`, `mc_eval_k_test=1` | `obj_bg` complete (`75/75`), others not run | `runs/scan_variants_review_ft_fair_pcxyz2k_v1` | `logs/finetune/scan_variants_review_fair_ft_chain/pipeline.log` |
-| `v2` | fair FT + explicit FPS eval | `v1` + `pt_sample_mode_train=random`, `pt_sample_mode_eval=fps`, `pt_fps_key=pt_fps_order` | `obj_bg` complete (`75/75`) | `runs/scan_variants_review_ft_fair_pcxyz2k_fps_v2` | `logs/finetune/scan_variants_review_fair_ft_chain_v2_objbg/pipeline.log` |
+| `v1` | intended fair FT (pc-xyz 2k, xyz-only) | `n_point=2048`, `allow_scale_up=1`, `pt_xyz_key=pc_xyz`, `ablate_point_dist=1`, `cls_is_causal=0`, `cls_pooling=mean_pts`, `mc_eval_k_test=1` | `obj_bg` complete (`75/75`) but **provisional** | `runs/scan_variants_review_ft_fair_pcxyz2k_v1` | `logs/finetune/scan_variants_review_fair_ft_chain/pipeline.log` |
+| `v2` | intended fair FT + explicit FPS eval | `v1` + `pt_sample_mode_train=random`, `pt_sample_mode_eval=fps`, `pt_fps_key=pt_fps_order` | `obj_bg` complete (`75/75`) but **provisional** | `runs/scan_variants_review_ft_fair_pcxyz2k_fps_v2` | `logs/finetune/scan_variants_review_fair_ft_chain_v2_objbg/pipeline.log` |
+| `v3` | corrected fair FT (`pc_xyz` + aligned FPS key) | `n_point=2048`, `pt_xyz_key=pc_xyz`, `pt_fps_key=auto`, `pt_sample_mode_eval=fps`, `ablate_point_dist=1`, `cls_is_causal=0`, `cls_pooling=mean_pts` | `obj_bg` running | `runs/scan_variants_review_ft_fair_pcxyz2k_fpsfix_v3/obj_bg` | `logs/finetune/scan_variants_review_ft_fair_pcxyz2k_fpsfix_v3_objbg/pipeline.log` |
 
 ## What changed between versions
 
@@ -26,16 +44,82 @@ Snapshot time: `2026-02-20 05:54 JST`
 - `v1 -> v2`:
   - sampling behavior made explicit with FPS at eval (`pt_sample_mode_eval=fps`)
   - train sampling kept random (`pt_sample_mode_train=random`)
+- `v2 -> v3`:
+  - fixed `pc_xyz` propagation in backends (no fallback to `pt_xyz_pool`)
+  - enabled `pt_fps_key=auto` key resolution
+  - generated `pc_fps_order` and aligned eval FPS to selected point key
+  - added warnings for `dist`/FPS key mismatch and explicit FPS fallback path
 
 ## Current run status
 
 - `v1` started at `2026-02-18 15:36` and finished `obj_bg` (`75/75`) at `2026-02-19 00:47`.
 - `v1` stage-2 did not proceed (pipeline script syntax error after stage-1 completion), so `obj_only` / `pb_t50_rs` remain `0/75`.
 - `v2` started at `2026-02-19 00:49` for `obj_bg` and completed `75/75` at `2026-02-19 08:35`.
+- `v3` started at `2026-02-20 07:48` for `obj_bg` (`75 jobs` total) and is currently running.
+- `v3` progress at this snapshot: `0/75` `last.pt` complete (running jobs are mid-epoch).
+- Fixed-grid post-chain status:
+  - launcher pid: `logs/finetune/scan_variants_review_fixedgrid_after_v3_objbg_chain/pipeline.pid`
+  - current state: waiting for `v3 obj_bg` completion (`[wait-v3] done=0/75`)
 - dist-enabled follow-up chain is complete:
   - stage D1 (dist-enabled `v1-style`, `obj_bg`): `75/75`
   - stage D2 (dist-enabled `v2-style`, `obj_bg`): `75/75`
   - chain log: `logs/finetune/scan_variants_review_fair_ft_dist_after_v2_objbg_chain/pipeline.log`
+
+## Scheduled Post-`v3` Diagnostic Chain (fixed-grid query)
+
+Purpose:
+
+- Validate whether query-token classification stabilizes with deterministic fixed-grid sampling under `v0`-style settings.
+- Keep this as internal diagnostic; do not mix with `pc_xyz-2k` fair-comparison headline tables.
+
+Chain:
+
+- runner: `scripts/finetune/run_scanobjectnn_review_fixedgrid_after_v3_objbg_local.sh`
+- launcher: `scripts/finetune/launch_scanobjectnn_review_fixedgrid_after_v3_objbg_local.sh`
+- pipeline log: `logs/finetune/scan_variants_review_fixedgrid_after_v3_objbg_chain/pipeline.log`
+
+Stages (auto-resume by `last.pt`):
+
+- `G1` (`fixed_grid` + `cls_pooling=mean_no_special`)
+  - run root: `runs/scan_variants_review_ft_bidir_poolfix_fixedgrid_v0diag`
+  - log root: `logs/finetune/scan_variants_review_ft_bidir_poolfix_fixedgrid_v0diag`
+- `G2` (`fixed_grid` + `cls_pooling=bos`, global-query proxy)
+  - run root: `runs/scan_variants_review_ft_bidir_poolfix_fixedgrid_bos_v0diag`
+  - log root: `logs/finetune/scan_variants_review_ft_bidir_poolfix_fixedgrid_bos_v0diag`
+
+Default sweep:
+
+- variant=`obj_bg`, methods=`5`, `K=0`, seeds=`0,1,2` (expected `15` jobs per stage).
+- baseline protocol: `n_point=256`, `n_ray=0`, `pt_xyz_key=pt_xyz_pool`, `pt_dist_key=pt_dist_pool`, `mc_eval_k_test=10`, bidirectional FT.
+
+## Log Audit Policy (for every result update)
+
+When adding/aggregating results in this file, always perform and record log checks:
+
+1. Launch/protocol header check
+   - Verify `pt_xyz_key`, `pt_sample_mode_{train,eval}`, `pt_fps_key`, `ablate_point_dist`, `n_point/n_ray`, `cls_is_causal`, `cls_pooling`, `mc_eval_k_test` in pipeline log.
+2. Sequence-length/size check
+   - Confirm whether `allow_scale_up` triggered and whether `pos_emb` resize occurred (`[sizes]`, `[ckpt] resizing pos_emb` lines).
+3. Warning scan
+   - Check for FPS fallback warnings and dist-key mismatch warnings; if present, record affected runs explicitly.
+4. Learning-curve sanity check
+   - Inspect early train/val trends from job logs (collapse / divergence / stable improvement) before publishing summary tables.
+5. Completeness check
+   - Count `last.pt` and state exact completion ratio (e.g., `x/75`).
+
+## Log Findings (v3 interim, from running jobs)
+
+- Scope: fine-tune only. No new pretrain was launched in this cycle.
+- Verified in `logs/finetune/scan_variants_review_ft_fair_pcxyz2k_fpsfix_v3_objbg/pipeline.log`:
+  - `pt_xyz_key=pc_xyz`, `pt_sample_mode_eval=fps`, `pt_fps_key=auto`, `ablate_point_dist=1`, `n_point=2048`, `n_ray=0`.
+- Size/embedding checks from job logs:
+  - Pretrained methods show `scale-up enabled: n_point 256 -> 2048` and `resizing pos_emb: ckpt_len=514 -> max_len=2050`.
+  - Scratch init run (`scratch_ablate_dist_k0_s0`) shows `n_point=2048/2048`, `n_ray=0/0` (no resize from 256-base ckpt).
+- Warning scan (so far):
+  - No FPS fallback warning and no dist-key mismatch warning observed in current `v3` job logs.
+- Early learning-curve observation:
+  - `shapenet_nepa_ablate_dist_k0_s0` shows stable train loss decrease and improving `val_acc` (already >0.4 at early epochs).
+  - `scratch_ablate_dist_k0_s0` remains low and unstable (near collapse regime).
 
 ## Quick result gap (`obj_bg`, best-by-K)
 
@@ -256,10 +340,19 @@ Source: `runs/scan_variants_review_ft_fair_pcxyz2k_v1/obj_bg/scan_<method>_ablat
   - D2: `runs/scan_variants_review_ft_fair_pcxyz2k_dist_fps_v2`
 - [ ] Decide go/no-go for expanding `v2` to `obj_only` and `pb_t50_rs`.
 - [ ] If FT still underperforms after `v2`, then re-open LP and model/head-side comparisons.
+- [ ] After `v3 obj_bg` completion, decide go/no-go for expanding corrected fair protocol to `obj_only` / `pb_t50_rs`.
+- [x] Launch post-`v3` fixed-grid diagnostic chain (`obj_bg`, `K=0`, seeds `0,1,2`):
+  - pipeline: `logs/finetune/scan_variants_review_fixedgrid_after_v3_objbg_chain/pipeline.log`
+- [ ] Optional diagnostic result aggregation (separate from fair-comparison main table): `v0`-style fixed-grid query ablation.
+  - Aim: reduce random-query variance in query-token classification.
+  - Keep this as internal diagnostic only (not PointGPT-style fair comparison mainline).
+  - First sweep now scheduled as two stages: `G1` (`mean_no_special`) and `G2` (`bos`).
 - [ ] Keep completion-side TODOs tracked separately (this page is classification-focused).
 - [ ] Keep launcher references up to date:
   - launcher: `scripts/finetune/launch_scanobjectnn_review_fair_ft_chain_local.sh`
   - runner: `scripts/finetune/run_scanobjectnn_review_fair_ft_chain_local.sh`
+  - launcher: `scripts/finetune/launch_scanobjectnn_review_fixedgrid_after_v3_objbg_local.sh`
+  - runner: `scripts/finetune/run_scanobjectnn_review_fixedgrid_after_v3_objbg_local.sh`
 
 ## Protocol reference (`v0` poolfix rerun)
 

@@ -1,4 +1,5 @@
 import numpy as np
+import warnings
 
 from .ordering import morton3d, sort_by_ray_direction
 
@@ -20,6 +21,8 @@ TYPE_Q_POINT = 5
 TYPE_A_POINT = 6
 TYPE_Q_RAY = 7
 TYPE_A_RAY = 8
+
+_WARNED_FPS_FALLBACK = False
 
 
 def _choice(n, k, rng=None):
@@ -146,6 +149,7 @@ def _sample_point_indices(
     pt_rfps_m: int = 4096,
 ) -> np.ndarray:
     """Select point indices according to a sampling policy."""
+    global _WARNED_FPS_FALLBACK
     n_pool = int(pt_xyz_pool.shape[0])
     n_point = int(n_point)
     if n_point <= 0:
@@ -155,20 +159,60 @@ def _sample_point_indices(
     k = min(n_point, n_pool)
     mode = str(pt_sample_mode).lower()
 
+    if mode in ("grid", "fixed_grid"):
+        # Deterministic fixed-grid queries in normalized space [-1,1]^3.
+        # We map each grid query to its nearest point in the pool.
+        r = int(np.ceil(float(k) ** (1.0 / 3.0)))
+        r = max(r, 1)
+        lin = np.linspace(-1.0, 1.0, num=r, dtype=np.float32)
+        gx, gy, gz = np.meshgrid(lin, lin, lin, indexing="ij")
+        grid = np.stack([gx, gy, gz], axis=-1).reshape(-1, 3)[:k]
+        try:
+            from scipy.spatial import cKDTree
+
+            _, nn = cKDTree(pt_xyz_pool.astype(np.float32, copy=False)).query(grid, k=1)
+            return np.asarray(nn, dtype=np.int64).reshape(-1)
+        except Exception:
+            # Fallback: brute-force nearest neighbor (chunked to keep memory bounded).
+            idx = np.empty((grid.shape[0],), dtype=np.int64)
+            pts = pt_xyz_pool.astype(np.float32, copy=False)
+            bsz = 64
+            for i in range(0, grid.shape[0], bsz):
+                q = grid[i : i + bsz]
+                d2 = ((q[:, None, :] - pts[None, :, :]) ** 2).sum(axis=-1)
+                idx[i : i + bsz] = np.argmin(d2, axis=1).astype(np.int64, copy=False)
+            return idx
+
     if mode == "fps":
+        order = None
         if pt_fps_order is not None:
-            order = np.asarray(pt_fps_order).reshape(-1)
-            k0 = min(k, order.shape[0])
-            chosen = order[:k0].astype(np.int64, copy=False)
-            if k0 == k:
-                return chosen
-            used = np.zeros((n_pool,), dtype=bool)
-            used[chosen] = True
-            rest = np.flatnonzero(~used)
-            extra = rng.choice(rest, size=(k - k0), replace=False)
-            return np.concatenate([chosen, extra.astype(np.int64)], axis=0)
-        # fall back to RFPS when cached order is unavailable
-        mode = "rfps"
+            cand = np.asarray(pt_fps_order).reshape(-1)
+            if cand.size > 0 and int(cand.min()) >= 0 and int(cand.max()) < n_pool:
+                order = cand.astype(np.int64, copy=False)
+
+        if order is None:
+            if not _WARNED_FPS_FALLBACK:
+                warnings.warn(
+                    "pt_sample_mode='fps' but no valid FPS order was provided; "
+                    "computing FPS on-the-fly. For strict reproducibility and speed, "
+                    "precompute FPS order in cache and set --pt_fps_key accordingly."
+                )
+                _WARNED_FPS_FALLBACK = True
+            from nepa3d.utils.fps import fps_order
+
+            order = fps_order(pt_xyz_pool.astype(np.float32, copy=False), k=k).astype(
+                np.int64, copy=False
+            )
+
+        k0 = min(k, int(order.shape[0]))
+        chosen = order[:k0].astype(np.int64, copy=False)
+        if k0 == k:
+            return chosen
+        used = np.zeros((n_pool,), dtype=bool)
+        used[chosen] = True
+        rest = np.flatnonzero(~used)
+        extra = rng.choice(rest, size=(k - k0), replace=False)
+        return np.concatenate([chosen, extra.astype(np.int64)], axis=0)
 
     if mode == "rfps":
         from nepa3d.utils.fps import rfps_order
