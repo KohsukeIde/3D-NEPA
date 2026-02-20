@@ -29,6 +29,7 @@ class QueryNepa(nn.Module):
         topo_include_bos=True,
         topo_ray_coord="origin",  # origin | proj | bbox
         topo_ray_bbox=0.5,
+        encdec_src_causal=0,
     ):
         super().__init__()
         self.feat_dim = int(feat_dim)
@@ -38,6 +39,7 @@ class QueryNepa(nn.Module):
         self.topo_include_bos = bool(topo_include_bos)
         self.topo_ray_coord = str(topo_ray_coord)
         self.topo_ray_bbox = float(topo_ray_bbox)
+        self.encdec_src_causal = bool(encdec_src_causal)
 
         self.type_emb = nn.Embedding(int(n_types), int(d_model))
         self.token_mlp = nn.Sequential(
@@ -66,6 +68,7 @@ class QueryNepa(nn.Module):
                 dropout=dropout,
                 topo_k=self.topo_k,
                 topo_include_bos=self.topo_include_bos,
+                src_causal=bool(self.encdec_src_causal),
             )
         else:
             raise ValueError(f"Unknown arch={self.arch}")

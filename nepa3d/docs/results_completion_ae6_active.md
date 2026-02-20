@@ -2012,3 +2012,61 @@ Readout:
 - `w96_lr1e-4_v3` is consistently better than `w64_lr2e-4_v3`.
 - however, both retries remain below prior scale references (`scalequick ep051`, `scale_stab ep053`), especially on CPAC IoU.
 - therefore these v3 retries are diagnostic and not promotion candidates for the main line.
+
+### H) Objective-Preserving Scale Retry (linear vs sqrt, Feb 20, 2026)
+
+Objective:
+
+- run a clean scale retry without auxiliary objective terms (no B-2/C-2/D/E),
+- compare dual-mask window scaling modes only:
+  - `linear`
+  - `sqrt`
+
+Policy alignment:
+
+- this run follows the current policy to prioritize completion;
+- UCPR was intentionally not executed in this retry pack.
+
+Runner:
+
+- `scripts/analysis/run_scale_objpres_retry_local.sh`
+
+Launch logs:
+
+- `logs/analysis/scale_objpres_manual_20260220_161222/launcher.log` (`linear`)
+- `logs/analysis/scale_objpres_manual_20260220_161156/launcher.log` (`sqrt`)
+
+Pretrain/eval logs:
+
+- `logs/analysis/eccv_upmix_nepa_qa_dualmask_scale_objpres_lin_s0_20260220_161222/pretrain.log`
+- `logs/analysis/eccv_upmix_nepa_qa_dualmask_scale_objpres_sqrt_s0_20260220_161156/pretrain.log`
+
+Checkpoints:
+
+- `runs/eccv_upmix_nepa_qa_dualmask_scale_objpres_lin_s0_20260220_161222/ckpt_ep054.pt`
+- `runs/eccv_upmix_nepa_qa_dualmask_scale_objpres_sqrt_s0_20260220_161156/ckpt_ep054.pt`
+
+CPAC summary (`max_shapes=800`, `htrain4k`, `n_query=256`):
+
+| Run | `n_context=512` pool MAE/RMSE/IoU | `n_context=512` grid_near08 MAE/RMSE/IoU | `n_context=1024` pool MAE/RMSE/IoU | `n_context=1024` grid_near08 MAE/RMSE/IoU |
+|---|---|---|---|---|
+| `objpres_linear` | `0.03094 / 0.03826 / 0.54390` | `0.02852 / 0.03519 / 0.27776` | `0.03167 / 0.03752 / 0.45244` | `0.02938 / 0.03526 / 0.21150` |
+| `objpres_sqrt` | `0.02974 / 0.03716 / 0.57319` | `0.02712 / 0.03386 / 0.31692` | `0.03047 / 0.03636 / 0.50173` | `0.02862 / 0.03452 / 0.23993` |
+
+Result JSON:
+
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_lin_s0_20260220_161222_pc512q256_pool_h_htrain4k.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_lin_s0_20260220_161222_pc512q256_grid_near08_h_htrain4k.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_lin_s0_20260220_161222_pc1024q256_pool_h_htrain4k.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_lin_s0_20260220_161222_pc1024q256_grid_near08_h_htrain4k.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_sqrt_s0_20260220_161156_pc512q256_pool_h_htrain4k.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_sqrt_s0_20260220_161156_pc512q256_grid_near08_h_htrain4k.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_sqrt_s0_20260220_161156_pc1024q256_pool_h_htrain4k.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_sqrt_s0_20260220_161156_pc1024q256_grid_near08_h_htrain4k.json`
+
+Readout:
+
+- both objective-preserving retries completed end-to-end (pretrain + 4 CPAC evals each).
+- `sqrt` scaling is consistently better than `linear` across all four CPAC settings.
+- in this objective-preserving line, `n_context=1024` is worse than `n_context=512` for both pool and grid.
+- absolute IoU remains below the earlier completion-best auxiliary lines, so this pack is a stabilization diagnostic, not a main promotion candidate.

@@ -6,6 +6,9 @@ import os
 import numpy as np
 import torch
 
+from .mesh_metrics import mesh_metrics
+from ..utils import grid as grid_utils
+
 from ..backends.mesh_backend import MeshBackend
 from ..backends.pointcloud_backend import (
     PointCloudBackend,
@@ -1091,6 +1094,411 @@ def extract_xy_for_path(
     return X, y, q_xyz.astype(np.float32, copy=False)
 
 
+def _trilinear_sample_grid_np(grid: np.ndarray, xyz: np.ndarray) -> np.ndarray:
+    """Trilinearly sample a (G,G,G) grid at xyz in [-1, 1].
+
+    Grid convention follows preprocessing: grid indices correspond to x/y/z axes
+    in that order (i.e., grid[ix, iy, iz]).
+    """
+
+    assert grid.ndim == 3, f"grid must be (G,G,G), got {grid.shape}"
+    G = int(grid.shape[0])
+    assert grid.shape[1] == G and grid.shape[2] == G, f"grid must be cubic, got {grid.shape}"
+
+    xyz = np.asarray(xyz, dtype=np.float32)
+    # Normalize xyz from [-1,1] -> [0, G-1]
+    gcoord = (xyz + 1.0) * 0.5 * float(G - 1)
+    gx = np.clip(gcoord[:, 0], 0.0, float(G - 1))
+    gy = np.clip(gcoord[:, 1], 0.0, float(G - 1))
+    gz = np.clip(gcoord[:, 2], 0.0, float(G - 1))
+
+    x0 = np.floor(gx).astype(np.int64)
+    y0 = np.floor(gy).astype(np.int64)
+    z0 = np.floor(gz).astype(np.int64)
+    x1 = np.clip(x0 + 1, 0, G - 1)
+    y1 = np.clip(y0 + 1, 0, G - 1)
+    z1 = np.clip(z0 + 1, 0, G - 1)
+
+    xd = (gx - x0.astype(np.float32)).astype(np.float32)
+    yd = (gy - y0.astype(np.float32)).astype(np.float32)
+    zd = (gz - z0.astype(np.float32)).astype(np.float32)
+
+    c000 = grid[x0, y0, z0]
+    c100 = grid[x1, y0, z0]
+    c010 = grid[x0, y1, z0]
+    c110 = grid[x1, y1, z0]
+    c001 = grid[x0, y0, z1]
+    c101 = grid[x1, y0, z1]
+    c011 = grid[x0, y1, z1]
+    c111 = grid[x1, y1, z1]
+
+    c00 = c000 * (1.0 - xd) + c100 * xd
+    c01 = c001 * (1.0 - xd) + c101 * xd
+    c10 = c010 * (1.0 - xd) + c110 * xd
+    c11 = c011 * (1.0 - xd) + c111 * xd
+    c0 = c00 * (1.0 - yd) + c10 * yd
+    c1 = c01 * (1.0 - yd) + c11 * yd
+    c = c0 * (1.0 - zd) + c1 * zd
+    return c.astype(np.float32, copy=False)
+
+
+def _mesh_from_udf_grid(udf_grid: np.ndarray, *, level: float) -> tuple[np.ndarray, np.ndarray]:
+    """Marching-cubes mesh from an unsigned distance field on [-1,1]^3 voxel centers."""
+
+    from skimage import measure
+
+    udf = np.asarray(udf_grid, dtype=np.float32)
+    assert udf.ndim == 3, f"udf_grid must be (G,G,G), got {udf.shape}"
+    G = int(udf.shape[0])
+    assert udf.shape[1] == G and udf.shape[2] == G, f"udf_grid must be cubic, got {udf.shape}"
+    if G < 2:
+        raise ValueError(f"grid_res must be >=2 for marching cubes, got {G}")
+
+    voxel = 2.0 / float(G - 1)
+    verts, faces, _, _ = measure.marching_cubes(
+        volume=udf,
+        level=float(level),
+        spacing=(voxel, voxel, voxel),
+    )
+    # marching_cubes vertices are in [0,2] with origin at 0; shift to [-1,1]
+    verts = verts + np.array([-1.0, -1.0, -1.0], dtype=np.float32)
+    return verts.astype(np.float32, copy=False), faces.astype(np.int64, copy=False)
+
+
+def _build_feat_type_for_ctx_and_queries(
+    ctx_xyz: np.ndarray,
+    ctx_dist: np.ndarray,
+    q_xyz: np.ndarray,
+    *,
+    qa_tokens: int,
+    qa_layout: str,
+    add_eos: int,
+) -> tuple[np.ndarray, np.ndarray, slice | np.ndarray]:
+    """Build (feat, type_id, q_pos) for a batch with explicit query points.
+
+    Feature layout matches tokenizer's fixed feature dim=15; we only populate:
+      - xyz at [:, 0:3]
+      - dist at [:, 10]
+    All other channels are left as 0.
+    """
+
+    ctx_xyz = np.asarray(ctx_xyz, dtype=np.float32)
+    ctx_dist = np.asarray(ctx_dist, dtype=np.float32).reshape(-1)
+    q_xyz = np.asarray(q_xyz, dtype=np.float32)
+
+    n_ctx = int(ctx_xyz.shape[0])
+    n_q = int(q_xyz.shape[0])
+
+    feat_dim = 15
+    bos = np.zeros((1, feat_dim), dtype=np.float32)
+    bos_type = np.array([TYPE_BOS], dtype=np.int64)
+
+    if int(qa_tokens) > 0:
+        # Context
+        ctx_q = np.zeros((n_ctx, feat_dim), dtype=np.float32)
+        ctx_q[:, 0:3] = ctx_xyz
+        ctx_q_type = np.full((n_ctx,), TYPE_Q_POINT, dtype=np.int64)
+
+        ctx_a = np.zeros((n_ctx, feat_dim), dtype=np.float32)
+        ctx_a[:, 10] = ctx_dist
+        ctx_a_type = np.full((n_ctx,), TYPE_A_POINT, dtype=np.int64)
+
+        # Queries (answers are zeroed)
+        q_q = np.zeros((n_q, feat_dim), dtype=np.float32)
+        q_q[:, 0:3] = q_xyz
+        q_q_type = np.full((n_q,), TYPE_Q_POINT, dtype=np.int64)
+
+        q_a = np.zeros((n_q, feat_dim), dtype=np.float32)
+        q_a[:, 10] = 0.0
+        q_a_type = np.full((n_q,), TYPE_A_POINT, dtype=np.int64)
+
+        if str(qa_layout) == "split":
+            feat = np.concatenate([bos, ctx_q, q_q, ctx_a, q_a], axis=0)
+            type_id = np.concatenate(
+                [bos_type, ctx_q_type, q_q_type, ctx_a_type, q_a_type], axis=0
+            )
+            q_pos: slice | np.ndarray = slice(1 + n_ctx, 1 + n_ctx + n_q)
+        else:
+            ctx_qa = np.stack([ctx_q, ctx_a], axis=1).reshape(2 * n_ctx, feat_dim)
+            ctx_qa_type = np.stack([ctx_q_type, ctx_a_type], axis=1).reshape(2 * n_ctx)
+            q_qa = np.stack([q_q, q_a], axis=1).reshape(2 * n_q, feat_dim)
+            q_qa_type = np.stack([q_q_type, q_a_type], axis=1).reshape(2 * n_q)
+            feat = np.concatenate([bos, ctx_qa, q_qa], axis=0)
+            type_id = np.concatenate([bos_type, ctx_qa_type, q_qa_type], axis=0)
+            base = 1 + 2 * n_ctx
+            q_pos = base + 2 * np.arange(n_q, dtype=np.int64)
+    else:
+        ctx_feat = np.zeros((n_ctx, feat_dim), dtype=np.float32)
+        ctx_feat[:, 0:3] = ctx_xyz
+        ctx_feat[:, 10] = ctx_dist
+        q_feat = np.zeros((n_q, feat_dim), dtype=np.float32)
+        q_feat[:, 0:3] = q_xyz
+        q_feat[:, 10] = 0.0
+        feat = np.concatenate([bos, ctx_feat, q_feat], axis=0)
+        type_id = np.concatenate(
+            [bos_type, np.full((n_ctx + n_q,), TYPE_POINT, dtype=np.int64)], axis=0
+        )
+        q_pos = slice(1 + n_ctx, 1 + n_ctx + n_q)
+
+    if int(add_eos) > 0:
+        eos = np.zeros((1, feat_dim), dtype=np.float32)
+        feat = np.concatenate([feat, eos], axis=0)
+        type_id = np.concatenate([type_id, np.array([TYPE_EOS], dtype=np.int64)], axis=0)
+
+    # Add batch dimension
+    feat = feat[None, :, :]
+    type_id = type_id[None, :]
+    return feat, type_id, q_pos
+
+
+def _predict_udf_grid_ridge(
+    *,
+    model: torch.nn.Module,
+    ridge_w: np.ndarray,
+    ctx_xyz: np.ndarray,
+    ctx_dist: np.ndarray,
+    grid_res: int,
+    chunk_n_query: int,
+    qa_tokens: int,
+    qa_layout: str,
+    rep_source: str,
+    add_eos: int,
+    device: torch.device,
+) -> np.ndarray:
+    """Predict a dense UDF grid via chunked query evaluation + ridge head."""
+
+    import math as _math
+
+    # Precompute grid query points (voxel centers in [-1, 1]).
+    centers = grid_utils.make_grid_centers_np(int(grid_res)).astype(np.float32)
+    q_xyz_all = centers.reshape(-1, 3)
+    N = int(q_xyz_all.shape[0])
+
+    # Move ridge weights to device for fast matmul.
+    w_t = torch.from_numpy(ridge_w.astype(np.float32, copy=False)).to(device)
+    W = w_t[:-1, :]
+    b = w_t[-1:, :]
+
+    pred = np.zeros((N,), dtype=np.float32)
+
+    # Chunk over query points to keep sequence length manageable.
+    qbs = max(1, int(chunk_n_query))
+    n_chunks = int(_math.ceil(N / qbs))
+    for ci in range(n_chunks):
+        s = ci * qbs
+        e = min(N, (ci + 1) * qbs)
+        q_xyz = q_xyz_all[s:e]
+
+        feat, type_id, q_pos = _build_feat_type_for_ctx_and_queries(
+            ctx_xyz,
+            ctx_dist,
+            q_xyz,
+            qa_tokens=qa_tokens,
+            qa_layout=qa_layout,
+            add_eos=add_eos,
+        )
+        feat_t = torch.from_numpy(feat).to(device)
+        type_t = torch.from_numpy(type_id).to(device)
+
+        with torch.no_grad():
+            z, z_hat, h = model(feat_t, type_t)
+            rep = h if str(rep_source) == "h" else z_hat
+            rep_q = rep[:, q_pos, :].float().squeeze(0)  # (nq, d)
+            y = rep_q @ W + b  # (nq, 1)
+            pred[s:e] = y.squeeze(-1).detach().cpu().numpy().astype(np.float32, copy=False)
+
+    pred_grid = pred.reshape(int(grid_res), int(grid_res), int(grid_res))
+    return np.maximum(pred_grid, 0.0).astype(np.float32, copy=False)
+
+
+def _mesh_eval_chamfer_for_paths(
+    *,
+    model: torch.nn.Module | None,
+    ridge_w: np.ndarray | None,
+    paths: list[str],
+    args: argparse.Namespace,
+    device: torch.device,
+) -> dict:
+    """Compute mesh metrics (Chamfer/F-score) for a subset of paths."""
+
+    import os
+    import trimesh
+
+    ckpt_meta = None
+    def _get_ckpt_meta():
+        nonlocal ckpt_meta
+        if ckpt_meta is None:
+            ckpt_meta = torch.load(str(args.ckpt), map_location="cpu")
+        return ckpt_meta
+
+    # Keep mesh_eval robust even if caller does not populate these namespace fields.
+    qa_tokens = int(getattr(args, "qa_tokens", -1))
+    if qa_tokens < 0:
+        qa_tokens = int(infer_qa_tokens(_get_ckpt_meta(), -1))
+    qa_layout = str(getattr(args, "qa_layout", ""))
+    if qa_layout == "":
+        qa_layout = str(infer_qa_layout(_get_ckpt_meta()))
+    add_eos = int(getattr(args, "add_eos", -1))
+    if add_eos < 0:
+        add_eos = int(infer_add_eos(_get_ckpt_meta(), -1))
+
+    # Subsample paths if requested.
+    max_shapes = int(getattr(args, "mesh_eval_max_shapes", 0) or 0)
+    if max_shapes > 0:
+        paths = list(paths)[:max_shapes]
+
+    save_dir = str(getattr(args, "mesh_save_dir", "") or "")
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+
+    # Basic safety check: ensure positional embeddings are long enough for the
+    # (context + chunked queries) sequence length.
+    if ridge_w is not None and model is not None:
+        n_ctx = int(getattr(args, "n_context", 0))
+        qbs = int(getattr(args, "mesh_chunk_n_query", 512))
+        required_len = 1 + (1 + int(qa_tokens)) * (n_ctx + qbs) + (1 if int(add_eos) > 0 else 0)
+        try:
+            max_len = int(getattr(model, "pos_emb").shape[1])
+        except Exception:
+            max_len = -1
+        if max_len > 0 and required_len > max_len:
+            raise ValueError(
+                f"mesh_eval requires sequence length {required_len}, but model max_len={max_len}. "
+                "Re-run with a larger --max_len (pos_emb will be resized)."
+            )
+
+    per_shape = []
+    fail_count = 0
+
+    # Use a deterministic order; any randomness is only in mesh surface sampling.
+    for p in tqdm(paths, desc="mesh_eval", total=len(paths)):
+        # Context sampling follows the normal CPAC path.
+        _, ctx_xyz, ctx_dist, _, _ = _sample_ctx_query(
+            path=p,
+            context_backend=args.context_backend,
+            n_context=int(args.n_context),
+            seed=int(args.eval_seed),
+            voxel_grid=int(args.voxel_grid),
+            voxel_dilate=int(args.voxel_dilate),
+            voxel_max_steps=int(args.voxel_max_steps),
+            query_source="pool",
+            n_query=0,
+            disjoint_context_query=int(args.disjoint_context_query),
+            context_mode=str(args.context_mode_test),
+            grid_res_schedule=str(args.grid_res_schedule),
+            grid_sample_mode=str(args.grid_sample_mode),
+            grid_near_frac=float(args.grid_near_frac),
+            grid_near_tau=float(args.grid_near_tau),
+            grid_c2f_expand=int(args.grid_c2f_expand),
+            grid_c2f_stage_weights=str(args.grid_c2f_stage_weights),
+        )
+
+        # GT grid (native res) -> resample to mesh_grid_res.
+        try:
+            with np.load(p) as d:
+                gt_udf_native = d["udf_grid"].astype(np.float32)
+        except Exception as e:
+            per_shape.append({"path": p, "ok": False, "error": f"missing udf_grid: {e}"})
+            fail_count += 1
+            continue
+
+        grid_res = int(getattr(args, "mesh_grid_res", 24))
+        centers = grid_utils.make_grid_centers_np(grid_res).astype(np.float32)
+        q_xyz_all = centers.reshape(-1, 3)
+        gt_vals = _trilinear_sample_grid_np(gt_udf_native, q_xyz_all).reshape(grid_res, grid_res, grid_res)
+        gt_vals = np.maximum(gt_vals, 0.0).astype(np.float32, copy=False)
+
+        # Prediction.
+        if ridge_w is not None and model is not None:
+            pred_vals = _predict_udf_grid_ridge(
+                model=model,
+                ridge_w=ridge_w,
+                ctx_xyz=ctx_xyz,
+                ctx_dist=ctx_dist,
+                grid_res=grid_res,
+                chunk_n_query=int(getattr(args, "mesh_chunk_n_query", 512)),
+                qa_tokens=int(qa_tokens),
+                qa_layout=str(qa_layout),
+                rep_source=str(args.rep_source),
+                add_eos=int(add_eos),
+                device=device,
+            )
+        else:
+            # Fallback: nearest-neighbor distance to context xyz (geometric baseline)
+            # This makes mesh_eval usable even with --baseline_only.
+            try:
+                from scipy.spatial import cKDTree
+
+                tree = cKDTree(ctx_xyz)
+                dist, _ = tree.query(q_xyz_all, k=1, workers=-1)
+                pred_vals = dist.astype(np.float32).reshape(grid_res, grid_res, grid_res)
+            except Exception as e:
+                per_shape.append({"path": p, "ok": False, "error": f"baseline_nn_dist failed: {e}"})
+                fail_count += 1
+                continue
+
+        level = float(getattr(args, "mesh_mc_level", 0.03))
+        try:
+            v_pred, f_pred = _mesh_from_udf_grid(pred_vals, level=level)
+            v_gt, f_gt = _mesh_from_udf_grid(gt_vals, level=level)
+
+            m = mesh_metrics(
+                v_pred,
+                f_pred,
+                v_gt,
+                f_gt,
+                num_samples=int(getattr(args, "mesh_num_samples", 10000)),
+                fscore_tau=float(getattr(args, "mesh_fscore_tau", 0.01)),
+            )
+            rec = {"path": p, "ok": True, **m}
+
+            if save_dir:
+                sid = os.path.splitext(os.path.basename(p))[0]
+                trimesh.Trimesh(vertices=v_pred, faces=f_pred, process=False).export(
+                    os.path.join(save_dir, f"pred_{sid}.ply")
+                )
+                trimesh.Trimesh(vertices=v_gt, faces=f_gt, process=False).export(
+                    os.path.join(save_dir, f"gt_{sid}.ply")
+                )
+        except Exception as e:
+            rec = {"path": p, "ok": False, "error": str(e)}
+            fail_count += 1
+
+        per_shape.append(rec)
+
+    # Aggregate.
+    keys = ["chamfer_l2", "chamfer_l1", "fscore"]
+    agg = {}
+    for k in keys:
+        vals = [float(r[k]) for r in per_shape if r.get("ok") and k in r]
+        if vals:
+            agg[k + "_mean"] = float(np.mean(vals))
+            agg[k + "_std"] = float(np.std(vals))
+            agg[k + "_n"] = int(len(vals))
+        else:
+            agg[k + "_mean"] = float("nan")
+            agg[k + "_std"] = float("nan")
+            agg[k + "_n"] = 0
+
+    pred_mode = "ridge" if (ridge_w is not None and model is not None) else "nn_dist"
+
+    out = {
+        "enabled": True,
+        "pred_mode": pred_mode,
+        "grid_res": int(getattr(args, "mesh_grid_res", 24)),
+        "chunk_n_query": int(getattr(args, "mesh_chunk_n_query", 512)),
+        "mc_level": float(getattr(args, "mesh_mc_level", 0.03)),
+        "num_samples": int(getattr(args, "mesh_num_samples", 10000)),
+        "fscore_tau": float(getattr(args, "mesh_fscore_tau", 0.01)),
+        "fail_count": int(fail_count),
+        "n_eval_shapes": int(len(paths)),
+        "summary": agg,
+    }
+    if int(getattr(args, "mesh_store_per_shape", 0)) > 0:
+        out["per_shape"] = per_shape
+    return out
+
+
 def collect_xy(
     model,
     paths,
@@ -1395,6 +1803,62 @@ def main():
         default=0,
         help="If 1, skip ridge probe and report baseline only.",
     )
+
+    # Optional: mesh reconstruction + Chamfer/F-score evaluation.
+    ap.add_argument(
+        "--mesh_eval",
+        type=int,
+        default=0,
+        help="If 1, run mesh reconstruction (marching cubes) + Chamfer/F-score on a subset of test shapes.",
+    )
+    ap.add_argument(
+        "--mesh_eval_max_shapes",
+        type=int,
+        default=50,
+        help="How many test shapes to evaluate mesh metrics on (0=all).",
+    )
+    ap.add_argument(
+        "--mesh_grid_res",
+        type=int,
+        default=24,
+        help="Grid resolution used to reconstruct UDF volume for marching cubes.",
+    )
+    ap.add_argument(
+        "--mesh_chunk_n_query",
+        type=int,
+        default=512,
+        help="Number of grid query points per forward pass when reconstructing the UDF grid.",
+    )
+    ap.add_argument(
+        "--mesh_mc_level",
+        type=float,
+        default=0.03,
+        help="Iso-level for marching cubes on UDF (surface at distance=level).",
+    )
+    ap.add_argument(
+        "--mesh_num_samples",
+        type=int,
+        default=10000,
+        help="Number of surface points sampled per mesh for Chamfer/F-score.",
+    )
+    ap.add_argument(
+        "--mesh_fscore_tau",
+        type=float,
+        default=0.01,
+        help="Distance threshold for F-score in mesh evaluation.",
+    )
+    ap.add_argument(
+        "--mesh_save_dir",
+        type=str,
+        default="",
+        help="If set, save predicted/GT meshes as .ply into this directory.",
+    )
+    ap.add_argument(
+        "--mesh_store_per_shape",
+        type=int,
+        default=0,
+        help="If 1, store per-shape mesh metrics in output json (can be large).",
+    )
     ap.add_argument("--out_json", type=str, default="")
     args = ap.parse_args()
 
@@ -1520,6 +1984,16 @@ def main():
                 "baseline_only": True,
             }
         )
+
+        if int(getattr(args, "mesh_eval", 0)) == 1:
+            out["mesh_eval"] = _mesh_eval_chamfer_for_paths(
+                model=None,
+                ridge_w=None,
+                paths=te_paths,
+                args=args,
+                device=device,
+            )
+
         print(json.dumps(out, indent=2))
         if args.out_json:
             os.makedirs(os.path.dirname(args.out_json) or ".", exist_ok=True)
@@ -1702,6 +2176,15 @@ def main():
             "baseline": baseline,
         }
     )
+
+    if int(getattr(args, "mesh_eval", 0)) == 1:
+        out["mesh_eval"] = _mesh_eval_chamfer_for_paths(
+            model=model,
+            ridge_w=w,
+            paths=te_paths,
+            args=args,
+            device=device,
+        )
 
     print(json.dumps(out, indent=2))
     if args.out_json:

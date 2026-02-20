@@ -72,12 +72,14 @@ class EncoderDecoderTransformer(nn.Module):
         dropout: float = 0.0,
         topo_k: int = 0,
         topo_include_bos: bool = True,
+        src_causal: bool = False,
     ):
         super().__init__()
         self.d_model = int(d_model)
         self.nhead = int(nhead)
         self.topo_k = int(topo_k)
         self.topo_include_bos = bool(topo_include_bos)
+        self.src_causal = bool(src_causal)
 
         enc_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
@@ -126,8 +128,16 @@ class EncoderDecoderTransformer(nn.Module):
         assert b == b2
 
         enc_mask = None
+        mask_bll: Optional[torch.Tensor] = None
         if self.topo_k > 0 and enc_xyz is not None and l_enc > 1:
             mask_bll = _knn_topology_mask(enc_xyz, k=self.topo_k, include_bos=self.topo_include_bos)
+
+        if self.src_causal and l_enc > 1:
+            causal = _causal_mask(l_enc, device=enc_in.device)  # (L, L)
+            causal_bll = causal[None, :, :].expand(b, l_enc, l_enc)
+            mask_bll = causal_bll if mask_bll is None else (mask_bll | causal_bll)
+
+        if mask_bll is not None:
             # nn.TransformerEncoder expects (L, L) or (B*nhead, L, L).
             enc_mask = mask_bll[:, None, :, :].expand(b, self.nhead, l_enc, l_enc).reshape(
                 b * self.nhead, l_enc, l_enc

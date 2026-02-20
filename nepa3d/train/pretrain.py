@@ -1,5 +1,6 @@
 import argparse
 import copy
+import math
 import os
 
 import numpy as np
@@ -319,6 +320,12 @@ def main():
     ap.add_argument("--topo_k", type=int, default=0, help="kNN size for encoder topology attention (encdec).")
     ap.add_argument("--topo_ray_coord", type=str, default="origin", choices=["origin", "proj", "bbox"])
     ap.add_argument("--topo_ray_bbox", type=float, default=0.5)
+    ap.add_argument(
+        "--encdec_src_causal",
+        type=int,
+        default=0,
+        help="If 1, apply a causal (future-masking) attention mask inside the encoder when arch=encdec.",
+    )
     ap.add_argument("--dual_mask_near", type=float, default=0.0, help="Dual masking prob for *near* past tokens (PointGPT-style).")
     ap.add_argument("--dual_mask_far", type=float, default=0.0, help="Dual masking prob for *far* past tokens.")
     ap.add_argument("--dual_mask_window", type=int, default=32, help="Near-window size in token steps for dual masking.")
@@ -328,6 +335,26 @@ def main():
         type=int,
         default=0,
         help="If 1, apply dual-mask only to Query-like token pairs (Q/Q).",
+    )
+    ap.add_argument(
+        "--dual_mask_window_scale",
+        type=str,
+        default="linear",
+        choices=["none", "linear", "sqrt"],
+        help=(
+            "How to scale dual_mask_window when n_point/n_ray are scheduled. "
+            "none: keep fixed; linear: multiply by (cur_total/ref_total); "
+            "sqrt: multiply by sqrt(cur_total/ref_total)."
+        ),
+    )
+    ap.add_argument(
+        "--dual_mask_window_ref_total",
+        type=int,
+        default=-1,
+        help=(
+            "Reference total queries (n_point+n_ray) used for dual_mask_window scaling. "
+            "If <=0, uses the epoch0 total after schedule init (args.n_point+args.n_ray)."
+        ),
     )
     # B-2: ray monotonicity / depth supervision aux loss.
     ap.add_argument("--aux_b2_weight", type=float, default=0.0, help="Global weight for B-2 ray auxiliary loss (0=off).")
@@ -446,6 +473,32 @@ def main():
                 break
         return v
 
+    def _scaled_dual_mask_window(
+        base_window: int,
+        cur_total: int,
+        ref_total: int,
+        mode: str,
+    ) -> int:
+        """Scale dual_mask_window for larger query counts.
+
+        We keep the semantics simple: base_window is in *token distance* (as used by the
+        attention-bias implementation). We scale it by a ratio derived from the total
+        number of queries (n_point+n_ray).
+        """
+
+        if int(base_window) <= 0:
+            return int(base_window)
+        if str(mode) == "none":
+            return int(base_window)
+
+        denom = max(1, int(ref_total))
+        ratio = float(cur_total) / float(denom)
+        if str(mode) == "sqrt":
+            ratio = math.sqrt(max(1e-12, ratio))
+
+        w = int(round(float(base_window) * ratio))
+        return max(1, w)
+
     n_point_sched = _parse_epoch_value_schedule(args.n_point_schedule)
     n_ray_sched = _parse_epoch_value_schedule(args.n_ray_schedule)
 
@@ -483,6 +536,14 @@ def main():
         )
         args.n_point = int(n_point_init)
         args.n_ray = int(n_ray_init)
+
+    # Dual-mask window scaling reference.
+    # By default, we use the epoch0 total queries after schedule init.
+    dual_mask_ref_total = (
+        int(args.dual_mask_window_ref_total)
+        if int(args.dual_mask_window_ref_total) > 0
+        else int(args.n_point) + int(args.n_ray)
+    )
 
     if args.mix_config:
         ds, sampler, mix_info = build_mixed_pretrain(
@@ -578,6 +639,7 @@ def main():
         topo_k=int(args.topo_k),
         topo_ray_coord=str(args.topo_ray_coord),
         topo_ray_bbox=float(args.topo_ray_bbox),
+        encdec_src_causal=int(args.encdec_src_causal),
     ).to(device)
 
     teacher_model = None
@@ -594,6 +656,7 @@ def main():
         teacher_topo_k = int(teacher_pre_args.get("topo_k", 0))
         teacher_topo_ray_coord = str(teacher_pre_args.get("topo_ray_coord", "origin"))
         teacher_topo_ray_bbox = float(teacher_pre_args.get("topo_ray_bbox", 0.5))
+        teacher_encdec_src_causal = int(teacher_pre_args.get("encdec_src_causal", 0))
         teacher_len = int(teacher_state["pos_emb"].shape[1])
         if teacher_n_types != int(n_types):
             raise RuntimeError(
@@ -614,6 +677,7 @@ def main():
             topo_k=teacher_topo_k,
             topo_ray_coord=teacher_topo_ray_coord,
             topo_ray_bbox=teacher_topo_ray_bbox,
+            encdec_src_causal=teacher_encdec_src_causal,
         ).to(device)
         load_state_dict_flexible(teacher_model, teacher_state, strict=True)
         teacher_model.eval()
@@ -746,6 +810,7 @@ def main():
     # Track current dataset sizes so we only print when they change.
     cur_n_point = int(args.n_point)
     cur_n_ray = int(args.n_ray)
+    last_dm_window = None
 
     model.train()
     for ep in range(start_epoch, args.epochs):
@@ -763,6 +828,22 @@ def main():
                 ds.set_sizes(n_point=new_n_point, n_ray=new_n_ray)
                 cur_n_point, cur_n_ray = int(new_n_point), int(new_n_ray)
                 print(f"[schedule] epoch {ep}: n_point={cur_n_point}, n_ray={cur_n_ray}")
+
+        # Dual-mask window scaling for larger point/ray counts.
+        cur_total = int(cur_n_point) + int(cur_n_ray)
+        dm_window = _scaled_dual_mask_window(
+            int(args.dual_mask_window),
+            cur_total,
+            int(dual_mask_ref_total),
+            str(args.dual_mask_window_scale),
+        )
+        if last_dm_window is None or int(dm_window) != int(last_dm_window):
+            if str(args.dual_mask_window_scale) != "none":
+                print(
+                    f"[dual_mask] epoch {ep}: window {int(args.dual_mask_window)}->{int(dm_window)} "
+                    f"(scale={args.dual_mask_window_scale}, ref_total={dual_mask_ref_total}, cur_total={cur_total})"
+                )
+            last_dm_window = int(dm_window)
 
         if args.mix_config:
             # Deterministic per-epoch sampler.
@@ -789,7 +870,7 @@ def main():
                         type_id,
                         dual_mask_near=dm_near,
                         dual_mask_far=dm_far,
-                        dual_mask_window=int(args.dual_mask_window),
+                        dual_mask_window=int(dm_window),
                         dual_mask_seed=dm_seed,
                         dual_mask_type_aware=int(args.dual_mask_type_aware),
                     )
@@ -875,7 +956,7 @@ def main():
                                 type_id,
                                 dual_mask_near=dm_near,
                                 dual_mask_far=dm_far,
-                                dual_mask_window=int(args.dual_mask_window),
+                                dual_mask_window=int(dm_window),
                                 dual_mask_seed=dm_seed,
                                 dual_mask_type_aware=int(args.dual_mask_type_aware),
                             )
@@ -886,7 +967,7 @@ def main():
                                 type_id,
                                 dual_mask_near=dm_near,
                                 dual_mask_far=dm_far,
-                                dual_mask_window=int(args.dual_mask_window),
+                                dual_mask_window=int(dm_window),
                                 dual_mask_seed=dm_seed,
                                 dual_mask_type_aware=int(args.dual_mask_type_aware),
                             )
@@ -907,7 +988,7 @@ def main():
                             type_id,
                             dual_mask_near=dm_near,
                             dual_mask_far=dm_far,
-                            dual_mask_window=int(args.dual_mask_window),
+                            dual_mask_window=int(dm_window),
                             dual_mask_seed=dm_seed + 17,
                             dual_mask_type_aware=int(args.dual_mask_type_aware),
                         )

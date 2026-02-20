@@ -17,6 +17,24 @@ from __future__ import annotations
 import numpy as np
 
 
+def make_grid_centers_np(grid_res: int) -> np.ndarray:
+    """Return voxel-center coordinates for a cubic grid in [-1, 1]^3.
+
+    Args:
+        grid_res: cubic resolution G
+
+    Returns:
+        centers: (G, G, G, 3) float32 array
+    """
+
+    g = int(grid_res)
+    if g <= 0:
+        raise ValueError(f"grid_res must be positive, got {grid_res}")
+    lin = -1.0 + (np.arange(g, dtype=np.float32) + 0.5) * (2.0 / float(g))
+    x, y, z = np.meshgrid(lin, lin, lin, indexing="ij")
+    return np.stack([x, y, z], axis=-1).astype(np.float32, copy=False)
+
+
 def xyz_to_grid_coords(xyz: np.ndarray, grid_res: int) -> np.ndarray:
     """Convert world coords in [-1,1] to continuous grid index coords.
 
