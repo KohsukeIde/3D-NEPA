@@ -12,6 +12,8 @@
 - 既存 15 次元 feature を壊さず、**未使用スロットを type-dependent に再利用**する。
   - slot[11] は Ray では hit、Point では occupancy として使用
   - slot[12:15] は Ray では法線、Point では pseudo-normal として使用
+- 補助的な objective-side 実験（B-2/C-2 など）は、主張の中心ではなく **診断/感度確認**として扱う。
+- Retrieval（UCPR）はこのトラックでは **診断専用**で、主評価は completion（CPAC + mesh側）とする。
 
 ---
 

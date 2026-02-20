@@ -7,6 +7,12 @@ This file isolates completion-side ablations and scaling runs (A-E, 6) from the 
 - Planning doc: `plan_completion_ae6.md`
 - Source archive: `results_ucpr_cpac_active_mixed_archive.md`
 
+Policy note (Feb 20, 2026):
+
+- Main judgment for this file is completion quality (CPAC + mesh-side readout).
+- UCPR rows are retained as diagnostics only, not as primary model-selection criteria.
+- Objective-side auxiliaries (B-2/C-2 family) are recorded as probing tracks; objective-preserving lines remain the paper-main candidate path.
+
 ## Progress-8 Merge + Scaling-6 Smoke (Feb 16, 2026)
 
 This cycle starts integration of `/home/cvrt/Downloads/nepa_progress_8` into the active repo (`/home/cvrt/Desktop/dev/3D-NEPA`) and validates scaling hooks with small smoke runs.

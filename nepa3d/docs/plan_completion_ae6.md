@@ -8,6 +8,42 @@ This plan converts the feedback into an execution order that matches current rep
 - Retrieval: keep as appendix/diagnostic.
 - Goal: improve `grid` and mixed-query completion while keeping current strong `pool` performance.
 
+## Policy update (Feb 20, 2026)
+
+- Paper-main claims should stay **objective-preserving**:
+  - keep NEPA objective unchanged in final main line.
+  - treat B-2/C-2 style objective-side auxiliaries as diagnostic/probing tracks, not as main contribution claims.
+- UCPR is now treated as **diagnostic only**:
+  - do not use UCPR as primary decision criterion for next completion iterations.
+  - prioritize CPAC + mesh reconstruction metrics for go/no-go.
+
+## Feedback checklist status (Feb 20, 2026)
+
+Requested checklist:
+
+1. Stop full optimizer-state reset in scale-long (`pos_emb`-only mismatch handling)
+2. Scale `dual_mask_window` for larger point counts (1024/2048)
+3. Fix grid candidate res-schedule and compare A-1 systematically
+4. Add causal target mask in encdec and verify non-collapse
+5. Put mesh + Chamfer/F-score into main evaluation path
+
+Current status:
+
+- (1) **Done (implemented + run)**:
+  - partial optimizer restore is implemented (`--resume_optimizer_partial 1`) and used in scale-retry runs.
+  - shape-mismatched optimizer entries are dropped while others are kept.
+- (2) **Partially done**:
+  - dual-mask window scaling has been tried for 1024 (`w64`, `w96`) in retry runs.
+  - no dedicated 2048-point run has been completed yet in this line.
+- (3) **Done (implemented + compared)**:
+  - `grid_res_schedule`/`coarse_to_fine` are implemented and compared against `uniform`/`near_surface`.
+- (4) **Partially done**:
+  - encdec path has causal `tgt_mask` in code.
+  - however, a clean standalone post-fix ablation proving full recovery is still pending.
+- (5) **Partially done**:
+  - mesh metrics tooling (Chamfer/F-score) is implemented and used in qualitative compare artifacts.
+  - but CPAC main-table replacement with mesh-first metrics is not finalized yet.
+
 ## Current status
 
 - `6 (scaling hooks)` is merged: `max_len`, pos-emb resize, `n_point/n_ray` schedules.
