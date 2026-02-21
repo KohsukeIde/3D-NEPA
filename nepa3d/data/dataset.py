@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 import torch
 import warnings
@@ -162,6 +164,7 @@ class ModelNet40QueryDataset(Dataset):
         pt_sample_mode="random",
         pt_fps_key="pt_fps_order",
         pt_rfps_m=4096,
+        point_order_mode="morton",
         # Augmentations
         aug_rotate_z=False,
         aug_scale_min=1.0,
@@ -203,6 +206,7 @@ class ModelNet40QueryDataset(Dataset):
         self._warned_missing_fps_order = False
         self._warned_dist_mismatch = False
         self.pt_rfps_m = int(pt_rfps_m)
+        self.point_order_mode = str(point_order_mode)
 
         self.aug_rotate_z = bool(aug_rotate_z)
         self.aug_scale_min = float(aug_scale_min)
@@ -394,6 +398,7 @@ class ModelNet40QueryDataset(Dataset):
                 pt_sample_mode=self.pt_sample_mode,
                 pt_fps_order=pt_fps_order,
                 pt_rfps_m=self.pt_rfps_m,
+                point_order_mode=self.point_order_mode,
                 include_pt_grad=self.include_pt_grad,
                 pt_grad_mode=self.pt_grad_mode,
                 pt_grad_eps=self.pt_grad_eps,

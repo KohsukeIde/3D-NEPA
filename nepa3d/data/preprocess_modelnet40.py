@@ -8,6 +8,7 @@ import trimesh
 from tqdm import tqdm
 
 import math
+from nepa3d.utils.fps import fps_order
 
 try:
     from scipy.ndimage import binary_dilation, distance_transform_edt
@@ -361,6 +362,11 @@ def preprocess_one(
         pc_n = np.zeros_like(pc_xyz, dtype=np.float32)
     else:
         pc_n = mesh.face_normals[face_idx].astype(np.float32)
+    # Deterministic FPS order over observed point cloud points.
+    try:
+        pc_fps_order = fps_order(pc_xyz, k=int(pc_xyz.shape[0])).astype(np.int32, copy=False)
+    except Exception:
+        pc_fps_order = np.arange(pc_xyz.shape[0], dtype=np.int32)
 
     # Point-query pool: mix uniform-in-cube and near-surface samples.
     pt_pool = int(pt_pool)
@@ -528,6 +534,7 @@ def preprocess_one(
         out_path,
         pc_xyz=pc_xyz,
         pc_n=pc_n,
+        pc_fps_order=pc_fps_order,
         pt_xyz_pool=pt_xyz_pool,
         pt_dist_pool=pt_dist_pool,
         pt_dist_pc_pool=pt_dist_pc_pool,

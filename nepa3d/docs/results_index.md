@@ -11,6 +11,7 @@ Use this index to avoid mixing active and legacy tracks.
 - UCPR/CPAC active results (including QA cycle): `results_ucpr_cpac_active.md`
 - UCPR/CPAC table planning and command templates: `eccv_ucpr_cpac_tables.md`
 - Completion A-E/6 execution plan: `plan_completion_ae6.md`
+- 1024 pretrain A/B/C/D + multi-node launch plan: `pretrain_abcd_1024_multinode_active.md`
 
 ## Legacy
 

@@ -10,9 +10,13 @@
 set -eu
 
 . /etc/profile.d/modules.sh
-module load cuda/12.6
+CUDA_MODULE="${CUDA_MODULE:-cuda/12.6}"
+if command -v module >/dev/null 2>&1; then
+  module load "${CUDA_MODULE}" 2>/dev/null || echo "[warn] module load ${CUDA_MODULE} failed; continue with current module set."
+fi
 
-cd /groups/gag51403/ide/3D-NEPA
+WORKDIR="${WORKDIR:-${PBS_O_WORKDIR:-$(pwd)}}"
+cd "${WORKDIR}"
 
 if [ -f ".venv/bin/activate" ]; then
   . .venv/bin/activate
@@ -37,6 +41,17 @@ LR_BASE_TOTAL_BATCH="${LR_BASE_TOTAL_BATCH:-32}" # baseline total batch for deri
 BASE_LEARNING_RATE="${BASE_LEARNING_RATE:-}"     # if empty, derived from LR and LR_BASE_TOTAL_BATCH
 N_POINT="${N_POINT:-256}"
 N_RAY="${N_RAY:-256}"
+MAX_LEN="${MAX_LEN:--1}"
+ADD_EOS="${ADD_EOS:-1}"
+QA_TOKENS="${QA_TOKENS:-0}"
+QA_LAYOUT="${QA_LAYOUT:-interleave}"
+PT_XYZ_KEY="${PT_XYZ_KEY:-pt_xyz_pool}"
+PT_DIST_KEY="${PT_DIST_KEY:-pt_dist_pool}"
+ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
+PT_SAMPLE_MODE_TRAIN="${PT_SAMPLE_MODE_TRAIN:-random}"
+PT_FPS_KEY="${PT_FPS_KEY:-auto}"
+PT_RFPS_M="${PT_RFPS_M:-4096}"
+POINT_ORDER_MODE="${POINT_ORDER_MODE:-morton}"
 D_MODEL="${D_MODEL:-384}"
 LAYERS="${LAYERS:-8}"
 HEADS="${HEADS:-6}"
@@ -66,6 +81,21 @@ else
   echo "[lr-scale] disabled: lr=${LR}"
 fi
 
+LAUNCH_MIXED_PRECISION="${MIXED_PRECISION}"
+if [ "${LAUNCH_MIXED_PRECISION}" = "auto" ]; then
+  LAUNCH_MIXED_PRECISION="$("${PYTHON_BIN}" - <<'PY'
+import torch
+if not torch.cuda.is_available():
+    print("no")
+elif hasattr(torch.cuda, "is_bf16_supported") and torch.cuda.is_bf16_supported():
+    print("bf16")
+else:
+    print("fp16")
+PY
+)"
+fi
+echo "[accelerate] launch mixed_precision=${LAUNCH_MIXED_PRECISION} (requested=${MIXED_PRECISION})"
+
 if [ "${NUM_PROCESSES}" -gt 1 ]; then
   "${ACCELERATE_PYTHON}" -m "${ACCELERATE_LAUNCH_MODULE}" \
     --multi_gpu \
@@ -74,13 +104,24 @@ if [ "${NUM_PROCESSES}" -gt 1 ]; then
     --machine_rank "${MACHINE_RANK}" \
     --main_process_ip "${MAIN_PROCESS_IP}" \
     --main_process_port "${MAIN_PROCESS_PORT}" \
-    --mixed_precision "${MIXED_PRECISION}" \
+    --mixed_precision "${LAUNCH_MIXED_PRECISION}" \
     -m nepa3d.train.pretrain \
   --cache_root "${CACHE_ROOT}" \
   --backend "${BACKEND}" \
   --batch "${BATCH}" --epochs "${EPOCHS}" \
   --lr "${LR}" \
   --n_point "${N_POINT}" --n_ray "${N_RAY}" \
+  --max_len "${MAX_LEN}" \
+  --add_eos "${ADD_EOS}" \
+  --qa_tokens "${QA_TOKENS}" \
+  --qa_layout "${QA_LAYOUT}" \
+  --pt_xyz_key "${PT_XYZ_KEY}" \
+  --pt_dist_key "${PT_DIST_KEY}" \
+  --ablate_point_dist "${ABLATE_POINT_DIST}" \
+  --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN}" \
+  --pt_fps_key "${PT_FPS_KEY}" \
+  --pt_rfps_m "${PT_RFPS_M}" \
+  --point_order_mode "${POINT_ORDER_MODE}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
   --num_workers "${NUM_WORKERS}" \
   --mixed_precision "${MIXED_PRECISION}" \
@@ -96,6 +137,17 @@ else
   --batch "${BATCH}" --epochs "${EPOCHS}" \
   --lr "${LR}" \
   --n_point "${N_POINT}" --n_ray "${N_RAY}" \
+  --max_len "${MAX_LEN}" \
+  --add_eos "${ADD_EOS}" \
+  --qa_tokens "${QA_TOKENS}" \
+  --qa_layout "${QA_LAYOUT}" \
+  --pt_xyz_key "${PT_XYZ_KEY}" \
+  --pt_dist_key "${PT_DIST_KEY}" \
+  --ablate_point_dist "${ABLATE_POINT_DIST}" \
+  --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN}" \
+  --pt_fps_key "${PT_FPS_KEY}" \
+  --pt_rfps_m "${PT_RFPS_M}" \
+  --point_order_mode "${POINT_ORDER_MODE}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
   --num_workers "${NUM_WORKERS}" \
   --mixed_precision "${MIXED_PRECISION}" \

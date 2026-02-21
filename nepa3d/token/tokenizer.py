@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 import warnings
 
@@ -223,6 +225,43 @@ def _sample_point_indices(
     return rng.choice(n_pool, size=k, replace=False).astype(np.int64, copy=False)
 
 
+def _order_point_tokens(
+    pt_xyz_s: np.ndarray,
+    pt_dist_s: np.ndarray,
+    *,
+    rng=None,
+    point_order_mode: str = "morton",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply an explicit order for point tokens after sampling.
+
+    Supported modes:
+      - morton: spatially local Z-order sort (legacy behavior)
+      - fps: keep the sampled order as-is (for coarse-to-fine AR when sampling=fps)
+      - random: random permutation
+    """
+    if int(pt_xyz_s.shape[0]) <= 0:
+        return pt_xyz_s, pt_dist_s
+
+    mode = str(point_order_mode).lower()
+    if mode == "morton":
+        order = np.argsort(morton3d(pt_xyz_s))
+    elif mode == "fps":
+        order = None
+    elif mode == "random":
+        if rng is None:
+            rng = np.random
+        if hasattr(rng, "permutation"):
+            order = np.asarray(rng.permutation(pt_xyz_s.shape[0]), dtype=np.int64)
+        else:
+            order = np.random.permutation(pt_xyz_s.shape[0]).astype(np.int64, copy=False)
+    else:
+        raise ValueError(f"unknown point_order_mode: {point_order_mode}")
+
+    if order is None:
+        return pt_xyz_s, pt_dist_s
+    return pt_xyz_s[order], pt_dist_s[order]
+
+
 def _build_sequence_legacy(
     pt_xyz,
     pt_dist,
@@ -240,6 +279,7 @@ def _build_sequence_legacy(
     pt_sample_mode="random",
     pt_fps_order=None,
     pt_rfps_m=4096,
+    point_order_mode="morton",
     include_pt_grad=False,
     pt_grad_mode="raw",
     pt_grad_eps=1e-3,
@@ -293,10 +333,12 @@ def _build_sequence_legacy(
         ray_t_s = np.zeros((0,), dtype=np.float32)
         ray_n_s = np.zeros((0, 3), dtype=np.float32)
 
-    if pt_xyz_s.shape[0] > 0:
-        p_order = np.argsort(morton3d(pt_xyz_s))
-        pt_xyz_s = pt_xyz_s[p_order]
-        pt_dist_s = pt_dist_s[p_order]
+    pt_xyz_s, pt_dist_s = _order_point_tokens(
+        pt_xyz_s,
+        pt_dist_s,
+        rng=rng,
+        point_order_mode=point_order_mode,
+    )
 
     if ray_d_s.shape[0] > 0:
         r_order = sort_by_ray_direction(ray_d_s)
@@ -389,6 +431,7 @@ def _build_sequence_qa(
     pt_sample_mode="random",
     pt_fps_order=None,
     pt_rfps_m=4096,
+    point_order_mode="morton",
     include_pt_grad=False,
     pt_grad_mode="raw",
     pt_grad_eps=1e-3,
@@ -449,11 +492,12 @@ def _build_sequence_qa(
         ray_t_s = np.zeros((0,), dtype=np.float32)
         ray_n_s = np.zeros((0, 3), dtype=np.float32)
 
-    # ordering (same as legacy)
-    if pt_xyz_s.shape[0] > 0:
-        p_order = np.argsort(morton3d(pt_xyz_s))
-        pt_xyz_s = pt_xyz_s[p_order]
-        pt_dist_s = pt_dist_s[p_order]
+    pt_xyz_s, pt_dist_s = _order_point_tokens(
+        pt_xyz_s,
+        pt_dist_s,
+        rng=rng,
+        point_order_mode=point_order_mode,
+    )
 
     if ray_d_s.shape[0] > 0:
         r_order = sort_by_ray_direction(ray_d_s)
@@ -612,6 +656,7 @@ def build_sequence(
     pt_sample_mode="random",
     pt_fps_order=None,
     pt_rfps_m=4096,
+    point_order_mode="morton",
     include_pt_grad=False,
     pt_grad_mode="raw",
     pt_grad_eps=1e-3,
@@ -650,6 +695,7 @@ def build_sequence(
             pt_sample_mode=pt_sample_mode,
             pt_fps_order=pt_fps_order,
             pt_rfps_m=pt_rfps_m,
+            point_order_mode=point_order_mode,
             include_pt_grad=include_pt_grad,
             pt_grad_mode=pt_grad_mode,
             pt_grad_eps=pt_grad_eps,
@@ -676,6 +722,7 @@ def build_sequence(
         pt_sample_mode=pt_sample_mode,
         pt_fps_order=pt_fps_order,
         pt_rfps_m=pt_rfps_m,
+        point_order_mode=point_order_mode,
         include_pt_grad=include_pt_grad,
         pt_grad_mode=pt_grad_mode,
         pt_grad_eps=pt_grad_eps,

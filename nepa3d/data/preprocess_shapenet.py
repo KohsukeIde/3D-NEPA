@@ -57,6 +57,16 @@ def _build_split_map(mesh_paths, test_ratio=0.1, split_seed=0):
     return split_map
 
 
+def _filter_shard(paths, num_shards=1, shard_id=0):
+    ns = int(num_shards)
+    sid = int(shard_id)
+    if ns <= 1:
+        return list(paths)
+    if sid < 0 or sid >= ns:
+        raise ValueError(f"invalid shard_id={sid} for num_shards={ns}")
+    return [p for i, p in enumerate(paths) if (i % ns) == sid]
+
+
 def _worker(task):
     (
         mesh_path,
@@ -168,6 +178,8 @@ def main():
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--chunk_size", type=int, default=1)
     ap.add_argument("--max_tasks_per_child", type=int, default=2)
+    ap.add_argument("--num_shards", type=int, default=1, help="split target mesh list into N shards")
+    ap.add_argument("--shard_id", type=int, default=0, help="0-based shard id when num_shards>1")
     args = ap.parse_args()
 
     if (not args.no_udf) and (distance_transform_edt is None):
@@ -190,6 +202,11 @@ def main():
         target_paths = mesh_paths
     else:
         target_paths = [p for p in mesh_paths if split_map.get(p) == args.split]
+    target_paths = _filter_shard(target_paths, num_shards=args.num_shards, shard_id=args.shard_id)
+    print(
+        f"[shard] num_shards={int(args.num_shards)} shard_id={int(args.shard_id)} "
+        f"targets={len(target_paths)}"
+    )
 
     seed_base = None if args.seed < 0 else int(args.seed)
     workers = max(1, int(args.workers))
@@ -256,4 +273,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

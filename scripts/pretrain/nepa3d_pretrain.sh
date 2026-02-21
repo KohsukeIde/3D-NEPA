@@ -11,10 +11,14 @@ set -eu
 
 # Environment setup
 . /etc/profile.d/modules.sh
-module load cuda/12.6
+CUDA_MODULE="${CUDA_MODULE:-cuda/12.6}"
+if command -v module >/dev/null 2>&1; then
+  module load "${CUDA_MODULE}" 2>/dev/null || echo "[warn] module load ${CUDA_MODULE} failed; continue with current module set."
+fi
 
 # Move to working directory
-cd /groups/gag51403/ide/3D-NEPA
+WORKDIR="${WORKDIR:-${PBS_O_WORKDIR:-$(pwd)}}"
+cd "${WORKDIR}"
 
 # Activate Python virtual environment
 if [ -f ".venv/bin/activate" ]; then
@@ -68,6 +72,15 @@ ACCELERATE_LAUNCH_MODULE="${ACCELERATE_LAUNCH_MODULE:-accelerate.commands.launch
 DROP_RAY_PROB="${DROP_RAY_PROB:-0.0}"
 FORCE_MISSING_RAY="${FORCE_MISSING_RAY:-0}"
 ADD_EOS="${ADD_EOS:-1}"
+QA_TOKENS="${QA_TOKENS:-0}"
+QA_LAYOUT="${QA_LAYOUT:-interleave}"
+PT_XYZ_KEY="${PT_XYZ_KEY:-pt_xyz_pool}"
+PT_DIST_KEY="${PT_DIST_KEY:-pt_dist_pool}"
+ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
+PT_SAMPLE_MODE_TRAIN="${PT_SAMPLE_MODE_TRAIN:-random}"
+PT_FPS_KEY="${PT_FPS_KEY:-auto}"
+PT_RFPS_M="${PT_RFPS_M:-4096}"
+POINT_ORDER_MODE="${POINT_ORDER_MODE:-morton}"
 VOXEL_GRID="${VOXEL_GRID:-64}"
 VOXEL_DILATE="${VOXEL_DILATE:-1}"
 VOXEL_MAX_STEPS="${VOXEL_MAX_STEPS:-0}"
@@ -110,6 +123,21 @@ else
   echo "[lr-scale] disabled: lr=${LR}"
 fi
 
+LAUNCH_MIXED_PRECISION="${MIXED_PRECISION}"
+if [ "${LAUNCH_MIXED_PRECISION}" = "auto" ]; then
+  LAUNCH_MIXED_PRECISION="$("${PYTHON_BIN}" - <<'PY'
+import torch
+if not torch.cuda.is_available():
+    print("no")
+elif hasattr(torch.cuda, "is_bf16_supported") and torch.cuda.is_bf16_supported():
+    print("bf16")
+else:
+    print("fp16")
+PY
+)"
+fi
+echo "[accelerate] launch mixed_precision=${LAUNCH_MIXED_PRECISION} (requested=${MIXED_PRECISION})"
+
 if [ "${NUM_PROCESSES}" -gt 1 ]; then
   "${ACCELERATE_PYTHON}" -m "${ACCELERATE_LAUNCH_MODULE}" \
     --multi_gpu \
@@ -118,7 +146,7 @@ if [ "${NUM_PROCESSES}" -gt 1 ]; then
     --machine_rank "${MACHINE_RANK}" \
     --main_process_ip "${MAIN_PROCESS_IP}" \
     --main_process_port "${MAIN_PROCESS_PORT}" \
-    --mixed_precision "${MIXED_PRECISION}" \
+    --mixed_precision "${LAUNCH_MIXED_PRECISION}" \
     -m nepa3d.train.pretrain \
   --cache_root "${CACHE_ROOT}" \
   --mix_config "${MIX_CONFIG}" \
@@ -135,6 +163,15 @@ if [ "${NUM_PROCESSES}" -gt 1 ]; then
   --num_workers "${NUM_WORKERS}" \
   --drop_ray_prob "${DROP_RAY_PROB}" \
   --add_eos "${ADD_EOS}" \
+  --qa_tokens "${QA_TOKENS}" \
+  --qa_layout "${QA_LAYOUT}" \
+  --pt_xyz_key "${PT_XYZ_KEY}" \
+  --pt_dist_key "${PT_DIST_KEY}" \
+  --ablate_point_dist "${ABLATE_POINT_DIST}" \
+  --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN}" \
+  --pt_fps_key "${PT_FPS_KEY}" \
+  --pt_rfps_m "${PT_RFPS_M}" \
+  --point_order_mode "${POINT_ORDER_MODE}" \
   --objective "${OBJECTIVE}" \
   --mask_ratio "${MASK_RATIO}" \
   --mixed_precision "${MIXED_PRECISION}" \
@@ -183,6 +220,15 @@ else
   --num_workers "${NUM_WORKERS}" \
   --drop_ray_prob "${DROP_RAY_PROB}" \
   --add_eos "${ADD_EOS}" \
+  --qa_tokens "${QA_TOKENS}" \
+  --qa_layout "${QA_LAYOUT}" \
+  --pt_xyz_key "${PT_XYZ_KEY}" \
+  --pt_dist_key "${PT_DIST_KEY}" \
+  --ablate_point_dist "${ABLATE_POINT_DIST}" \
+  --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN}" \
+  --pt_fps_key "${PT_FPS_KEY}" \
+  --pt_rfps_m "${PT_RFPS_M}" \
+  --point_order_mode "${POINT_ORDER_MODE}" \
   --objective "${OBJECTIVE}" \
   --mask_ratio "${MASK_RATIO}" \
   --mixed_precision "${MIXED_PRECISION}" \

@@ -2,6 +2,7 @@ import argparse
 import glob
 import json
 import os
+from typing import Optional, Union
 
 import numpy as np
 import torch
@@ -638,7 +639,7 @@ def infer_qa_layout(ckpt):
     return str(pre_args.get("qa_layout", "interleave"))
 
 
-def build_model_from_ckpt(ckpt_path, device, max_len_override: int | None = None):
+def build_model_from_ckpt(ckpt_path, device, max_len_override: Optional[int] = None):
     ckpt = torch.load(ckpt_path, map_location="cpu")
     pre_args = ckpt.get("args", {})
     state = ckpt["model"]
@@ -1173,7 +1174,7 @@ def _build_feat_type_for_ctx_and_queries(
     qa_tokens: int,
     qa_layout: str,
     add_eos: int,
-) -> tuple[np.ndarray, np.ndarray, slice | np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, Union[slice, np.ndarray]]:
     """Build (feat, type_id, q_pos) for a batch with explicit query points.
 
     Feature layout matches tokenizer's fixed feature dim=15; we only populate:
@@ -1217,7 +1218,7 @@ def _build_feat_type_for_ctx_and_queries(
             type_id = np.concatenate(
                 [bos_type, ctx_q_type, q_q_type, ctx_a_type, q_a_type], axis=0
             )
-            q_pos: slice | np.ndarray = slice(1 + n_ctx, 1 + n_ctx + n_q)
+            q_pos: Union[slice, np.ndarray] = slice(1 + n_ctx, 1 + n_ctx + n_q)
         else:
             ctx_qa = np.stack([ctx_q, ctx_a], axis=1).reshape(2 * n_ctx, feat_dim)
             ctx_qa_type = np.stack([ctx_q_type, ctx_a_type], axis=1).reshape(2 * n_ctx)
@@ -1313,8 +1314,8 @@ def _predict_udf_grid_ridge(
 
 def _mesh_eval_chamfer_for_paths(
     *,
-    model: torch.nn.Module | None,
-    ridge_w: np.ndarray | None,
+    model: Optional[torch.nn.Module],
+    ridge_w: Optional[np.ndarray],
     paths: list[str],
     args: argparse.Namespace,
     device: torch.device,

@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from accelerate import Accelerator
 from torch.utils.data import DataLoader
 
 from ..data.dataset import ModelNet40QueryDataset, collate
@@ -294,6 +295,8 @@ def main():
     )
 
     args = ap.parse_args()
+    accelerator = Accelerator()
+    log = accelerator.print
 
     # Apply augmentation presets (override individual aug_* defaults).
     if args.aug_preset == "modelnet40":
@@ -314,8 +317,7 @@ def main():
         args.aug_jitter_clip = 0.0
 
     set_seed(args.seed)
-
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = accelerator.device
 
     train_backend = args.train_backend or args.backend
     eval_backend = args.eval_backend or args.backend
@@ -334,11 +336,11 @@ def main():
         )
         picked_set = set(picked_classes)
         test_paths = sorted([p for p in test_paths if label_from_path(p) in picked_set])
-        print(
+        log(
             f"[fewshot-nway] n_way={args.fewshot_n_way} way_seed={way_seed} "
             f"picked_classes={picked_classes}"
         )
-        print(
+        log(
             f"[fewshot-nway] filtered_train={len(train_paths_full)} "
             f"filtered_test={len(test_paths)}"
         )
@@ -348,7 +350,7 @@ def main():
     )
     if args.fewshot_k and args.fewshot_k > 0:
         train_paths = stratified_kshot(train_paths, k=args.fewshot_k, seed=args.fewshot_seed)
-        print(f"[fewshot] k={args.fewshot_k} selected_train={len(train_paths)} (from split-train)")
+        log(f"[fewshot] k={args.fewshot_k} selected_train={len(train_paths)} (from split-train)")
 
     label_map = build_label_map(train_paths_full)
 
@@ -373,24 +375,24 @@ def main():
     if args.n_point is None:
         args.n_point = pre_n_point
     elif args.n_point > pre_n_point and (not allow_scale_up):
-        print(
+        log(
             f"[sizes] requested n_point={args.n_point} > pretrain n_point={pre_n_point}; capping (set --allow_scale_up 1 to override)"
         )
         args.n_point = pre_n_point
     elif args.n_point > pre_n_point and allow_scale_up:
-        print(f"[sizes] scale-up enabled: n_point {pre_n_point} -> {args.n_point}")
+        log(f"[sizes] scale-up enabled: n_point {pre_n_point} -> {args.n_point}")
     elif args.n_point <= 0:
         raise ValueError(f"--n_point must be positive, got {args.n_point}")
 
     if args.n_ray is None:
         args.n_ray = pre_n_ray
     elif args.n_ray > pre_n_ray and (not allow_scale_up):
-        print(
+        log(
             f"[sizes] requested n_ray={args.n_ray} > pretrain n_ray={pre_n_ray}; capping (set --allow_scale_up 1 to override)"
         )
         args.n_ray = pre_n_ray
     elif args.n_ray > pre_n_ray and allow_scale_up:
-        print(f"[sizes] scale-up enabled: n_ray {pre_n_ray} -> {args.n_ray}")
+        log(f"[sizes] scale-up enabled: n_ray {pre_n_ray} -> {args.n_ray}")
     elif args.n_ray < 0:
         raise ValueError(f"--n_ray must be >= 0, got {args.n_ray}")
 
@@ -547,7 +549,7 @@ def main():
 
     state = ckpt["model"]
     if model_max_len != ckpt_max_len:
-        print(f"[ckpt] resizing pos_emb: ckpt_len={ckpt_max_len} -> max_len={model_max_len}")
+        log(f"[ckpt] resizing pos_emb: ckpt_len={ckpt_max_len} -> max_len={model_max_len}")
         state = maybe_resize_pos_emb_in_state_dict(dict(state), model_max_len)
 
     backbone = QueryNepa(
@@ -576,11 +578,12 @@ def main():
     opt_params = model.head.parameters() if args.freeze_backbone else model.parameters()
     opt = optim.AdamW(opt_params, lr=args.lr, weight_decay=args.weight_decay)
     ce = nn.CrossEntropyLoss()
+    model, opt, train_dl, val_dl, test_dl = accelerator.prepare(model, opt, train_dl, val_dl, test_dl)
 
     def eval_acc(dl):
         model.eval()
-        correct = 0
-        total = 0
+        correct = torch.zeros((), device=device, dtype=torch.long)
+        total = torch.zeros((), device=device, dtype=torch.long)
         with torch.no_grad():
             for batch in dl:
                 feat = batch["feat"].to(device).float()
@@ -597,43 +600,50 @@ def main():
                 else:
                     logits = model(feat, type_id)
                 pred = logits.argmax(dim=-1)
-                correct += (pred == y).sum().item()
+                correct += (pred == y).sum()
                 total += y.numel()
-        return correct / max(total, 1)
+        correct = accelerator.reduce(correct, reduction="sum")
+        total = accelerator.reduce(total, reduction="sum")
+        return float((correct.float() / total.clamp(min=1).float()).item())
 
     if args.save_dir:
-        os.makedirs(args.save_dir, exist_ok=True)
+        if accelerator.is_main_process:
+            os.makedirs(args.save_dir, exist_ok=True)
+    accelerator.wait_for_everyone()
 
     best_val = -1.0
     best_ep = -1
     best_state = None
 
-    print(
+    model_for_log = accelerator.unwrap_model(model)
+    log(
         f"train_backend={train_backend} eval_backend={eval_backend} "
         f"val_ratio={args.val_ratio} val_seed={args.val_seed} "
         f"mc_eval_k_val={mc_eval_k_val} mc_eval_k_test={mc_eval_k_test} "
         f"freeze_backbone={bool(args.freeze_backbone)} "
         f"cls_is_causal={bool(int(args.cls_is_causal))} "
-        f"cls_pooling={args.cls_pooling}->{model._resolved_pooling()} "
+        f"cls_pooling={args.cls_pooling}->{model_for_log._resolved_pooling()} "
         f"pt_xyz_key={args.pt_xyz_key} pt_dist_key={args.pt_dist_key} "
         f"pt_sample_mode_train={args.pt_sample_mode_train} pt_sample_mode_eval={args.pt_sample_mode_eval} "
         f"pt_fps_key={args.pt_fps_key} pt_rfps_m={args.pt_rfps_m} "
         f"ablate_point_dist={bool(args.ablate_point_dist)} "
         f"n_point={args.n_point}/{pre_n_point} n_ray={args.n_ray}/{pre_n_ray} "
-        f"model_max_len={model_max_len}"
+        f"model_max_len={model_max_len} world_size={accelerator.num_processes}"
     )
-    print(f"num_train={len(train_paths)} num_val={len(val_paths)} num_test={len(test_paths)}")
+    log(f"num_train={len(train_paths)} num_val={len(val_paths)} num_test={len(test_paths)}")
 
     for ep in range(args.epochs):
+        if hasattr(train_dl, "set_epoch"):
+            train_dl.set_epoch(ep)
         model.train()
         if args.freeze_backbone:
             # keep frozen backbone deterministic even in train loop
-            model.backbone.eval()
+            accelerator.unwrap_model(model).backbone.eval()
 
-        train_loss_sum = 0.0
-        train_correct = 0
-        train_total = 0
-        train_steps = 0
+        train_loss_sum = torch.zeros((), device=device, dtype=torch.float32)
+        train_correct = torch.zeros((), device=device, dtype=torch.long)
+        train_total = torch.zeros((), device=device, dtype=torch.long)
+        train_steps = torch.zeros((), device=device, dtype=torch.long)
 
         for batch in train_dl:
             feat = batch["feat"].to(device).float()
@@ -643,26 +653,30 @@ def main():
             opt.zero_grad(set_to_none=True)
             logits = model(feat, type_id)
             loss = ce(logits, y)
-            loss.backward()
+            accelerator.backward(loss)
             opt.step()
 
-            train_loss_sum += float(loss.detach().item())
+            train_loss_sum += loss.detach()
             train_steps += 1
             with torch.no_grad():
                 pred = logits.argmax(dim=-1)
-                train_correct += int((pred == y).sum().item())
-                train_total += int(y.numel())
+                train_correct += (pred == y).sum()
+                train_total += y.numel()
 
         val_acc = eval_acc(val_dl)
-        train_loss = train_loss_sum / max(train_steps, 1)
-        train_acc = train_correct / max(train_total, 1)
+        train_loss_sum = accelerator.reduce(train_loss_sum, reduction="sum")
+        train_steps = accelerator.reduce(train_steps, reduction="sum")
+        train_correct = accelerator.reduce(train_correct, reduction="sum")
+        train_total = accelerator.reduce(train_total, reduction="sum")
+        train_loss = float((train_loss_sum / train_steps.clamp(min=1).to(train_loss_sum.dtype)).item())
+        train_acc = float((train_correct.float() / train_total.clamp(min=1).float()).item())
         improved = val_acc > best_val + 1e-12
         if improved:
             best_val = val_acc
             best_ep = ep
             # Keep best weights.
-            best_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
-            if args.save_dir:
+            best_state = {k: v.detach().cpu() for k, v in accelerator.unwrap_model(model).state_dict().items()}
+            if args.save_dir and accelerator.is_main_process:
                 torch.save(
                     {
                         "model": best_state,
@@ -674,21 +688,21 @@ def main():
                     os.path.join(args.save_dir, "best.pt"),
                 )
 
-        print(
+        log(
             f"ep={ep} train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
             f"val_acc={val_acc:.4f} best_val={best_val:.4f} best_ep={best_ep}"
         )
 
     # Final test evaluation on the best VAL checkpoint.
     if best_state is not None:
-        model.load_state_dict(best_state, strict=True)
+        accelerator.unwrap_model(model).load_state_dict(best_state, strict=True)
     test_acc = eval_acc(test_dl)
-    print(f"best_val={best_val:.4f} best_ep={best_ep} test_acc={test_acc:.4f}")
+    log(f"best_val={best_val:.4f} best_ep={best_ep} test_acc={test_acc:.4f}")
 
-    if args.save_dir:
+    if args.save_dir and accelerator.is_main_process:
         torch.save(
             {
-                "model": {k: v.detach().cpu() for k, v in model.state_dict().items()},
+                "model": {k: v.detach().cpu() for k, v in accelerator.unwrap_model(model).state_dict().items()},
                 "epoch": args.epochs - 1,
                 "val_acc": best_val,
                 "test_acc": test_acc,

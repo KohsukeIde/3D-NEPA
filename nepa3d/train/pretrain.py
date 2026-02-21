@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import copy
 import math
@@ -293,6 +295,53 @@ def main():
         help="Token layout when qa_tokens=1.",
     )
     ap.add_argument(
+        "--pt_xyz_key",
+        type=str,
+        default="pt_xyz_pool",
+        help="Point pool key used for point-token sampling.",
+    )
+    ap.add_argument(
+        "--pt_dist_key",
+        type=str,
+        default="pt_dist_pool",
+        help="Distance pool key paired with --pt_xyz_key (set empty to disable explicit dist pool lookup).",
+    )
+    ap.add_argument(
+        "--ablate_point_dist",
+        type=int,
+        default=0,
+        help="If 1, zero-out point distance channel regardless of dist pool.",
+    )
+    ap.add_argument(
+        "--pt_sample_mode_train",
+        type=str,
+        default="random",
+        choices=["random", "fps", "rfps", "fixed_grid"],
+        help="Point sampling mode used by pretrain dataset.",
+    )
+    ap.add_argument(
+        "--pt_fps_key",
+        type=str,
+        default="auto",
+        help="Key for precomputed FPS order (e.g., pc_fps_order/pt_fps_order/auto).",
+    )
+    ap.add_argument(
+        "--pt_rfps_m",
+        type=int,
+        default=4096,
+        help="Candidate size for RFPS mode.",
+    )
+    ap.add_argument(
+        "--point_order_mode",
+        type=str,
+        default="morton",
+        choices=["morton", "fps", "random"],
+        help=(
+            "Point token ordering after sampling: morton=legacy, "
+            "fps=keep sampling order, random=shuffle."
+        ),
+    )
+    ap.add_argument(
         "--include_pt_grad",
         type=int,
         default=0,
@@ -425,6 +474,8 @@ def main():
     ap.add_argument("--voxel_max_steps", type=int, default=0)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
+    if isinstance(args.pt_dist_key, str) and len(args.pt_dist_key.strip()) == 0:
+        args.pt_dist_key = None
 
     arch_warns: list[str] = []
     if str(args.arch) == "encdec":
@@ -569,6 +620,17 @@ def main():
         else int(args.n_point) + int(args.n_ray)
     )
 
+    mprint(
+        "[point_tokens] "
+        f"pt_xyz_key={args.pt_xyz_key} "
+        f"pt_dist_key={args.pt_dist_key} "
+        f"ablate_point_dist={int(bool(args.ablate_point_dist))} "
+        f"pt_sample_mode_train={args.pt_sample_mode_train} "
+        f"pt_fps_key={args.pt_fps_key} "
+        f"pt_rfps_m={int(args.pt_rfps_m)} "
+        f"point_order_mode={args.point_order_mode}"
+    )
+
     if args.mix_config:
         ds, sampler, mix_info = build_mixed_pretrain(
             args.mix_config,
@@ -591,6 +653,13 @@ def main():
             voxel_grid=args.voxel_grid,
             voxel_dilate=args.voxel_dilate,
             voxel_max_steps=args.voxel_max_steps,
+            pt_xyz_key=str(args.pt_xyz_key),
+            pt_dist_key=args.pt_dist_key,
+            ablate_point_dist=bool(args.ablate_point_dist),
+            pt_sample_mode=str(args.pt_sample_mode_train),
+            pt_fps_key=str(args.pt_fps_key),
+            pt_rfps_m=int(args.pt_rfps_m),
+            point_order_mode=str(args.point_order_mode),
         )
         # Optional overrides from CLI (useful for PBS -v variables)
         if args.mix_num_samples and args.mix_num_samples > 0:
@@ -639,6 +708,13 @@ def main():
             voxel_grid=args.voxel_grid,
             voxel_dilate=args.voxel_dilate,
             voxel_max_steps=args.voxel_max_steps,
+            pt_xyz_key=str(args.pt_xyz_key),
+            pt_dist_key=args.pt_dist_key,
+            ablate_point_dist=bool(args.ablate_point_dist),
+            pt_sample_mode=str(args.pt_sample_mode_train),
+            pt_fps_key=str(args.pt_fps_key),
+            pt_rfps_m=int(args.pt_rfps_m),
+            point_order_mode=str(args.point_order_mode),
         )
         dl = DataLoader(
             ds,

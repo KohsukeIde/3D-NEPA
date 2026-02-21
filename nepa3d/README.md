@@ -20,6 +20,7 @@ Legacy means early/pre-review snapshots (including old ModelNet40-era runs). Cur
 - ScanObjectNN M1 legacy snapshot (`75/75`): `nepa3d/docs/results_scanobjectnn_m1_legacy.md`
 - UCPR/CPAC active results (incl. QA cycle): `nepa3d/docs/results_ucpr_cpac_active.md`
 - UCPR/CPAC planning doc: `nepa3d/docs/eccv_ucpr_cpac_tables.md`
+- 1024 pretrain A/B/C/D + multi-node launch plan: `nepa3d/docs/pretrain_abcd_1024_multinode_active.md`
 - K-plane/Tri-plane results (pilot + full e50) are tracked in `nepa3d/docs/results_ucpr_cpac_active.md`
 
 ## Classification Attention Mode (Important)
@@ -94,6 +95,7 @@ Output layout:
 - `data/shapenet_cache_v0/train/<synset>/<model>.npz`
 - `data/shapenet_cache_v0/test/<synset>/<model>.npz`
 - split manifest: `data/shapenet_cache_v0/_splits/{train.txt,test.txt}`
+- each cache `.npz` includes `pc_fps_order` (deterministic FPS order over `pc_xyz`)
 
 ### 2.2 ScanObjectNN cache (paper-safe setting)
 
@@ -110,6 +112,7 @@ Profile:
 - `PT_POOL=4000`
 - `RAY_POOL=256`
 - `PT_SURFACE_RATIO=0.5`, `PT_SURFACE_SIGMA=0.02`
+- `WORKERS=8` (file-level parallelism; effective max is number of h5 files per split)
 
 Local command:
 
@@ -122,7 +125,8 @@ Local command:
   --ray_pool 256 \
   --pt_surface_ratio 0.5 \
   --pt_surface_sigma 0.02 \
-  --seed 0
+  --seed 0 \
+  --workers 8
 ```
 
 Safety behavior:
@@ -135,6 +139,18 @@ Safety behavior:
 Legacy note:
 
 - `data/scanobjectnn_cache_v2` is kept for historical/internal runs only
+
+If you already have a cache generated before `pc_fps_order` was added, backfill it with:
+
+```bash
+CACHE_ROOT=data/scanobjectnn_main_split_v2 \
+SPLITS=train,test \
+FPS_K=2048 \
+PT_KEY=pc_xyz \
+OUT_KEY=pc_fps_order \
+WORKERS=16 \
+bash scripts/preprocess/migrate_add_pt_fps_order.sh
+```
 
 ### 2.3 ShapeNet unpaired cache for UCPR/CPAC (`data/shapenet_unpaired_cache_v1`)
 

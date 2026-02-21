@@ -1,4 +1,5 @@
 import argparse
+import concurrent.futures as cf
 import glob
 import os
 from collections import defaultdict
@@ -7,6 +8,8 @@ import h5py
 import numpy as np
 from scipy.spatial import cKDTree
 from tqdm import tqdm
+
+from nepa3d.utils.fps import fps_order
 
 
 def normalize_points(pc):
@@ -120,6 +123,74 @@ def _write_preprocess_meta(out_root, split, scan_root, h5_paths, pt_pool, ray_po
             f.write(f"{os.path.abspath(p)}\n")
 
 
+def _process_h5_file(task):
+    (
+        h5_path,
+        out_root,
+        split,
+        pt_pool,
+        ray_pool,
+        pt_surface_ratio,
+        pt_surface_sigma,
+        base_seed,
+        global_offset,
+        overwrite,
+    ) = task
+
+    stem = os.path.splitext(os.path.basename(h5_path))[0]
+    n_total = 0
+    n_ok = 0
+    n_skip = 0
+
+    with h5py.File(h5_path, "r") as f:
+        if "data" not in f or "label" not in f:
+            return (h5_path, 0, 0, 0)
+        data = f["data"]
+        label = f["label"][:].reshape(-1).astype(np.int64)
+        n_total = int(data.shape[0])
+
+        for idx in range(n_total):
+            cls_id = int(label[idx])
+            cls = f"class_{cls_id:03d}"
+            name = f"{stem}_{idx:06d}"
+            out_path = os.path.join(out_root, split, cls, f"{name}.npz")
+            if (not overwrite) and os.path.exists(out_path):
+                n_skip += 1
+                continue
+
+            pc = data[idx]
+            pc_xyz = normalize_points(pc)
+            pc_n = np.zeros_like(pc_xyz, dtype=np.float32)
+            try:
+                pc_fps_order = fps_order(pc_xyz, k=int(pc_xyz.shape[0])).astype(np.int32, copy=False)
+            except Exception:
+                pc_fps_order = np.arange(pc_xyz.shape[0], dtype=np.int32)
+
+            # Deterministic per-sample RNG (stable across file-parallel execution).
+            seed_i = (int(base_seed) + int(global_offset) + int(idx)) & 0xFFFFFFFF
+            rng = np.random.RandomState(seed_i)
+            pools = make_pools(
+                pc_xyz,
+                pt_pool=pt_pool,
+                ray_pool=ray_pool,
+                rng=rng,
+                pt_surface_ratio=pt_surface_ratio,
+                pt_surface_sigma=pt_surface_sigma,
+            )
+
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            np.savez_compressed(
+                out_path,
+                pc_xyz=pc_xyz.astype(np.float32, copy=False),
+                pc_n=pc_n,
+                pc_fps_order=pc_fps_order,
+                **pools,
+            )
+            n_ok += 1
+
+    return (h5_path, n_total, n_ok, n_skip)
+
+
 def preprocess_split(
     scan_root,
     out_root,
@@ -131,6 +202,7 @@ def preprocess_split(
     pt_surface_ratio=0.5,
     pt_surface_sigma=0.02,
     allow_duplicate_stems=False,
+    workers=1,
 ):
     h5_paths = find_split_files(scan_root, split)
     if not h5_paths:
@@ -149,9 +221,55 @@ def preprocess_split(
         seed,
     )
 
+    # Compute sample counts per file once (used for logging and deterministic offsets).
+    file_sizes = []
+    for h5_path in h5_paths:
+        with h5py.File(h5_path, "r") as f:
+            if "data" not in f:
+                continue
+            file_sizes.append((h5_path, int(f["data"].shape[0])))
+    n_items = int(sum(n for _, n in file_sizes))
+    print(f"{split}: {n_items} samples from {len(file_sizes)} files")
+
+    workers = max(1, int(workers))
+    if workers > 1 and len(file_sizes) > 0:
+        tasks = []
+        offset = 0
+        for h5_path, n in file_sizes:
+            tasks.append(
+                (
+                    h5_path,
+                    out_root,
+                    split,
+                    pt_pool,
+                    ray_pool,
+                    pt_surface_ratio,
+                    pt_surface_sigma,
+                    seed,
+                    offset,
+                    overwrite,
+                )
+            )
+            offset += int(n)
+
+        n_ok = 0
+        n_skip = 0
+        with cf.ProcessPoolExecutor(max_workers=min(workers, len(tasks))) as ex:
+            futs = [ex.submit(_process_h5_file, t) for t in tasks]
+            for fut in tqdm(cf.as_completed(futs), total=len(futs), desc=f"preprocess {split} files"):
+                h5_path, n_total, ok, skip = fut.result()
+                n_ok += int(ok)
+                n_skip += int(skip)
+                print(
+                    f"{split}: {os.path.basename(h5_path)} total={int(n_total)} "
+                    f"ok={int(ok)} skip={int(skip)}"
+                )
+        print(f"{split}: done ok={n_ok} skip={n_skip}")
+        return
+
     rng = np.random.RandomState(int(seed) & 0xFFFFFFFF)
     items = list(iter_h5_samples(h5_paths))
-    print(f"{split}: {len(items)} samples from {len(h5_paths)} files")
+    print(f"{split}: sequential mode ({len(items)} samples)")
 
     for h5_path, idx, pc, cls_id in tqdm(items, desc=f"preprocess {split}"):
         cls = f"class_{cls_id:03d}"
@@ -163,6 +281,11 @@ def preprocess_split(
 
         pc_xyz = normalize_points(pc)
         pc_n = np.zeros_like(pc_xyz, dtype=np.float32)
+        # Deterministic FPS order over observed point cloud points.
+        try:
+            pc_fps_order = fps_order(pc_xyz, k=int(pc_xyz.shape[0])).astype(np.int32, copy=False)
+        except Exception:
+            pc_fps_order = np.arange(pc_xyz.shape[0], dtype=np.int32)
         pools = make_pools(pc_xyz, pt_pool=pt_pool, ray_pool=ray_pool, rng=rng, pt_surface_ratio=pt_surface_ratio, pt_surface_sigma=pt_surface_sigma)
 
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -170,6 +293,7 @@ def preprocess_split(
             out_path,
             pc_xyz=pc_xyz.astype(np.float32, copy=False),
             pc_n=pc_n,
+            pc_fps_order=pc_fps_order,
             **pools,
         )
 
@@ -189,6 +313,7 @@ def main():
         action="store_true",
         help="allow duplicate h5 basenames across scan_root (unsafe; can overwrite outputs)",
     )
+    ap.add_argument("--workers", type=int, default=1, help="parallel workers across h5 files")
     ap.add_argument("--overwrite", action="store_true")
     args = ap.parse_args()
 
@@ -204,6 +329,7 @@ def main():
             pt_surface_ratio=args.pt_surface_ratio,
             pt_surface_sigma=args.pt_surface_sigma,
             allow_duplicate_stems=args.allow_duplicate_stems,
+            workers=args.workers,
         )
     if args.split in ("test", "all"):
         preprocess_split(
@@ -217,6 +343,7 @@ def main():
             pt_surface_ratio=args.pt_surface_ratio,
             pt_surface_sigma=args.pt_surface_sigma,
             allow_duplicate_stems=args.allow_duplicate_stems,
+            workers=args.workers,
         )
 
 

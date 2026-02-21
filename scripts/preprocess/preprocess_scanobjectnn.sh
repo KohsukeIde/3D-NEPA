@@ -1,17 +1,31 @@
-#!/bin/sh
-#PBS -q rt_HC
-#PBS -l select=1:ncpus=32:mem=128gb
-#PBS -l walltime=12:00:00
-#PBS -P gag51403
+#!/bin/bash
+#PBS -q abciq
+#PBS -l select=1:ncpus=32:mem=100gb:ngpus=0
+#PBS -l walltime=24:00:00
+#PBS -l rt_QC=1
+#PBS -l spot_rt_QC=1
+#PBS -W group_list=qgah50055
 #PBS -N nepa3d_preprocess_scan
-#PBS -o nepa3d_preprocess_scan.out
-#PBS -e nepa3d_preprocess_scan.err
+#PBS -o logs/preprocess/preprocess_scanobjectnn.out
+#PBS -e logs/preprocess/preprocess_scanobjectnn.err
 
 set -euo pipefail
 
-. /etc/profile.d/modules.sh
+# Resolve repository root. Priority:
+#  1) explicit REPO_ROOT
+#  2) PBS submit dir if it contains 3D-NEPA
+#  3) PBS submit dir itself if it is repo root
+#  4) this environment's default checkout path
+if [ -n "${REPO_ROOT:-}" ]; then
+  cd "${REPO_ROOT}"
+elif [ -n "${PBS_O_WORKDIR:-}" ] && [ -d "${PBS_O_WORKDIR}/3D-NEPA" ]; then
+  cd "${PBS_O_WORKDIR}/3D-NEPA"
+elif [ -n "${PBS_O_WORKDIR:-}" ] && [ -f "${PBS_O_WORKDIR}/nepa3d/data/preprocess_scanobjectnn.py" ]; then
+  cd "${PBS_O_WORKDIR}"
+else
+  cd /groups/qgah50055/ide/VGI/3D-NEPA
+fi
 
-cd /groups/gag51403/ide/3D-NEPA
 if [ -f ".venv/bin/activate" ]; then
   . .venv/bin/activate
 fi
@@ -29,20 +43,21 @@ RAY_POOL="${RAY_POOL:-256}"
 PT_SURFACE_RATIO="${PT_SURFACE_RATIO:-0.5}"
 PT_SURFACE_SIGMA="${PT_SURFACE_SIGMA:-0.02}"
 SEED="${SEED:-0}"
+WORKERS="${WORKERS:-8}"
 OVERWRITE="${OVERWRITE:-0}"
 ALLOW_DUPLICATE_STEMS="${ALLOW_DUPLICATE_STEMS:-0}"
 
-EXTRA_OVERWRITE=""
+extra_overwrite=()
 if [ "${OVERWRITE}" = "1" ]; then
-  EXTRA_OVERWRITE="--overwrite"
+  extra_overwrite+=(--overwrite)
 fi
 
-EXTRA_DUP=""
+extra_dup=()
 if [ "${ALLOW_DUPLICATE_STEMS}" = "1" ]; then
-  EXTRA_DUP="--allow_duplicate_stems"
+  extra_dup+=(--allow_duplicate_stems)
 fi
 
-"${PYTHON_BIN}" nepa3d/data/preprocess_scanobjectnn.py \
+"${PYTHON_BIN}" -u -m nepa3d.data.preprocess_scanobjectnn \
   --scan_root "${SCAN_ROOT}" \
   --out_root "${OUT_ROOT}" \
   --split "${SPLIT}" \
@@ -51,5 +66,6 @@ fi
   --pt_surface_ratio "${PT_SURFACE_RATIO}" \
   --pt_surface_sigma "${PT_SURFACE_SIGMA}" \
   --seed "${SEED}" \
-  ${EXTRA_OVERWRITE} \
-  ${EXTRA_DUP}
+  --workers "${WORKERS}" \
+  "${extra_overwrite[@]}" \
+  "${extra_dup[@]}"

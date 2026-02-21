@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -eu
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [ -n "${PBS_O_WORKDIR:-}" ] && [ -d "${PBS_O_WORKDIR}" ]; then
+  ROOT_DIR="${PBS_O_WORKDIR}"
+else
+  ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
 cd "${ROOT_DIR}"
 
 PYTHON_BIN="${PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"
@@ -32,6 +36,8 @@ SEED="${SEED:-0}"
 WORKERS="${WORKERS:-4}"
 CHUNK_SIZE="${CHUNK_SIZE:-1}"
 MAX_TASKS_PER_CHILD="${MAX_TASKS_PER_CHILD:-2}"
+NUM_SHARDS="${NUM_SHARDS:-1}"
+SHARD_ID="${SHARD_ID:-0}"
 OVERWRITE="${OVERWRITE:-0}"
 NO_PC_RAYS="${NO_PC_RAYS:-0}"
 NO_UDF="${NO_UDF:-0}"
@@ -86,5 +92,6 @@ set -x
   --workers "${WORKERS}" \
   --chunk_size "${CHUNK_SIZE}" \
   --max_tasks_per_child "${MAX_TASKS_PER_CHILD}" \
+  --num_shards "${NUM_SHARDS}" \
+  --shard_id "${SHARD_ID}" \
   ${EXTRA_FLAGS}
-

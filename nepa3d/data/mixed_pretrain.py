@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -233,6 +235,13 @@ def build_mixed_pretrain(
     voxel_grid: int = 64,
     voxel_dilate: int = 1,
     voxel_max_steps: int = 0,
+    pt_xyz_key: str = "pt_xyz_pool",
+    pt_dist_key: str = "pt_dist_pool",
+    ablate_point_dist: bool = False,
+    pt_sample_mode: str = "random",
+    pt_fps_key: str = "auto",
+    pt_rfps_m: int = 4096,
+    point_order_mode: str = "morton",
 ) -> Tuple[MixedPretrainDataset, MixtureSampler, Dict[str, Any]]:
     """Build (dataset, sampler) for mixed pretraining from a YAML config."""
     specs, cfg = load_mix_config(mix_config_path)
@@ -269,6 +278,13 @@ def build_mixed_pretrain(
             voxel_grid=int(voxel_grid if s.voxel_grid is None else s.voxel_grid),
             voxel_dilate=int(voxel_dilate if s.voxel_dilate is None else s.voxel_dilate),
             voxel_max_steps=int(voxel_max_steps if s.voxel_max_steps is None else s.voxel_max_steps),
+            pt_xyz_key=str(pt_xyz_key),
+            pt_dist_key=None if pt_dist_key is None else str(pt_dist_key),
+            ablate_point_dist=bool(ablate_point_dist),
+            pt_sample_mode=str(pt_sample_mode),
+            pt_fps_key=str(pt_fps_key),
+            pt_rfps_m=int(pt_rfps_m),
+            point_order_mode=str(point_order_mode),
             return_label=False,
         )
         datasets.append(ds)
