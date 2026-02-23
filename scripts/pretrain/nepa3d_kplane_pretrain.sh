@@ -31,7 +31,7 @@ LR="${LR:-3e-4}"
 # 2D NEPA style linear LR scaling:
 #   LEARNING_RATE = BASE_LEARNING_RATE * TOTAL_BATCH_SIZE / 256
 # Backward-compatible default keeps LR at current default when TOTAL_BATCH_SIZE=96.
-LR_SCALE_ENABLE="${LR_SCALE_ENABLE:-1}"          # 1: enable linear scaling, 0: disable
+LR_SCALE_ENABLE="${LR_SCALE_ENABLE:-0}"          # 1: enable linear scaling, 0: disable
 LR_SCALE_REF_BATCH="${LR_SCALE_REF_BATCH:-256}"  # denominator in scaling rule
 LR_BASE_TOTAL_BATCH="${LR_BASE_TOTAL_BATCH:-96}" # baseline total batch for deriving BASE_LEARNING_RATE
 BASE_LEARNING_RATE="${BASE_LEARNING_RATE:-}"     # if empty, derived from LR and LR_BASE_TOTAL_BATCH
@@ -70,13 +70,28 @@ ACCELERATE_LAUNCH_MODULE="${ACCELERATE_LAUNCH_MODULE:-accelerate.commands.launch
 TOTAL_BATCH_SIZE="${TOTAL_BATCH_SIZE:-$((BATCH * NUM_PROCESSES))}"
 if [ "${LR_SCALE_ENABLE}" = "1" ]; then
   if [ -z "${BASE_LEARNING_RATE}" ]; then
-    BASE_LEARNING_RATE="$("${PYTHON_BIN}" -c "print(float('${LR}') * float('${LR_BASE_TOTAL_BATCH}') / 256.0)")"
+    BASE_LEARNING_RATE="$("${PYTHON_BIN}" -c "print(float('${LR}') * 256.0 / float('${LR_BASE_TOTAL_BATCH}'))")"
   fi
   LR="$("${PYTHON_BIN}" -c "print(float('${BASE_LEARNING_RATE}') * float('${TOTAL_BATCH_SIZE}') / float('${LR_SCALE_REF_BATCH}'))")"
   echo "[lr-scale] enabled: base_lr=${BASE_LEARNING_RATE} total_batch=${TOTAL_BATCH_SIZE} ref_batch=${LR_SCALE_REF_BATCH} lr=${LR}"
 else
   echo "[lr-scale] disabled: lr=${LR}"
 fi
+
+LAUNCH_MIXED_PRECISION="${MIXED_PRECISION}"
+if [ "${LAUNCH_MIXED_PRECISION}" = "auto" ]; then
+  LAUNCH_MIXED_PRECISION="$("${PYTHON_BIN}" - <<'PY'
+import torch
+if not torch.cuda.is_available():
+    print("no")
+elif hasattr(torch.cuda, "is_bf16_supported") and torch.cuda.is_bf16_supported():
+    print("bf16")
+else:
+    print("fp16")
+PY
+)"
+fi
+echo "[accelerate] launch mixed_precision=${LAUNCH_MIXED_PRECISION} (requested=${MIXED_PRECISION})"
 
 if [ "${NUM_PROCESSES}" -gt 1 ]; then
   "${ACCELERATE_PYTHON}" -m "${ACCELERATE_LAUNCH_MODULE}" \
@@ -86,7 +101,7 @@ if [ "${NUM_PROCESSES}" -gt 1 ]; then
     --machine_rank "${MACHINE_RANK}" \
     --main_process_ip "${MAIN_PROCESS_IP}" \
     --main_process_port "${MAIN_PROCESS_PORT}" \
-    --mixed_precision "${MIXED_PRECISION}" \
+    --mixed_precision "${LAUNCH_MIXED_PRECISION}" \
     -m nepa3d.train.pretrain_kplane \
   --mix_config "${MIX_CONFIG}" \
   --mix_num_samples "${MIX_NUM_SAMPLES}" \
@@ -111,7 +126,7 @@ if [ "${NUM_PROCESSES}" -gt 1 ]; then
   --voxel_grid "${VOXEL_GRID}" \
   --voxel_dilate "${VOXEL_DILATE}" \
   --voxel_max_steps "${VOXEL_MAX_STEPS}" \
-  --mixed_precision "${MIXED_PRECISION}" \
+  --mixed_precision "${LAUNCH_MIXED_PRECISION}" \
   --save_dir "${SAVE_DIR}" \
   --save_every "${SAVE_EVERY}" \
   --save_last "${SAVE_LAST}" \
@@ -143,7 +158,7 @@ else
   --voxel_grid "${VOXEL_GRID}" \
   --voxel_dilate "${VOXEL_DILATE}" \
   --voxel_max_steps "${VOXEL_MAX_STEPS}" \
-  --mixed_precision "${MIXED_PRECISION}" \
+  --mixed_precision "${LAUNCH_MIXED_PRECISION}" \
   --save_dir "${SAVE_DIR}" \
   --save_every "${SAVE_EVERY}" \
   --save_last "${SAVE_LAST}" \

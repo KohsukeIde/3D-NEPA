@@ -1,6 +1,6 @@
 # 1024-Point Pretrain A/B/C/D (Active Plan)
 
-Last updated: 2026-02-21
+Last updated: 2026-02-23
 
 ## 1. Scope
 
@@ -148,7 +148,7 @@ Each run executes:
 
 - ScanObjectNN classification fine-tune/eval (`pointcloud_noray`, `n_point=1024`, `n_ray=0`, `pc_xyz`, xyz-only)
   - fine-tune is launched with `accelerate` multi-GPU on one node (`NPROC_PER_NODE`, default `4`)
-  - pooling is fixed to `mean_pts` (`--cls_pooling mean_pts`)
+  - current rerun default is `mean_q` (`--cls_pooling mean_q`); old failed logs used `mean_pts`
 - CPAC-UDF eval (`pointcloud_noray -> udf`, non-transductive head train: `train_udf`)
 - ModelNet40 classification step is auto-run only when `data/modelnet40_cache_v2` exists; otherwise it is skipped.
 
@@ -171,7 +171,7 @@ Each run executes:
   - Run C: `mae=0.1897`, `rmse=0.2396`, `iou@tau=0.1721`
   - Run D: `mae=0.2043`, `rmse=0.2513`, `iou@tau=0.1144`
 
-## 9. Classification Result Snapshot (from logs)
+## 9. Classification Result Snapshot (Historical / Superseded by §14)
 
 - Source logs:
   - `logs/eval/abcd_cls_cpac/runA_classification_scan.log`
@@ -233,3 +233,123 @@ Interpretation:
 - There are two independent factors that can make scaling appear worse:
   - pretrain LR scaling behavior yields very small LR at large global batch
   - eval protocol forces xyz-only classification for all runs, which is not a full-spec A/C/D readout
+
+## 13. Patch Applied (LR scaling / mixed precision / cls pooling)
+
+Applied from `nepa_pretrain_lrscale_mixedprecision_patch.zip` (with one safety addition):
+
+- Updated pretrain launcher scripts:
+  - `scripts/pretrain/nepa3d_pretrain.sh`
+  - `scripts/pretrain/nepa3d_pretrain_pointcloud.sh`
+  - `scripts/pretrain/nepa3d_kplane_pretrain.sh`
+  - `scripts/pretrain/run_shapenet_mix_pretrains_mainsplit_local.sh`
+  - `scripts/pretrain/run_shapenet_m1_pretrains_local.sh`
+  - `scripts/pretrain/run_shapenet_simple_local.sh`
+- Changes:
+  - `LR_SCALE_ENABLE` default set to `0` (off by default).
+  - fixed base-LR derivation formula:
+    - old: `BASE_LR = LR * LR_BASE_TOTAL_BATCH / 256`
+    - new: `BASE_LR = LR * 256 / LR_BASE_TOTAL_BATCH`
+  - `--mixed_precision` passed to Python with resolved `LAUNCH_MIXED_PRECISION` (`no/fp16/bf16`).
+  - note: in `nepa3d_kplane_pretrain.sh`, added explicit `LAUNCH_MIXED_PRECISION` resolve block to avoid unset variable risk.
+
+Classification robustness patch:
+
+- `nepa3d/train/finetune_cls.py`
+  - added `cls_pooling=mean_q` (query-point mean: `TYPE_POINT` + `TYPE_Q_POINT`).
+  - safety guard: when `qa_tokens=1` + `--ablate_point_dist` + `cls_pooling=mean_pts`, auto-switch to `mean_q` with warning.
+- `scripts/eval/nepa3d_eval_cls_cpac_qf.sh`
+  - `CLS_POOLING` env (default `mean_q`)
+  - `ABLATE_POINT_DIST` env (default `1`)
+- `scripts/eval/submit_abcd_cls_cpac_qf.sh`
+  - forwards `CLS_POOLING` and `ABLATE_POINT_DIST` to submitted jobs.
+
+### Re-run log checklist (must-pass)
+
+- Pretrain log head:
+  - expected by default: `[lr-scale] disabled: lr=<configured>`
+  - `qa_tokens` in checkpoint args must match run design (A/C/D=`1`, B=`0`).
+- Eval log head:
+  - `cls_pooling` should resolve to `mean_q` for QA+dist-ablation runs.
+  - if `qa_tokens=1` and dist ablation is on, no `mean_pts` should remain without warning/override.
+
+## 14. Final Outcome (2026-02-23)
+
+Final eval jobs (new batch) used:
+
+- A/C: `logs/eval/abcd_cls_cpac_fix20260222_200311/run{A,C}.out`
+- B/D rerun: `logs/eval/abcd_cls_cpac_fix20260222_200311_rerun1/run{B,D}.out`
+
+Final scheduler status:
+
+- pretrain: `94030/94031/94032/94033` all `Exit_status=0`
+- eval: `94034=0`, `94036=0`, `94071=0`, `94072=1`
+
+### 14.1 ScanObjectNN classification (final)
+
+From:
+
+- `logs/eval/abcd_cls_cpac_fix20260222_200311/runA_fix20260222_200311_classification_scan.log`
+- `logs/eval/abcd_cls_cpac_fix20260222_200311_rerun1/runB_fix20260222_200311_rerun1_classification_scan.log`
+- `logs/eval/abcd_cls_cpac_fix20260222_200311/runC_fix20260222_200311_classification_scan.log`
+- `logs/eval/abcd_cls_cpac_fix20260222_200311_rerun1/runD_fix20260222_200311_rerun1_classification_scan.log`
+
+| Run | best_val | best_ep | test_acc |
+|---|---:|---:|---:|
+| A | 0.8554 | 96 | 0.6279 |
+| B (rerun1) | 0.9065 | 89 | 0.6506 |
+| C | 0.8460 | 83 | 0.5906 |
+| D (rerun1) | 0.8155 | 82 | 0.6129 |
+
+### 14.2 CPAC-UDF (final)
+
+From JSON:
+
+- `results/cpac_abcd_1024_runA_fix20260222_200311.json`
+- `results/cpac_abcd_1024_runB_fix20260222_200311_rerun1.json`
+- `results/cpac_abcd_1024_runC_fix20260222_200311.json`
+
+| Run | mae | rmse | iou@tau |
+|---|---:|---:|---:|
+| A | 0.0639 | 0.0863 | 0.5576 |
+| B (rerun1) | 0.1174 | 0.1575 | 0.4193 |
+| C | 0.1026 | 0.1329 | 0.3528 |
+
+Run D CPAC in rerun1 failed (no final JSON):
+
+- log: `logs/eval/abcd_cls_cpac_fix20260222_200311_rerun1/runD.out`
+- error: `RuntimeError: The size of tensor a (4098) must match the size of tensor b (2500) at non-singleton dimension 1`
+- interpretation: CPAC eval context/query token length exceeded the checkpoint positional length (`max_len=2500`) for D.
+
+### 14.3 ModelNet40 status
+
+All runs skipped ModelNet40 because cache was missing:
+
+- `[skip] ModelNet cache not found: data/modelnet40_cache_v2`
+
+Seen in:
+
+- `logs/eval/abcd_cls_cpac_fix20260222_200311/runA.out`
+- `logs/eval/abcd_cls_cpac_fix20260222_200311/runC.out`
+- `logs/eval/abcd_cls_cpac_fix20260222_200311_rerun1/runB.out`
+- `logs/eval/abcd_cls_cpac_fix20260222_200311_rerun1/runD.out`
+
+## 15. Log Audit (Problems / Non-problems)
+
+### 15.1 Confirmed OK
+
+- Pretrain A/B/C/D completed successfully (`Exit_status=0`).
+- No NaN/Traceback/on-the-fly-FPS fallback warnings found in final pretrain logs (`ddp_pretrain_94030..94033`).
+- Classification stage completed for all A/B/C/D (including D inside rerun1 before CPAC step).
+
+### 15.2 Confirmed issue still open
+
+- CPAC for Run D (rerun1) failed due token length mismatch (`4098` vs checkpoint `2500`).
+- Therefore, D has valid classification metrics but no valid CPAC metric for this new batch.
+
+### 15.3 Recommended fix for D-CPAC rerun
+
+Either:
+
+- reduce CPAC token load so total length fits `<=2500` (e.g., smaller `n_context` and/or `n_query` for D), or
+- re-train D with larger `max_len` to support current CPAC eval tokenization.

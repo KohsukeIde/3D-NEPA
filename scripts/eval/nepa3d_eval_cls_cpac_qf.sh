@@ -32,6 +32,9 @@ LR_CLS="${LR_CLS:-1e-4}"
 N_POINT_CLS="${N_POINT_CLS:-1024}"
 N_RAY_CLS="${N_RAY_CLS:-0}"
 ACCELERATE_LAUNCH_MODULE="${ACCELERATE_LAUNCH_MODULE:-accelerate.commands.launch}"
+CLS_POOLING="${CLS_POOLING:-mean_q}"
+ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-1}"
+DDP_FIND_UNUSED_PARAMETERS="${DDP_FIND_UNUSED_PARAMETERS:-1}"
 
 CPAC_SPLIT="${CPAC_SPLIT:-eval}"
 CPAC_N_CONTEXT="${CPAC_N_CONTEXT:-1024}"
@@ -82,11 +85,17 @@ if [[ ! -d "${UNPAIRED_CACHE_ROOT}" ]]; then
   exit 2
 fi
 
+ABLATE_POINT_DIST_FLAG=()
+if [[ "${ABLATE_POINT_DIST}" == "1" ]]; then
+  ABLATE_POINT_DIST_FLAG+=(--ablate_point_dist)
+fi
+
 SCAN_SAVE_DIR="${EVAL_ROOT}/classification_scan/${RUN_TAG}"
 SCAN_LOG="${LOG_ROOT}/${RUN_TAG}_classification_scan.log"
 mkdir -p "${SCAN_SAVE_DIR}"
 
 echo "=== CLASSIFICATION: ScanObjectNN ==="
+echo "cls_pooling=${CLS_POOLING} ablate_point_dist=${ABLATE_POINT_DIST}"
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
 python -u -m "${ACCELERATE_LAUNCH_MODULE}" \
   --num_processes "${NPROC_PER_NODE}" \
@@ -108,11 +117,12 @@ python -u -m "${ACCELERATE_LAUNCH_MODULE}" \
   --eval_seed 0 \
   --mc_eval_k_val 1 \
   --mc_eval_k_test 10 \
+  --ddp_find_unused_parameters "${DDP_FIND_UNUSED_PARAMETERS}" \
   --cls_is_causal 0 \
-  --cls_pooling mean_pts \
+  --cls_pooling "${CLS_POOLING}" \
   --pt_xyz_key pc_xyz \
   --pt_dist_key pt_dist_pool \
-  --ablate_point_dist \
+  "${ABLATE_POINT_DIST_FLAG[@]}" \
   --pt_sample_mode_train fps \
   --pt_sample_mode_eval fps \
   --pt_fps_key auto \
@@ -147,11 +157,12 @@ if [[ -d "${MODELNET_CACHE_ROOT}" ]]; then
     --eval_seed 0 \
     --mc_eval_k_val 1 \
     --mc_eval_k_test 10 \
+    --ddp_find_unused_parameters "${DDP_FIND_UNUSED_PARAMETERS}" \
     --cls_is_causal 0 \
-    --cls_pooling mean_pts \
+    --cls_pooling "${CLS_POOLING}" \
     --pt_xyz_key pc_xyz \
     --pt_dist_key pt_dist_pool \
-    --ablate_point_dist \
+    "${ABLATE_POINT_DIST_FLAG[@]}" \
     --pt_sample_mode_train fps \
     --pt_sample_mode_eval fps \
     --pt_fps_key auto \

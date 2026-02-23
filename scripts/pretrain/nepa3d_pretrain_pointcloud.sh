@@ -35,7 +35,7 @@ LR="${LR:-3e-4}"
 # 2D NEPA style linear LR scaling:
 #   LEARNING_RATE = BASE_LEARNING_RATE * TOTAL_BATCH_SIZE / 256
 # Backward-compatible default keeps LR at current default when TOTAL_BATCH_SIZE=32.
-LR_SCALE_ENABLE="${LR_SCALE_ENABLE:-1}"          # 1: enable linear scaling, 0: disable
+LR_SCALE_ENABLE="${LR_SCALE_ENABLE:-0}"          # 1: enable linear scaling, 0: disable
 LR_SCALE_REF_BATCH="${LR_SCALE_REF_BATCH:-256}"  # denominator in scaling rule
 LR_BASE_TOTAL_BATCH="${LR_BASE_TOTAL_BATCH:-32}" # baseline total batch for deriving BASE_LEARNING_RATE
 BASE_LEARNING_RATE="${BASE_LEARNING_RATE:-}"     # if empty, derived from LR and LR_BASE_TOTAL_BATCH
@@ -73,7 +73,7 @@ ACCELERATE_LAUNCH_MODULE="${ACCELERATE_LAUNCH_MODULE:-accelerate.commands.launch
 TOTAL_BATCH_SIZE="${TOTAL_BATCH_SIZE:-$((BATCH * NUM_PROCESSES))}"
 if [ "${LR_SCALE_ENABLE}" = "1" ]; then
   if [ -z "${BASE_LEARNING_RATE}" ]; then
-    BASE_LEARNING_RATE="$("${PYTHON_BIN}" -c "print(float('${LR}') * float('${LR_BASE_TOTAL_BATCH}') / 256.0)")"
+    BASE_LEARNING_RATE="$("${PYTHON_BIN}" -c "print(float('${LR}') * 256.0 / float('${LR_BASE_TOTAL_BATCH}'))")"
   fi
   LR="$("${PYTHON_BIN}" -c "print(float('${BASE_LEARNING_RATE}') * float('${TOTAL_BATCH_SIZE}') / float('${LR_SCALE_REF_BATCH}'))")"
   echo "[lr-scale] enabled: base_lr=${BASE_LEARNING_RATE} total_batch=${TOTAL_BATCH_SIZE} ref_batch=${LR_SCALE_REF_BATCH} lr=${LR}"
@@ -124,7 +124,7 @@ if [ "${NUM_PROCESSES}" -gt 1 ]; then
   --point_order_mode "${POINT_ORDER_MODE}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
   --num_workers "${NUM_WORKERS}" \
-  --mixed_precision "${MIXED_PRECISION}" \
+  --mixed_precision "${LAUNCH_MIXED_PRECISION}" \
   --save_every "${SAVE_EVERY}" \
   --save_last "${SAVE_LAST}" \
   --auto_resume "${AUTO_RESUME}" \
@@ -150,7 +150,7 @@ else
   --point_order_mode "${POINT_ORDER_MODE}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
   --num_workers "${NUM_WORKERS}" \
-  --mixed_precision "${MIXED_PRECISION}" \
+  --mixed_precision "${LAUNCH_MIXED_PRECISION}" \
   --save_every "${SAVE_EVERY}" \
   --save_last "${SAVE_LAST}" \
   --auto_resume "${AUTO_RESUME}" \

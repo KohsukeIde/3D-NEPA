@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from accelerate import Accelerator
+from accelerate.utils import DistributedDataParallelKwargs
 from torch.utils.data import DataLoader
 
 from ..data.dataset import ModelNet40QueryDataset, collate
@@ -113,6 +114,9 @@ class ClsWrapper(nn.Module):
         elif pool == "mean_pts":
             pt_mask = (type_id == TYPE_POINT) | (type_id == TYPE_Q_POINT) | (type_id == TYPE_A_POINT)
             pooled = _masked_mean(h, pt_mask) if pt_mask.any() else h[:, -1, :]
+        elif pool == "mean_q":
+            q_mask = (type_id == TYPE_POINT) | (type_id == TYPE_Q_POINT)
+            pooled = _masked_mean(h, q_mask) if q_mask.any() else h[:, -1, :]
         elif pool == "mean_a":
             a_mask = (type_id == TYPE_A_POINT) | (type_id == TYPE_A_RAY)
             pooled = _masked_mean(h, a_mask) if a_mask.any() else h[:, -1, :]
@@ -227,8 +231,8 @@ def main():
         "--cls_pooling",
         type=str,
         default="mean_a",
-        choices=["auto", "eos", "bos", "mean", "mean_no_special", "mean_pts", "mean_a"],
-        help="classification pooling (default=mean_a): auto(mean_a for qa_tokens else eos), eos, bos, mean, mean_no_special, mean_pts, mean_a",
+        choices=["auto", "eos", "bos", "mean", "mean_no_special", "mean_pts", "mean_q", "mean_a"],
+        help="classification pooling (default=mean_a): auto(mean_a for qa_tokens else eos), eos, bos, mean, mean_no_special, mean_pts, mean_q, mean_a",
     )
     ap.add_argument(
         "--ablate_point_dist",
@@ -273,6 +277,12 @@ def main():
         default=4096,
         help="RFPS candidate count when fps key is unavailable.",
     )
+    ap.add_argument(
+        "--ddp_find_unused_parameters",
+        type=int,
+        default=1,
+        help="DDP setting for finetune (1=enable find_unused_parameters, safer for partial-token pooling).",
+    )
 
     # --- Data augmentation (classification protocol alignment) ---
     ap.add_argument(
@@ -295,7 +305,10 @@ def main():
     )
 
     args = ap.parse_args()
-    accelerator = Accelerator()
+    ddp_kwargs = DistributedDataParallelKwargs(
+        find_unused_parameters=bool(int(args.ddp_find_unused_parameters))
+    )
+    accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
     log = accelerator.print
 
     # Apply augmentation presets (override individual aug_* defaults).
@@ -366,6 +379,15 @@ def main():
         qa_tokens = bool(args.qa_tokens)
     else:
         qa_tokens = bool(pre_args.get("qa_tokens", ckpt_n_types >= 9))
+
+    # Safety guard: with qa_tokens=1 + point-dist ablation, A_POINT carries near-empty info.
+    # Averaging Q/A point tokens together (mean_pts) can dilute useful signal.
+    if qa_tokens and args.ablate_point_dist and args.cls_pooling == "mean_pts":
+        log(
+            "[warn] qa_tokens=1 + --ablate_point_dist + cls_pooling=mean_pts can dilute Q-point signal; "
+            "override cls_pooling to mean_q"
+        )
+        args.cls_pooling = "mean_q"
 
     pre_n_point = int(pre_args["n_point"])
     pre_n_ray = int(pre_args["n_ray"])

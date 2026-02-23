@@ -8,6 +8,8 @@ WORKDIR="${WORKDIR:-/groups/qgah50055/ide/VGI/3D-NEPA}"
 WALLTIME="${WALLTIME:-24:00:00}"
 RT_QF="${RT_QF:-1}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-4}"
+CLS_POOLING="${CLS_POOLING:-mean_q}"
+ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-1}"
 QSUB_DEPEND="${QSUB_DEPEND:-}"
 
 mkdir -p "${WORKDIR}/logs/eval/abcd_cls_cpac"
@@ -36,7 +38,7 @@ submit() {
     -N "eval_${run_tag}"
     -o "${out_log}"
     -e "${err_log}"
-    -v "WORKDIR=${WORKDIR},RUN_TAG=${run_tag},CKPT=${ckpt},NPROC_PER_NODE=${NPROC_PER_NODE}"
+    -v "WORKDIR=${WORKDIR},RUN_TAG=${run_tag},CKPT=${ckpt},NPROC_PER_NODE=${NPROC_PER_NODE},CLS_POOLING=${CLS_POOLING},ABLATE_POINT_DIST=${ABLATE_POINT_DIST}"
   )
   if [[ -n "${QSUB_DEPEND}" ]]; then
     cmd+=( -W "depend=${QSUB_DEPEND}" )

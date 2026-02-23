@@ -17,7 +17,7 @@ LR="${LR:-3e-4}"
 # 2D NEPA style linear LR scaling:
 #   LEARNING_RATE = BASE_LEARNING_RATE * TOTAL_BATCH_SIZE / 256
 # Single-GPU local runner uses TOTAL_BATCH_SIZE=BATCH by default.
-LR_SCALE_ENABLE="${LR_SCALE_ENABLE:-1}"
+LR_SCALE_ENABLE="${LR_SCALE_ENABLE:-0}"
 LR_SCALE_REF_BATCH="${LR_SCALE_REF_BATCH:-256}"
 LR_BASE_TOTAL_BATCH="${LR_BASE_TOTAL_BATCH:-32}"
 BASE_LEARNING_RATE="${BASE_LEARNING_RATE:-}"
@@ -54,7 +54,7 @@ fi
 
 if [ "${LR_SCALE_ENABLE}" = "1" ]; then
   if [ -z "${BASE_LEARNING_RATE}" ]; then
-    BASE_LEARNING_RATE="$("${PYTHON_BIN}" -c "print(float('${LR}') * float('${LR_BASE_TOTAL_BATCH}') / 256.0)")"
+    BASE_LEARNING_RATE="$("${PYTHON_BIN}" -c "print(float('${LR}') * 256.0 / float('${LR_BASE_TOTAL_BATCH}'))")"
   fi
   LR="$("${PYTHON_BIN}" -c "print(float('${BASE_LEARNING_RATE}') * float('${TOTAL_BATCH_SIZE}') / float('${LR_SCALE_REF_BATCH}'))")"
   echo "[lr-scale] enabled: base_lr=${BASE_LEARNING_RATE} total_batch=${TOTAL_BATCH_SIZE} ref_batch=${LR_SCALE_REF_BATCH} lr=${LR}"
