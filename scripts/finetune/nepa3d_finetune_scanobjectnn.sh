@@ -44,6 +44,14 @@ PT_SAMPLE_MODE_TRAIN="${PT_SAMPLE_MODE_TRAIN:-random}"
 PT_SAMPLE_MODE_EVAL="${PT_SAMPLE_MODE_EVAL:-fps}"
 PT_FPS_KEY="${PT_FPS_KEY:-pt_fps_order}"
 PT_RFPS_M="${PT_RFPS_M:-4096}"
+POINT_ORDER_MODE="${POINT_ORDER_MODE:-morton}"
+AUG_PRESET="${AUG_PRESET:-scanobjectnn}"
+GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-1}"
+MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
+LR_SCHEDULER="${LR_SCHEDULER:-cosine}"
+WARMUP_EPOCHS="${WARMUP_EPOCHS:-10}"
+WARMUP_START_FACTOR="${WARMUP_START_FACTOR:-0.1}"
+MIN_LR="${MIN_LR:-1e-6}"
 
 "${PYTHON_BIN}" -m nepa3d.train.finetune_cls \
   --cache_root "${CACHE_ROOT}" \
@@ -66,4 +74,12 @@ PT_RFPS_M="${PT_RFPS_M:-4096}"
   --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN}" \
   --pt_sample_mode_eval "${PT_SAMPLE_MODE_EVAL}" \
   --pt_fps_key "${PT_FPS_KEY}" \
-  --pt_rfps_m "${PT_RFPS_M}"
+  --pt_rfps_m "${PT_RFPS_M}" \
+  --point_order_mode "${POINT_ORDER_MODE}" \
+  --aug_preset "${AUG_PRESET}" \
+  --grad_accum_steps "${GRAD_ACCUM_STEPS}" \
+  --max_grad_norm "${MAX_GRAD_NORM}" \
+  --lr_scheduler "${LR_SCHEDULER}" \
+  --warmup_epochs "${WARMUP_EPOCHS}" \
+  --warmup_start_factor "${WARMUP_START_FACTOR}" \
+  --min_lr "${MIN_LR}"

@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 
 import numpy as np
@@ -266,6 +267,13 @@ def main():
         help="Point sampling for EVAL sequences.",
     )
     ap.add_argument(
+        "--point_order_mode",
+        type=str,
+        default="morton",
+        choices=["morton", "fps", "random"],
+        help="Point ordering after sampling: morton=space-filling sort, fps=keep sampled order, random=shuffle.",
+    )
+    ap.add_argument(
         "--pt_fps_key",
         type=str,
         default="pt_fps_order",
@@ -282,6 +290,43 @@ def main():
         type=int,
         default=1,
         help="DDP setting for finetune (1=enable find_unused_parameters, safer for partial-token pooling).",
+    )
+    ap.add_argument(
+        "--grad_accum_steps",
+        type=int,
+        default=1,
+        help="Gradient accumulation steps (effective batch = batch * world_size * grad_accum_steps).",
+    )
+    ap.add_argument(
+        "--max_grad_norm",
+        type=float,
+        default=0.0,
+        help="Global grad norm clipping (<=0 disables clipping).",
+    )
+    ap.add_argument(
+        "--lr_scheduler",
+        type=str,
+        default="cosine",
+        choices=["none", "cosine"],
+        help="Learning-rate schedule for fine-tuning.",
+    )
+    ap.add_argument(
+        "--warmup_epochs",
+        type=float,
+        default=10.0,
+        help="Warmup duration in epochs (used when --lr_scheduler cosine).",
+    )
+    ap.add_argument(
+        "--warmup_start_factor",
+        type=float,
+        default=0.1,
+        help="Warmup start LR factor for LinearLR (used when --lr_scheduler cosine).",
+    )
+    ap.add_argument(
+        "--min_lr",
+        type=float,
+        default=1e-6,
+        help="Minimum LR floor for cosine scheduler.",
     )
 
     # --- Data augmentation (classification protocol alignment) ---
@@ -305,10 +350,14 @@ def main():
     )
 
     args = ap.parse_args()
+    args.grad_accum_steps = max(1, int(args.grad_accum_steps))
     ddp_kwargs = DistributedDataParallelKwargs(
         find_unused_parameters=bool(int(args.ddp_find_unused_parameters))
     )
-    accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
+    accelerator = Accelerator(
+        gradient_accumulation_steps=args.grad_accum_steps,
+        kwargs_handlers=[ddp_kwargs],
+    )
     log = accelerator.print
 
     # Apply augmentation presets (override individual aug_* defaults).
@@ -443,6 +492,7 @@ def main():
         aug_jitter_sigma=args.aug_jitter_sigma,
         aug_jitter_clip=args.aug_jitter_clip,
         aug_eval=args.aug_eval,
+        point_order_mode=args.point_order_mode,
         return_label=True,
         label_map=label_map,
     )
@@ -475,6 +525,7 @@ def main():
         aug_jitter_sigma=args.aug_jitter_sigma,
         aug_jitter_clip=args.aug_jitter_clip,
         aug_eval=args.aug_eval,
+        point_order_mode=args.point_order_mode,
         return_label=True,
         label_map=label_map,
     )
@@ -507,6 +558,7 @@ def main():
         aug_jitter_sigma=args.aug_jitter_sigma,
         aug_jitter_clip=args.aug_jitter_clip,
         aug_eval=args.aug_eval,
+        point_order_mode=args.point_order_mode,
         return_label=True,
         label_map=label_map,
     )
@@ -602,6 +654,50 @@ def main():
     ce = nn.CrossEntropyLoss()
     model, opt, train_dl, val_dl, test_dl = accelerator.prepare(model, opt, train_dl, val_dl, test_dl)
 
+    # Build scheduler on optimizer after accelerator.prepare so the wrapped optimizer is controlled.
+    steps_per_epoch = max(1, math.ceil(len(train_dl) / args.grad_accum_steps))
+    total_update_steps = max(1, int(args.epochs) * steps_per_epoch)
+    warmup_steps = 0
+    lr_scheduler = None
+    if args.lr_scheduler == "cosine":
+        warmup_steps = int(round(float(args.warmup_epochs) * steps_per_epoch))
+        if total_update_steps > 1:
+            warmup_steps = max(0, min(warmup_steps, total_update_steps - 1))
+        else:
+            warmup_steps = 0
+
+        schedulers = []
+        milestones = []
+        if warmup_steps > 0:
+            start_factor = float(args.warmup_start_factor)
+            start_factor = max(1e-8, min(start_factor, 1.0))
+            schedulers.append(
+                optim.lr_scheduler.LinearLR(
+                    opt,
+                    start_factor=start_factor,
+                    end_factor=1.0,
+                    total_iters=warmup_steps,
+                )
+            )
+            milestones.append(warmup_steps)
+
+        cosine_steps = max(1, total_update_steps - warmup_steps)
+        schedulers.append(
+            optim.lr_scheduler.CosineAnnealingLR(
+                opt,
+                T_max=cosine_steps,
+                eta_min=float(args.min_lr),
+            )
+        )
+        if len(schedulers) == 1:
+            lr_scheduler = schedulers[0]
+        else:
+            lr_scheduler = optim.lr_scheduler.SequentialLR(
+                opt,
+                schedulers=schedulers,
+                milestones=milestones,
+            )
+
     def eval_acc(dl):
         model.eval()
         correct = torch.zeros((), device=device, dtype=torch.long)
@@ -647,13 +743,18 @@ def main():
         f"cls_pooling={args.cls_pooling}->{model_for_log._resolved_pooling()} "
         f"pt_xyz_key={args.pt_xyz_key} pt_dist_key={args.pt_dist_key} "
         f"pt_sample_mode_train={args.pt_sample_mode_train} pt_sample_mode_eval={args.pt_sample_mode_eval} "
+        f"point_order_mode={args.point_order_mode} "
         f"pt_fps_key={args.pt_fps_key} pt_rfps_m={args.pt_rfps_m} "
         f"ablate_point_dist={bool(args.ablate_point_dist)} "
         f"n_point={args.n_point}/{pre_n_point} n_ray={args.n_ray}/{pre_n_ray} "
-        f"model_max_len={model_max_len} world_size={accelerator.num_processes}"
+        f"model_max_len={model_max_len} world_size={accelerator.num_processes} "
+        f"grad_accum_steps={args.grad_accum_steps} max_grad_norm={args.max_grad_norm} "
+        f"lr_scheduler={args.lr_scheduler} warmup_steps={warmup_steps} total_update_steps={total_update_steps} "
+        f"min_lr={args.min_lr}"
     )
     log(f"num_train={len(train_paths)} num_val={len(val_paths)} num_test={len(test_paths)}")
 
+    global_update_steps = 0
     for ep in range(args.epochs):
         if hasattr(train_dl, "set_epoch"):
             train_dl.set_epoch(ep)
@@ -666,17 +767,28 @@ def main():
         train_correct = torch.zeros((), device=device, dtype=torch.long)
         train_total = torch.zeros((), device=device, dtype=torch.long)
         train_steps = torch.zeros((), device=device, dtype=torch.long)
+        train_update_steps = torch.zeros((), device=device, dtype=torch.long)
+
+        opt.zero_grad(set_to_none=True)
 
         for batch in train_dl:
             feat = batch["feat"].to(device).float()
             type_id = batch["type_id"].to(device).long()
             y = batch["label"].to(device).long()
 
-            opt.zero_grad(set_to_none=True)
-            logits = model(feat, type_id)
-            loss = ce(logits, y)
-            accelerator.backward(loss)
-            opt.step()
+            with accelerator.accumulate(model):
+                logits = model(feat, type_id)
+                loss = ce(logits, y)
+                accelerator.backward(loss)
+                if accelerator.sync_gradients:
+                    if args.max_grad_norm > 0:
+                        accelerator.clip_grad_norm_(model.parameters(), float(args.max_grad_norm))
+                    opt.step()
+                    if lr_scheduler is not None:
+                        lr_scheduler.step()
+                    opt.zero_grad(set_to_none=True)
+                    train_update_steps += 1
+                    global_update_steps += 1
 
             train_loss_sum += loss.detach()
             train_steps += 1
@@ -692,6 +804,7 @@ def main():
         train_total = accelerator.reduce(train_total, reduction="sum")
         train_loss = float((train_loss_sum / train_steps.clamp(min=1).to(train_loss_sum.dtype)).item())
         train_acc = float((train_correct.float() / train_total.clamp(min=1).float()).item())
+        cur_lr = float(opt.param_groups[0]["lr"])
         improved = val_acc > best_val + 1e-12
         if improved:
             best_val = val_acc
@@ -712,7 +825,8 @@ def main():
 
         log(
             f"ep={ep} train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
-            f"val_acc={val_acc:.4f} best_val={best_val:.4f} best_ep={best_ep}"
+            f"val_acc={val_acc:.4f} best_val={best_val:.4f} best_ep={best_ep} "
+            f"lr={cur_lr:.6e} updates_ep={int(train_update_steps.item())} updates_total={global_update_steps}"
         )
 
     # Final test evaluation on the best VAL checkpoint.

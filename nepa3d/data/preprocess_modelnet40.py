@@ -2,6 +2,7 @@ import argparse
 import glob
 import multiprocessing as mp
 import os
+import zipfile
 
 import numpy as np
 import trimesh
@@ -261,6 +262,30 @@ def closest_point_distance_chunked(mesh, xyz, chunk_size=2048):
     return out
 
 
+def nearest_distance_to_points(query_xyz, ref_xyz, chunk_size=2048):
+    """Unsigned nearest-neighbor distance from query points to reference points."""
+    q = query_xyz.astype(np.float32, copy=False)
+    r = ref_xyz.astype(np.float32, copy=False)
+    if q.size == 0:
+        return np.zeros((0,), dtype=np.float32)
+    if r.size == 0:
+        return np.ones((q.shape[0],), dtype=np.float32)
+
+    if cKDTree is not None:
+        kdt = cKDTree(r)
+        dist, _ = kdt.query(q, k=1)
+        return dist.astype(np.float32, copy=False)
+
+    out = np.empty((q.shape[0],), dtype=np.float32)
+    cs = max(1, int(chunk_size))
+    for s in range(0, q.shape[0], cs):
+        e = min(q.shape[0], s + cs)
+        diff = q[s:e, None, :] - r[None, :, :]
+        d2 = np.sum(diff * diff, axis=2)
+        out[s:e] = np.sqrt(np.min(d2, axis=1)).astype(np.float32)
+    return out
+
+
 def approx_point_distance_kdtree(mesh, xyz, ref_points=8192, fallback_pc=None):
     """Approximate point-to-surface distance using nearest sampled surface points."""
     if cKDTree is None:
@@ -342,26 +367,63 @@ def preprocess_one(
     if seed is not None:
         np.random.seed(seed)
 
-    mesh = trimesh.load(mesh_path, force="mesh")
-    if mesh is None or len(mesh.vertices) == 0:
-        return False
-
     try:
-        mesh.remove_degenerate_faces()
-        mesh.remove_duplicate_faces()
-        mesh.remove_infinite_values()
-        mesh.remove_unreferenced_vertices()
+        geom = trimesh.load(mesh_path, process=False)
     except Exception:
-        pass
+        return False
+    mesh = None
+    pc_src = None
 
-    mesh = normalize_mesh(mesh)
+    if isinstance(geom, trimesh.Trimesh):
+        mesh = geom
+        if len(mesh.vertices) > 0:
+            pc_src = np.asarray(mesh.vertices).astype(np.float32, copy=False)
+    elif isinstance(geom, trimesh.Scene):
+        # Scene fallback: merge all available vertices as point cloud.
+        verts = []
+        for g in geom.geometry.values():
+            if hasattr(g, "vertices"):
+                v = np.asarray(g.vertices)
+                if v.size > 0:
+                    verts.append(v)
+        if verts:
+            pc_src = np.concatenate(verts, axis=0).astype(np.float32, copy=False)
+    elif hasattr(geom, "vertices"):
+        v = np.asarray(geom.vertices)
+        if v.size > 0:
+            pc_src = v.astype(np.float32, copy=False)
 
-    pc_xyz, face_idx = mesh.sample(pc_points, return_index=True)
-    pc_xyz = pc_xyz.astype(np.float32)
-    if face_idx is None:
-        pc_n = np.zeros_like(pc_xyz, dtype=np.float32)
+    has_mesh = mesh is not None and len(getattr(mesh, "vertices", [])) > 0 and len(getattr(mesh, "faces", [])) > 0
+    if has_mesh:
+        try:
+            mesh.remove_degenerate_faces()
+            mesh.remove_duplicate_faces()
+            mesh.remove_infinite_values()
+            mesh.remove_unreferenced_vertices()
+        except Exception:
+            pass
+
+        mesh = normalize_mesh(mesh)
+        pc_xyz, face_idx = mesh.sample(pc_points, return_index=True)
+        pc_xyz = pc_xyz.astype(np.float32, copy=False)
+        if face_idx is None:
+            pc_n = np.zeros_like(pc_xyz, dtype=np.float32)
+        else:
+            pc_n = mesh.face_normals[face_idx].astype(np.float32, copy=False)
     else:
-        pc_n = mesh.face_normals[face_idx].astype(np.float32)
+        if pc_src is None or pc_src.shape[0] == 0:
+            return False
+        # Normalize point-only geometry to canonical cube, same convention as mesh path.
+        center = (pc_src.max(axis=0) + pc_src.min(axis=0)) * 0.5
+        pc_src = pc_src - center
+        scale = np.max(np.linalg.norm(pc_src, axis=1))
+        if scale < 1e-9:
+            scale = 1.0
+        pc_src = (pc_src / scale).astype(np.float32, copy=False)
+
+        idx = np.random.choice(pc_src.shape[0], size=int(pc_points), replace=(pc_src.shape[0] < int(pc_points)))
+        pc_xyz = pc_src[idx].astype(np.float32, copy=False)
+        pc_n = np.zeros_like(pc_xyz, dtype=np.float32)
     # Deterministic FPS order over observed point cloud points.
     try:
         pc_fps_order = fps_order(pc_xyz, k=int(pc_xyz.shape[0])).astype(np.int32, copy=False)
@@ -383,17 +445,21 @@ def preprocess_one(
     pt_xyz_pool = np.concatenate(pts, axis=0) if len(pts) > 1 else pts[0]
     # Clip to canonical cube
     pt_xyz_pool = np.clip(pt_xyz_pool, -1.0, 1.0).astype(np.float32, copy=False)
-    if pt_dist_mode == "kdtree":
-        try:
-            pt_dist_pool = approx_point_distance_kdtree(
-                mesh, pt_xyz_pool, ref_points=dist_ref_points, fallback_pc=pc_xyz
-            )
-        except Exception:
-            pt_dist_pool = closest_point_distance_chunked(
-                mesh, pt_xyz_pool, chunk_size=pt_query_chunk
-            )
+    if has_mesh:
+        if pt_dist_mode == "kdtree":
+            try:
+                pt_dist_pool = approx_point_distance_kdtree(
+                    mesh, pt_xyz_pool, ref_points=dist_ref_points, fallback_pc=pc_xyz
+                )
+            except Exception:
+                pt_dist_pool = closest_point_distance_chunked(
+                    mesh, pt_xyz_pool, chunk_size=pt_query_chunk
+                )
+        else:
+            pt_dist_pool = closest_point_distance_chunked(mesh, pt_xyz_pool, chunk_size=pt_query_chunk)
     else:
-        pt_dist_pool = closest_point_distance_chunked(mesh, pt_xyz_pool, chunk_size=pt_query_chunk)
+        # Point-only fallback: use nearest-neighbor distance to observed points.
+        pt_dist_pool = nearest_distance_to_points(pt_xyz_pool, pc_xyz, chunk_size=pt_query_chunk)
     if not np.isfinite(pt_dist_pool).all():
         finite = np.isfinite(pt_dist_pool)
         fill = float(np.max(pt_dist_pool[finite])) if finite.any() else 1.0
@@ -407,19 +473,7 @@ def preprocess_one(
     # NOTE: pt_dist_pool is mesh-derived (explicit surface). pt_dist_pc_pool is observation-derived.
     pt_dist_pc_pool = None
     try:
-        if cKDTree is not None:
-            kdt_pc = cKDTree(pc_xyz)
-            dist_pc, _ = kdt_pc.query(pt_xyz_pool, k=1)
-            pt_dist_pc_pool = dist_pc.astype(np.float32, copy=False)
-        else:
-            # Fallback: brute-force nearest neighbor distance in chunks (slower).
-            pt_dist_pc_pool = np.empty((pt_xyz_pool.shape[0],), dtype=np.float32)
-            cs = max(1, int(pt_query_chunk))
-            for s in range(0, pt_xyz_pool.shape[0], cs):
-                e = min(pt_xyz_pool.shape[0], s + cs)
-                diff = pt_xyz_pool[s:e, None, :] - pc_xyz[None, :, :]
-                d2 = np.sum(diff * diff, axis=2)
-                pt_dist_pc_pool[s:e] = np.sqrt(np.min(d2, axis=1)).astype(np.float32)
+        pt_dist_pc_pool = nearest_distance_to_points(pt_xyz_pool, pc_xyz, chunk_size=pt_query_chunk)
     except Exception:
         pt_dist_pc_pool = None
     if pt_dist_pc_pool is None:
@@ -464,37 +518,45 @@ def preprocess_one(
     ray_d = np.concatenate(ray_d_list, axis=0)[:ray_pool]
     m = ray_o.shape[0]
 
-    # Use Embree intersector if available, otherwise fall back to triangle intersector.
-    try:
-        from trimesh.ray.ray_pyembree import RayMeshIntersector
-
-        intersector = RayMeshIntersector(mesh)
-    except Exception:
-        intersector = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
-
     ray_hit = np.zeros((m,), dtype=np.float32)
     ray_t = np.zeros((m,), dtype=np.float32)
     ray_n = np.zeros((m, 3), dtype=np.float32)
+    if has_mesh:
+        # Use Embree intersector if available, otherwise fall back to triangle intersector.
+        try:
+            from trimesh.ray.ray_pyembree import RayMeshIntersector
 
-    rcs = max(1, int(ray_query_chunk))
-    for s in range(0, m, rcs):
-        e = min(m, s + rcs)
-        loc, idx_ray, idx_tri = intersector.intersects_location(
-            ray_o[s:e], ray_d[s:e], multiple_hits=False
-        )
-        if len(idx_ray) == 0:
-            continue
-        idx = idx_ray + s
-        ray_hit[idx] = 1.0
-        ray_t[idx] = np.sum((loc - ray_o[idx]) * ray_d[idx], axis=1).astype(np.float32)
-        ray_n[idx] = mesh.face_normals[idx_tri].astype(np.float32)
-    bad_t = ~np.isfinite(ray_t)
-    bad_n = ~np.isfinite(ray_n).all(axis=1)
-    bad = bad_t | bad_n
-    if np.any(bad):
-        ray_hit[bad] = 0.0
-        ray_t[bad] = 0.0
-        ray_n[bad] = 0.0
+            intersector = RayMeshIntersector(mesh)
+        except Exception:
+            intersector = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
+
+        rcs = max(1, int(ray_query_chunk))
+        for s in range(0, m, rcs):
+            e = min(m, s + rcs)
+            loc, idx_ray, idx_tri = intersector.intersects_location(
+                ray_o[s:e], ray_d[s:e], multiple_hits=False
+            )
+            if len(idx_ray) == 0:
+                continue
+            idx = idx_ray + s
+            ray_hit[idx] = 1.0
+            ray_t[idx] = np.sum((loc - ray_o[idx]) * ray_d[idx], axis=1).astype(np.float32)
+            ray_n[idx] = mesh.face_normals[idx_tri].astype(np.float32)
+        bad_t = ~np.isfinite(ray_t)
+        bad_n = ~np.isfinite(ray_n).all(axis=1)
+        bad = bad_t | bad_n
+        if np.any(bad):
+            ray_hit[bad] = 0.0
+            ray_t[bad] = 0.0
+            ray_n[bad] = 0.0
+    else:
+        # Point-only fallback: approximate "mesh-ray" pools from occupancy traversal.
+        try:
+            ray_hit, ray_t, ray_n = render_rays_from_pointcloud_occ(
+                ray_o, ray_d, pc_xyz, pc_n, grid=pc_grid, dilate=pc_dilate, max_steps=pc_max_steps
+            )
+        except Exception:
+            pass
 
     
     # PointCloud ray pools (approx): traverse voxelized pointcloud occupancy with DDA.
@@ -503,9 +565,15 @@ def preprocess_one(
     ray_n_pc = None
     if compute_pc_rays:
         try:
-            ray_hit_pc, ray_t_pc, ray_n_pc = render_rays_from_pointcloud_occ(
-                ray_o, ray_d, pc_xyz, pc_n, grid=pc_grid, dilate=pc_dilate, max_steps=pc_max_steps
-            )
+            if has_mesh:
+                ray_hit_pc, ray_t_pc, ray_n_pc = render_rays_from_pointcloud_occ(
+                    ray_o, ray_d, pc_xyz, pc_n, grid=pc_grid, dilate=pc_dilate, max_steps=pc_max_steps
+                )
+            else:
+                # In point-only mode, reuse already computed occupancy-based rays.
+                ray_hit_pc = ray_hit.copy()
+                ray_t_pc = ray_t.copy()
+                ray_n_pc = ray_n.copy()
         except Exception:
             # fall back to zeros so downstream can handle.
             ray_hit_pc = np.zeros_like(ray_hit, dtype=np.float32)
@@ -579,30 +647,85 @@ def _worker(task):
         pt_dist_mode,
         dist_ref_points,
     ) = task
-    ok = preprocess_one(
-        mesh_path,
-        out_path,
-        pc_points=pc_points,
-        pt_pool=pt_pool,
-        ray_pool=ray_pool,
-        n_views=n_views,
-        rays_per_view=rays_per_view,
-        seed=seed,
-        pc_grid=pc_grid,
-        pc_dilate=pc_dilate,
-        pc_max_steps=pc_max_steps,
-        compute_pc_rays=compute_pc_rays,
-        df_grid=df_grid,
-        df_dilate=df_dilate,
-        compute_udf=compute_udf,
-        pt_surface_ratio=pt_surface_ratio,
-        pt_surface_sigma=pt_surface_sigma,
-        pt_query_chunk=pt_query_chunk,
-        ray_query_chunk=ray_query_chunk,
-        pt_dist_mode=pt_dist_mode,
-        dist_ref_points=dist_ref_points,
-    )
+    try:
+        ok = preprocess_one(
+            mesh_path,
+            out_path,
+            pc_points=pc_points,
+            pt_pool=pt_pool,
+            ray_pool=ray_pool,
+            n_views=n_views,
+            rays_per_view=rays_per_view,
+            seed=seed,
+            pc_grid=pc_grid,
+            pc_dilate=pc_dilate,
+            pc_max_steps=pc_max_steps,
+            compute_pc_rays=compute_pc_rays,
+            df_grid=df_grid,
+            df_dilate=df_dilate,
+            compute_udf=compute_udf,
+            pt_surface_ratio=pt_surface_ratio,
+            pt_surface_sigma=pt_surface_sigma,
+            pt_query_chunk=pt_query_chunk,
+            ray_query_chunk=ray_query_chunk,
+            pt_dist_mode=pt_dist_mode,
+            dist_ref_points=dist_ref_points,
+        )
+    except Exception:
+        ok = False
     return (mesh_path, ok)
+
+
+def discover_modelnet_meshes(modelnet_root, split, mesh_glob=""):
+    """Return (paths, source_pattern) for supported ModelNet layouts.
+
+    Supported auto layouts:
+      1) <root>/<class>/<split>/*.off          (official ModelNet40)
+      2) <root>/<split>/<class>/*.off          (split-first off tree)
+      3) <root>/ply_format/<split>/<class>/*.ply
+      4) <root>/<split>/<class>/*.ply          (split-first ply tree)
+    """
+    if mesh_glob:
+        pattern = mesh_glob if os.path.isabs(mesh_glob) else os.path.join(modelnet_root, mesh_glob)
+        return sorted(glob.glob(pattern)), pattern
+
+    patterns = [
+        os.path.join(modelnet_root, "*", split, "*.off"),
+        os.path.join(modelnet_root, split, "*", "*.off"),
+        os.path.join(modelnet_root, "ply_format", split, "*", "*.ply"),
+        os.path.join(modelnet_root, split, "*", "*.ply"),
+    ]
+    for pattern in patterns:
+        paths = sorted(glob.glob(pattern))
+        if paths:
+            return paths, pattern
+    return [], patterns[0]
+
+
+def infer_class_from_mesh_path(mesh_path, split):
+    """Infer class name from mesh path robustly across supported layouts."""
+    parts = os.path.normpath(mesh_path).split(os.sep)
+    # Prefer split-anchor rule: .../<split>/<class>/<file>
+    for i, p in enumerate(parts):
+        if p == split and i + 1 < len(parts) - 1:
+            return parts[i + 1]
+    # Fallback for official layout: .../<class>/<split>/<file>
+    if len(parts) >= 3 and parts[-2] == split:
+        return parts[-3]
+    # Last safe fallback: parent directory
+    if len(parts) >= 2:
+        return parts[-2]
+    raise ValueError(f"cannot infer class from mesh path: {mesh_path}")
+
+
+def is_valid_npz(path):
+    """Return True if path is a readable NPZ(zip) file with intact central dir/CRC."""
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            bad = zf.testzip()
+        return bad is None
+    except Exception:
+        return False
 
 
 def main():
@@ -610,6 +733,12 @@ def main():
     ap.add_argument("--modelnet_root", type=str, required=True)
     ap.add_argument("--out_root", type=str, required=True)
     ap.add_argument("--split", type=str, choices=["train", "test"], required=True)
+    ap.add_argument(
+        "--mesh_glob",
+        type=str,
+        default="",
+        help="Optional mesh glob (absolute or relative to modelnet_root). Empty uses auto-discovery for off/ply layouts.",
+    )
     ap.add_argument("--pc_points", type=int, default=2048)
     ap.add_argument("--pt_pool", type=int, default=20000)
     ap.add_argument("--ray_pool", type=int, default=8000)
@@ -658,18 +787,32 @@ def main():
     chunk_size = max(1, args.chunk_size)
     max_tasks_per_child = None if args.max_tasks_per_child <= 0 else int(args.max_tasks_per_child)
 
-    pattern = os.path.join(args.modelnet_root, "*", args.split, "*.off")
-    paths = sorted(glob.glob(pattern))
+    paths, source_pattern = discover_modelnet_meshes(
+        args.modelnet_root,
+        args.split,
+        mesh_glob=args.mesh_glob,
+    )
+    print(
+        f"[discover] split={args.split} source_pattern={source_pattern} "
+        f"num_meshes={len(paths)}"
+    )
+    if not paths:
+        print("[discover] no meshes found. check --modelnet_root/--mesh_glob/layout.")
+        return
 
     tasks = []
     skip_count = 0
+    regenerate_count = 0
     for i, mesh_path in enumerate(paths):
-        cls = mesh_path.split(os.sep)[-3]
+        cls = infer_class_from_mesh_path(mesh_path, args.split)
         name = os.path.splitext(os.path.basename(mesh_path))[0]
         out_path = os.path.join(args.out_root, args.split, cls, f"{name}.npz")
         if os.path.exists(out_path) and not args.overwrite:
-            skip_count += 1
-            continue
+            if is_valid_npz(out_path):
+                skip_count += 1
+                continue
+            regenerate_count += 1
+            print(f"[warn] invalid existing npz -> regenerate: {out_path}")
         seed = None if seed_base is None else seed_base + i
         tasks.append(
             (
@@ -699,6 +842,8 @@ def main():
 
     if skip_count > 0:
         print(f"skip existing: {skip_count}")
+    if regenerate_count > 0:
+        print(f"regenerate invalid existing: {regenerate_count}")
 
     if not tasks:
         print("nothing to do")

@@ -36,6 +36,13 @@ ACCELERATE_LAUNCH_MODULE="${ACCELERATE_LAUNCH_MODULE:-accelerate.commands.launch
 CLS_POOLING="${CLS_POOLING:-mean_q}"
 ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-1}"
 DDP_FIND_UNUSED_PARAMETERS="${DDP_FIND_UNUSED_PARAMETERS:-1}"
+POINT_ORDER_MODE="${POINT_ORDER_MODE:-morton}"
+LR_SCHEDULER="${LR_SCHEDULER:-cosine}"
+WARMUP_EPOCHS="${WARMUP_EPOCHS:-10}"
+WARMUP_START_FACTOR="${WARMUP_START_FACTOR:-0.1}"
+MIN_LR="${MIN_LR:-1e-6}"
+GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-1}"
+MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
 
 CPAC_SPLIT="${CPAC_SPLIT:-eval}"
 CPAC_N_CONTEXT="${CPAC_N_CONTEXT:-1024}"
@@ -127,7 +134,8 @@ SCAN_LOG="${LOG_ROOT}/${RUN_TAG}_classification_scan.log"
 mkdir -p "${SCAN_SAVE_DIR}"
 
 echo "=== CLASSIFICATION: ScanObjectNN ==="
-echo "cls_pooling=${CLS_POOLING} ablate_point_dist=${ABLATE_POINT_DIST}"
+echo "cls_pooling=${CLS_POOLING} ablate_point_dist=${ABLATE_POINT_DIST} point_order_mode=${POINT_ORDER_MODE}"
+echo "lr_scheduler=${LR_SCHEDULER} warmup_epochs=${WARMUP_EPOCHS} min_lr=${MIN_LR} grad_accum_steps=${GRAD_ACCUM_STEPS} max_grad_norm=${MAX_GRAD_NORM}"
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
 python -u -m "${ACCELERATE_LAUNCH_MODULE}" \
   --num_processes "${NPROC_PER_NODE}" \
@@ -159,6 +167,13 @@ python -u -m "${ACCELERATE_LAUNCH_MODULE}" \
   --pt_sample_mode_eval fps \
   --pt_fps_key auto \
   --pt_rfps_m 4096 \
+  --point_order_mode "${POINT_ORDER_MODE}" \
+  --lr_scheduler "${LR_SCHEDULER}" \
+  --warmup_epochs "${WARMUP_EPOCHS}" \
+  --warmup_start_factor "${WARMUP_START_FACTOR}" \
+  --min_lr "${MIN_LR}" \
+  --grad_accum_steps "${GRAD_ACCUM_STEPS}" \
+  --max_grad_norm "${MAX_GRAD_NORM}" \
   --aug_preset scanobjectnn \
   --save_dir "${SCAN_SAVE_DIR}" \
   2>&1 | tee "${SCAN_LOG}"
@@ -199,6 +214,13 @@ if [[ -d "${MODELNET_CACHE_ROOT}" ]]; then
     --pt_sample_mode_eval fps \
     --pt_fps_key auto \
     --pt_rfps_m 4096 \
+    --point_order_mode "${POINT_ORDER_MODE}" \
+    --lr_scheduler "${LR_SCHEDULER}" \
+    --warmup_epochs "${WARMUP_EPOCHS}" \
+    --warmup_start_factor "${WARMUP_START_FACTOR}" \
+    --min_lr "${MIN_LR}" \
+    --grad_accum_steps "${GRAD_ACCUM_STEPS}" \
+    --max_grad_norm "${MAX_GRAD_NORM}" \
     --aug_preset modelnet40 \
     --save_dir "${MODELNET_SAVE_DIR}" \
     2>&1 | tee "${MODELNET_LOG}"
