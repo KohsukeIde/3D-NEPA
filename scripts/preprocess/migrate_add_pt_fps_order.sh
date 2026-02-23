@@ -46,4 +46,18 @@ if [[ "${OVERWRITE}" == "1" ]]; then
   args+=(--overwrite)
 fi
 
-.venv/bin/python -u -m nepa3d.data.migrate_add_pt_fps_order "${args[@]}"
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [[ -z "${PYTHON_BIN}" ]]; then
+  if [[ -x ".venv/bin/python" ]]; then
+    PYTHON_BIN=".venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python)"
+  else
+    echo "ERROR: python interpreter not found (.venv/bin/python, python3, python)" >&2
+    exit 2
+  fi
+fi
+
+"${PYTHON_BIN}" -u -m nepa3d.data.migrate_add_pt_fps_order "${args[@]}"

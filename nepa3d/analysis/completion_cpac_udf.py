@@ -639,6 +639,40 @@ def infer_qa_layout(ckpt):
     return str(pre_args.get("qa_layout", "interleave"))
 
 
+def _required_seq_len(n_context: int, n_query: int, qa_tokens: bool, add_eos: bool) -> int:
+    n_ctx = max(0, int(n_context))
+    n_q = max(0, int(n_query))
+    per_item = 2 if bool(qa_tokens) else 1
+    return 1 + per_item * (n_ctx + n_q) + (1 if bool(add_eos) else 0)
+
+
+def _validate_model_max_len(
+    model: torch.nn.Module,
+    *,
+    n_context: int,
+    n_query: int,
+    qa_tokens: bool,
+    add_eos: bool,
+    stage: str,
+) -> None:
+    required_len = _required_seq_len(
+        n_context=n_context,
+        n_query=n_query,
+        qa_tokens=qa_tokens,
+        add_eos=add_eos,
+    )
+    try:
+        max_len = int(getattr(model, "pos_emb").shape[1])
+    except Exception:
+        max_len = -1
+    if max_len > 0 and required_len > max_len:
+        raise ValueError(
+            f"{stage} requires sequence length {required_len}, but model max_len={max_len}. "
+            "Reduce --n_context/--n_query or re-run with a larger --max_len "
+            "(pos_emb will be resized)."
+        )
+
+
 def build_model_from_ckpt(ckpt_path, device, max_len_override: Optional[int] = None):
     ckpt = torch.load(ckpt_path, map_location="cpu")
     pre_args = ckpt.get("args", {})
@@ -1355,18 +1389,14 @@ def _mesh_eval_chamfer_for_paths(
     # Basic safety check: ensure positional embeddings are long enough for the
     # (context + chunked queries) sequence length.
     if ridge_w is not None and model is not None:
-        n_ctx = int(getattr(args, "n_context", 0))
-        qbs = int(getattr(args, "mesh_chunk_n_query", 512))
-        required_len = 1 + (1 + int(qa_tokens)) * (n_ctx + qbs) + (1 if int(add_eos) > 0 else 0)
-        try:
-            max_len = int(getattr(model, "pos_emb").shape[1])
-        except Exception:
-            max_len = -1
-        if max_len > 0 and required_len > max_len:
-            raise ValueError(
-                f"mesh_eval requires sequence length {required_len}, but model max_len={max_len}. "
-                "Re-run with a larger --max_len (pos_emb will be resized)."
-            )
+        _validate_model_max_len(
+            model,
+            n_context=int(getattr(args, "n_context", 0)),
+            n_query=int(getattr(args, "mesh_chunk_n_query", 512)),
+            qa_tokens=bool(qa_tokens),
+            add_eos=bool(add_eos),
+            stage="mesh_eval",
+        )
 
     per_shape = []
     fail_count = 0
@@ -2002,6 +2032,16 @@ def main():
                 json.dump(out, f, indent=2)
             print(f"[saved] {args.out_json}")
         return
+
+    # Fail fast when CPAC query length exceeds model positional capacity.
+    _validate_model_max_len(
+        model,
+        n_context=int(args.n_context),
+        n_query=int(args.n_query),
+        qa_tokens=bool(qa_tokens),
+        add_eos=bool(add_eos),
+        stage="cpac_eval",
+    )
 
     Xtr, Ytr, Qtr, Gtr = collect_xy(
         model,

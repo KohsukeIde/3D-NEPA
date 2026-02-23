@@ -9,14 +9,15 @@
 #PBS -l rt_QF=8
 #PBS -l walltime=72:00:00
 #PBS -j oe
-#PBS -W group_list=qgah50055
 #PBS -N nepa3d_pretrain_ddp
 #PBS -o nepa3d_pretrain_ddp.out
 #PBS -e nepa3d_pretrain_ddp.err
 
 set -euo pipefail
 
-WORKDIR="${WORKDIR:-/groups/qgah50055/ide/VGI/3D-NEPA}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DEFAULT_WORKDIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+WORKDIR="${WORKDIR:-${DEFAULT_WORKDIR}}"
 CUDA_MODULE="${CUDA_MODULE:-cuda/12.9}"
 VENV_ACTIVATE="${VENV_ACTIVATE:-.venv/bin/activate}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-4}"

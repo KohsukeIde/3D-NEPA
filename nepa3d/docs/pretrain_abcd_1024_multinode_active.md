@@ -353,3 +353,9 @@ Either:
 
 - reduce CPAC token load so total length fits `<=2500` (e.g., smaller `n_context` and/or `n_query` for D), or
 - re-train D with larger `max_len` to support current CPAC eval tokenization.
+
+### 15.4 Next retrain policy (2026-02-23)
+
+- To avoid this class of failure in the next batch, unify A/B/C/D pretrain to `max_len=4500`.
+- `scripts/pretrain/submit_pretrain_abcd_qf.sh` now exposes `MAX_LEN_ABCD` (default `4500`) and applies it to all runs.
+- CPAC wrappers perform a checkpoint-length precheck before evaluation and fail fast when `n_context/n_query` exceed the effective max length.

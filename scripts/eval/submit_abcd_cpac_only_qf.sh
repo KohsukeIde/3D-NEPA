@@ -4,9 +4,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="${SCRIPT_DIR}/nepa3d_cpac_only_qf.sh"
 
-WORKDIR="${WORKDIR:-/groups/qgah50055/ide/VGI/3D-NEPA}"
+DEFAULT_WORKDIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+WORKDIR="${WORKDIR:-${DEFAULT_WORKDIR}}"
 WALLTIME="${WALLTIME:-24:00:00}"
 RT_QF="${RT_QF:-1}"
+CPAC_N_CONTEXT="${CPAC_N_CONTEXT:-1024}"
+CPAC_N_QUERY="${CPAC_N_QUERY:-1024}"
+CPAC_MAX_LEN="${CPAC_MAX_LEN:--1}"
 QSUB_DEPEND="${QSUB_DEPEND:-}"
 
 mkdir -p "${WORKDIR}/logs/eval/abcd_cpac_only"
@@ -35,7 +39,7 @@ submit() {
     -N "cpac_${run_tag}"
     -o "${out_log}"
     -e "${err_log}"
-    -v "WORKDIR=${WORKDIR},RUN_TAG=${run_tag},CKPT=${ckpt}"
+    -v "WORKDIR=${WORKDIR},RUN_TAG=${run_tag},CKPT=${ckpt},CPAC_N_CONTEXT=${CPAC_N_CONTEXT},CPAC_N_QUERY=${CPAC_N_QUERY},CPAC_MAX_LEN=${CPAC_MAX_LEN}"
   )
   if [[ -n "${QSUB_DEPEND}" ]]; then
     cmd+=( -W "depend=${QSUB_DEPEND}" )
