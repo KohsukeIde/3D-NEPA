@@ -1,6 +1,6 @@
 # 1024-Point Pretrain A/B/C/D (Active Plan)
 
-Last updated: 2026-02-23
+Last updated: 2026-02-24
 
 ## 1. Scope
 
@@ -577,6 +577,8 @@ Relaunch:
 
 #### 17.3.2 Retry2 final metrics (A/B/C/D all completed)
 
+> Note (2026-02-24): this Retry2 block used deprecated pretrain checkpoints (`runs/pretrain_abcd_1024_run*`, `qa_tokens=0`, low-LR) and is kept only as historical trace, not as the current primary result.
+
 Retry2 jobs all finished successfully (`Exit_status=0`):
 
 - `94968.qjcm` runA
@@ -598,3 +600,46 @@ Source logs/results:
 - ScanObjectNN: `logs/eval/abcd_cls_cpac_fix20260224_sched300_retry2/run*_classification_scan.log`
 - ModelNet40: `logs/eval/abcd_cls_cpac_fix20260224_sched300_retry2/run*_classification_modelnet.log`
 - CPAC JSON: `results/abcd_1024_fix20260224_sched300_retry2/cpac_abcd_1024_run*.json`
+
+## 18. Run A Scan Ablation (16GPU, fps/morton x aug none/scan)
+
+Purpose:
+
+- Isolate ScanObjectNN classification sensitivity to:
+  - token order at fine-tune (`POINT_ORDER_MODE=fps` vs `morton`)
+  - augmentation preset (`SCAN_AUG_PRESET=none` vs `scanobjectnn`)
+- Keep pretrain checkpoint fixed to Run A:
+  - `runs/pretrain_abcd_1024_fix20260222_200311_runA/last.pt`
+
+Launch/runtime:
+
+- submit helper: `scripts/eval/submit_scan_ablation_aug_order_qf.sh`
+- launcher: `scripts/eval/nepa3d_eval_cls_cpac_multinode_pbsdsh.sh`
+- cluster shape: `4 nodes x 4 GPU/node = 16 GPU` per run (`NUM_PROCESSES=16`)
+- jobs:
+  - `95239.qjcm` runA_fps_augnone (`Exit_status=0`, walltime `03:00:09`)
+  - `95240.qjcm` runA_fps_augscan (`Exit_status=0`, walltime `02:37:33`)
+  - `95241.qjcm` runA_morton_augnone (`Exit_status=0`, walltime `02:37:05`)
+  - `95242.qjcm` runA_morton_augscan (`Exit_status=0`, walltime `02:37:14`)
+
+Final ScanObjectNN metrics:
+
+| Run | point_order_mode | aug_preset | best_val | best_ep | test_acc |
+|---|---|---|---:|---:|---:|
+| runA_fps_augnone | fps | none | 0.9152 | 191 | 0.6969 |
+| runA_morton_augnone | morton | none | 0.9165 | 170 | 0.6976 |
+| runA_fps_augscan | fps | scanobjectnn | 0.8631 | 180 | 0.6459 |
+| runA_morton_augscan | morton | scanobjectnn | 0.8882 | 237 | 0.6519 |
+
+Source logs:
+
+- `logs/eval/scan_ablation_aug_order_fix20260224_scanablation_2x2_16gpu/runA_fps_augnone_classification_scan.log`
+- `logs/eval/scan_ablation_aug_order_fix20260224_scanablation_2x2_16gpu/runA_fps_augscan_classification_scan.log`
+- `logs/eval/scan_ablation_aug_order_fix20260224_scanablation_2x2_16gpu/runA_morton_augnone_classification_scan.log`
+- `logs/eval/scan_ablation_aug_order_fix20260224_scanablation_2x2_16gpu/runA_morton_augscan_classification_scan.log`
+
+Quick read:
+
+- `aug_preset=none` outperformed `aug_preset=scanobjectnn` by about `+0.045` to `+0.051` in `test_acc`.
+- `fps` vs `morton` difference was small in this setup; `morton` was slightly higher (`+0.0007` to `+0.0060`).
+- All runs show large `best_val` vs `test_acc` gap and reached near-perfect train accuracy in late epochs, indicating persistent overfitting risk.

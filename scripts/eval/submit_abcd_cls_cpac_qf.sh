@@ -36,6 +36,10 @@ CPAC_N_CONTEXT="${CPAC_N_CONTEXT:-1024}"
 CPAC_N_QUERY="${CPAC_N_QUERY:-1024}"
 CPAC_MAX_LEN="${CPAC_MAX_LEN:--1}"
 QSUB_DEPEND="${QSUB_DEPEND:-}"
+CKPT_RUNA="${CKPT_RUNA:-${WORKDIR}/runs/pretrain_abcd_1024_fix20260222_200311_runA/last.pt}"
+CKPT_RUNB="${CKPT_RUNB:-${WORKDIR}/runs/pretrain_abcd_1024_fix20260222_200311_runB/last.pt}"
+CKPT_RUNC="${CKPT_RUNC:-${WORKDIR}/runs/pretrain_abcd_1024_fix20260222_200311_runC/last.pt}"
+CKPT_RUND="${CKPT_RUND:-${WORKDIR}/runs/pretrain_abcd_1024_fix20260222_200311_runD/last.pt}"
 
 mkdir -p "${WORKDIR}/${LOG_ROOT}" "${WORKDIR}/${RESULTS_ROOT}" "${WORKDIR}/${EVAL_ROOT}"
 
@@ -73,9 +77,9 @@ submit() {
   "${cmd[@]}"
 }
 
-submit "runA" "${WORKDIR}/runs/pretrain_abcd_1024_runA/last.pt"
-submit "runB" "${WORKDIR}/runs/pretrain_abcd_1024_runB/last.pt"
-submit "runC" "${WORKDIR}/runs/pretrain_abcd_1024_runC/last.pt"
-submit "runD" "${WORKDIR}/runs/pretrain_abcd_1024_runD/last.pt"
+submit "runA" "${CKPT_RUNA}"
+submit "runB" "${CKPT_RUNB}"
+submit "runC" "${CKPT_RUNC}"
+submit "runD" "${CKPT_RUND}"
 
 echo "[done] submitted A/B/C/D classification+CPAC jobs"
