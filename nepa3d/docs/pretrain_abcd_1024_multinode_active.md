@@ -574,3 +574,27 @@ Relaunch:
   - `94971.qjcm` (runD)
 - run set: `fix20260224_sched300_retry2`
 - log root: `logs/eval/abcd_cls_cpac_fix20260224_sched300_retry2/`
+
+#### 17.3.2 Retry2 final metrics (A/B/C/D all completed)
+
+Retry2 jobs all finished successfully (`Exit_status=0`):
+
+- `94968.qjcm` runA
+- `94969.qjcm` runB
+- `94970.qjcm` runC
+- `94971.qjcm` runD
+
+Final metrics:
+
+| Run | ScanObjectNN `test_acc` | ModelNet40 `test_acc` | CPAC `iou@tau` | CPAC `mae` | CPAC `rmse` |
+|---|---:|---:|---:|---:|---:|
+| A | 0.4150 | 0.9111 | 0.2684 | 0.1604 | 0.2056 |
+| B | 0.2913 | 0.9346 | 0.2665 | 0.1621 | 0.2081 |
+| C | 0.3831 | 0.9160 | 0.1721 | 0.1897 | 0.2396 |
+| D | 0.3031 | 0.9199 | 0.1144 | 0.2043 | 0.2513 |
+
+Source logs/results:
+
+- ScanObjectNN: `logs/eval/abcd_cls_cpac_fix20260224_sched300_retry2/run*_classification_scan.log`
+- ModelNet40: `logs/eval/abcd_cls_cpac_fix20260224_sched300_retry2/run*_classification_modelnet.log`
+- CPAC JSON: `results/abcd_1024_fix20260224_sched300_retry2/cpac_abcd_1024_run*.json`
