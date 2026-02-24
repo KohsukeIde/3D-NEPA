@@ -37,10 +37,16 @@ EPOCHS_CLS="${EPOCHS_CLS:-100}"
 LR_CLS="${LR_CLS:-1e-4}"
 N_POINT_CLS="${N_POINT_CLS:-1024}"
 N_RAY_CLS="${N_RAY_CLS:-0}"
+PT_XYZ_KEY_CLS="${PT_XYZ_KEY_CLS:-pc_xyz}"
+PT_DIST_KEY_CLS="${PT_DIST_KEY_CLS:-pt_dist_pool}"
 ACCELERATE_LAUNCH_MODULE="${ACCELERATE_LAUNCH_MODULE:-accelerate.commands.launch}"
 MIXED_PRECISION="${MIXED_PRECISION:-no}"
 CLS_POOLING="${CLS_POOLING:-mean_q}"
 ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-1}"
+USE_FC_NORM="${USE_FC_NORM:-0}"
+LABEL_SMOOTHING="${LABEL_SMOOTHING:-0.0}"
+WEIGHT_DECAY_CLS="${WEIGHT_DECAY_CLS:-0.05}"
+WEIGHT_DECAY_NORM="${WEIGHT_DECAY_NORM:-0.0}"
 DDP_FIND_UNUSED_PARAMETERS="${DDP_FIND_UNUSED_PARAMETERS:-1}"
 POINT_ORDER_MODE="${POINT_ORDER_MODE:-morton}"
 LR_SCHEDULER="${LR_SCHEDULER:-cosine}"
@@ -188,7 +194,9 @@ if [[ "${RUN_SCAN}" == "1" ]]; then
   mkdir -p "${SCAN_SAVE_DIR}"
   echo "=== CLASSIFICATION: ScanObjectNN ==="
   echo "cls_pooling=${CLS_POOLING} ablate_point_dist=${ABLATE_POINT_DIST} point_order_mode=${POINT_ORDER_MODE} aug_preset=${SCAN_AUG_PRESET}"
+  echo "pt_xyz_key=${PT_XYZ_KEY_CLS} pt_dist_key=${PT_DIST_KEY_CLS}"
   echo "lr_scheduler=${LR_SCHEDULER} warmup_epochs=${WARMUP_EPOCHS} min_lr=${MIN_LR} grad_accum_steps=${GRAD_ACCUM_STEPS} max_grad_norm=${MAX_GRAD_NORM}"
+  echo "use_fc_norm=${USE_FC_NORM} label_smoothing=${LABEL_SMOOTHING} weight_decay=${WEIGHT_DECAY_CLS} weight_decay_norm=${WEIGHT_DECAY_NORM}"
   OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   python -u -m "${ACCELERATE_LAUNCH_MODULE}" \
     "${ACCELERATE_DDP_ARGS[@]}" \
@@ -199,6 +207,10 @@ if [[ "${RUN_SCAN}" == "1" ]]; then
     --batch "${BATCH_SCAN}" \
     --epochs "${EPOCHS_CLS}" \
     --lr "${LR_CLS}" \
+    --weight_decay "${WEIGHT_DECAY_CLS}" \
+    --weight_decay_norm "${WEIGHT_DECAY_NORM}" \
+    --label_smoothing "${LABEL_SMOOTHING}" \
+    --use_fc_norm "${USE_FC_NORM}" \
     --n_point "${N_POINT_CLS}" \
     --n_ray "${N_RAY_CLS}" \
     --num_workers "${NUM_WORKERS}" \
@@ -211,8 +223,8 @@ if [[ "${RUN_SCAN}" == "1" ]]; then
     --ddp_find_unused_parameters "${DDP_FIND_UNUSED_PARAMETERS}" \
     --cls_is_causal 0 \
     --cls_pooling "${CLS_POOLING}" \
-    --pt_xyz_key pc_xyz \
-    --pt_dist_key pt_dist_pool \
+    --pt_xyz_key "${PT_XYZ_KEY_CLS}" \
+    --pt_dist_key "${PT_DIST_KEY_CLS}" \
     "${ABLATE_POINT_DIST_FLAG[@]}" \
     --pt_sample_mode_train fps \
     --pt_sample_mode_eval fps \
@@ -251,6 +263,10 @@ if [[ "${RUN_MODELNET}" == "1" ]] && [[ -d "${MODELNET_CACHE_ROOT}" ]]; then
     --batch "${BATCH_MODELNET}" \
     --epochs "${EPOCHS_CLS}" \
     --lr "${LR_CLS}" \
+    --weight_decay "${WEIGHT_DECAY_CLS}" \
+    --weight_decay_norm "${WEIGHT_DECAY_NORM}" \
+    --label_smoothing "${LABEL_SMOOTHING}" \
+    --use_fc_norm "${USE_FC_NORM}" \
     --n_point "${N_POINT_CLS}" \
     --n_ray "${N_RAY_CLS}" \
     --num_workers "${NUM_WORKERS}" \
@@ -263,8 +279,8 @@ if [[ "${RUN_MODELNET}" == "1" ]] && [[ -d "${MODELNET_CACHE_ROOT}" ]]; then
     --ddp_find_unused_parameters "${DDP_FIND_UNUSED_PARAMETERS}" \
     --cls_is_causal 0 \
     --cls_pooling "${CLS_POOLING}" \
-    --pt_xyz_key pc_xyz \
-    --pt_dist_key pt_dist_pool \
+    --pt_xyz_key "${PT_XYZ_KEY_CLS}" \
+    --pt_dist_key "${PT_DIST_KEY_CLS}" \
     "${ABLATE_POINT_DIST_FLAG[@]}" \
     --pt_sample_mode_train fps \
     --pt_sample_mode_eval fps \

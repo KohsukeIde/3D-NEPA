@@ -77,9 +77,18 @@ def stratified_nway(paths, n_way, seed=0):
 
 
 class ClsWrapper(nn.Module):
-    def __init__(self, backbone, n_classes, cls_is_causal=False, cls_pooling="auto", qa_tokens=False):
+    def __init__(
+        self,
+        backbone,
+        n_classes,
+        cls_is_causal=False,
+        cls_pooling="auto",
+        qa_tokens=False,
+        use_fc_norm=False,
+    ):
         super().__init__()
         self.backbone = backbone
+        self.fc_norm = nn.LayerNorm(backbone.d_model) if bool(use_fc_norm) else nn.Identity()
         self.head = nn.Linear(backbone.d_model, n_classes)
         self.cls_is_causal = bool(cls_is_causal)
         self.cls_pooling = str(cls_pooling)
@@ -124,6 +133,7 @@ class ClsWrapper(nn.Module):
         else:
             # EOS/last-token pooling (legacy behavior).
             pooled = h[:, -1, :]
+        pooled = self.fc_norm(pooled)
         return self.head(pooled)
 
 
@@ -157,6 +167,18 @@ def main():
     ap.add_argument("--epochs", type=int, default=100)
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--weight_decay", type=float, default=0.05)
+    ap.add_argument(
+        "--weight_decay_norm",
+        type=float,
+        default=0.0,
+        help="Weight decay for norm/bias/1D params (usually 0.0).",
+    )
+    ap.add_argument(
+        "--label_smoothing",
+        type=float,
+        default=0.0,
+        help="CrossEntropy label smoothing in [0, 1).",
+    )
     ap.add_argument("--n_point", type=int, default=None)
     ap.add_argument("--n_ray", type=int, default=None)
     ap.add_argument(
@@ -234,6 +256,13 @@ def main():
         default="mean_a",
         choices=["auto", "eos", "bos", "mean", "mean_no_special", "mean_pts", "mean_q", "mean_a"],
         help="classification pooling (default=mean_a): auto(mean_a for qa_tokens else eos), eos, bos, mean, mean_no_special, mean_pts, mean_q, mean_a",
+    )
+    ap.add_argument(
+        "--use_fc_norm",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Apply LayerNorm on pooled feature before linear classifier head.",
     )
     ap.add_argument(
         "--ablate_point_dist",
@@ -648,10 +677,39 @@ def main():
         cls_is_causal=bool(int(args.cls_is_causal)),
         cls_pooling=args.cls_pooling,
         qa_tokens=qa_tokens,
+        use_fc_norm=bool(int(args.use_fc_norm)),
     ).to(device)
-    opt_params = model.head.parameters() if args.freeze_backbone else model.parameters()
-    opt = optim.AdamW(opt_params, lr=args.lr, weight_decay=args.weight_decay)
-    ce = nn.CrossEntropyLoss()
+    if args.freeze_backbone:
+        # In linear-probe mode, only train head (and optional fc_norm).
+        trainable_named_params = [
+            (n, p)
+            for n, p in model.named_parameters()
+            if p.requires_grad and (n.startswith("head.") or n.startswith("fc_norm."))
+        ]
+    else:
+        trainable_named_params = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
+
+    decay_params = []
+    no_decay_params = []
+    for name, param in trainable_named_params:
+        name_l = name.lower()
+        if param.ndim <= 1 or name_l.endswith(".bias") or ("norm" in name_l):
+            no_decay_params.append(param)
+        else:
+            decay_params.append(param)
+
+    opt_groups = []
+    if decay_params:
+        opt_groups.append({"params": decay_params, "weight_decay": float(args.weight_decay)})
+    if no_decay_params:
+        opt_groups.append({"params": no_decay_params, "weight_decay": float(args.weight_decay_norm)})
+    if not opt_groups:
+        raise RuntimeError("No trainable parameters found for optimizer.")
+
+    opt = optim.AdamW(opt_groups, lr=args.lr)
+    smoothing = float(args.label_smoothing)
+    smoothing = min(max(smoothing, 0.0), 0.999)
+    ce = nn.CrossEntropyLoss(label_smoothing=smoothing)
     model, opt, train_dl, val_dl, test_dl = accelerator.prepare(model, opt, train_dl, val_dl, test_dl)
 
     # Build scheduler on optimizer after accelerator.prepare so the wrapped optimizer is controlled.
@@ -748,6 +806,9 @@ def main():
         f"ablate_point_dist={bool(args.ablate_point_dist)} "
         f"n_point={args.n_point}/{pre_n_point} n_ray={args.n_ray}/{pre_n_ray} "
         f"model_max_len={model_max_len} world_size={accelerator.num_processes} "
+        f"use_fc_norm={bool(int(args.use_fc_norm))} "
+        f"label_smoothing={smoothing:.4f} "
+        f"weight_decay={args.weight_decay} weight_decay_norm={args.weight_decay_norm} "
         f"grad_accum_steps={args.grad_accum_steps} max_grad_norm={args.max_grad_norm} "
         f"lr_scheduler={args.lr_scheduler} warmup_steps={warmup_steps} total_update_steps={total_update_steps} "
         f"min_lr={args.min_lr}"

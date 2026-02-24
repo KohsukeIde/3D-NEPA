@@ -643,3 +643,75 @@ Quick read:
 - `aug_preset=none` outperformed `aug_preset=scanobjectnn` by about `+0.045` to `+0.051` in `test_acc`.
 - `fps` vs `morton` difference was small in this setup; `morton` was slightly higher (`+0.0007` to `+0.0060`).
 - All runs show large `best_val` vs `test_acc` gap and reached near-perfect train accuracy in late epochs, indicating persistent overfitting risk.
+
+## 19. SOTA-fair vs NEPA-full (Pool/LS + Regularization Ablations, 2026-02-24)
+
+Purpose:
+
+- Verify fine-tune-side improvements with short schedule (`EPOCHS_CLS=120`) under two protocols:
+  - SOTA-fair: `pt_xyz_key=pc_xyz`, `ablate_point_dist=1`, `point_order_mode=morton`
+  - NEPA-full: `pt_xyz_key=pt_xyz_pool`, `ablate_point_dist=0`, `point_order_mode=fps`
+- Evaluate:
+  - pooling + label smoothing combinations
+  - regularization components (`fc_norm`, no-decay split, label smoothing)
+
+Launch/runtime:
+
+- jobs: `95628.qjcm` .. `95643.qjcm` (16 jobs total)
+- each job: `rt_QF=1`, `ngpus=4` (4 GPU/job), all finished `Exit_status=0`
+- walltime per job: roughly `03:55` to `04:02`
+
+### 19.1 SOTA-fair: Pooling + Label Smoothing
+
+Source: `logs/eval/scan_pool_ls_scan_sotafair_poolls_20260224_175813/*_classification_scan.log`
+
+| Run | cls_pooling | label_smoothing | best_val | best_ep | test_acc |
+|---|---|---:|---:|---:|---:|
+| run_q_ls00 | mean_q | 0.0 | 0.9559 | 89 | 0.7510 |
+| run_q_ls01 | mean_q | 0.1 | 0.9541 | 73 | 0.7492 |
+| run_a_ls00 | mean_a | 0.0 | 0.9491 | 113 | 0.7350 |
+| run_a_ls01 | mean_a | 0.1 | 0.9453 | 59 | 0.7274 |
+
+### 19.2 SOTA-fair: Regularization Ablation
+
+Source: `logs/eval/scan_regab_scan_sotafair_regab_20260224_175813/*_classification_scan.log`
+
+| Run | use_fc_norm | label_smoothing | weight_decay_norm | best_val | best_ep | test_acc |
+|---|---:|---:|---:|---:|---:|---:|
+| s0_base | 0 | 0.0 | 0.05 | 0.9417 | 73 | 0.7389 |
+| s1_wdsplit | 0 | 0.0 | 0.00 | 0.9435 | 95 | 0.7326 |
+| s2_fc_norm | 1 | 0.0 | 0.00 | 0.9545 | 65 | 0.7526 |
+| s3_fc_norm_ls | 1 | 0.1 | 0.00 | 0.9535 | 89 | 0.7447 |
+
+### 19.3 NEPA-full: Pooling + Label Smoothing
+
+Source: `logs/eval/scan_pool_ls_scan_nepafull_poolls_20260224_175813/*_classification_scan.log`
+
+| Run | cls_pooling | label_smoothing | best_val | best_ep | test_acc |
+|---|---|---:|---:|---:|---:|
+| run_q_ls01 | mean_q | 0.1 | 0.5345 | 27 | 0.4928 |
+| run_q_ls00 | mean_q | 0.0 | 0.5423 | 21 | 0.4911 |
+| run_a_ls01 | mean_a | 0.1 | 0.5278 | 22 | 0.4809 |
+| run_a_ls00 | mean_a | 0.0 | 0.5140 | 96 | 0.4526 |
+
+### 19.4 NEPA-full: Regularization Ablation
+
+Source: `logs/eval/scan_regab_scan_nepafull_regab_20260224_175813/*_classification_scan.log`
+
+| Run | use_fc_norm | label_smoothing | weight_decay_norm | best_val | best_ep | test_acc |
+|---|---:|---:|---:|---:|---:|---:|
+| s0_base | 0 | 0.0 | 0.05 | 0.5357 | 19 | 0.4842 |
+| s1_wdsplit | 0 | 0.0 | 0.00 | 0.5272 | 20 | 0.4696 |
+| s2_fc_norm | 1 | 0.0 | 0.00 | 0.5128 | 100 | 0.4498 |
+| s3_fc_norm_ls | 1 | 0.1 | 0.00 | 0.5210 | 21 | 0.4734 |
+
+Quick read:
+
+- SOTA-fair:
+  - `mean_q` clearly outperformed `mean_a` (about `+0.014` to `+0.022` in `test_acc`).
+  - best was `s2_fc_norm` (`test_acc=0.7526`), indicating `fc_norm` helps in this protocol.
+  - adding label smoothing on top (`s3_fc_norm_ls`) reduced `test_acc` vs `s2_fc_norm`.
+- NEPA-full:
+  - all settings were significantly lower (`test_acc ~0.45-0.49`) and did not show the same gains.
+  - this indicates a protocol mismatch or data/feature usage issue that needs separate debugging before merging with SOTA-fair conclusions.
+- No runtime exceptions were observed in these 16 runs (only terminal NCCL process-group shutdown warnings).
