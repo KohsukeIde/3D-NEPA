@@ -1,6 +1,6 @@
 # 1024-Point Pretrain A/B/C/D (Active Plan)
 
-Last updated: 2026-02-24
+Last updated: 2026-02-25
 
 ## 1. Scope
 
@@ -830,3 +830,69 @@ Default job count:
 - pretrain: `4` jobs
 - eval: `4 runs x 4 ablations = 16` jobs
 - total: `20` jobs
+
+## 22. TTA + Pipeline hotfixes (2026-02-25)
+
+Purpose:
+
+- Ensure the current evaluation flow actually runs `fps + TTA` and consumes the newly trained pretrain checkpoints (not legacy fixed checkpoints).
+
+### 22.1 Script changes applied
+
+- `scripts/pretrain/submit_pretrain_abcd_qf.sh`
+  - added `DEFAULT_WORKDIR` / `WORKDIR` handling.
+  - added `GROUP_LIST` and `qsub -W group_list=...`.
+  - now passes `WORKDIR` via `-v WORKDIR=...` to each submitted pretrain job.
+- `scripts/eval/nepa3d_eval_cls_cpac_qf.sh`
+  - default changed to `AUG_EVAL=1` (TTA on by default).
+- `scripts/eval/submit_abcd_cls_cpac_qf.sh`
+  - default changed to `AUG_EVAL=1`.
+  - checkpoint defaults updated:
+    - `runs/pretrain_abcd_1024_runA/last.pt`
+    - `runs/pretrain_abcd_1024_runB/last.pt`
+    - `runs/pretrain_abcd_1024_runC/last.pt`
+    - `runs/pretrain_abcd_1024_runD/last.pt`
+  - when `QSUB_DEPEND` is set and checkpoint file is not created yet, script now warns and continues submission instead of hard-failing.
+- `scripts/eval/submit_sotafair_llrd_droppath_ablation_qf.sh`
+  - default changed to `AUG_EVAL=1`.
+  - explicitly forwards `AUG_EVAL` to `submit_abcd_cls_cpac_qf.sh`.
+- `scripts/pipeline/submit_pretrain_then_sotafair_eval_qf.sh`
+  - now passes `CKPT_RUNA/B/C/D` explicitly to stage2 as:
+    - `${WORKDIR}/runs/pretrain_abcd_1024_run{A,B,C,D}/last.pt`
+  - forwards `AUG_EVAL=1` by default to stage2.
+
+### 22.2 Behavior after fixes
+
+- Classification eval defaults in this flow are now:
+  - `PT_SAMPLE_MODE_EVAL_CLS=fps`
+  - `AUG_EVAL=1`
+  - `MC_EVAL_K_TEST=10`
+- Note:
+  - `AUG_EVAL=1` only becomes effective TTA when augmentation is non-trivial.
+  - current run uses `SCAN_AUG_PRESET=scanobjectnn`, so test-time augmentation is active.
+
+### 22.3 Submission record for this fix
+
+- First attempt run set:
+  - `fps_tta_20260225_012814`
+- Issue observed:
+  - pretrain jobs launched with incorrect working directory (`/var/spool/pbs`) and failed quickly.
+  - stage2 was still targeting legacy fixed checkpoints.
+- Second attempt run set (after hotfix):
+  - `fps_tta_retry_20260225_013044`
+- Submitted jobs:
+  - pretrain: `95920` `95921` `95922` `95923`
+  - eval (dependency on pretrain afterok): `95924` ... `95939`
+
+### 22.4 Logs for this cycle
+
+- Pipeline meta:
+  - `logs/pipeline/pretrain_then_eval_fps_tta_retry_20260225_013044/pretrain_job_ids.txt`
+- Pretrain logs:
+  - `logs/ddp_pretrain/ddp_pretrain_95920.qjcm_runA/logs/*.pretrain.log`
+  - `logs/ddp_pretrain/ddp_pretrain_95921.qjcm_runB/logs/*.pretrain.log`
+  - `logs/ddp_pretrain/ddp_pretrain_95922.qjcm_runC/logs/*.pretrain.log`
+  - `logs/ddp_pretrain/ddp_pretrain_95923.qjcm_runD/logs/*.pretrain.log`
+- Eval logs (once dependency is released):
+  - `logs/eval/abcd_cls_cpac_fps_tta_retry_20260225_013044_sotafair_*/run*.out`
+  - `logs/eval/abcd_cls_cpac_fps_tta_retry_20260225_013044_sotafair_*/run*.err`
