@@ -39,6 +39,7 @@ FEWSHOT_K="${FEWSHOT_K:-0}"
 FEWSHOT_SEED="${FEWSHOT_SEED:-0}"
 VAL_RATIO="${VAL_RATIO:-0.1}"
 VAL_SEED="${VAL_SEED:-0}"
+VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}"
 ADD_EOS="${ADD_EOS:--1}"
 PT_SAMPLE_MODE_TRAIN="${PT_SAMPLE_MODE_TRAIN:-random}"
 PT_SAMPLE_MODE_EVAL="${PT_SAMPLE_MODE_EVAL:-fps}"
@@ -46,12 +47,20 @@ PT_FPS_KEY="${PT_FPS_KEY:-pt_fps_order}"
 PT_RFPS_M="${PT_RFPS_M:-4096}"
 POINT_ORDER_MODE="${POINT_ORDER_MODE:-morton}"
 AUG_PRESET="${AUG_PRESET:-scanobjectnn}"
+AUG_EVAL="${AUG_EVAL:-0}"
+LLRD="${LLRD:-1.0}"
+DROP_PATH="${DROP_PATH:-0.0}"
 GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-1}"
 MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
 LR_SCHEDULER="${LR_SCHEDULER:-cosine}"
 WARMUP_EPOCHS="${WARMUP_EPOCHS:-10}"
 WARMUP_START_FACTOR="${WARMUP_START_FACTOR:-0.1}"
 MIN_LR="${MIN_LR:-1e-6}"
+
+AUG_EVAL_FLAG=""
+if [ "${AUG_EVAL}" = "1" ]; then
+  AUG_EVAL_FLAG="--aug_eval"
+fi
 
 "${PYTHON_BIN}" -m nepa3d.train.finetune_cls \
   --cache_root "${CACHE_ROOT}" \
@@ -69,6 +78,7 @@ MIN_LR="${MIN_LR:-1e-6}"
   --mc_eval_k "${MC_EVAL_K}" \
   --val_ratio "${VAL_RATIO}" \
   --val_seed "${VAL_SEED}" \
+  --val_split_mode "${VAL_SPLIT_MODE}" \
   --fewshot_k "${FEWSHOT_K}" \
   --fewshot_seed "${FEWSHOT_SEED}" \
   --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN}" \
@@ -77,6 +87,9 @@ MIN_LR="${MIN_LR:-1e-6}"
   --pt_rfps_m "${PT_RFPS_M}" \
   --point_order_mode "${POINT_ORDER_MODE}" \
   --aug_preset "${AUG_PRESET}" \
+  ${AUG_EVAL_FLAG} \
+  --llrd "${LLRD}" \
+  --drop_path "${DROP_PATH}" \
   --grad_accum_steps "${GRAD_ACCUM_STEPS}" \
   --max_grad_norm "${MAX_GRAD_NORM}" \
   --lr_scheduler "${LR_SCHEDULER}" \

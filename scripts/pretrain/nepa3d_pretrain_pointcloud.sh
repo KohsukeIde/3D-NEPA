@@ -55,6 +55,7 @@ POINT_ORDER_MODE="${POINT_ORDER_MODE:-morton}"
 D_MODEL="${D_MODEL:-384}"
 LAYERS="${LAYERS:-8}"
 HEADS="${HEADS:-6}"
+DROP_PATH="${DROP_PATH:-0.0}"
 SAVE_DIR="${SAVE_DIR:-runs/querynepa3d_pcpre_v0}"
 SAVE_EVERY="${SAVE_EVERY:-10}"
 SAVE_LAST="${SAVE_LAST:-1}"
@@ -123,6 +124,7 @@ if [ "${NUM_PROCESSES}" -gt 1 ]; then
   --pt_rfps_m "${PT_RFPS_M}" \
   --point_order_mode "${POINT_ORDER_MODE}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
+  --drop_path "${DROP_PATH}" \
   --num_workers "${NUM_WORKERS}" \
   --mixed_precision "${LAUNCH_MIXED_PRECISION}" \
   --save_every "${SAVE_EVERY}" \
@@ -149,6 +151,7 @@ else
   --pt_rfps_m "${PT_RFPS_M}" \
   --point_order_mode "${POINT_ORDER_MODE}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
+  --drop_path "${DROP_PATH}" \
   --num_workers "${NUM_WORKERS}" \
   --mixed_precision "${LAUNCH_MIXED_PRECISION}" \
   --save_every "${SAVE_EVERY}" \

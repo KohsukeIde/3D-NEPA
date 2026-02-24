@@ -715,3 +715,118 @@ Quick read:
   - all settings were significantly lower (`test_acc ~0.45-0.49`) and did not show the same gains.
   - this indicates a protocol mismatch or data/feature usage issue that needs separate debugging before merging with SOTA-fair conclusions.
 - No runtime exceptions were observed in these 16 runs (only terminal NCCL process-group shutdown warnings).
+
+## 20. ScanObjectNN val-test gap audit (2026-02-24)
+
+Question:
+
+- Why is `best_val` very high (for example `~0.95`) while `test_acc` stays much lower (`~0.75`)?
+
+### 20.1 Confirmed current split behavior
+
+- `finetune_cls.py` builds `val` from `train` via random stratified file-level split:
+  - `train_paths_full = list_npz(args.cache_root, "train")`
+  - `train_paths, val_paths = stratified_train_val_split(...)`
+  - refs: `nepa3d/train/finetune_cls.py:418`, `nepa3d/train/finetune_cls.py:439`
+- split function is class-stratified but not group-aware:
+  - groups by class only, shuffles file paths, takes first `n_val`.
+  - ref: `nepa3d/data/modelnet40_index.py:22`
+
+### 20.2 Cache composition confirms multi-variant setup
+
+- `scanobjectnn_main_split_v2` train metadata includes 5 H5 sources:
+  - `training_objectdataset.h5`
+  - `training_objectdataset_augmented25_norot.h5`
+  - `training_objectdataset_augmented25rot.h5`
+  - `training_objectdataset_augmentedrot.h5`
+  - `training_objectdataset_augmentedrot_scale75.h5`
+  - ref: `data/scanobjectnn_main_split_v2/_meta/scanobjectnn_train_source.txt:8`
+- log-confirmed counts in current runs:
+  - `num_train=43298 num_val=4805 num_test=12137`
+  - ref: `logs/eval/scan_pool_ls_scan_sotafair_poolls_20260224_175813/run_a_ls00_classification_scan.log:23`
+
+### 20.3 Leakage check result (train/val)
+
+Leak proxy:
+
+- canonical group id = `class_id + base_object_id` (basename numeric suffix after removing augmentation tag).
+- this approximates "same original object, different variant".
+
+Measured on `data/scanobjectnn_main_split_v2/train`:
+
+- total files: `48103`
+- unique canonical groups: `14337`
+- groups with multiple variants: `11909` (`83.06%`)
+- group size histogram: `{4:10749, 1:2428, 2:921, 3:179, 5:60}`
+
+Reproducing current split (`val_ratio=0.1`, `val_seed=0`):
+
+- file split sizes: `train=43298`, `val=4805`
+- val groups: `4188`
+- overlapping groups between split-train and val: `3949` (`94.29%` of val groups)
+- leaking val files (same canonical group exists in split-train): `4553/4805` (`94.76%`)
+
+Interpretation:
+
+- The current `val` is heavily contaminated by same-object variant overlap with train.
+- This can inflate `val_acc` and create large `best_val` vs `test_acc` gaps.
+
+### 20.4 Mitigation (recommended)
+
+1. Replace file-level val split with group-aware stratified split for ScanObjectNN.
+2. Group by canonical object id (`class + base id`), then assign full groups to train or val.
+3. Keep test as official `test` split and report it separately as the benchmark metric.
+
+Quick feasibility check:
+
+- group-aware split with the same ratio gives roughly similar sizes (`train=43354`, `val=4749`) but zero train/val group overlap.
+
+## 21. New knobs (LLRD / drop_path / val split) and pipeline (2026-02-24)
+
+### 21.1 Fine-tune code updates
+
+- `nepa3d/train/finetune_cls.py` now supports:
+  - `--val_split_mode {file,group_auto,group_scanobjectnn}`
+    - `group_auto` uses ScanObjectNN group-aware split (no same-group train/val leakage).
+  - `--llrd` (layer-wise LR decay; `1.0` disables)
+  - `--drop_path` (backbone stochastic depth rate)
+- Group-aware split utility added in:
+  - `nepa3d/data/modelnet40_index.py`
+  - `scanobjectnn_group_key(...)` + grouped stratified split path
+
+### 21.2 Backbone drop_path support
+
+- Added block-level stochastic depth path to:
+  - `nepa3d/models/causal_transformer.py`
+  - `nepa3d/models/encdec_transformer.py`
+- `QueryNepa` now accepts `drop_path` and forwards it:
+  - `nepa3d/models/query_nepa.py`
+- `pretrain.py` now has `--drop_path`; launcher scripts pass `DROP_PATH`.
+
+### 21.3 Eval/submit script wiring
+
+- `scripts/eval/nepa3d_eval_cls_cpac_qf.sh` and `scripts/eval/submit_abcd_cls_cpac_qf.sh` now forward:
+  - `LLRD`, `DROP_PATH`, `VAL_SPLIT_MODE`
+  - `PT_SAMPLE_MODE_TRAIN_CLS`, `PT_SAMPLE_MODE_EVAL_CLS`, `PT_RFPS_M_CLS`
+  - `AUG_EVAL` (vote-style TTA switch)
+  - current default: `AUG_EVAL=1` (TTA on; set `AUG_EVAL=0` to disable)
+- New ablation submit helper:
+  - `scripts/eval/submit_sotafair_llrd_droppath_ablation_qf.sh`
+  - default ablation set: `base,llrd,dp,llrd_dp`
+  - default `AUG_EVAL=1` (TTA on)
+
+### 21.4 End-to-end pipeline submit helper
+
+- New chained submit script:
+  - `scripts/pipeline/submit_pretrain_then_sotafair_eval_qf.sh`
+- Behavior:
+  1. submit pretrain A/B/C/D
+  2. wait via PBS dependency (`afterok:<all_pretrain_job_ids>`)
+  3. auto-submit SOTA-fair eval ablation matrix with val split fix (`group_auto`)
+  4. default `AUG_EVAL=1` (TTA on) for this eval flow
+
+Default job count:
+
+- pretrain: `4` jobs
+- eval: `4 runs x 4 ablations = 16` jobs
+- total: `20` jobs

@@ -25,6 +25,7 @@ class QueryNepa(nn.Module):
         num_layers=8,
         mlp_ratio=4,
         dropout=0.0,
+        drop_path=0.0,
         max_len=2048,
         arch="causal",
         topo_k=0,
@@ -59,6 +60,7 @@ class QueryNepa(nn.Module):
                 num_layers=num_layers,
                 mlp_ratio=mlp_ratio,
                 dropout=dropout,
+                drop_path=drop_path,
             )
         elif self.arch == "encdec":
             self.backbone = EncoderDecoderTransformer(
@@ -68,6 +70,7 @@ class QueryNepa(nn.Module):
                 num_decoder_layers=num_layers,
                 dim_feedforward=int(d_model * mlp_ratio),
                 dropout=dropout,
+                drop_path=drop_path,
                 topo_k=self.topo_k,
                 topo_include_bos=self.topo_include_bos,
                 src_causal=bool(self.encdec_src_causal),

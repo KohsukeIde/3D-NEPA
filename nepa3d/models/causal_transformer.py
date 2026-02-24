@@ -7,18 +7,36 @@ from ..token.tokenizer import TYPE_POINT, TYPE_Q_POINT, TYPE_Q_RAY, TYPE_RAY
 
 
 class CausalTransformer(nn.Module):
-    def __init__(self, d_model=384, nhead=6, num_layers=8, mlp_ratio=4, dropout=0.0):
+    def __init__(
+        self,
+        d_model=384,
+        nhead=6,
+        num_layers=8,
+        mlp_ratio=4,
+        dropout=0.0,
+        drop_path=0.0,
+    ):
         super().__init__()
-        layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=d_model * mlp_ratio,
-            dropout=dropout,
-            batch_first=True,
-            norm_first=True,
-            activation="gelu",
+        self.layers = nn.ModuleList(
+            [
+                nn.TransformerEncoderLayer(
+                    d_model=d_model,
+                    nhead=nhead,
+                    dim_feedforward=d_model * mlp_ratio,
+                    dropout=dropout,
+                    batch_first=True,
+                    norm_first=True,
+                    activation="gelu",
+                )
+                for _ in range(int(num_layers))
+            ]
         )
-        self.enc = nn.TransformerEncoder(layer, num_layers=num_layers)
+        drop_path = self._clamp01(drop_path)
+        if int(num_layers) <= 1:
+            rates = [drop_path]
+        else:
+            rates = torch.linspace(0.0, float(drop_path), int(num_layers)).tolist()
+        self.drop_path_rates = [float(r) for r in rates]
 
     @staticmethod
     def _clamp01(x: float) -> float:
@@ -28,6 +46,23 @@ class CausalTransformer(nn.Module):
         if x > 1.0:
             return 1.0
         return x
+
+    @staticmethod
+    def _apply_drop_path(x_prev: torch.Tensor, x_next: torch.Tensor, drop_prob: float) -> torch.Tensor:
+        """Apply block-level stochastic depth to residual (x_next - x_prev)."""
+        p = float(drop_prob)
+        if p <= 0.0 or (not x_prev.requires_grad) or (not x_prev.is_floating_point()):
+            return x_next
+        if p >= 1.0:
+            return x_prev
+        if not x_prev.is_cuda and x_prev.dtype not in (torch.float16, torch.float32, torch.float64, torch.bfloat16):
+            return x_next
+        keep_prob = 1.0 - p
+        shape = (x_prev.shape[0],) + (1,) * (x_prev.ndim - 1)
+        rnd = torch.rand(shape, device=x_prev.device, dtype=x_prev.dtype)
+        mask = (rnd < keep_prob).to(x_prev.dtype)
+        residual = (x_next - x_prev) * mask / keep_prob
+        return x_prev + residual
 
     def forward(
         self,
@@ -103,4 +138,10 @@ class CausalTransformer(nn.Module):
                 extra = eligible & (u < prob)
                 attn_mask = attn_mask | extra
 
-        return self.enc(x, mask=attn_mask)
+        for li, layer in enumerate(self.layers):
+            x_next = layer(x, src_mask=attn_mask)
+            if self.training:
+                x = self._apply_drop_path(x, x_next, self.drop_path_rates[li])
+            else:
+                x = x_next
+        return x

@@ -277,6 +277,12 @@ def main():
     ap.add_argument("--d_model", type=int, default=384)
     ap.add_argument("--layers", type=int, default=8)
     ap.add_argument("--heads", type=int, default=6)
+    ap.add_argument(
+        "--drop_path",
+        type=float,
+        default=0.0,
+        help="Backbone drop-path (stochastic depth) rate.",
+    )
     ap.add_argument("--save_dir", type=str, default="runs/querynepa3d_pretrain")
     ap.add_argument("--save_every", type=int, default=1, help="save periodic checkpoints every N epochs (>=1)")
     ap.add_argument("--save_last", type=int, default=1, help="if 1, also write save_dir/last.pt at checkpoint save points")
@@ -737,6 +743,7 @@ def main():
         n_types=n_types,
         nhead=args.heads,
         num_layers=args.layers,
+        drop_path=float(args.drop_path),
         max_len=t,
         arch=str(args.arch),
         topo_k=int(args.topo_k),
@@ -760,6 +767,7 @@ def main():
         teacher_topo_ray_coord = str(teacher_pre_args.get("topo_ray_coord", "origin"))
         teacher_topo_ray_bbox = float(teacher_pre_args.get("topo_ray_bbox", 0.5))
         teacher_encdec_src_causal = int(teacher_pre_args.get("encdec_src_causal", 0))
+        teacher_drop_path = float(teacher_pre_args.get("drop_path", 0.0))
         teacher_len = int(teacher_state["pos_emb"].shape[1])
         if teacher_n_types != int(n_types):
             raise RuntimeError(
@@ -775,6 +783,7 @@ def main():
             n_types=teacher_n_types,
             nhead=teacher_heads,
             num_layers=teacher_layers,
+            drop_path=teacher_drop_path,
             max_len=t,
             arch=teacher_arch,
             topo_k=teacher_topo_k,

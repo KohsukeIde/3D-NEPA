@@ -1,6 +1,7 @@
 import argparse
 import math
 import os
+import re
 
 import numpy as np
 import torch
@@ -15,6 +16,7 @@ from ..data.modelnet40_index import (
     build_label_map,
     label_from_path,
     list_npz,
+    scanobjectnn_group_key,
     stratified_train_val_split,
 )
 from ..models.query_nepa import QueryNepa
@@ -203,6 +205,18 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--val_ratio", type=float, default=0.1, help="stratified val split ratio from TRAIN")
     ap.add_argument("--val_seed", type=int, default=0, help="seed for stratified train/val split")
+    ap.add_argument(
+        "--val_split_mode",
+        type=str,
+        default="file",
+        choices=["file", "group_auto", "group_scanobjectnn"],
+        help=(
+            "Validation split mode from TRAIN. "
+            "file: legacy file-level split; "
+            "group_auto: group-aware split for ScanObjectNN caches only; "
+            "group_scanobjectnn: always use ScanObjectNN group key."
+        ),
+    )
     ap.add_argument("--fewshot_k", type=int, default=0, help="K-shot fine-tuning: number of training samples per class (0=full train)")
     ap.add_argument("--fewshot_seed", type=int, default=0, help="seed for K-shot subset selection")
     ap.add_argument(
@@ -357,6 +371,18 @@ def main():
         default=1e-6,
         help="Minimum LR floor for cosine scheduler.",
     )
+    ap.add_argument(
+        "--llrd",
+        type=float,
+        default=1.0,
+        help="Layer-wise learning-rate decay factor in (0,1]. 1.0 disables LLRD.",
+    )
+    ap.add_argument(
+        "--drop_path",
+        type=float,
+        default=0.0,
+        help="Backbone drop-path (stochastic depth) rate during fine-tuning.",
+    )
 
     # --- Data augmentation (classification protocol alignment) ---
     ap.add_argument(
@@ -414,6 +440,10 @@ def main():
     eval_backend = args.eval_backend or args.backend
     mc_eval_k_val = args.mc_eval_k if args.mc_eval_k_val < 0 else int(args.mc_eval_k_val)
     mc_eval_k_test = args.mc_eval_k if args.mc_eval_k_test < 0 else int(args.mc_eval_k_test)
+    if not (0.0 < float(args.llrd) <= 1.0):
+        raise ValueError(f"--llrd must be in (0,1], got {args.llrd}")
+    if not (0.0 <= float(args.drop_path) < 1.0):
+        raise ValueError(f"--drop_path must be in [0,1), got {args.drop_path}")
 
     train_paths_full = list_npz(args.cache_root, "train")
     test_paths = list_npz(args.cache_root, "test")
@@ -436,8 +466,23 @@ def main():
             f"filtered_test={len(test_paths)}"
         )
 
+    val_group_key_fn = None
+    resolved_val_split_mode = str(args.val_split_mode)
+    if args.val_split_mode == "group_scanobjectnn":
+        val_group_key_fn = scanobjectnn_group_key
+    elif args.val_split_mode == "group_auto":
+        cache_root_l = os.path.abspath(args.cache_root).lower()
+        if "scanobjectnn" in cache_root_l:
+            val_group_key_fn = scanobjectnn_group_key
+            resolved_val_split_mode = "group_scanobjectnn(auto)"
+        else:
+            resolved_val_split_mode = "file(auto-fallback)"
+
     train_paths, val_paths = stratified_train_val_split(
-        train_paths_full, val_ratio=args.val_ratio, seed=args.val_seed
+        train_paths_full,
+        val_ratio=args.val_ratio,
+        seed=args.val_seed,
+        group_key_fn=val_group_key_fn,
     )
     if args.fewshot_k and args.fewshot_k > 0:
         train_paths = stratified_kshot(train_paths, k=args.fewshot_k, seed=args.fewshot_seed)
@@ -661,6 +706,7 @@ def main():
         n_types=ckpt_n_types,
         nhead=pre_args["heads"],
         num_layers=pre_args["layers"],
+        drop_path=float(args.drop_path),
         max_len=model_max_len,
     )
     load_state_dict_flexible(backbone, state, strict=True)
@@ -689,20 +735,47 @@ def main():
     else:
         trainable_named_params = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
 
-    decay_params = []
-    no_decay_params = []
+    arch_name = str(pre_args.get("arch", "causal")).lower()
+    n_layers = int(pre_args.get("layers", 0))
+    use_llrd = (not args.freeze_backbone) and (float(args.llrd) < 0.999999)
+    max_layer_idx = (2 * n_layers if arch_name == "encdec" else n_layers) + 1
+
+    def _layer_idx_from_name(param_name: str) -> int:
+        # Wrapper head is deepest: no decay in LR scale.
+        if param_name.startswith("head.") or param_name.startswith("fc_norm."):
+            return max_layer_idx
+        m = re.search(r"\.(?:enc|encoder)\.layers\.(\d+)\.", param_name)
+        if m:
+            return int(m.group(1)) + 1
+        m = re.search(r"\.decoder\.layers\.(\d+)\.", param_name)
+        if m:
+            return n_layers + int(m.group(1)) + 1
+        # Token/type/pos embeddings and misc params are treated as shallowest.
+        return 0
+
+    grouped = {}
+    llrd_scales = []
     for name, param in trainable_named_params:
         name_l = name.lower()
-        if param.ndim <= 1 or name_l.endswith(".bias") or ("norm" in name_l):
-            no_decay_params.append(param)
-        else:
-            decay_params.append(param)
+        is_no_decay = bool(param.ndim <= 1 or name_l.endswith(".bias") or ("norm" in name_l))
+        wd = float(args.weight_decay_norm if is_no_decay else args.weight_decay)
 
-    opt_groups = []
-    if decay_params:
-        opt_groups.append({"params": decay_params, "weight_decay": float(args.weight_decay)})
-    if no_decay_params:
-        opt_groups.append({"params": no_decay_params, "weight_decay": float(args.weight_decay_norm)})
+        lr_scale = 1.0
+        if use_llrd:
+            layer_idx = _layer_idx_from_name(name)
+            lr_scale = float(args.llrd) ** float(max_layer_idx - layer_idx)
+            llrd_scales.append(lr_scale)
+
+        key = (round(lr_scale, 12), wd)
+        if key not in grouped:
+            grouped[key] = {
+                "params": [],
+                "weight_decay": wd,
+                "lr": float(args.lr) * lr_scale,
+            }
+        grouped[key]["params"].append(param)
+
+    opt_groups = list(grouped.values())
     if not opt_groups:
         raise RuntimeError("No trainable parameters found for optimizer.")
 
@@ -795,6 +868,7 @@ def main():
     log(
         f"train_backend={train_backend} eval_backend={eval_backend} "
         f"val_ratio={args.val_ratio} val_seed={args.val_seed} "
+        f"val_split_mode={resolved_val_split_mode} "
         f"mc_eval_k_val={mc_eval_k_val} mc_eval_k_test={mc_eval_k_test} "
         f"freeze_backbone={bool(args.freeze_backbone)} "
         f"cls_is_causal={bool(int(args.cls_is_causal))} "
@@ -810,10 +884,18 @@ def main():
         f"label_smoothing={smoothing:.4f} "
         f"weight_decay={args.weight_decay} weight_decay_norm={args.weight_decay_norm} "
         f"grad_accum_steps={args.grad_accum_steps} max_grad_norm={args.max_grad_norm} "
+        f"llrd={args.llrd:.4f} "
+        f"drop_path={args.drop_path:.4f} "
         f"lr_scheduler={args.lr_scheduler} warmup_steps={warmup_steps} total_update_steps={total_update_steps} "
         f"min_lr={args.min_lr}"
     )
     log(f"num_train={len(train_paths)} num_val={len(val_paths)} num_test={len(test_paths)}")
+    if use_llrd and len(llrd_scales) > 0:
+        log(
+            f"[llrd] enabled: factor={args.llrd:.4f} "
+            f"min_scale={min(llrd_scales):.6f} max_scale={max(llrd_scales):.6f} "
+            f"param_groups={len(opt_groups)}"
+        )
 
     global_update_steps = 0
     for ep in range(args.epochs):

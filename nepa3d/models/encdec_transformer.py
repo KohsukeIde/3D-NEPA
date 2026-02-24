@@ -70,6 +70,7 @@ class EncoderDecoderTransformer(nn.Module):
         num_decoder_layers: int,
         dim_feedforward: int,
         dropout: float = 0.0,
+        drop_path: float = 0.0,
         topo_k: int = 0,
         topo_include_bos: bool = True,
         src_causal: bool = False,
@@ -81,30 +82,64 @@ class EncoderDecoderTransformer(nn.Module):
         self.topo_include_bos = bool(topo_include_bos)
         self.src_causal = bool(src_causal)
 
-        enc_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            activation="gelu",
-            batch_first=True,
-            norm_first=True,
+        self.encoder_layers = nn.ModuleList(
+            [
+                nn.TransformerEncoderLayer(
+                    d_model=d_model,
+                    nhead=nhead,
+                    dim_feedforward=dim_feedforward,
+                    dropout=dropout,
+                    activation="gelu",
+                    batch_first=True,
+                    norm_first=True,
+                )
+                for _ in range(int(num_encoder_layers))
+            ]
         )
-        self.encoder = nn.TransformerEncoder(enc_layer, num_layers=int(num_encoder_layers))
 
-        dec_layer = nn.TransformerDecoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            activation="gelu",
-            batch_first=True,
-            norm_first=True,
+        self.decoder_layers = nn.ModuleList(
+            [
+                nn.TransformerDecoderLayer(
+                    d_model=d_model,
+                    nhead=nhead,
+                    dim_feedforward=dim_feedforward,
+                    dropout=dropout,
+                    activation="gelu",
+                    batch_first=True,
+                    norm_first=True,
+                )
+                for _ in range(int(num_decoder_layers))
+            ]
         )
-        self.decoder = nn.TransformerDecoder(dec_layer, num_layers=int(num_decoder_layers))
+
+        drop_path = max(0.0, min(float(drop_path), 1.0))
+        if int(num_encoder_layers) <= 1:
+            enc_rates = [drop_path]
+        else:
+            enc_rates = torch.linspace(0.0, drop_path, int(num_encoder_layers)).tolist()
+        if int(num_decoder_layers) <= 1:
+            dec_rates = [drop_path]
+        else:
+            dec_rates = torch.linspace(0.0, drop_path, int(num_decoder_layers)).tolist()
+        self.encoder_drop_path_rates = [float(r) for r in enc_rates]
+        self.decoder_drop_path_rates = [float(r) for r in dec_rates]
 
         self.enc_ln = nn.LayerNorm(d_model)
         self.dec_ln = nn.LayerNorm(d_model)
+
+    @staticmethod
+    def _apply_drop_path(x_prev: torch.Tensor, x_next: torch.Tensor, drop_prob: float) -> torch.Tensor:
+        p = float(drop_prob)
+        if p <= 0.0 or (not x_prev.requires_grad) or (not x_prev.is_floating_point()):
+            return x_next
+        if p >= 1.0:
+            return x_prev
+        keep_prob = 1.0 - p
+        shape = (x_prev.shape[0],) + (1,) * (x_prev.ndim - 1)
+        rnd = torch.rand(shape, device=x_prev.device, dtype=x_prev.dtype)
+        mask = (rnd < keep_prob).to(x_prev.dtype)
+        residual = (x_next - x_prev) * mask / keep_prob
+        return x_prev + residual
 
     def forward(
         self,
@@ -143,10 +178,30 @@ class EncoderDecoderTransformer(nn.Module):
                 b * self.nhead, l_enc, l_enc
             )
 
-        enc_out = self.encoder(enc_in, mask=enc_mask)
+        enc_out = enc_in
+        for li, enc_layer in enumerate(self.encoder_layers):
+            enc_next = enc_layer(enc_out, src_mask=enc_mask)
+            if self.training:
+                enc_out = self._apply_drop_path(
+                    enc_out,
+                    enc_next,
+                    self.encoder_drop_path_rates[li],
+                )
+            else:
+                enc_out = enc_next
         enc_out = self.enc_ln(enc_out)
 
         dec_mask = _causal_mask(l_dec, device=dec_in.device) if l_dec > 0 else None
-        dec_out = self.decoder(dec_in, memory=enc_out, tgt_mask=dec_mask)
+        dec_out = dec_in
+        for li, dec_layer in enumerate(self.decoder_layers):
+            dec_next = dec_layer(dec_out, memory=enc_out, tgt_mask=dec_mask)
+            if self.training:
+                dec_out = self._apply_drop_path(
+                    dec_out,
+                    dec_next,
+                    self.decoder_drop_path_rates[li],
+                )
+            else:
+                dec_out = dec_next
         dec_out = self.dec_ln(dec_out)
         return enc_out, dec_out

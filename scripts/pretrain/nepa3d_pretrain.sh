@@ -53,6 +53,7 @@ N_RAY_SCHEDULE="${N_RAY_SCHEDULE:-}"      # e.g., '0:256,10:512'
 D_MODEL="${D_MODEL:-384}"
 LAYERS="${LAYERS:-8}"
 HEADS="${HEADS:-6}"
+DROP_PATH="${DROP_PATH:-0.0}"
 SAVE_DIR="${SAVE_DIR:-runs/querynepa3d_meshpre_v0}"
 SAVE_EVERY="${SAVE_EVERY:-10}"
 SAVE_LAST="${SAVE_LAST:-1}"
@@ -160,6 +161,7 @@ if [ "${NUM_PROCESSES}" -gt 1 ]; then
   --n_point_schedule "${N_POINT_SCHEDULE}" \
   --n_ray_schedule "${N_RAY_SCHEDULE}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
+  --drop_path "${DROP_PATH}" \
   --num_workers "${NUM_WORKERS}" \
   --drop_ray_prob "${DROP_RAY_PROB}" \
   --add_eos "${ADD_EOS}" \
@@ -217,6 +219,7 @@ else
   --n_point_schedule "${N_POINT_SCHEDULE}" \
   --n_ray_schedule "${N_RAY_SCHEDULE}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
+  --drop_path "${DROP_PATH}" \
   --num_workers "${NUM_WORKERS}" \
   --drop_ray_prob "${DROP_RAY_PROB}" \
   --add_eos "${ADD_EOS}" \

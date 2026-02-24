@@ -53,10 +53,17 @@ LR_SCHEDULER="${LR_SCHEDULER:-cosine}"
 WARMUP_EPOCHS="${WARMUP_EPOCHS:-10}"
 WARMUP_START_FACTOR="${WARMUP_START_FACTOR:-0.1}"
 MIN_LR="${MIN_LR:-1e-6}"
+LLRD="${LLRD:-1.0}"
+DROP_PATH="${DROP_PATH:-0.0}"
 GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-1}"
 MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
+VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}"
+PT_SAMPLE_MODE_TRAIN_CLS="${PT_SAMPLE_MODE_TRAIN_CLS:-fps}"
+PT_SAMPLE_MODE_EVAL_CLS="${PT_SAMPLE_MODE_EVAL_CLS:-fps}"
+PT_RFPS_M_CLS="${PT_RFPS_M_CLS:-4096}"
 SCAN_AUG_PRESET="${SCAN_AUG_PRESET:-scanobjectnn}"
 MODELNET_AUG_PRESET="${MODELNET_AUG_PRESET:-modelnet40}"
+AUG_EVAL="${AUG_EVAL:-1}"
 RUN_SCAN="${RUN_SCAN:-1}"
 RUN_MODELNET="${RUN_MODELNET:-1}"
 RUN_CPAC="${RUN_CPAC:-1}"
@@ -164,6 +171,10 @@ ABLATE_POINT_DIST_FLAG=()
 if [[ "${ABLATE_POINT_DIST}" == "1" ]]; then
   ABLATE_POINT_DIST_FLAG+=(--ablate_point_dist)
 fi
+AUG_EVAL_FLAG=()
+if [[ "${AUG_EVAL}" == "1" ]]; then
+  AUG_EVAL_FLAG+=(--aug_eval)
+fi
 
 ACCELERATE_DDP_ARGS=()
 if [[ "${NUM_MACHINES}" -gt 1 ]]; then
@@ -195,7 +206,8 @@ if [[ "${RUN_SCAN}" == "1" ]]; then
   echo "=== CLASSIFICATION: ScanObjectNN ==="
   echo "cls_pooling=${CLS_POOLING} ablate_point_dist=${ABLATE_POINT_DIST} point_order_mode=${POINT_ORDER_MODE} aug_preset=${SCAN_AUG_PRESET}"
   echo "pt_xyz_key=${PT_XYZ_KEY_CLS} pt_dist_key=${PT_DIST_KEY_CLS}"
-  echo "lr_scheduler=${LR_SCHEDULER} warmup_epochs=${WARMUP_EPOCHS} min_lr=${MIN_LR} grad_accum_steps=${GRAD_ACCUM_STEPS} max_grad_norm=${MAX_GRAD_NORM}"
+  echo "lr_scheduler=${LR_SCHEDULER} warmup_epochs=${WARMUP_EPOCHS} min_lr=${MIN_LR} llrd=${LLRD} drop_path=${DROP_PATH} grad_accum_steps=${GRAD_ACCUM_STEPS} max_grad_norm=${MAX_GRAD_NORM}"
+  echo "val_split_mode=${VAL_SPLIT_MODE} pt_sample_mode_train=${PT_SAMPLE_MODE_TRAIN_CLS} pt_sample_mode_eval=${PT_SAMPLE_MODE_EVAL_CLS} pt_rfps_m=${PT_RFPS_M_CLS} aug_eval=${AUG_EVAL}"
   echo "use_fc_norm=${USE_FC_NORM} label_smoothing=${LABEL_SMOOTHING} weight_decay=${WEIGHT_DECAY_CLS} weight_decay_norm=${WEIGHT_DECAY_NORM}"
   OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   python -u -m "${ACCELERATE_LAUNCH_MODULE}" \
@@ -217,6 +229,7 @@ if [[ "${RUN_SCAN}" == "1" ]]; then
     --seed "${SEED}" \
     --val_ratio 0.1 \
     --val_seed 0 \
+    --val_split_mode "${VAL_SPLIT_MODE}" \
     --eval_seed 0 \
     --mc_eval_k_val "${MC_EVAL_K_VAL}" \
     --mc_eval_k_test "${MC_EVAL_K_TEST}" \
@@ -226,18 +239,21 @@ if [[ "${RUN_SCAN}" == "1" ]]; then
     --pt_xyz_key "${PT_XYZ_KEY_CLS}" \
     --pt_dist_key "${PT_DIST_KEY_CLS}" \
     "${ABLATE_POINT_DIST_FLAG[@]}" \
-    --pt_sample_mode_train fps \
-    --pt_sample_mode_eval fps \
+    --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN_CLS}" \
+    --pt_sample_mode_eval "${PT_SAMPLE_MODE_EVAL_CLS}" \
     --pt_fps_key auto \
-    --pt_rfps_m 4096 \
+    --pt_rfps_m "${PT_RFPS_M_CLS}" \
     --point_order_mode "${POINT_ORDER_MODE}" \
     --lr_scheduler "${LR_SCHEDULER}" \
     --warmup_epochs "${WARMUP_EPOCHS}" \
     --warmup_start_factor "${WARMUP_START_FACTOR}" \
     --min_lr "${MIN_LR}" \
+    --llrd "${LLRD}" \
+    --drop_path "${DROP_PATH}" \
     --grad_accum_steps "${GRAD_ACCUM_STEPS}" \
     --max_grad_norm "${MAX_GRAD_NORM}" \
     --aug_preset "${SCAN_AUG_PRESET}" \
+    "${AUG_EVAL_FLAG[@]}" \
     --save_dir "${SCAN_SAVE_DIR}" \
     2>&1 | tee "${SCAN_LOG}"
 else
@@ -273,6 +289,7 @@ if [[ "${RUN_MODELNET}" == "1" ]] && [[ -d "${MODELNET_CACHE_ROOT}" ]]; then
     --seed "${SEED}" \
     --val_ratio 0.1 \
     --val_seed 0 \
+    --val_split_mode "${VAL_SPLIT_MODE}" \
     --eval_seed 0 \
     --mc_eval_k_val "${MC_EVAL_K_VAL}" \
     --mc_eval_k_test "${MC_EVAL_K_TEST}" \
@@ -282,18 +299,21 @@ if [[ "${RUN_MODELNET}" == "1" ]] && [[ -d "${MODELNET_CACHE_ROOT}" ]]; then
     --pt_xyz_key "${PT_XYZ_KEY_CLS}" \
     --pt_dist_key "${PT_DIST_KEY_CLS}" \
     "${ABLATE_POINT_DIST_FLAG[@]}" \
-    --pt_sample_mode_train fps \
-    --pt_sample_mode_eval fps \
+    --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN_CLS}" \
+    --pt_sample_mode_eval "${PT_SAMPLE_MODE_EVAL_CLS}" \
     --pt_fps_key auto \
-    --pt_rfps_m 4096 \
+    --pt_rfps_m "${PT_RFPS_M_CLS}" \
     --point_order_mode "${POINT_ORDER_MODE}" \
     --lr_scheduler "${LR_SCHEDULER}" \
     --warmup_epochs "${WARMUP_EPOCHS}" \
     --warmup_start_factor "${WARMUP_START_FACTOR}" \
     --min_lr "${MIN_LR}" \
+    --llrd "${LLRD}" \
+    --drop_path "${DROP_PATH}" \
     --grad_accum_steps "${GRAD_ACCUM_STEPS}" \
     --max_grad_norm "${MAX_GRAD_NORM}" \
     --aug_preset "${MODELNET_AUG_PRESET}" \
+    "${AUG_EVAL_FLAG[@]}" \
     --save_dir "${MODELNET_SAVE_DIR}" \
     2>&1 | tee "${MODELNET_LOG}"
 else
