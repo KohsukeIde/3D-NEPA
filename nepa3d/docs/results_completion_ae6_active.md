@@ -2070,3 +2070,63 @@ Readout:
 - `sqrt` scaling is consistently better than `linear` across all four CPAC settings.
 - in this objective-preserving line, `n_context=1024` is worse than `n_context=512` for both pool and grid.
 - absolute IoU remains below the earlier completion-best auxiliary lines, so this pack is a stabilization diagnostic, not a main promotion candidate.
+
+### I) CPAC Mesh-Eval Pack (baseline vs objective-preserving retries, Feb 20, 2026)
+
+Objective:
+
+- execute mesh-side evaluation (`mesh_eval`) on the same grid query modes used in A-1,
+- compare baseline (`ep049`) against objective-preserving scale retries (`objpres_linear`, `objpres_sqrt`),
+- record Chamfer/F-score together with point-space CPAC metrics.
+
+Protocol:
+
+- script: `scripts/analysis/run_cpac_mesh_a1_objpres_local.sh`
+- eval settings: `max_shapes=800`, `mesh_eval_max_shapes=80`, `mesh_grid_res=24`, `mesh_chunk_n_query=512`, `mesh_mc_level=0.03`, `mesh_num_samples=10000`, `mesh_fscore_tau=0.01`
+- query modes: `grid_uniform`, `grid_near08`, `grid_c2f163264`
+- all runs finished with `mesh_eval.fail_count=0`
+
+Run logs:
+
+- `logs/analysis/cpac_mesh_a1_objpres/cpac_eccv_upmix_nepa_qa_dualmask_s0_pc2udf_800_grid_uniform_mesh_eval_seed0.log`
+- `logs/analysis/cpac_mesh_a1_objpres/cpac_eccv_upmix_nepa_qa_dualmask_s0_pc2udf_800_grid_near08_mesh_eval_seed0.log`
+- `logs/analysis/cpac_mesh_a1_objpres/cpac_eccv_upmix_nepa_qa_dualmask_s0_pc2udf_800_grid_c2f163264_mesh_eval_seed0.log`
+- `logs/analysis/cpac_mesh_a1_objpres/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_lin_s0_20260220_161222_pc2udf_800_grid_uniform_mesh_eval_seed0.log`
+- `logs/analysis/cpac_mesh_a1_objpres/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_lin_s0_20260220_161222_pc2udf_800_grid_near08_mesh_eval_seed0.log`
+- `logs/analysis/cpac_mesh_a1_objpres/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_lin_s0_20260220_161222_pc2udf_800_grid_c2f163264_mesh_eval_seed0.log`
+- `logs/analysis/cpac_mesh_a1_objpres/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_sqrt_s0_20260220_161156_pc2udf_800_grid_uniform_mesh_eval_seed0.log`
+- `logs/analysis/cpac_mesh_a1_objpres/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_sqrt_s0_20260220_161156_pc2udf_800_grid_near08_mesh_eval_seed0.log`
+- `logs/analysis/cpac_mesh_a1_objpres/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_sqrt_s0_20260220_161156_pc2udf_800_grid_c2f163264_mesh_eval_seed0.log`
+
+Results (`seed0`, `n_eval_shapes=80`):
+
+| Run | Query mode | MAE | RMSE | IoU@0.03 | Chamfer L2 | Chamfer L1 | F-score@0.01 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| baseline `ep049` | uniform | 0.04083 | 0.05241 | 0.25870 | 0.01504 | 0.12124 | 0.06196 |
+| baseline `ep049` | near08 | 0.02485 | 0.03360 | 0.41816 | 0.02757 | 0.15532 | 0.04860 |
+| baseline `ep049` | c2f163264 | 0.02767 | 0.03615 | 0.40008 | 0.01846 | 0.13053 | 0.05911 |
+| `objpres_linear` `ep054` | uniform | 0.05137 | 0.06673 | 0.19034 | 0.03490 | 0.17865 | 0.03757 |
+| `objpres_linear` `ep054` | near08 | 0.02673 | 0.03443 | 0.32511 | 0.06423 | 0.24385 | 0.02250 |
+| `objpres_linear` `ep054` | c2f163264 | 0.03147 | 0.03940 | 0.22681 | 0.04759 | 0.21133 | 0.03166 |
+| `objpres_sqrt` `ep054` | uniform | 0.04935 | 0.06390 | 0.19147 | 0.02943 | 0.16159 | 0.04059 |
+| `objpres_sqrt` `ep054` | near08 | 0.02649 | 0.03402 | 0.32982 | 0.06765 | 0.24691 | 0.02219 |
+| `objpres_sqrt` `ep054` | c2f163264 | 0.03085 | 0.03867 | 0.24067 | 0.04230 | 0.19692 | 0.03484 |
+
+Result JSON:
+
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_s0_pc2udf_800_grid_uniform_mesh_eval_seed0.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_s0_pc2udf_800_grid_near08_mesh_eval_seed0.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_s0_pc2udf_800_grid_c2f163264_mesh_eval_seed0.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_lin_s0_20260220_161222_pc2udf_800_grid_uniform_mesh_eval_seed0.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_lin_s0_20260220_161222_pc2udf_800_grid_near08_mesh_eval_seed0.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_lin_s0_20260220_161222_pc2udf_800_grid_c2f163264_mesh_eval_seed0.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_sqrt_s0_20260220_161156_pc2udf_800_grid_uniform_mesh_eval_seed0.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_sqrt_s0_20260220_161156_pc2udf_800_grid_near08_mesh_eval_seed0.json`
+- `results/cpac_eccv_upmix_nepa_qa_dualmask_scale_objpres_sqrt_s0_20260220_161156_pc2udf_800_grid_c2f163264_mesh_eval_seed0.json`
+
+Readout:
+
+- this mesh-eval pack completed end-to-end with zero mesh-eval failures.
+- baseline `ep049` remains stronger than current objective-preserving scale retries on both point-space IoU and mesh metrics in this setup.
+- inside the objective-preserving pair, `sqrt` remains better than `linear`.
+- for baseline, `c2f163264` is close to `near08` on IoU and clearly better than `uniform`; this supports A-1 as a robust grid-query design improvement vs uniform.

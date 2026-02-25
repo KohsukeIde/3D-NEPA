@@ -23,6 +23,7 @@ set -euo pipefail
 #   MESH_CHUNK_N_QUERY
 #   MESH_NUM_SAMPLES
 #   MESH_FSCORE_TAU
+#   MAX_LEN
 #   EVAL_SEED
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -44,6 +45,7 @@ MESH_GRID_RES="${MESH_GRID_RES:-24}"
 MESH_CHUNK_N_QUERY="${MESH_CHUNK_N_QUERY:-512}"
 MESH_NUM_SAMPLES="${MESH_NUM_SAMPLES:-10000}"
 MESH_FSCORE_TAU="${MESH_FSCORE_TAU:-0.01}"
+MAX_LEN="${MAX_LEN:-1538}"
 EVAL_SEED="${EVAL_SEED:-0}"
 
 RUN_NAME="$(basename "$(dirname "$CKPT")")"
@@ -63,6 +65,7 @@ run_one() {
     --head_train_split train_udf \
     --head_train_backend udfgrid \
     --head_train_max_shapes "${HEAD_TRAIN_MAX_SHAPES}" \
+    --max_len "${MAX_LEN}" \
     --n_context 256 --n_query 256 \
     --disjoint_context_query 1 \
     --context_mode_train normal --context_mode_test normal \

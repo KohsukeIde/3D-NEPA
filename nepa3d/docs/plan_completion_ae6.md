@@ -32,17 +32,18 @@ Current status:
 - (1) **Done (implemented + run)**:
   - partial optimizer restore is implemented (`--resume_optimizer_partial 1`) and used in scale-retry runs.
   - shape-mismatched optimizer entries are dropped while others are kept.
-- (2) **Partially done**:
-  - dual-mask window scaling has been tried for 1024 (`w64`, `w96`) in retry runs.
-  - no dedicated 2048-point run has been completed yet in this line.
+- (2) **Done for current scale range (implemented + run)**:
+  - dual-mask window scaling is implemented (`--dual_mask_window_scale {none,linear,sqrt}`).
+  - validated in objective-preserving retries (`linear` vs `sqrt`) and scale retry runs up to `n_context=1024`.
+  - dedicated `2048` run is still optional future extension, not blocked by missing implementation.
 - (3) **Done (implemented + compared)**:
   - `grid_res_schedule`/`coarse_to_fine` are implemented and compared against `uniform`/`near_surface`.
 - (4) **Partially done**:
   - encdec path has causal `tgt_mask` in code.
-  - however, a clean standalone post-fix ablation proving full recovery is still pending.
-- (5) **Partially done**:
-  - mesh metrics tooling (Chamfer/F-score) is implemented and used in qualitative compare artifacts.
-  - but CPAC main-table replacement with mesh-first metrics is not finalized yet.
+  - rerun line (`encdec_plusgut_projfresh`) is completed, but full non-collapse recovery is still not confirmed.
+- (5) **Done (implemented + run)**:
+  - mesh metrics tooling (Chamfer/F-score) is integrated in `completion_cpac_udf.py`.
+  - CPAC mesh-eval pack (baseline vs objective-preserving retries; uniform/near08/c2f) completed with `fail_count=0`.
 
 ## Current status
 
@@ -113,6 +114,10 @@ Current status:
   - both runs completed full CPAC (`pc512/pc1024`, pool + grid_near08) and UCPR guardrail.
   - `w96_lr1e-4_v3` > `w64_lr2e-4_v3`, but both are below prior `scalequick(ep051)` and `scale_stab(ep053)`.
   - keep as diagnostic references; do not promote to main candidate.
+- CPAC mesh-eval pack (Feb 20, 2026) completed:
+  - baseline `ep049`, `objpres_linear ep054`, `objpres_sqrt ep054`.
+  - query modes: `grid_uniform`, `grid_near08`, `grid_c2f163264`.
+  - all 9 runs finished with `mesh_eval.fail_count=0` and `n_eval_shapes=80`.
 - Coverage status:
   - A/B/C/D/E/6 all have at least one seed0 full-protocol result set recorded.
 
@@ -201,9 +206,11 @@ Before expanding ablations, prioritize these fixes to reduce interpretation risk
   - resume-time optimizer partial restore for `pos_emb` resize
     - new arg: `--resume_optimizer_partial` (default `1`)
     - behavior: drop only shape-mismatched optimizer slots; keep others.
+  - scale-transition diagnostics in training logs
+    - new args: `--log_scale_diagnostics`, `--log_scale_diag_every`
+    - logs include token counts, effective dual-mask params, and gradient norms (total/backbone/embeddings/heads).
   - plusgut chain launch is now independent by default
     - `WAIT_FOR_PRIOR=0` default in plusgut chain runners.
     - launchers support `RUN_ID` suffix to keep rerun logs/pids separate.
 - Remaining:
-  - add explicit scale-transition diagnostics (token length / grad norms) to training logs.
   - run dedicated fresh pretrain for `encdec_plusgut_bbox` (current bbox is diagnostic ckpt-path variant).

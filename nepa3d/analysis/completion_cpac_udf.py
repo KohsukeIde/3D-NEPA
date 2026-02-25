@@ -1472,16 +1472,39 @@ def _mesh_eval_chamfer_for_paths(
         try:
             v_pred, f_pred = _mesh_from_udf_grid(pred_vals, level=level)
             v_gt, f_gt = _mesh_from_udf_grid(gt_vals, level=level)
+            tau = float(getattr(args, "mesh_fscore_tau", 0.01))
+            n_samples = int(getattr(args, "mesh_num_samples", 10000))
+            # Support current mesh_metrics.py API, while keeping compatibility
+            # with older call signatures.
+            try:
+                m = mesh_metrics(
+                    v_pred,
+                    f_pred,
+                    v_gt,
+                    f_gt,
+                    n_samples=n_samples,
+                    taus=(tau,),
+                    seed=int(getattr(args, "eval_seed", 0)),
+                )
+            except TypeError:
+                m = mesh_metrics(
+                    v_pred,
+                    f_pred,
+                    v_gt,
+                    f_gt,
+                    num_samples=n_samples,
+                    fscore_tau=tau,
+                )
 
-            m = mesh_metrics(
-                v_pred,
-                f_pred,
-                v_gt,
-                f_gt,
-                num_samples=int(getattr(args, "mesh_num_samples", 10000)),
-                fscore_tau=float(getattr(args, "mesh_fscore_tau", 0.01)),
-            )
-            rec = {"path": p, "ok": True, **m}
+            fscore_key = f"fscore@{tau}"
+            fscore_val = m.get("fscore", m.get(fscore_key, float("nan")))
+            rec = {
+                "path": p,
+                "ok": True,
+                "chamfer_l2": float(m.get("chamfer_l2", float("nan"))),
+                "chamfer_l1": float(m.get("chamfer_l1", float("nan"))),
+                "fscore": float(fscore_val),
+            }
 
             if save_dir:
                 sid = os.path.splitext(os.path.basename(p))[0]

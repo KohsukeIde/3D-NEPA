@@ -23,6 +23,8 @@ from ..token.tokenizer import (
     TYPE_MISSING_RAY,
     TYPE_POINT,
     TYPE_RAY,
+    TYPE_Q_POINT,
+    TYPE_Q_RAY,
     TYPE_A_POINT,
     TYPE_A_RAY,
 )
@@ -210,6 +212,17 @@ def _prune_optimizer_state_for_shape_mismatch(
                 dropped += 1
     pruned["state"] = state
     return pruned, dropped, checked
+
+
+def _grad_l2_norm(parameters) -> float:
+    """Compute global L2 norm of gradients over a parameter iterable."""
+    total = 0.0
+    for p in parameters:
+        if p.grad is None:
+            continue
+        g = p.grad.detach()
+        total += float(g.float().pow(2).sum().item())
+    return float(math.sqrt(total)) if total > 0.0 else 0.0
 
 
 def main():
@@ -410,6 +423,18 @@ def main():
             "Reference total queries (n_point+n_ray) used for dual_mask_window scaling. "
             "If <=0, uses the epoch0 total after schedule init (args.n_point+args.n_ray)."
         ),
+    )
+    ap.add_argument(
+        "--log_scale_diagnostics",
+        type=int,
+        default=1,
+        help="If 1, print scale-transition diagnostics (seq length/token counts + grad norms).",
+    )
+    ap.add_argument(
+        "--log_scale_diag_every",
+        type=int,
+        default=100,
+        help="Logging interval (in steps) for scale diagnostics.",
     )
     # B-2: ray monotonicity / depth supervision aux loss.
     ap.add_argument("--aux_b2_weight", type=float, default=0.0, help="Global weight for B-2 ray auxiliary loss (0=off).")
@@ -977,6 +1002,8 @@ def main():
         for batch in dl:
             feat = batch["feat"].to(device, non_blocking=True).float()
             type_id = batch["type_id"].to(device, non_blocking=True).long()
+            dm_near_cur = 0.0
+            dm_far_cur = 0.0
 
             opt.zero_grad(set_to_none=True)
             with accelerator.autocast():
@@ -986,6 +1013,8 @@ def main():
                     ramp = min(1.0, float(global_step) / float(warmup_steps))
                     dm_near = float(args.dual_mask_near) * ramp
                     dm_far = float(args.dual_mask_far) * ramp
+                    dm_near_cur = float(dm_near)
+                    dm_far_cur = float(dm_far)
                     dm_seed = int(args.seed) * 1000003 + int(global_step)
 
                     z, z_hat, h_main = model(

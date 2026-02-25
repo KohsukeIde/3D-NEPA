@@ -112,3 +112,30 @@ Feb 20 follow-up (`encdec_plusgut_projfresh`) で追加確認:
   1. `logs/pretrain/*.log`（学習条件/挙動）
   2. `results/*.json`（最終評価値）
   3. JSON 内 `ckpt`（参照チェックポイントの一致）
+
+---
+
+## 7) フィードバック項目の完了状況（Feb 20, 2026）
+
+完了:
+
+- `scale_long` 系の optimizer 復元問題:
+  - `--resume_optimizer_partial` を導入し、shape 不一致パラメータのみ除外して復元。
+- dual-mask window のスケール化:
+  - `--dual_mask_window_scale {none,linear,sqrt}` を実装し、retry 実験で比較済み。
+- A-1 query 設計比較:
+  - `uniform / near_surface / coarse_to_fine` 比較は実施済み。
+- mesh + Chamfer/F-score 評価:
+  - `completion_cpac_udf.py` に統合し、baseline + objpres(`linear/sqrt`) の mesh-eval pack を完走済み（`fail_count=0`）。
+- スケール遷移診断ログ:
+  - token長・dual-mask実効値・勾配ノルムを出力する診断ログを pretrain に追加済み。
+
+継続課題（未完）:
+
+- `encdec` の「完全非崩壊」切り分け:
+  - causal `tgt_mask` は実装済みだが、fresh line でも UCPR hard-pair が near-randomのため、
+    completion-only 指標での追加切り分けが必要。
+- `encdec_plusgut_bbox` の独立 fresh pretrain:
+  - 現在の bbox 行は diagnostic（proj ckpt 由来）扱いで、独立学習ラインは未実行。
+- 分類（ScanObjectNN）での 2048/FPS 条件の再最適化:
+  - completion 主軸の本サイクルでは未着手。
