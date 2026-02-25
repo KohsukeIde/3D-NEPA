@@ -2130,3 +2130,61 @@ Readout:
 - baseline `ep049` remains stronger than current objective-preserving scale retries on both point-space IoU and mesh metrics in this setup.
 - inside the objective-preserving pair, `sqrt` remains better than `linear`.
 - for baseline, `c2f163264` is close to `near08` on IoU and clearly better than `uniform`; this supports A-1 as a robust grid-query design improvement vs uniform.
+
+### J) PlusGUT Fresh2 Chain (`projfresh2` vs `bboxfresh2`, Feb 21, 2026)
+
+Objective:
+
+- finalize independent fresh pretrains for both EncDec topology-coordinate variants:
+  - `encdec_plusgut_projfresh2`
+  - `encdec_plusgut_bboxfresh2`
+- compare against `causal_plusgut_ref` under the same eval protocol.
+
+Execution / completion:
+
+- chain log: `logs/analysis/pending_feedback_all_chain_20260220_175606/stage1_impl_update_encdec_pair.log`
+- completion lines:
+  - `[2026-02-21 00:25:35] [nepa_impl_encdec_plusgut_projfresh2_s0_e50] chain finished`
+  - `[2026-02-21 00:26:54] [nepa_impl_encdec_plusgut_bboxfresh2_s0_e50] chain finished`
+  - `[2026-02-21 00:26:54] all model chains finished`
+
+Checkpoints:
+
+- `runs/eccv_upmix_nepa_impl_encdec_plusgut_projfresh2_s0/ckpt_ep049.pt`
+- `runs/eccv_upmix_nepa_impl_encdec_plusgut_bboxfresh2_s0/ckpt_ep049.pt`
+
+UCPR diagnostic summary (`max_files=1000`, `pooling=mean_a`, `eval_seed=0`, `eval_seed_gallery=999`):
+
+| Model line | `mesh->udfgrid` R@1/R@5/R@10/MRR | `mesh->pointcloud_noray` R@1/R@5/R@10/MRR |
+|---|---|---|
+| `causal_plusgut_ref` | `0.048 / 0.157 / 0.229 / 0.11376` | `0.048 / 0.128 / 0.211 / 0.10442` |
+| `encdec_plusgut_projfresh2` | `0.004 / 0.012 / 0.021 / 0.01402` | `0.003 / 0.012 / 0.024 / 0.01447` |
+| `encdec_plusgut_bboxfresh2` | `0.003 / 0.015 / 0.031 / 0.01725` | `0.003 / 0.015 / 0.030 / 0.01749` |
+
+CPAC summary (`max_shapes=800`, `head_train_split=train_udf`, `head_train_max_shapes=4000`, `n_context=256`, `n_query=256`):
+
+| Model line | pool normal MAE/RMSE/IoU | pool `testnone` MAE/RMSE/IoU | pool `testmismatch` MAE/RMSE/IoU | grid near08 MAE/RMSE/IoU |
+|---|---|---|---|---|
+| `causal_plusgut_ref` | `0.03047 / 0.04099 / 0.69146` | `0.29427 / 0.38066 / 0.56442` | `0.08257 / 0.12239 / 0.44388` | `0.02595 / 0.03499 / 0.39956` |
+| `encdec_plusgut_projfresh2` | `0.04445 / 0.06396 / 0.70193` | `0.12180 / 0.14448 / 0.03742` | `0.06044 / 0.08867 / 0.59883` | `0.02997 / 0.04412 / 0.37672` |
+| `encdec_plusgut_bboxfresh2` | `0.04323 / 0.06322 / 0.71871` | `0.14907 / 0.22587 / 0.44786` | `0.05730 / 0.08609 / 0.66129` | `0.02983 / 0.04362 / 0.37748` |
+
+NN-copy reference (same protocol):
+
+- pool normal: `MAE/RMSE/IoU = 0.06151 / 0.09474 / 0.70891`
+- grid near08: `MAE/RMSE/IoU = 0.03874 / 0.06579 / 0.37652`
+
+Qualitative MC mean over 8 shapes (`summary.json`):
+
+| Model line | mean MAE_grid | mean RMSE_grid | mean IoU@level |
+|---|---:|---:|---:|
+| `causal_plusgut_ref` | 0.04771 | 0.06288 | 0.12757 |
+| `encdec_plusgut_projfresh2` | 0.19320 | 0.23621 | 0.06072 |
+| `encdec_plusgut_bboxfresh2` | 0.26855 | 0.31627 | 0.06618 |
+
+Readout:
+
+- `projfresh2` / `bboxfresh2` are both completed and no longer pending.
+- CPACでは EncDec が NN-copy を上回る設定（pool/grid）がある一方、`causal_plusgut_ref` と比べると `MAE/RMSE` と mesh 側平均は依然弱い。
+- `bboxfresh2` は `projfresh2` より CPAC pool IoU で改善したが、grid near08 はほぼ同等。
+- UCPR（diagnostic）は両fresh2とも near-random帯で、completion 主評価の判断は CPAC + mesh 指標を優先する。

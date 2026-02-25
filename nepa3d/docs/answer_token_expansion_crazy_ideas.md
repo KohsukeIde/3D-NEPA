@@ -102,6 +102,28 @@ Feb 20 follow-up (`encdec_plusgut_projfresh`) で追加確認:
   - causal ref: `IoU=0.39956`
   - NN-copy: `IoU=0.37652`
 
+Feb 21 follow-up (`encdec_plusgut_projfresh2` / `encdec_plusgut_bboxfresh2`) で追加確認:
+
+- 両fresh2 pretrain/evalは完了（`ckpt_ep049.pt` と対応JSONを確認済み）。
+- UCPR hard-pair は引き続き near-random帯（MRR `~0.014-0.017`）で、causal ref（MRR `~0.104-0.114`）を下回る。
+- CPAC pool normal は bboxfresh2 が最良:
+  - projfresh2: `MAE/RMSE/IoU = 0.04445 / 0.06396 / 0.70193`
+  - bboxfresh2: `MAE/RMSE/IoU = 0.04323 / 0.06322 / 0.71871`
+  - causal ref: `0.03047 / 0.04099 / 0.69146`
+- CPAC grid near08 は projfresh2/bboxfresh2 ともほぼ同等:
+  - projfresh2: `0.02997 / 0.04412 / 0.37672`
+  - bboxfresh2: `0.02983 / 0.04362 / 0.37748`
+  - causal ref: `0.02595 / 0.03499 / 0.39956`
+- qualitative MC（8-shape mean IoU@level）では causal ref が依然優位:
+  - causal ref: `0.12757`
+  - projfresh2: `0.06072`
+  - bboxfresh2: `0.06618`
+
+運用上の結論:
+
+- `projfresh2` と `bboxfresh2` は「未完了ジョブ」ではなく、結果確定済みライン。
+- モデル選定は UCPR ではなく completion（CPAC + mesh 側）を優先して継続する。
+
 ---
 
 ## 6) 記載運用メモ（Feb 19, 2026）
