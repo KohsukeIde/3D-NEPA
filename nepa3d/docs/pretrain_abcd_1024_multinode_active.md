@@ -1031,3 +1031,103 @@ Note:
 
 - This run set used `SCAN_CACHE_ROOT=data/scanobjectnn_main_split_v2` (mixed main_split-derived cache), not protocol-separated caches (`obj_bg` / `obj_only` / `pb_t50_rs`).
 - Therefore, these numbers are useful for internal ablation comparison but are not final protocol-split benchmark tables.
+
+## 25. Sampling-mode audit and policy update (2026-02-25)
+
+Purpose:
+
+- Explicitly record pretrain sampling mode provenance for the current result sets.
+- Prevent recurrence of ambiguous `fps` vs `rfps` provenance in reports.
+
+### 25.1 Audit result: current reported metrics are from `fps` pretrain
+
+Confirmed from A/B/C/D pretrain logs used by the current eval chains:
+
+- Run A:
+  - `logs/ddp_pretrain/ddp_pretrain_95920.qjcm_runA/logs/qh459.pretrain.log:20`
+  - `pt_sample_mode_train=fps`
+- Run B:
+  - `logs/ddp_pretrain/ddp_pretrain_95921.qjcm_runB/logs/qh134.pretrain.log:20`
+  - `pt_sample_mode_train=fps`
+- Run C:
+  - `logs/ddp_pretrain/ddp_pretrain_95922.qjcm_runC/logs/qh139.pretrain.log:20`
+  - `pt_sample_mode_train=fps`
+- Run D:
+  - `logs/ddp_pretrain/ddp_pretrain_95923.qjcm_runD/logs/qh033.pretrain.log:20`
+  - `pt_sample_mode_train=fps`
+
+Eval logs are consistent with this (`pt_sample_mode_train=fps`, `pt_sample_mode_eval=fps`), e.g.:
+
+- `logs/eval/abcd_cls_cpac_fps_tta_retry_20260225_013044_sotafair_base/runA.out:15`
+
+Conclusion:
+
+- Section 24 (`fps_tta_retry_20260225_013044`) metrics are all based on `fps`-trained pretrain checkpoints.
+- Newly submitted `nepafull_tta_20260225_141831_*` jobs also reference the same `runs/pretrain_abcd_1024_run{A,B,C,D}/last.pt` and therefore are `fps`-pretrain based as well.
+
+### 25.2 Policy update for future reports (mandatory metadata)
+
+For every pretrain/eval result block, record all of:
+
+1. pretrain checkpoint path and job IDs
+2. `pt_sample_mode_train` and `pt_rfps_m`
+3. `pt_fps_key` / `pt_xyz_key` / `pt_dist_key`
+4. eval-side `pt_sample_mode_train` and `pt_sample_mode_eval`
+5. protocol split (`main_split` mixed vs `obj_bg` / `obj_only` / `pb_t50_rs`)
+
+### 25.3 `rfps` scope guideline (A-only or not)
+
+Guideline:
+
+- `rfps` should **not** be A-only when comparing A/B/C/D in one table.
+- To avoid sampling-mode confound, use the same pretrain sampling mode across all compared runs (`A/B/C/D` all `rfps`, or all `fps`).
+
+If maintaining a separate SOTA-fair protocol that must stay `fps`, report it as a separate table and do not mix with `rfps` A/C/D numbers in one ablation conclusion.
+
+## 26. `rfps` pretrain relaunch and fine-tune mode clarification (2026-02-25)
+
+Purpose:
+
+- Start a new A/B/C/D pretrain batch with `pt_sample_mode_train=rfps`.
+- Explicitly record that currently running fine-tune/eval batches are still `fps` on train/eval sampling.
+
+### 26.1 `rfps` pretrain submission (new batch)
+
+Submitted jobs:
+
+- `96381.qjcm` (`runA_rfps_20260225_142727`)
+- `96382.qjcm` (`runB_rfps_20260225_142727`)
+- `96383.qjcm` (`runC_rfps_20260225_142727`)
+- `96384.qjcm` (`runD_rfps_20260225_142727`)
+
+Submission summary file:
+
+- `logs/pipeline/rfps_pretrain_20260225_142727_jobs.txt`
+
+Checkpoint output roots:
+
+- `runs/pretrain_abcd_1024_rfps_20260225_142727_runA`
+- `runs/pretrain_abcd_1024_rfps_20260225_142727_runB`
+- `runs/pretrain_abcd_1024_rfps_20260225_142727_runC`
+- `runs/pretrain_abcd_1024_rfps_20260225_142727_runD`
+
+Key launch settings:
+
+- `PT_SAMPLE_MODE_TRAIN=rfps`
+- `PT_RFPS_M=4096`
+- `MAX_LEN=4500`
+- run matrix otherwise follows A/B/C/D design (B uses `pc_xyz`, others `pt_xyz_pool`; A/C/D keep dist on, B dist ablation).
+
+### 26.2 Clarification: currently running fine-tune/eval mode
+
+- Existing eval batches launched before `rfps` pretrain completion (including `fps_tta_retry_20260225_013044_*` and `nepafull_tta_20260225_141831_*`) are based on `fps` pretrain checkpoints and run fine-tune with:
+  - `pt_sample_mode_train=fps`
+  - `pt_sample_mode_eval=fps`
+- Example evidence:
+  - `logs/eval/abcd_cls_cpac_fps_tta_retry_20260225_013044_sotafair_base/runA.out:15`
+  - `logs/eval/abcd_cls_cpac_nepafull_tta_20260225_141831_base/runA.out:15`
+
+Implication:
+
+- No result table from the above eval batches should be labeled as `rfps`-pretrain-based.
+- `rfps` claims must wait for checkpoints from jobs `96381`..`96384` and eval reruns that explicitly point to those checkpoints.
