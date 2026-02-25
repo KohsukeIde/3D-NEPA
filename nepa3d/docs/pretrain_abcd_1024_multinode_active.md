@@ -1223,3 +1223,148 @@ Remaining active set:
 
 - NEPA-full eval (A/B): `96364`, `96365`, `96368`, `96369`, `96372`, `96373`, `96376`, `96377`
 - rfps pretrain (A/B): `96381`, `96382`
+
+## 29. ModelNet40 recheck + cache rebuild + 8-job submit (2026-02-25)
+
+### 29.1 Source dataset verification (`data/ModelNet40`)
+
+Rechecked input tree after replacement:
+
+- OFF (official layout) is present and complete:
+  - train: `9843`
+  - test: `2468`
+  - classes: `40/40` (train/test symmetric)
+- `ply_format` tree is partial and should not be used for official evaluation:
+  - train: `9843` (40 classes)
+  - test: `601` (9 classes)
+  - contains one zero-byte file:
+    - `data/ModelNet40/ply_format/test/chair/chair_0900_[8].ply`
+
+Conclusion:
+
+- Official OFF tree is valid and should be the source for cache rebuild.
+
+### 29.2 Cache rebuild submission
+
+Submitted full overwrite rebuild for `data/modelnet40_cache_v2`:
+
+- script: `scripts/preprocess/submit_modelnet40_cache_v2_qf.sh`
+- key args: `OVERWRITE=1`, `SPLIT=all`, `N_WORKERS=32`
+- job: `96491.qjcm`
+
+### 29.3 8 eval jobs submitted (A/B only)
+
+Requested matrix:
+
+- pretrain modes: `fps`, `rfps`
+- runs: `A`, `B`
+- protocols: `SOTA-fair`, `NEPA-full`
+- total: `8` jobs
+
+All jobs were submitted with dependency on ModelNet cache rebuild:
+
+- common dependency: `afterok:96491.qjcm`
+
+Per-job dependency also includes the corresponding pretrain job:
+
+- fps-A depends on `95920.qjcm`
+- fps-B depends on `95921.qjcm`
+- rfps-A depends on `96381.qjcm`
+- rfps-B depends on `96382.qjcm`
+
+Submitted eval jobs:
+
+- `96492.qjcm` `fps_runA_sotafair`
+- `96493.qjcm` `fps_runA_nepafull`
+- `96494.qjcm` `fps_runB_sotafair`
+- `96495.qjcm` `fps_runB_nepafull`
+- `96496.qjcm` `rfps_runA_sotafair`
+- `96497.qjcm` `rfps_runA_nepafull`
+- `96498.qjcm` `rfps_runB_sotafair`
+- `96499.qjcm` `rfps_runB_nepafull`
+
+Run/log roots:
+
+- run set: `ab_fps_rfps_2proto_20260225_163448`
+- logs: `logs/eval/ab_fps_rfps_2proto_20260225_163448`
+- outputs: `runs/eval_ab_fps_rfps_2proto_20260225_163448`
+- results: `results/ab_fps_rfps_2proto_20260225_163448`
+
+Protocol settings used:
+
+- SOTA-fair:
+  - `PT_XYZ_KEY_CLS=pc_xyz`
+  - `ABLATE_POINT_DIST=1`
+  - `POINT_ORDER_MODE=morton`
+- NEPA-full:
+  - `PT_XYZ_KEY_CLS=pt_xyz_pool`
+  - `ABLATE_POINT_DIST=0`
+  - `POINT_ORDER_MODE=fps`
+- Common:
+  - `VAL_SPLIT_MODE=group_auto`
+  - `PT_SAMPLE_MODE_TRAIN_CLS=fps`
+  - `PT_SAMPLE_MODE_EVAL_CLS=fps`
+  - `AUG_EVAL=1` (TTA on)
+  - `RUN_SCAN=1`, `RUN_MODELNET=1`, `RUN_CPAC=0`
+
+### 29.4 LR rollback (no-sweep policy) and re-submit
+
+User policy update:
+
+- For this batch, do **not** change fine-tune LR.
+- Keep the same LR as previous fine-tuning runs; LR sweep is deferred.
+
+Action taken:
+
+1. Stopped the first 8 submitted jobs (they had `LR_CLS=5e-4`).
+   - terminated: `96492`..`96499`
+2. Restored script defaults:
+   - `scripts/eval/nepa3d_eval_cls_cpac_qf.sh`: `LR_CLS` default back to `1e-4`
+   - `scripts/eval/submit_abcd_cls_cpac_qf.sh`: `LR_CLS` default back to `1e-4`
+3. Re-submitted the same 8-job matrix with explicit `LR_CLS=1e-4`.
+
+Re-submitted jobs:
+
+- `96536.qjcm` `fps_runA_sotafair`
+- `96537.qjcm` `fps_runA_nepafull`
+- `96538.qjcm` `fps_runB_sotafair`
+- `96539.qjcm` `fps_runB_nepafull`
+- `96540.qjcm` `rfps_runA_sotafair`
+- `96541.qjcm` `rfps_runA_nepafull`
+- `96542.qjcm` `rfps_runB_sotafair`
+- `96543.qjcm` `rfps_runB_nepafull`
+
+New run/log roots:
+
+- run set: `ab_fps_rfps_2proto_lr1e4_20260225_164957`
+- logs: `logs/eval/ab_fps_rfps_2proto_lr1e4_20260225_164957`
+- outputs: `runs/eval_ab_fps_rfps_2proto_lr1e4_20260225_164957`
+- results: `results/ab_fps_rfps_2proto_lr1e4_20260225_164957`
+
+### 29.5 Additional LR sensitivity check (fps A/B only, 5e-4)
+
+For a controlled A/B-only comparison request, added a second batch with:
+
+- pretrain mode: `fps` only
+- runs: `A`, `B`
+- protocols: `SOTA-fair`, `NEPA-full`
+- LR override: `LR_CLS=5e-4`
+- common settings kept same (`group_auto`, `fps/fps`, `AUG_EVAL=1`, `RUN_CPAC=0`)
+
+Submitted jobs:
+
+- `96546.qjcm` `fps5e4_runA_sotafair`
+- `96547.qjcm` `fps5e4_runA_nepafull`
+- `96548.qjcm` `fps5e4_runB_sotafair`
+- `96549.qjcm` `fps5e4_runB_nepafull`
+
+Dependency:
+
+- `afterok:96491.qjcm` (ModelNet cache rebuild) + corresponding fps pretrain completion.
+
+Run/log roots:
+
+- run set: `ab_fps_lr5e4_abtest_20260225_165338`
+- logs: `logs/eval/ab_fps_lr5e4_abtest_20260225_165338`
+- outputs: `runs/eval_ab_fps_lr5e4_abtest_20260225_165338`
+- results: `results/ab_fps_lr5e4_abtest_20260225_165338`
