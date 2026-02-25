@@ -961,3 +961,73 @@ bash scripts/pipeline/submit_pretrain_then_sotafair_eval_qf.sh
   - `4 pretrain + 48 eval = 52 jobs`
 - if adding one extra non-variant ModelNet/CPAC matrix (`4x4=16`) separately:
   - total becomes `68 jobs`.
+
+## 24. Result snapshot: `fps_tta_retry_20260225_013044` (2026-02-25)
+
+Purpose:
+
+- Record finalized metrics from the completed SOTA-fair ablation batch with:
+  - `PT_SAMPLE_MODE_EVAL_CLS=fps`
+  - `AUG_EVAL=1` (TTA on)
+  - `VAL_SPLIT_MODE=group_auto` (resolved to `group_scanobjectnn(auto)` in Scan logs)
+
+Run-set roots:
+
+- logs:
+  - `logs/eval/abcd_cls_cpac_fps_tta_retry_20260225_013044_sotafair_base`
+  - `logs/eval/abcd_cls_cpac_fps_tta_retry_20260225_013044_sotafair_llrd`
+  - `logs/eval/abcd_cls_cpac_fps_tta_retry_20260225_013044_sotafair_dp`
+  - `logs/eval/abcd_cls_cpac_fps_tta_retry_20260225_013044_sotafair_llrd_dp`
+- results:
+  - `results/abcd_1024_fps_tta_retry_20260225_013044_sotafair_base`
+  - `results/abcd_1024_fps_tta_retry_20260225_013044_sotafair_llrd`
+  - `results/abcd_1024_fps_tta_retry_20260225_013044_sotafair_dp`
+  - `results/abcd_1024_fps_tta_retry_20260225_013044_sotafair_llrd_dp`
+
+### 24.1 Completion / sanity
+
+- All `4 ablations x 4 runs = 16` jobs finished without runtime errors.
+- `run*.err` were empty across all four ablation roots.
+- CPAC JSON save markers were found for all runs in all ablations (`16/16`).
+
+### 24.2 ScanObjectNN classification (`test_acc`)
+
+| Ablation | Run A | Run B | Run C | Run D | Avg(ABC) |
+|---|---:|---:|---:|---:|---:|
+| `base` | 0.6726 | 0.6654 | 0.6204 | 0.2686 | 0.6528 |
+| `dp` | 0.6803 | 0.6576 | 0.6222 | 0.2158 | 0.6534 |
+| `llrd` | 0.5155 | 0.4862 | 0.4633 | 0.1786 | 0.4883 |
+| `llrd_dp` | 0.4508 | 0.4658 | 0.4287 | 0.0840 | 0.4484 |
+
+Quick read:
+
+- `base` and `dp` are nearly tied on `Avg(ABC)` (`dp` +0.0006).
+- `llrd` and `llrd_dp` are clearly lower in this run set.
+- `Run D` remains substantially weaker than A/B/C under all ablations.
+
+### 24.3 ModelNet40 classification (`test_acc`)
+
+| Ablation | Run A | Run B | Run C | Run D |
+|---|---:|---:|---:|---:|
+| `base` | 0.9453 | 0.9453 | 0.9395 | 0.5752 |
+| `dp` | 0.9414 | 0.9482 | 0.9482 | 0.1260 |
+| `llrd` | 0.9229 | 0.9180 | 0.9209 | 0.2246 |
+| `llrd_dp` | 0.9121 | 0.9072 | 0.9092 | 0.1953 |
+
+### 24.4 CPAC-UDF (from result JSON)
+
+Note:
+
+- CPAC metrics were identical across the four ablation roots for the same run id (A/B/C/D), because CPAC stage in this flow did not use the fine-tune ablation knobs.
+
+| Run | mae | rmse | iou@tau |
+|---|---:|---:|---:|
+| A | 0.05808 | 0.08149 | 0.63259 |
+| B | 0.09551 | 0.13030 | 0.49248 |
+| C | 0.08713 | 0.11350 | 0.36150 |
+| D | 0.12917 | 0.16613 | 0.30167 |
+
+### 24.5 Caveat (protocol split)
+
+- This run set used `SCAN_CACHE_ROOT=data/scanobjectnn_main_split_v2` (mixed main_split-derived cache), not protocol-separated caches (`obj_bg` / `obj_only` / `pb_t50_rs`).
+- Therefore, these numbers are useful for internal ablation comparison but are not final protocol-split benchmark tables.
