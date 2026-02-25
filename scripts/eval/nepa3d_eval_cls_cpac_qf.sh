@@ -54,6 +54,7 @@ WARMUP_EPOCHS="${WARMUP_EPOCHS:-10}"
 WARMUP_START_FACTOR="${WARMUP_START_FACTOR:-0.1}"
 MIN_LR="${MIN_LR:-1e-6}"
 LLRD="${LLRD:-1.0}"
+LLRD_MODE="${LLRD_MODE:-exp}"
 DROP_PATH="${DROP_PATH:-0.0}"
 GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-1}"
 MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
@@ -207,7 +208,7 @@ if [[ "${RUN_SCAN}" == "1" ]]; then
   echo "=== CLASSIFICATION: ScanObjectNN ==="
   echo "cls_pooling=${CLS_POOLING} ablate_point_dist=${ABLATE_POINT_DIST} point_order_mode=${POINT_ORDER_MODE} aug_preset=${SCAN_AUG_PRESET}"
   echo "pt_xyz_key=${PT_XYZ_KEY_CLS} pt_dist_key=${PT_DIST_KEY_CLS}"
-  echo "lr_scheduler=${LR_SCHEDULER} warmup_epochs=${WARMUP_EPOCHS} min_lr=${MIN_LR} llrd=${LLRD} drop_path=${DROP_PATH} grad_accum_steps=${GRAD_ACCUM_STEPS} max_grad_norm=${MAX_GRAD_NORM}"
+  echo "lr_scheduler=${LR_SCHEDULER} warmup_epochs=${WARMUP_EPOCHS} min_lr=${MIN_LR} llrd=${LLRD} llrd_mode=${LLRD_MODE} drop_path=${DROP_PATH} grad_accum_steps=${GRAD_ACCUM_STEPS} max_grad_norm=${MAX_GRAD_NORM}"
   echo "val_split_mode=${VAL_SPLIT_MODE} pt_sample_mode_train=${PT_SAMPLE_MODE_TRAIN_CLS} pt_sample_mode_eval=${PT_SAMPLE_MODE_EVAL_CLS} pt_rfps_m=${PT_RFPS_M_CLS} aug_eval=${AUG_EVAL} aug_recompute_dist=${AUG_RECOMPUTE_DIST}"
   echo "use_fc_norm=${USE_FC_NORM} label_smoothing=${LABEL_SMOOTHING} weight_decay=${WEIGHT_DECAY_CLS} weight_decay_norm=${WEIGHT_DECAY_NORM}"
   OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
@@ -250,6 +251,7 @@ if [[ "${RUN_SCAN}" == "1" ]]; then
     --warmup_start_factor "${WARMUP_START_FACTOR}" \
     --min_lr "${MIN_LR}" \
     --llrd "${LLRD}" \
+    --llrd_mode "${LLRD_MODE}" \
     --drop_path "${DROP_PATH}" \
     --grad_accum_steps "${GRAD_ACCUM_STEPS}" \
     --max_grad_norm "${MAX_GRAD_NORM}" \
@@ -311,6 +313,7 @@ if [[ "${RUN_MODELNET}" == "1" ]] && [[ -d "${MODELNET_CACHE_ROOT}" ]]; then
     --warmup_start_factor "${WARMUP_START_FACTOR}" \
     --min_lr "${MIN_LR}" \
     --llrd "${LLRD}" \
+    --llrd_mode "${LLRD_MODE}" \
     --drop_path "${DROP_PATH}" \
     --grad_accum_steps "${GRAD_ACCUM_STEPS}" \
     --max_grad_norm "${MAX_GRAD_NORM}" \

@@ -378,6 +378,17 @@ def main():
         help="Layer-wise learning-rate decay factor in (0,1]. 1.0 disables LLRD.",
     )
     ap.add_argument(
+        "--llrd_mode",
+        type=str,
+        default="exp",
+        choices=["exp", "linear"],
+        help=(
+            "LLRD schedule mode: "
+            "exp uses factor^(depth), "
+            "linear maps shallowest=args.llrd to deepest=1.0."
+        ),
+    )
+    ap.add_argument(
         "--drop_path",
         type=float,
         default=0.0,
@@ -801,7 +812,13 @@ def main():
         lr_scale = 1.0
         if use_llrd:
             layer_idx = _layer_idx_from_name(name)
-            lr_scale = float(args.llrd) ** float(max_layer_idx - layer_idx)
+            if args.llrd_mode == "linear":
+                llrd_min = float(args.llrd)
+                lr_scale = llrd_min + (1.0 - llrd_min) * (
+                    float(layer_idx) / float(max(1, max_layer_idx))
+                )
+            else:
+                lr_scale = float(args.llrd) ** float(max_layer_idx - layer_idx)
             llrd_scales.append(lr_scale)
 
         key = (round(lr_scale, 12), wd)
@@ -923,7 +940,7 @@ def main():
         f"label_smoothing={smoothing:.4f} "
         f"weight_decay={args.weight_decay} weight_decay_norm={args.weight_decay_norm} "
         f"grad_accum_steps={args.grad_accum_steps} max_grad_norm={args.max_grad_norm} "
-        f"llrd={args.llrd:.4f} "
+        f"llrd={args.llrd:.4f} llrd_mode={args.llrd_mode} "
         f"drop_path={args.drop_path:.4f} "
         f"lr_scheduler={args.lr_scheduler} warmup_steps={warmup_steps} total_update_steps={total_update_steps} "
         f"min_lr={args.min_lr}"
@@ -931,7 +948,7 @@ def main():
     log(f"num_train={len(train_paths)} num_val={len(val_paths)} num_test={len(test_paths)}")
     if use_llrd and len(llrd_scales) > 0:
         log(
-            f"[llrd] enabled: factor={args.llrd:.4f} "
+            f"[llrd] enabled: mode={args.llrd_mode} factor={args.llrd:.4f} "
             f"min_scale={min(llrd_scales):.6f} max_scale={max(llrd_scales):.6f} "
             f"param_groups={len(opt_groups)}"
         )

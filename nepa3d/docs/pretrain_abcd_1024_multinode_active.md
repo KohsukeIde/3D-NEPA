@@ -1437,3 +1437,121 @@ Checkpoint roots (expected):
 
 - `runs/pretrain_ab_1024_rfps_aug_rfps_aug_ab_20260225_171018_runA`
 - `runs/pretrain_ab_1024_rfps_aug_rfps_aug_ab_20260225_171018_runB`
+
+## 31. LLRD mode update (linear) + A/B-only eval submission (2026-02-25)
+
+### 31.1 Code changes
+
+Implemented configurable LLRD schedule mode for fine-tuning:
+
+- `nepa3d/train/finetune_cls.py`
+  - added CLI:
+    - `--llrd_mode {exp,linear}` (default: `exp` for backward compatibility)
+  - `exp` mode (legacy): `lr_scale = llrd^(max_layer_idx - layer_idx)`
+  - `linear` mode:
+    - shallowest (`layer_idx=0`) -> `lr_scale=llrd`
+    - deepest (`layer_idx=max_layer_idx`) -> `lr_scale=1.0`
+    - linear interpolation in between
+  - startup log and `[llrd]` summary now print `llrd_mode`.
+
+Eval script wiring:
+
+- `scripts/eval/nepa3d_eval_cls_cpac_qf.sh`
+  - added env: `LLRD_MODE` (default `exp`)
+  - forwards `--llrd_mode` to both ScanObjectNN and ModelNet40 fine-tune commands
+  - startup config log now prints `llrd_mode`
+- `scripts/eval/submit_abcd_cls_cpac_qf.sh`
+  - forwards `LLRD_MODE` through qsub variables
+
+### 31.2 A/B-only eval jobs submitted (linear LLRD)
+
+Requested scope:
+
+- A/B only
+- linear LLRD validation run
+
+Submitted jobs:
+
+- `97033.qjcm` (`runA_llrdlin`)
+- `97034.qjcm` (`runB_llrdlin`)
+
+Note:
+
+- Initial submission `97031/97032` was replaced immediately to enforce `VAL_SPLIT_MODE=group_auto`.
+- Active run set is the re-submitted one below.
+
+Submission settings:
+
+- `LLRD=0.35`
+- `LLRD_MODE=linear`
+- `VAL_SPLIT_MODE=group_auto`
+- other knobs kept at script defaults (no LR sweep change; default `LR_CLS=1e-4`)
+
+Run roots:
+
+- run set: `ab_llrd_linear035_groupauto_20260225_213924`
+- logs: `logs/eval/ab_cls_cpac_ab_llrd_linear035_groupauto_20260225_213924`
+- outputs: `runs/eval_ab_ab_llrd_linear035_groupauto_20260225_213924`
+- results: `results/ab_ab_llrd_linear035_groupauto_20260225_213924`
+
+## 32. Augmentation fine-tune results (A/B) + no-augmentation comparison (2026-02-25)
+
+### 32.1 Status summary
+
+- Early batch `ab_fps_rfps_2proto_20260225_163448` (`96492`..`96499`) is treated as superseded/incomplete.
+  - `classification_scan.log` in this root stops near early epochs for several runs.
+- Completed batches used for reporting:
+  - `ab_fps_rfps_2proto_lr1e4_20260225_164957`
+  - `ab_fps_lr5e4_abtest_20260225_165338`
+- In these batches:
+  - `RUN_CPAC=0` (classification-only, CPAC skipped)
+  - `aug_preset=scanobjectnn` for ScanObjectNN stage
+  - `AUG_EVAL=1` (TTA on), `PT_SAMPLE_MODE_{TRAIN,EVAL}=fps`
+
+### 32.2 Final metrics (`ScanObjectNN` / `ModelNet40`)
+
+Source roots:
+
+- `logs/eval/ab_fps_rfps_2proto_lr1e4_20260225_164957`
+- `logs/eval/ab_fps_lr5e4_abtest_20260225_165338`
+
+`LR_CLS=1e-4` batch:
+
+| setting | ScanObjectNN `test_acc` | ModelNet40 `test_acc` |
+|---|---:|---:|
+| `fps_runA_sotafair` | 0.6606 | 0.8620 |
+| `fps_runA_nepafull` | 0.3341 | 0.8327 |
+| `fps_runB_sotafair` | 0.6654 | 0.8695 |
+| `fps_runB_nepafull` | 0.5389 | 0.8682 |
+| `rfps_runB_sotafair` | 0.6654 | 0.8717 |
+| `rfps_runB_nepafull` | 0.5660 | 0.8620 |
+
+`LR_CLS=5e-4` batch (fps A/B only):
+
+| setting | ScanObjectNN `test_acc` | ModelNet40 `test_acc` |
+|---|---:|---:|
+| `fps5e4_runA_sotafair` | 0.6875 | 0.8825 |
+| `fps5e4_runA_nepafull` | 0.3074 | 0.8649 |
+| `fps5e4_runB_sotafair` | 0.6762 | 0.8786 |
+| `fps5e4_runB_nepafull` | 0.6042 | 0.8874 |
+
+### 32.3 Comparison against augmentation-none baseline
+
+Explicit augmentation-none baseline (historical, Run A only) from §18:
+
+| baseline run | point order | aug preset | ScanObjectNN `test_acc` |
+|---|---|---|---:|
+| `runA_fps_augnone` | `fps` | `none` | 0.6969 |
+| `runA_morton_augnone` | `morton` | `none` | 0.6976 |
+
+Comparison (Run A, SOTA-fair) using morton no-aug baseline `0.6976`:
+
+| setting | ScanObjectNN `test_acc` | delta vs no-aug (`0.6976`) |
+|---|---:|---:|
+| strong-aug + `LR_CLS=1e-4` (`fps_runA_sotafair`) | 0.6606 | -0.0370 |
+| strong-aug + `LR_CLS=5e-4` (`fps5e4_runA_sotafair`) | 0.6875 | -0.0101 |
+
+Notes:
+
+- No explicit augmentation-none counterpart was run for `Run B` in this A/B batch, so B-side no-aug delta is unavailable.
+- The no-aug baseline above is from a different historical batch/checkpoint context; use as directional reference, not strict apples-to-apples proof.
