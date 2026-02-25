@@ -360,6 +360,26 @@ def main():
             "fps=keep sampling order, random=shuffle."
         ),
     )
+    ap.add_argument("--aug_rotate_z", action="store_true", help="Train-time point/ray augmentation: random Z-rotation.")
+    ap.add_argument("--aug_scale_min", type=float, default=1.0, help="Train-time augmentation: random scale minimum.")
+    ap.add_argument("--aug_scale_max", type=float, default=1.0, help="Train-time augmentation: random scale maximum.")
+    ap.add_argument(
+        "--aug_translate",
+        type=float,
+        default=0.0,
+        help="Train-time augmentation: random translation range (uniform in [-t,t]).",
+    )
+    ap.add_argument("--aug_jitter_sigma", type=float, default=0.0, help="Train-time augmentation: point jitter sigma.")
+    ap.add_argument("--aug_jitter_clip", type=float, default=0.0, help="Train-time augmentation: point jitter clip.")
+    ap.add_argument(
+        "--aug_recompute_dist",
+        type=int,
+        default=0,
+        help=(
+            "If 1, recompute point-distance targets from augmented pc_xyz when jitter is enabled "
+            "(slower, but keeps xyz/dist strictly consistent)."
+        ),
+    )
     ap.add_argument(
         "--include_pt_grad",
         type=int,
@@ -659,7 +679,13 @@ def main():
         f"pt_sample_mode_train={args.pt_sample_mode_train} "
         f"pt_fps_key={args.pt_fps_key} "
         f"pt_rfps_m={int(args.pt_rfps_m)} "
-        f"point_order_mode={args.point_order_mode}"
+        f"point_order_mode={args.point_order_mode} "
+        f"aug_rotate_z={int(bool(args.aug_rotate_z))} "
+        f"aug_scale=[{float(args.aug_scale_min):.3f},{float(args.aug_scale_max):.3f}] "
+        f"aug_translate={float(args.aug_translate):.3f} "
+        f"aug_jitter_sigma={float(args.aug_jitter_sigma):.4f} "
+        f"aug_jitter_clip={float(args.aug_jitter_clip):.4f} "
+        f"aug_recompute_dist={int(bool(args.aug_recompute_dist))}"
     )
 
     if args.mix_config:
@@ -691,6 +717,13 @@ def main():
             pt_fps_key=str(args.pt_fps_key),
             pt_rfps_m=int(args.pt_rfps_m),
             point_order_mode=str(args.point_order_mode),
+            aug_rotate_z=bool(args.aug_rotate_z),
+            aug_scale_min=float(args.aug_scale_min),
+            aug_scale_max=float(args.aug_scale_max),
+            aug_translate=float(args.aug_translate),
+            aug_jitter_sigma=float(args.aug_jitter_sigma),
+            aug_jitter_clip=float(args.aug_jitter_clip),
+            aug_recompute_dist=bool(args.aug_recompute_dist),
         )
         # Optional overrides from CLI (useful for PBS -v variables)
         if args.mix_num_samples and args.mix_num_samples > 0:
@@ -746,6 +779,13 @@ def main():
             pt_fps_key=str(args.pt_fps_key),
             pt_rfps_m=int(args.pt_rfps_m),
             point_order_mode=str(args.point_order_mode),
+            aug_rotate_z=bool(args.aug_rotate_z),
+            aug_scale_min=float(args.aug_scale_min),
+            aug_scale_max=float(args.aug_scale_max),
+            aug_translate=float(args.aug_translate),
+            aug_jitter_sigma=float(args.aug_jitter_sigma),
+            aug_jitter_clip=float(args.aug_jitter_clip),
+            aug_recompute_dist=bool(args.aug_recompute_dist),
         )
         dl = DataLoader(
             ds,

@@ -82,6 +82,13 @@ PT_SAMPLE_MODE_TRAIN="${PT_SAMPLE_MODE_TRAIN:-random}"
 PT_FPS_KEY="${PT_FPS_KEY:-auto}"
 PT_RFPS_M="${PT_RFPS_M:-4096}"
 POINT_ORDER_MODE="${POINT_ORDER_MODE:-morton}"
+AUG_ROTATE_Z="${AUG_ROTATE_Z:-0}"
+AUG_SCALE_MIN="${AUG_SCALE_MIN:-1.0}"
+AUG_SCALE_MAX="${AUG_SCALE_MAX:-1.0}"
+AUG_TRANSLATE="${AUG_TRANSLATE:-0.0}"
+AUG_JITTER_SIGMA="${AUG_JITTER_SIGMA:-0.0}"
+AUG_JITTER_CLIP="${AUG_JITTER_CLIP:-0.0}"
+AUG_RECOMPUTE_DIST="${AUG_RECOMPUTE_DIST:-0}"
 VOXEL_GRID="${VOXEL_GRID:-64}"
 VOXEL_DILATE="${VOXEL_DILATE:-1}"
 VOXEL_MAX_STEPS="${VOXEL_MAX_STEPS:-0}"
@@ -111,6 +118,10 @@ AUX_E_WEIGHT="${AUX_E_WEIGHT:-0.0}"
 EXTRA_FORCE=""
 if [ "${FORCE_MISSING_RAY}" = "1" ]; then
   EXTRA_FORCE="--force_missing_ray"
+fi
+EXTRA_AUG_ROTATE_Z=""
+if [ "${AUG_ROTATE_Z}" = "1" ]; then
+  EXTRA_AUG_ROTATE_Z="--aug_rotate_z"
 fi
 
 TOTAL_BATCH_SIZE="${TOTAL_BATCH_SIZE:-$((BATCH * NUM_PROCESSES))}"
@@ -174,6 +185,13 @@ if [ "${NUM_PROCESSES}" -gt 1 ]; then
   --pt_fps_key "${PT_FPS_KEY}" \
   --pt_rfps_m "${PT_RFPS_M}" \
   --point_order_mode "${POINT_ORDER_MODE}" \
+  ${EXTRA_AUG_ROTATE_Z} \
+  --aug_scale_min "${AUG_SCALE_MIN}" \
+  --aug_scale_max "${AUG_SCALE_MAX}" \
+  --aug_translate "${AUG_TRANSLATE}" \
+  --aug_jitter_sigma "${AUG_JITTER_SIGMA}" \
+  --aug_jitter_clip "${AUG_JITTER_CLIP}" \
+  --aug_recompute_dist "${AUG_RECOMPUTE_DIST}" \
   --objective "${OBJECTIVE}" \
   --mask_ratio "${MASK_RATIO}" \
   --mixed_precision "${LAUNCH_MIXED_PRECISION}" \
@@ -232,6 +250,13 @@ else
   --pt_fps_key "${PT_FPS_KEY}" \
   --pt_rfps_m "${PT_RFPS_M}" \
   --point_order_mode "${POINT_ORDER_MODE}" \
+  ${EXTRA_AUG_ROTATE_Z} \
+  --aug_scale_min "${AUG_SCALE_MIN}" \
+  --aug_scale_max "${AUG_SCALE_MAX}" \
+  --aug_translate "${AUG_TRANSLATE}" \
+  --aug_jitter_sigma "${AUG_JITTER_SIGMA}" \
+  --aug_jitter_clip "${AUG_JITTER_CLIP}" \
+  --aug_recompute_dist "${AUG_RECOMPUTE_DIST}" \
   --objective "${OBJECTIVE}" \
   --mask_ratio "${MASK_RATIO}" \
   --mixed_precision "${LAUNCH_MIXED_PRECISION}" \

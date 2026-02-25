@@ -242,6 +242,13 @@ def build_mixed_pretrain(
     pt_fps_key: str = "auto",
     pt_rfps_m: int = 4096,
     point_order_mode: str = "morton",
+    aug_rotate_z: bool = False,
+    aug_scale_min: float = 1.0,
+    aug_scale_max: float = 1.0,
+    aug_translate: float = 0.0,
+    aug_jitter_sigma: float = 0.0,
+    aug_jitter_clip: float = 0.0,
+    aug_recompute_dist: bool = False,
 ) -> Tuple[MixedPretrainDataset, MixtureSampler, Dict[str, Any]]:
     """Build (dataset, sampler) for mixed pretraining from a YAML config."""
     specs, cfg = load_mix_config(mix_config_path)
@@ -285,6 +292,13 @@ def build_mixed_pretrain(
             pt_fps_key=str(pt_fps_key),
             pt_rfps_m=int(pt_rfps_m),
             point_order_mode=str(point_order_mode),
+            aug_rotate_z=bool(aug_rotate_z),
+            aug_scale_min=float(aug_scale_min),
+            aug_scale_max=float(aug_scale_max),
+            aug_translate=float(aug_translate),
+            aug_jitter_sigma=float(aug_jitter_sigma),
+            aug_jitter_clip=float(aug_jitter_clip),
+            aug_recompute_dist=bool(aug_recompute_dist),
             return_label=False,
         )
         datasets.append(ds)

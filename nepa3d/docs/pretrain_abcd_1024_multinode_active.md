@@ -1368,3 +1368,72 @@ Run/log roots:
 - logs: `logs/eval/ab_fps_lr5e4_abtest_20260225_165338`
 - outputs: `runs/eval_ab_fps_lr5e4_abtest_20260225_165338`
 - results: `results/ab_fps_lr5e4_abtest_20260225_165338`
+
+## 30. Pretrain RFPS + augmentation (A/B) intake (2026-02-25)
+
+Purpose:
+
+- Add RFPS + mild geometric augmentation support to **pretrain** path (not only fine-tune).
+- Launch A/B pretrain runs with:
+  - `pt_sample_mode_train=rfps`
+  - augmentation (mild): rotate-z + scale + jitter
+
+### 30.1 Code/script changes
+
+Pretrain CLI and dataset wiring:
+
+- `nepa3d/train/pretrain.py`
+  - added args:
+    - `--aug_rotate_z`
+    - `--aug_scale_min`, `--aug_scale_max`
+    - `--aug_translate`
+    - `--aug_jitter_sigma`, `--aug_jitter_clip`
+    - `--aug_recompute_dist`
+  - aug config is now printed in startup token-config line.
+  - forwarded aug args to both:
+    - mixed pretrain builder path
+    - single-dataset `ModelNet40QueryDataset` path
+- `nepa3d/data/mixed_pretrain.py`
+  - `build_mixed_pretrain(...)` now accepts and forwards pretrain aug args to each dataset.
+
+Pretrain shell wrappers:
+
+- `scripts/pretrain/nepa3d_pretrain.sh`
+  - added env knobs and forwarding:
+    - `AUG_ROTATE_Z`
+    - `AUG_SCALE_MIN`, `AUG_SCALE_MAX`
+    - `AUG_TRANSLATE`
+    - `AUG_JITTER_SIGMA`, `AUG_JITTER_CLIP`
+    - `AUG_RECOMPUTE_DIST`
+- `scripts/pretrain/nepa3d_pretrain_pointcloud.sh`
+  - same aug knob forwarding added for consistency.
+
+New submit helper:
+
+- `scripts/pretrain/submit_pretrain_ab_rfps_aug_qf.sh`
+  - submits **A/B only**
+  - default pretrain mode: `rfps`
+  - default aug (mild):
+    - `AUG_ROTATE_Z=1`
+    - `AUG_SCALE_MIN=0.8`
+    - `AUG_SCALE_MAX=1.25`
+    - `AUG_TRANSLATE=0.0`
+    - `AUG_JITTER_SIGMA=0.01`
+    - `AUG_JITTER_CLIP=0.05`
+    - `AUG_RECOMPUTE_DIST=0` (off by default; slower when on)
+
+### 30.2 Submitted pretrain jobs (A/B, rfps+aug)
+
+Submitted via new helper:
+
+- `96560.qjcm` `runA_rfps_aug_rfps_aug_ab_20260225_171018`
+- `96561.qjcm` `runB_rfps_aug_rfps_aug_ab_20260225_171018`
+
+Job-id record:
+
+- `logs/pretrain/rfps_aug_ab_20260225_171018_job_ids.txt`
+
+Checkpoint roots (expected):
+
+- `runs/pretrain_ab_1024_rfps_aug_rfps_aug_ab_20260225_171018_runA`
+- `runs/pretrain_ab_1024_rfps_aug_rfps_aug_ab_20260225_171018_runB`
