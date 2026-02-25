@@ -95,10 +95,25 @@ def _apply_point_aug(
             noise = np.clip(noise, -clip, clip)
         xyz = xyz + noise
 
-    # Rays: apply rigid/scale to ray pools if they exist.
+    # Apply rigid/scale to stored pools if present so downstream features stay aligned.
     # This keeps point tokens and ray tokens consistent when n_ray>0.
     pools_out = dict(pools)
     if (R is not None) or (scale is not None) or (shift is not None):
+        if "pc_xyz" in pools_out and pools_out["pc_xyz"] is not None:
+            try:
+                pools_out["pc_xyz"] = _apply_aug_to_xyz(
+                    np.asarray(pools_out["pc_xyz"]), R=R, scale=scale, shift=shift
+                )
+            except Exception:
+                pass
+        if "pc_n" in pools_out and pools_out["pc_n"] is not None:
+            try:
+                pn = np.asarray(pools_out["pc_n"])
+                if R is not None:
+                    pn = pn @ R.T
+                pools_out["pc_n"] = pn
+            except Exception:
+                pass
         if "ray_o_pool" in pools_out and pools_out["ray_o_pool"] is not None:
             try:
                 pools_out["ray_o_pool"] = _apply_aug_to_xyz(np.asarray(pools_out["ray_o_pool"]), R=R, scale=scale, shift=shift)
@@ -173,6 +188,7 @@ class ModelNet40QueryDataset(Dataset):
         aug_jitter_sigma=0.0,
         aug_jitter_clip=0.0,
         aug_eval=False,
+        aug_recompute_dist=False,
     ):
         self.paths = list(npz_paths)
         self.backend = backend
@@ -215,6 +231,9 @@ class ModelNet40QueryDataset(Dataset):
         self.aug_jitter_sigma = float(aug_jitter_sigma)
         self.aug_jitter_clip = float(aug_jitter_clip)
         self.aug_eval = bool(aug_eval)
+        self.aug_recompute_dist = bool(aug_recompute_dist)
+        self._warned_aug_recompute_dist_missing_ref = False
+        self._warned_aug_recompute_dist_failed = False
 
         if self.return_label:
             self.label_map = label_map or build_label_map(self.paths)
@@ -346,6 +365,34 @@ class ModelNet40QueryDataset(Dataset):
                     jitter_sigma=self.aug_jitter_sigma,
                     jitter_clip=self.aug_jitter_clip,
                 )
+                # Keep pt_dist strictly consistent with jittered query points when requested.
+                if (
+                    self.aug_recompute_dist
+                    and (not self.ablate_point_dist)
+                    and float(self.aug_jitter_sigma) > 0.0
+                ):
+                    surf_xyz = local_pools.get("pc_xyz", None) if isinstance(local_pools, dict) else None
+                    if surf_xyz is None:
+                        if not self._warned_aug_recompute_dist_missing_ref:
+                            warnings.warn(
+                                f"aug_recompute_dist requested but pc_xyz is missing (path={path}); "
+                                "falling back to scaled dist augmentation only."
+                            )
+                            self._warned_aug_recompute_dist_missing_ref = True
+                    else:
+                        try:
+                            from scipy.spatial import cKDTree
+
+                            kdt = cKDTree(np.asarray(surf_xyz, dtype=np.float32))
+                            dist_new, _ = kdt.query(np.asarray(xyz, dtype=np.float32), k=1)
+                            dist = np.asarray(dist_new, dtype=np.float32).reshape(-1, 1)
+                        except Exception as ex:
+                            if not self._warned_aug_recompute_dist_failed:
+                                warnings.warn(
+                                    f"aug_recompute_dist failed (path={path}): {ex}; "
+                                    "falling back to scaled dist augmentation only."
+                                )
+                                self._warned_aug_recompute_dist_failed = True
 
             if self.ablate_point_dist:
                 dist = np.zeros_like(dist, dtype=np.float32)

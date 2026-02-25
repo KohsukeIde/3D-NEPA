@@ -34,7 +34,7 @@ MAIN_PROCESS_PORT="${MAIN_PROCESS_PORT:-29500}"
 BATCH_SCAN="${BATCH_SCAN:-96}"
 BATCH_MODELNET="${BATCH_MODELNET:-128}"
 EPOCHS_CLS="${EPOCHS_CLS:-100}"
-LR_CLS="${LR_CLS:-1e-4}"
+LR_CLS="${LR_CLS:-5e-4}"
 N_POINT_CLS="${N_POINT_CLS:-1024}"
 N_RAY_CLS="${N_RAY_CLS:-0}"
 PT_XYZ_KEY_CLS="${PT_XYZ_KEY_CLS:-pc_xyz}"
@@ -64,6 +64,7 @@ PT_RFPS_M_CLS="${PT_RFPS_M_CLS:-4096}"
 SCAN_AUG_PRESET="${SCAN_AUG_PRESET:-scanobjectnn}"
 MODELNET_AUG_PRESET="${MODELNET_AUG_PRESET:-modelnet40}"
 AUG_EVAL="${AUG_EVAL:-1}"
+AUG_RECOMPUTE_DIST="${AUG_RECOMPUTE_DIST:-1}"
 RUN_SCAN="${RUN_SCAN:-1}"
 RUN_MODELNET="${RUN_MODELNET:-1}"
 RUN_CPAC="${RUN_CPAC:-1}"
@@ -207,7 +208,7 @@ if [[ "${RUN_SCAN}" == "1" ]]; then
   echo "cls_pooling=${CLS_POOLING} ablate_point_dist=${ABLATE_POINT_DIST} point_order_mode=${POINT_ORDER_MODE} aug_preset=${SCAN_AUG_PRESET}"
   echo "pt_xyz_key=${PT_XYZ_KEY_CLS} pt_dist_key=${PT_DIST_KEY_CLS}"
   echo "lr_scheduler=${LR_SCHEDULER} warmup_epochs=${WARMUP_EPOCHS} min_lr=${MIN_LR} llrd=${LLRD} drop_path=${DROP_PATH} grad_accum_steps=${GRAD_ACCUM_STEPS} max_grad_norm=${MAX_GRAD_NORM}"
-  echo "val_split_mode=${VAL_SPLIT_MODE} pt_sample_mode_train=${PT_SAMPLE_MODE_TRAIN_CLS} pt_sample_mode_eval=${PT_SAMPLE_MODE_EVAL_CLS} pt_rfps_m=${PT_RFPS_M_CLS} aug_eval=${AUG_EVAL}"
+  echo "val_split_mode=${VAL_SPLIT_MODE} pt_sample_mode_train=${PT_SAMPLE_MODE_TRAIN_CLS} pt_sample_mode_eval=${PT_SAMPLE_MODE_EVAL_CLS} pt_rfps_m=${PT_RFPS_M_CLS} aug_eval=${AUG_EVAL} aug_recompute_dist=${AUG_RECOMPUTE_DIST}"
   echo "use_fc_norm=${USE_FC_NORM} label_smoothing=${LABEL_SMOOTHING} weight_decay=${WEIGHT_DECAY_CLS} weight_decay_norm=${WEIGHT_DECAY_NORM}"
   OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   python -u -m "${ACCELERATE_LAUNCH_MODULE}" \
@@ -253,6 +254,7 @@ if [[ "${RUN_SCAN}" == "1" ]]; then
     --grad_accum_steps "${GRAD_ACCUM_STEPS}" \
     --max_grad_norm "${MAX_GRAD_NORM}" \
     --aug_preset "${SCAN_AUG_PRESET}" \
+    --aug_recompute_dist "${AUG_RECOMPUTE_DIST}" \
     "${AUG_EVAL_FLAG[@]}" \
     --save_dir "${SCAN_SAVE_DIR}" \
     2>&1 | tee "${SCAN_LOG}"
@@ -313,6 +315,7 @@ if [[ "${RUN_MODELNET}" == "1" ]] && [[ -d "${MODELNET_CACHE_ROOT}" ]]; then
     --grad_accum_steps "${GRAD_ACCUM_STEPS}" \
     --max_grad_norm "${MAX_GRAD_NORM}" \
     --aug_preset "${MODELNET_AUG_PRESET}" \
+    --aug_recompute_dist "${AUG_RECOMPUTE_DIST}" \
     "${AUG_EVAL_FLAG[@]}" \
     --save_dir "${MODELNET_SAVE_DIR}" \
     2>&1 | tee "${MODELNET_LOG}"

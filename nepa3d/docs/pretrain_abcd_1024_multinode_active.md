@@ -1131,3 +1131,95 @@ Implication:
 
 - No result table from the above eval batches should be labeled as `rfps`-pretrain-based.
 - `rfps` claims must wait for checkpoints from jobs `96381`..`96384` and eval reruns that explicitly point to those checkpoints.
+
+## 27. Fine-tune augmentation/LR protocol update (2026-02-25)
+
+Purpose:
+
+- Align fine-tune-side regularization closer to common PointGPT-style point-cloud classification practice.
+- Remove weak-augmentation defaults that were effectively "rotation-only" for ScanObjectNN.
+
+### 27.1 Code/script changes
+
+Applied updates:
+
+- `nepa3d/train/finetune_cls.py`
+  - `aug_preset=scanobjectnn` is now **strong preset**:
+    - `rotate_z=True`
+    - `scale_min=0.67`, `scale_max=1.5`
+    - `translate=0.2`
+    - `jitter_sigma=0.01`, `jitter_clip=0.05`
+  - `aug_preset=modelnet40` now includes jitter:
+    - `rotate_z=False`
+    - `scale_min=0.8`, `scale_max=1.25`
+    - `translate=0.1`
+    - `jitter_sigma=0.01`, `jitter_clip=0.05`
+  - legacy-compatible presets were added:
+    - `scanobjectnn_rot_only` (old rotate-only behavior)
+    - `modelnet40_legacy` (old no-jitter behavior)
+  - added `--aug_recompute_dist` (default `1`):
+    - when jitter is enabled and point-distance is used (`ablate_point_dist=0`), recompute `pt_dist` from augmented `pc_xyz` via nearest-neighbor for strict xyz/dist consistency (slower).
+- `nepa3d/data/dataset.py`
+  - augmentation path now also transforms cached `pc_xyz`/`pc_n` with rigid/scale transforms.
+  - jitter-aware strict distance recompute path added (guarded by `aug_recompute_dist`).
+- `scripts/eval/nepa3d_eval_cls_cpac_qf.sh`
+  - fine-tune LR default changed: `LR_CLS=5e-4` (was `1e-4`)
+  - added `AUG_RECOMPUTE_DIST` env (default `1`) and forwards `--aug_recompute_dist`
+- `scripts/eval/submit_abcd_cls_cpac_qf.sh`
+  - fine-tune LR default changed: `LR_CLS=5e-4` (was `1e-4`)
+  - forwards `AUG_RECOMPUTE_DIST` to qsub jobs
+- `scripts/eval/submit_sotafair_llrd_droppath_ablation_qf.sh`
+  - `SCAN_AUG_PRESET` default changed to `scanobjectnn` (was `none`)
+- `scripts/pipeline/submit_pretrain_then_sotafair_eval_qf.sh`
+  - stage2 `SCAN_AUG_PRESET` default changed to `scanobjectnn` (was `none`)
+
+### 27.2 Reproducibility note
+
+Because `scanobjectnn` preset semantics changed, old logs using `scanobjectnn` are **not** directly comparable unless you pin legacy preset explicitly:
+
+- ScanObjectNN legacy behavior:
+  - `SCAN_AUG_PRESET=scanobjectnn_rot_only`
+- ModelNet40 legacy behavior:
+  - `MODELNET_AUG_PRESET=modelnet40_legacy`
+
+### 27.3 Recommended run protocol (current default-aligned)
+
+- Train sampling:
+  - `PT_SAMPLE_MODE_TRAIN_CLS=fps`
+- Eval sampling:
+  - `PT_SAMPLE_MODE_EVAL_CLS=fps`
+- Voting/TTA:
+  - `MC_EVAL_K_TEST=10`
+  - `AUG_EVAL=1`
+- Val split:
+  - `VAL_SPLIT_MODE=group_auto`
+
+This preserves FPS-based train/eval sampling while adding stronger geometric/noise augmentation as regularization.
+
+## 28. Run-scope reduction to A/B only (resource control, 2026-02-25)
+
+Purpose:
+
+- Reduce running job count while keeping representative checkpoints/protocols for rapid iteration.
+
+Decision:
+
+- Keep only `Run A` / `Run B` active for the current cycle.
+- Stop `Run C` / `Run D` jobs in-flight and defer full A/B/C/D rerun to a later stage.
+
+Termination applied:
+
+- NEPA-full eval (C/D across 4 ablations) terminated by user:
+  - `96366`, `96367`, `96370`, `96371`, `96374`, `96375`, `96378`, `96379`
+- rfps pretrain (C/D) terminated by user:
+  - `96383`, `96384`
+
+Confirmed from scheduler records (`qstat -fx` comments):
+
+- all above jobs: `job_state=F`
+- comment includes: `terminated by qch10156fh@qes02`
+
+Remaining active set:
+
+- NEPA-full eval (A/B): `96364`, `96365`, `96368`, `96369`, `96372`, `96373`, `96376`, `96377`
+- rfps pretrain (A/B): `96381`, `96382`

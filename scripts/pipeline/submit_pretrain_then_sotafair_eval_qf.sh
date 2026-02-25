@@ -80,7 +80,7 @@ if [[ -n "${SCAN_VARIANTS}" ]]; then
     RUN_SCAN="${RUN_SCAN:-1}" \
     RUN_MODELNET="${RUN_MODELNET:-0}" \
     RUN_CPAC="${RUN_CPAC:-0}" \
-    SCAN_AUG_PRESET="${SCAN_AUG_PRESET:-none}" \
+    SCAN_AUG_PRESET="${SCAN_AUG_PRESET:-scanobjectnn}" \
     MODELNET_AUG_PRESET="${MODELNET_AUG_PRESET:-modelnet40}" \
     AUG_EVAL="${AUG_EVAL:-1}" \
     ABLATIONS="${ABLATIONS:-base,llrd,dp,llrd_dp}" \
@@ -104,7 +104,7 @@ else
     RUN_SCAN="${RUN_SCAN:-1}" \
     RUN_MODELNET="${RUN_MODELNET:-1}" \
     RUN_CPAC="${RUN_CPAC:-0}" \
-    SCAN_AUG_PRESET="${SCAN_AUG_PRESET:-none}" \
+    SCAN_AUG_PRESET="${SCAN_AUG_PRESET:-scanobjectnn}" \
     MODELNET_AUG_PRESET="${MODELNET_AUG_PRESET:-modelnet40}" \
     AUG_EVAL="${AUG_EVAL:-1}" \
     ABLATIONS="${ABLATIONS:-base,llrd,dp,llrd_dp}" \

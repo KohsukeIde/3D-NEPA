@@ -389,8 +389,18 @@ def main():
         "--aug_preset",
         type=str,
         default="none",
-        choices=["none", "modelnet40", "scanobjectnn"],
-        help="Augmentation preset (train): none | modelnet40 (scale+translate) | scanobjectnn (rotate-z).",
+        choices=[
+            "none",
+            "modelnet40",
+            "modelnet40_legacy",
+            "scanobjectnn",
+            "scanobjectnn_rot_only",
+        ],
+        help=(
+            "Augmentation preset (train/eval when --aug_eval): "
+            "none | modelnet40(strong) | modelnet40_legacy | "
+            "scanobjectnn(strong) | scanobjectnn_rot_only."
+        ),
     )
     ap.add_argument("--aug_rotate_z", action="store_true", help="Train-time: random rotation around Z axis")
     ap.add_argument("--aug_scale_min", type=float, default=1.0, help="Train-time: random scale min")
@@ -398,6 +408,16 @@ def main():
     ap.add_argument("--aug_translate", type=float, default=0.0, help="Train-time: random translation range (uniform in [-t,t])")
     ap.add_argument("--aug_jitter_sigma", type=float, default=0.0, help="Train-time: jitter sigma")
     ap.add_argument("--aug_jitter_clip", type=float, default=0.0, help="Train-time: jitter clip")
+    ap.add_argument(
+        "--aug_recompute_dist",
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help=(
+            "If 1, recompute point distance-to-surface after jitter augmentation "
+            "for strict xyz/dist consistency (slower)."
+        ),
+    )
     ap.add_argument(
         "--aug_eval",
         action="store_true",
@@ -417,7 +437,14 @@ def main():
 
     # Apply augmentation presets (override individual aug_* defaults).
     if args.aug_preset == "modelnet40":
-        # Matches common ModelNet40 protocols: scale+translate. (Rotation is often omitted.)
+        # Strong ModelNet40 protocol for regularization + TTA.
+        args.aug_rotate_z = False
+        args.aug_scale_min = 0.8
+        args.aug_scale_max = 1.25
+        args.aug_translate = 0.1
+        args.aug_jitter_sigma = 0.01
+        args.aug_jitter_clip = 0.05
+    elif args.aug_preset == "modelnet40_legacy":
         args.aug_rotate_z = False
         args.aug_scale_min = 0.8
         args.aug_scale_max = 1.25
@@ -425,7 +452,15 @@ def main():
         args.aug_jitter_sigma = 0.0
         args.aug_jitter_clip = 0.0
     elif args.aug_preset == "scanobjectnn":
-        # Matches common ScanObjectNN protocols: simple rotation augmentation.
+        # Strong ScanObjectNN protocol to mitigate overfitting on small train sets.
+        args.aug_rotate_z = True
+        args.aug_scale_min = 0.67
+        args.aug_scale_max = 1.5
+        args.aug_translate = 0.2
+        args.aug_jitter_sigma = 0.01
+        args.aug_jitter_clip = 0.05
+    elif args.aug_preset == "scanobjectnn_rot_only":
+        # Legacy preset kept for historical reproducibility.
         args.aug_rotate_z = True
         args.aug_scale_min = 1.0
         args.aug_scale_max = 1.0
@@ -565,6 +600,7 @@ def main():
         aug_translate=args.aug_translate,
         aug_jitter_sigma=args.aug_jitter_sigma,
         aug_jitter_clip=args.aug_jitter_clip,
+        aug_recompute_dist=bool(int(args.aug_recompute_dist)),
         aug_eval=args.aug_eval,
         point_order_mode=args.point_order_mode,
         return_label=True,
@@ -598,6 +634,7 @@ def main():
         aug_translate=args.aug_translate,
         aug_jitter_sigma=args.aug_jitter_sigma,
         aug_jitter_clip=args.aug_jitter_clip,
+        aug_recompute_dist=bool(int(args.aug_recompute_dist)),
         aug_eval=args.aug_eval,
         point_order_mode=args.point_order_mode,
         return_label=True,
@@ -631,6 +668,7 @@ def main():
         aug_translate=args.aug_translate,
         aug_jitter_sigma=args.aug_jitter_sigma,
         aug_jitter_clip=args.aug_jitter_clip,
+        aug_recompute_dist=bool(int(args.aug_recompute_dist)),
         aug_eval=args.aug_eval,
         point_order_mode=args.point_order_mode,
         return_label=True,
@@ -877,6 +915,7 @@ def main():
         f"pt_sample_mode_train={args.pt_sample_mode_train} pt_sample_mode_eval={args.pt_sample_mode_eval} "
         f"point_order_mode={args.point_order_mode} "
         f"pt_fps_key={args.pt_fps_key} pt_rfps_m={args.pt_rfps_m} "
+        f"aug_recompute_dist={bool(int(args.aug_recompute_dist))} "
         f"ablate_point_dist={bool(args.ablate_point_dist)} "
         f"n_point={args.n_point}/{pre_n_point} n_ray={args.n_ray}/{pre_n_ray} "
         f"model_max_len={model_max_len} world_size={accelerator.num_processes} "
