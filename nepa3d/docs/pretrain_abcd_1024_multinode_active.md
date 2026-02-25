@@ -1555,3 +1555,537 @@ Notes:
 
 - No explicit augmentation-none counterpart was run for `Run B` in this A/B batch, so B-side no-aug delta is unavailable.
 - The no-aug baseline above is from a different historical batch/checkpoint context; use as directional reference, not strict apples-to-apples proof.
+
+## 33. RFPS dual-mask status + 256 ON/OFF comparison launch (2026-02-26)
+
+### 33.1 Current RFPS pretrain dual-mask status (confirmed OFF)
+
+Checked current RFPS+aug checkpoints:
+
+- `runs/pretrain_ab_1024_rfps_aug_rfps_aug_ab_20260225_171018_runA/last.pt`
+- `runs/pretrain_ab_1024_rfps_aug_rfps_aug_ab_20260225_171018_runB/last.pt`
+
+Checkpoint args confirm:
+
+- `pt_sample_mode_train=rfps`
+- `dual_mask_near=0.0`
+- `dual_mask_far=0.0`
+
+So current RFPS pretrain runs are dual-mask OFF in effect.
+
+### 33.2 Script wiring update (dual-mask env pass-through)
+
+Updated wrappers so dual-mask can be controlled from qsub env:
+
+- `scripts/pretrain/nepa3d_pretrain.sh`
+- `scripts/pretrain/nepa3d_pretrain_pointcloud.sh`
+- `scripts/pretrain/submit_pretrain_ab_rfps_aug_qf.sh`
+
+Added/forwarded env knobs:
+
+- `DUAL_MASK_NEAR`, `DUAL_MASK_FAR`
+- `DUAL_MASK_WINDOW`, `DUAL_MASK_WARMUP_FRAC`
+- `DUAL_MASK_TYPE_AWARE`
+- `DUAL_MASK_WINDOW_SCALE`, `DUAL_MASK_WINDOW_REF_TOTAL`
+
+### 33.3 New compact comparison launcher (A/B, 256)
+
+Added:
+
+- `scripts/pretrain/submit_pretrain_ab_rfps_aug_dualmask256_qf.sh`
+
+Purpose:
+
+- A/B only, `PT_SAMPLE_MODE_TRAIN=rfps`, with augmentation
+- compact token budget (`n_point=256`; A uses `n_ray=256`, B uses `n_ray=0`)
+- direct dual-mask ON/OFF comparison
+
+### 33.4 Submitted jobs (A/B x dual-mask OFF/ON)
+
+Submitted run set:
+
+- `rfps_aug_dm256_20260226_001557`
+
+Jobs:
+
+- `97137.qjcm` `runA_rfps256_dmoff_rfps_aug_dm256_20260226_001557`
+- `97138.qjcm` `runA_rfps256_dmon_rfps_aug_dm256_20260226_001557`
+- `97139.qjcm` `runB_rfps256_dmoff_rfps_aug_dm256_20260226_001557`
+- `97140.qjcm` `runB_rfps256_dmon_rfps_aug_dm256_20260226_001557`
+
+Job-id record:
+
+- `logs/pretrain/rfps_aug_dualmask256_job_ids.txt`
+
+## 34. 256-aligned fine-tune/eval launch for dual-mask comparison (2026-02-26)
+
+Purpose:
+
+- Evaluate 256 pretrain checkpoints with matched 256 fine-tune/eval settings.
+- Keep protocol split style from prior A/B 2-proto runs.
+
+### 34.1 New submit helper
+
+Added:
+
+- `scripts/eval/submit_ab_dualmask256_2proto_qf.sh`
+
+Behavior:
+
+- matrix: `A/B` x `dual-mask {off,on}` x `{SOTA-fair, NEPA-full}` = 8 jobs
+- each eval job depends on the corresponding pretrain job:
+  - A-dmoff -> `afterok:97137.qjcm`
+  - A-dmon -> `afterok:97138.qjcm`
+  - B-dmoff -> `afterok:97139.qjcm`
+  - B-dmon -> `afterok:97140.qjcm`
+
+### 34.2 256 eval settings (common)
+
+- `N_POINT_CLS=256`
+- `N_RAY_CLS=0`
+- `PT_SAMPLE_MODE_TRAIN_CLS=fps`
+- `PT_SAMPLE_MODE_EVAL_CLS=fps`
+- `AUG_EVAL=1`, `MC_EVAL_K_TEST=10`
+- `VAL_SPLIT_MODE=group_auto`
+- `RUN_SCAN=1`, `RUN_MODELNET=1`, `RUN_CPAC=0`
+- `LR_CLS=1e-4` (no LR sweep policy)
+
+Protocol-specific mapping:
+
+- SOTA-fair:
+  - `PT_XYZ_KEY_CLS=pc_xyz`
+  - `ABLATE_POINT_DIST=1`
+  - `POINT_ORDER_MODE=morton`
+- NEPA-full:
+  - `PT_XYZ_KEY_CLS=pt_xyz_pool`
+  - `ABLATE_POINT_DIST=0`
+  - `POINT_ORDER_MODE=fps`
+
+### 34.3 Submitted jobs
+
+Run set:
+
+- `dualmask256_eval_20260226_002435`
+
+Submitted:
+
+- `97142.qjcm` `runA_dmoff_sotafair`
+- `97143.qjcm` `runA_dmoff_nepafull`
+- `97144.qjcm` `runA_dmon_sotafair`
+- `97145.qjcm` `runA_dmon_nepafull`
+- `97146.qjcm` `runB_dmoff_sotafair`
+- `97147.qjcm` `runB_dmoff_nepafull`
+- `97148.qjcm` `runB_dmon_sotafair`
+- `97149.qjcm` `runB_dmon_nepafull`
+
+Job-id record:
+
+- `logs/eval/ab_dualmask256_eval_job_ids.txt`
+
+Run roots:
+
+- logs: `logs/eval/ab_dualmask256_2proto_dualmask256_eval_20260226_002435`
+- outputs: `runs/eval_ab_dualmask256_2proto_dualmask256_eval_20260226_002435`
+- results: `results/ab_dualmask256_2proto_dualmask256_eval_20260226_002435`
+
+### 34.4 Intermediate results already finalized in this batch
+
+Completed eval jobs so far (`job_state=F`, `Exit_status=0`):
+
+- `97142.qjcm` `runA_dmoff_sotafair`
+- `97143.qjcm` `runA_dmoff_nepafull`
+- `97144.qjcm` `runA_dmon_sotafair`
+- `97145.qjcm` `runA_dmon_nepafull`
+- `97146.qjcm` `runB_dmoff_sotafair`
+- `97147.qjcm` `runB_dmoff_nepafull`
+- `97148.qjcm` `runB_dmon_sotafair`
+- `97149.qjcm` `runB_dmon_nepafull`
+
+Final metrics:
+
+| run | protocol | ScanObjectNN `test_acc` | ModelNet40 `test_acc` |
+|---|---|---:|---:|
+| `runA_dmoff_sotafair` | SOTA-fair | 0.6103 | 0.8665 |
+| `runA_dmon_sotafair` | SOTA-fair | 0.6130 | 0.8714 |
+| `runA_dmoff_nepafull` | NEPA-full | 0.2955 | 0.5677 |
+| `runA_dmon_nepafull` | NEPA-full | 0.4478 | 0.8418 |
+| `runB_dmoff_sotafair` | SOTA-fair | 0.7159 | 0.8880 |
+| `runB_dmon_sotafair` | SOTA-fair | 0.7154 | 0.8929 |
+| `runB_dmoff_nepafull` | NEPA-full | 0.5246 | 0.8551 |
+| `runB_dmon_nepafull` | NEPA-full | 0.5089 | 0.8597 |
+
+Notes:
+
+- A/B all 8 jobs in this 256 dual-mask eval matrix are complete.
+- This run set used `RUN_CPAC=0` (classification-only); CPAC metrics are not included here.
+
+## 35. Live execution tracker (running/held/completed snapshot, 2026-02-26)
+
+Purpose:
+
+- Make it explicit which results are already finalized vs still in-flight.
+- Avoid "missing results" ambiguity by tying each unreported item to job state.
+
+### 35.1 Newly completed since last update
+
+Pretrain (256 dual-mask comparison, B side):
+
+- `97139.qjcm` `runB_rfps256_dmoff_rfps_aug_dm256_20260226_001557`:
+  - `job_state=F`, `Exit_status=0`
+  - checkpoint: `runs/pretrain_ab_256_rfps_aug_dualmask_rfps_aug_dm256_20260226_001557_runB_dmoff/last.pt`
+- `97140.qjcm` `runB_rfps256_dmon_rfps_aug_dm256_20260226_001557`:
+  - `job_state=F`, `Exit_status=0`
+  - checkpoint: `runs/pretrain_ab_256_rfps_aug_dualmask_rfps_aug_dm256_20260226_001557_runB_dmon/last.pt`
+
+Eval (linear-LLRD A/B batch, B side):
+
+- `97034.qjcm` `runB_llrdlin`:
+  - `job_state=F`, `Exit_status=0`
+  - ScanObjectNN: `best_val=0.7023`, `best_ep=99`, `test_acc=0.6207`
+  - ModelNet40: `best_val=0.8677`, `best_ep=64`, `test_acc=0.8659`
+  - CPAC json: `results/ab_ab_llrd_linear035_groupauto_20260225_213924/cpac_abcd_1024_runB_llrdlin.json`
+
+### 35.2 Running jobs (what each is)
+
+As of this snapshot (`qselect -u $USER` / `qstat -x`):
+
+- `96560.qjcm`:
+  - `runA_rfps_aug_rfps_aug_ab_20260225_171018` pretrain (A, 1024, rfps+aug)
+  - logs: `logs/ddp_pretrain/ddp_pretrain_96560.qjcm_runA_rfps_aug_rfps_aug_ab_20260225_171018`
+- `97137.qjcm`:
+  - `runA_rfps256_dmoff_rfps_aug_dm256_20260226_001557` pretrain (A, 256, dual-mask OFF)
+  - logs: `logs/ddp_pretrain/ddp_pretrain_97137.qjcm_runA_rfps256_dmoff_rfps_aug_dm256_20260226_001557`
+- `97138.qjcm`:
+  - `runA_rfps256_dmon_rfps_aug_dm256_20260226_001557` pretrain (A, 256, dual-mask ON)
+  - logs: `logs/ddp_pretrain/ddp_pretrain_97138.qjcm_runA_rfps256_dmon_rfps_aug_dm256_20260226_001557`
+- `97146.qjcm`, `97147.qjcm`, `97148.qjcm`, `97149.qjcm`:
+  - B-side 256 eval (`dmoff/dmon` x `sotafair/nepafull`)
+  - logs: `logs/eval/ab_dualmask256_2proto_dualmask256_eval_20260226_002435`
+- `97033.qjcm`:
+  - `runA_llrdlin` eval (linear LLRD, A side)
+  - logs: `logs/eval/ab_cls_cpac_ab_llrd_linear035_groupauto_20260225_213924`
+- `96540.qjcm`, `96541.qjcm`:
+  - legacy rfps-A eval (`sotafair` / `nepafull`, 1024 setting)
+  - logs: `logs/eval/ab_fps_rfps_2proto_lr1e4_20260225_164957`
+
+### 35.3 Held jobs (waiting for dependencies)
+
+- `97142.qjcm` `runA_dmoff_sotafair` (`afterok:97137`)
+- `97143.qjcm` `runA_dmoff_nepafull` (`afterok:97137`)
+- `97144.qjcm` `runA_dmon_sotafair` (`afterok:97138`)
+- `97145.qjcm` `runA_dmon_nepafull` (`afterok:97138`)
+
+Meaning:
+
+- These are not missing; they are intentionally queued behind A-side 256 pretrain completion.
+
+### 35.4 "Unrecorded result" interpretation rule
+
+If a result table is not yet written in this doc, classify it first:
+
+1. `job_state=R`: still running (no final metric yet).
+2. `job_state=H`: dependency wait (not started yet).
+3. `job_state=F` with `Exit_status=0`: should be harvested and appended.
+
+At this snapshot, unrecorded items are explained by (1) or (2), except `97034` which is now harvested above.
+
+### 35.5 Next write-back plan
+
+- When `97137/97138` finish:
+  - start confirmation of `97142`..`97145` transition from `H -> R`
+- When `97146`..`97149` and `97142`..`97145` finish:
+  - append final 8-way table (`A/B`, `dmoff/dmon`, `sotafair/nepafull`) for:
+    - ScanObjectNN `best_val/best_ep/test_acc`
+    - ModelNet40 `best_val/best_ep/test_acc`
+
+### 35.6 Refresh snapshot (newly finished + state transitions)
+
+Additional completed jobs confirmed after the previous snapshot:
+
+- `96560.qjcm`:
+  - `runA_rfps_aug_rfps_aug_ab_20260225_171018` pretrain (A, 1024 rfps+aug)
+  - `job_state=F`, `Exit_status=0`
+  - checkpoint: `runs/pretrain_ab_1024_rfps_aug_rfps_aug_ab_20260225_171018_runA/last.pt`
+- `97137.qjcm`:
+  - `runA_rfps256_dmoff_rfps_aug_dm256_20260226_001557` pretrain
+  - `job_state=F`, `Exit_status=0`
+  - checkpoint: `runs/pretrain_ab_256_rfps_aug_dualmask_rfps_aug_dm256_20260226_001557_runA_dmoff/last.pt`
+  - checkpoint args: `dual_mask_near=0.0`, `dual_mask_far=0.0`
+- `97138.qjcm`:
+  - `runA_rfps256_dmon_rfps_aug_dm256_20260226_001557` pretrain
+  - `job_state=F`, `Exit_status=0`
+  - checkpoint: `runs/pretrain_ab_256_rfps_aug_dualmask_rfps_aug_dm256_20260226_001557_runA_dmon/last.pt`
+  - checkpoint args: `dual_mask_near=0.4`, `dual_mask_far=0.1`
+- `97146.qjcm` / `97148.qjcm`:
+  - B-side 256 eval (`dmoff_sotafair` / `dmon_sotafair`)
+  - both `job_state=F`, `Exit_status=0`
+  - metrics are summarized in §34.4
+
+State transition confirmed:
+
+- `97142`..`97145` moved from `H` to `R` (dependency satisfied).
+
+Current non-finished jobs at this refresh:
+
+- running:
+  - `96540`, `96541`, `97033`, `97142`, `97143`, `97144`, `97145`, `97147`, `97149`
+- held:
+  - none
+
+### 35.7 Refresh snapshot (latest check after 35.6)
+
+Additional completion confirmed:
+
+- `96561.qjcm`:
+  - `runB_rfps_aug_rfps_aug_ab_20260225_171018` pretrain (B, 1024 rfps+aug)
+  - `job_state=F`, `Exit_status=0`
+  - `obittime=2026-02-25 21:50:32`
+  - checkpoint: `runs/pretrain_ab_1024_rfps_aug_rfps_aug_ab_20260225_171018_runB/last.pt`
+
+No additional newly finished eval jobs were found in this refresh (relative to §34.4 / §35.6).
+
+Current non-finished jobs:
+
+- running:
+  - `96540` `eval_rfps_runA_sotafair`
+  - `96541` `eval_rfps_runA_nepafull`
+  - `97033` `eval_runA_llrdlin`
+  - `97142` `eval_runA_dmoff_sotafair`
+  - `97143` `eval_runA_dmoff_nepafull`
+  - `97144` `eval_runA_dmon_sotafair`
+  - `97145` `eval_runA_dmon_nepafull`
+- held:
+  - none
+
+### 35.8 Refresh snapshot (B-side 256 eval all complete)
+
+Additional eval completions after §35.7:
+
+- `97147.qjcm` `runB_dmoff_nepafull`: `job_state=F`, `Exit_status=0`
+- `97149.qjcm` `runB_dmon_nepafull`: `job_state=F`, `Exit_status=0`
+
+Their final metrics are now reflected in §34.4.
+
+Current non-finished jobs:
+
+- running:
+  - `96540` `eval_rfps_runA_sotafair`
+  - `96541` `eval_rfps_runA_nepafull`
+  - `97033` `eval_runA_llrdlin`
+  - `97142` `eval_runA_dmoff_sotafair`
+  - `97143` `eval_runA_dmoff_nepafull`
+  - `97144` `eval_runA_dmon_sotafair`
+  - `97145` `eval_runA_dmon_nepafull`
+- held:
+  - none
+
+### 35.9 Refresh snapshot (A-side completions + current queue)
+
+Additional completions confirmed:
+
+- `97033.qjcm` `runA_llrdlin`: `job_state=F`, `Exit_status=0`
+  - ScanObjectNN: `best_val=0.7332`, `best_ep=97`, `test_acc=0.6300`
+  - ModelNet40: `best_val=0.8701`, `best_ep=67`, `test_acc=0.8639`
+  - CPAC summary (from `runA_llrdlin.out`):
+    - `mae=0.0581`, `rmse=0.0815`, `iou@tau=0.6326`
+  - CPAC json: `results/ab_ab_llrd_linear035_groupauto_20260225_213924/cpac_abcd_1024_runA_llrdlin.json`
+- `97142.qjcm`..`97145.qjcm`:
+  - A-side 256 dual-mask eval (`runA_dmoff/dmon` x `sotafair/nepafull`) all `job_state=F`, `Exit_status=0`
+  - metrics are reflected in §34.4.
+
+Current non-finished jobs at this snapshot:
+
+- running:
+  - `96540` `eval_rfps_runA_sotafair`
+  - `96541` `eval_rfps_runA_nepafull`
+  - `97182` `pt_b00_interleave_theta`
+  - `97183` `pt_b01_split_theta`
+  - `97184` `pt_b02_split_theta_typepos`
+  - `97185` `pt_b03_split_viewraster_typepos`
+  - `97186` `pt_b04_split_xanchor_morton_typepos`
+  - `97187` `pt_b05_split_xanchor_fps_typepos`
+  - `97188` `pt_b06_split_dirfps_typepos`
+  - `97189` `pt_b07_event_xanchor_typepos`
+  - `97190` `pt_b08_event_dirfps_typepos`
+- held:
+  - `97191`..`97208` (all eval jobs in `a256_queryrethink` set; waiting `afterok` on the corresponding pretrain jobs)
+
+## 36. Query-rethink merge (split+SEP / ordering / type-pos) (2026-02-26)
+
+Purpose:
+
+- Merge `rethink_query` implementation into mainline while keeping existing training pipeline behavior by default.
+- Add the extra Ray ordering requested in this review: **direction-space FPS**.
+
+### 36.1 Core code merged from `rethink_query`
+
+Merged into `nepa3d`:
+
+- `nepa3d/token/ordering.py`
+- `nepa3d/token/tokenizer.py`
+- `nepa3d/data/dataset.py`
+- `nepa3d/data/mixed_pretrain.py`
+- `nepa3d/train/pretrain.py`
+- `nepa3d/models/query_nepa.py`
+- `nepa3d/utils/ckpt_utils.py`
+- `nepa3d/analysis/retrieval_ucpr.py`
+- `nepa3d/analysis/completion_cpac_udf.py`
+- `nepa3d/analysis/qualitative_cpac_marching_cubes.py`
+
+Manually merged (to preserve current LLRD behavior):
+
+- `nepa3d/train/finetune_cls.py`
+  - kept existing `--llrd_mode {exp,linear}` logic
+  - added ckpt compatibility for resized `type_emb` / `type_pos_emb`
+  - added `type_specific_pos` restoration from checkpoint args
+
+### 36.2 New tokenizer / pretrain capabilities
+
+Added:
+
+- `qa_layout=split_sep`:
+  - sequence becomes `[BOS] + Q... + [SEP] + A... (+[EOS])`
+  - new token type: `TYPE_SEP=9`
+- `sequence_mode={block,event}` (`bundle` alias -> `event`)
+- `event_order_mode={morton,fps,random}`
+- `ray_order_mode={theta_phi,view_raster,x_anchor_morton,x_anchor_fps,random,none}`
+- `type_specific_pos` (type-local positional embedding)
+- ckpt load compatibility for type-vocab/shape changes:
+  - `maybe_resize_type_emb_in_state_dict`
+  - `maybe_resize_type_pos_emb_in_state_dict`
+
+### 36.3 Additional ordering implemented in this pass
+
+Requested addition implemented:
+
+- **Ray direction FPS ordering**:
+  - new function: `sort_rays_by_direction_fps(ray_d)` in `nepa3d/token/ordering.py`
+  - new `ray_order_mode` aliases in tokenizer:
+    - `dir_fps`, `direction_fps`, `ray_fps`, `s2_fps`
+  - wired into `pretrain.py` CLI choices (`--ray_order_mode dir_fps`)
+
+### 36.4 Pretrain launcher wiring update
+
+Updated wrappers:
+
+- `scripts/pretrain/nepa3d_pretrain.sh`
+- `scripts/pretrain/nepa3d_pretrain_pointcloud.sh`
+- `scripts/pretrain/submit_pretrain_ab_rfps_aug_qf.sh`
+- `scripts/pretrain/submit_pretrain_ab_rfps_aug_dualmask256_qf.sh`
+
+New env passthroughs:
+
+- `SEQUENCE_MODE`, `EVENT_ORDER_MODE`
+- `RAY_ORDER_MODE`, `RAY_ANCHOR_MISS_T`, `RAY_VIEW_TOL`
+- `TYPE_SPECIFIC_POS`
+- `QA_LAYOUT` exposed in RFPS submit helpers for split/split_sep switching
+
+Compatibility note:
+
+- Defaults are set to prior behavior (`QA_LAYOUT=interleave`, `SEQUENCE_MODE=block`, `RAY_ORDER_MODE=theta_phi`, `TYPE_SPECIFIC_POS=0`), so existing runs are not implicitly changed.
+
+### 36.5 Sanity check
+
+Post-merge smoke check passed:
+
+- `python -m py_compile` on all changed Python files: **passed**
+- `build_sequence(..., qa_layout='split_sep', sequence_mode='event', ray_order_mode='dir_fps')` minimal runtime check: **passed**
+
+## 37. A-only 256 query-rethink ablation submission (CPAC+chamfer enabled) (2026-02-26)
+
+Purpose:
+
+- Small-scale (`256`) ablation for newly merged query serialization methods.
+- A-only pretrain (`n_point=256`, `n_ray=256`, `qa_tokens=1`) with 9 ordering/layout variants.
+- Per-checkpoint eval on both protocols (SOTA-fair / NEPA-full), with CPAC enabled.
+- CPAC mesh reconstruction/chamfer metrics enabled in the same eval pipeline.
+
+### 37.1 Eval pipeline update for CPAC mesh metrics
+
+Updated:
+
+- `scripts/eval/nepa3d_eval_cls_cpac_qf.sh`
+
+Added CPAC mesh env passthroughs to `completion_cpac_udf.py`:
+
+- `CPAC_MESH_EVAL`
+- `CPAC_MESH_EVAL_MAX_SHAPES`
+- `CPAC_MESH_GRID_RES`
+- `CPAC_MESH_CHUNK_N_QUERY`
+- `CPAC_MESH_MC_LEVEL`
+- `CPAC_MESH_NUM_SAMPLES`
+- `CPAC_MESH_FSCORE_TAU`
+- `CPAC_MESH_SAVE_DIR`
+- `CPAC_MESH_STORE_PER_SHAPE`
+
+### 37.2 New submit helper
+
+Added:
+
+- `scripts/pipeline/submit_a256_queryrethink_ablation_qf.sh`
+
+Behavior:
+
+- submit 9 pretrain jobs (A-only, 256)
+- submit 18 eval jobs with dependency (`afterok:<corresponding_pretrain_job>`)
+  - each pretrain checkpoint -> `{sotafair, nepafull}` eval
+- eval uses:
+  - `RUN_SCAN=1`, `RUN_MODELNET=1`, `RUN_CPAC=1`
+  - `CPAC_MESH_EVAL=1` (Chamfer/F-score path enabled)
+
+### 37.3 Submitted run set
+
+Run set:
+
+- `a256_queryrethink_20260226_024537`
+
+Pretrain jobs (9):
+
+- `97182.qjcm` `pt_b00_interleave_theta`
+- `97183.qjcm` `pt_b01_split_theta`
+- `97184.qjcm` `pt_b02_split_theta_typepos`
+- `97185.qjcm` `pt_b03_split_viewraster_typepos`
+- `97186.qjcm` `pt_b04_split_xanchor_morton_typepos`
+- `97187.qjcm` `pt_b05_split_xanchor_fps_typepos`
+- `97188.qjcm` `pt_b06_split_dirfps_typepos`
+- `97189.qjcm` `pt_b07_event_xanchor_typepos`
+- `97190.qjcm` `pt_b08_event_dirfps_typepos`
+
+Eval jobs (18, dependency-held at submit time):
+
+- `97191.qjcm` `ev_b00_interleave_theta_sotafair`
+- `97192.qjcm` `ev_b00_interleave_theta_nepafull`
+- `97193.qjcm` `ev_b01_split_theta_sotafair`
+- `97194.qjcm` `ev_b01_split_theta_nepafull`
+- `97195.qjcm` `ev_b02_split_theta_typepos_sotafair`
+- `97196.qjcm` `ev_b02_split_theta_typepos_nepafull`
+- `97197.qjcm` `ev_b03_split_viewraster_typepos_sotafair`
+- `97198.qjcm` `ev_b03_split_viewraster_typepos_nepafull`
+- `97199.qjcm` `ev_b04_split_xanchor_morton_typepos_sotafair`
+- `97200.qjcm` `ev_b04_split_xanchor_morton_typepos_nepafull`
+- `97201.qjcm` `ev_b05_split_xanchor_fps_typepos_sotafair`
+- `97202.qjcm` `ev_b05_split_xanchor_fps_typepos_nepafull`
+- `97203.qjcm` `ev_b06_split_dirfps_typepos_sotafair`
+- `97204.qjcm` `ev_b06_split_dirfps_typepos_nepafull`
+- `97205.qjcm` `ev_b07_event_xanchor_typepos_sotafair`
+- `97206.qjcm` `ev_b07_event_xanchor_typepos_nepafull`
+- `97207.qjcm` `ev_b08_event_dirfps_typepos_sotafair`
+- `97208.qjcm` `ev_b08_event_dirfps_typepos_nepafull`
+
+Submitted job list:
+
+- `logs/eval/a256_queryrethink_a256_queryrethink_20260226_024537/submitted_jobs_a256_queryrethink_20260226_024537.txt`
+
+### 37.4 Snapshot right after submission
+
+Job states:
+
+- pretrain `97182`..`97190`: `R`
+- eval `97191`..`97208`: `H` (waiting for pretrain dependencies)
+
+Confirmed in eval job variables (`97191.qjcm`):
+
+- `RUN_CPAC=1`
+- `CPAC_MESH_EVAL=1`
+- `CPAC_MESH_EVAL_MAX_SHAPES=800`
+- `CPAC_N_CONTEXT=256`, `CPAC_N_QUERY=256`, `CPAC_MAX_LEN=1300`

@@ -3,7 +3,13 @@ from __future__ import annotations
 import numpy as np
 import warnings
 
-from .ordering import morton3d, sort_by_ray_direction
+from .ordering import (
+    morton3d,
+    sort_by_ray_direction,
+    sort_rays_by_direction_fps,
+    sort_rays_by_view_raster,
+    sort_rays_by_x_anchor,
+)
 
 # -----------------------------------------------------------------------------
 # Token type ids
@@ -23,6 +29,13 @@ TYPE_Q_POINT = 5
 TYPE_A_POINT = 6
 TYPE_Q_RAY = 7
 TYPE_A_RAY = 8
+
+# Separator token to explicitly mark the boundary between query and answer blocks
+# in split layouts.
+TYPE_SEP = 9
+
+# Size of the type-id vocabulary.
+TYPE_VOCAB_SIZE = TYPE_SEP + 1
 
 _WARNED_FPS_FALLBACK = False
 
@@ -258,8 +271,8 @@ def _order_point_tokens(
         raise ValueError(f"unknown point_order_mode: {point_order_mode}")
 
     if order is None:
-        return pt_xyz_s, pt_dist_s
-    return pt_xyz_s[order], pt_dist_s[order]
+        return pt_xyz_s, pt_dist_s, None
+    return pt_xyz_s[order], pt_dist_s[order], order
 
 
 def _build_sequence_legacy(
@@ -333,7 +346,7 @@ def _build_sequence_legacy(
         ray_t_s = np.zeros((0,), dtype=np.float32)
         ray_n_s = np.zeros((0, 3), dtype=np.float32)
 
-    pt_xyz_s, pt_dist_s = _order_point_tokens(
+    pt_xyz_s, pt_dist_s, _p_order = _order_point_tokens(
         pt_xyz_s,
         pt_dist_s,
         rng=rng,
@@ -428,6 +441,11 @@ def _build_sequence_qa(
     add_eos=True,
     rng=None,
     qa_layout="interleave",
+    sequence_mode="block",
+    event_order_mode="morton",
+    ray_order_mode="theta_phi",
+    ray_anchor_miss_t=4.0,
+    ray_view_tol=1e-6,
     pt_sample_mode="random",
     pt_fps_order=None,
     pt_rfps_m=4096,
@@ -441,7 +459,14 @@ def _build_sequence_qa(
     ray_unc_k=8,
     ray_unc_mode="normal_var",
 ):
-    """Q/A separated tokenization: [BOS] + (Qp,Ap)* + (Qr,Ar)* (+ [EOS]).
+    """Q/A separated tokenization.
+
+    Default (sequence_mode=block):
+      [BOS] + (Qp,Ap)* + (Qr,Ar)* (+ [EOS]).
+
+    Event mode (sequence_mode=event):
+      Build a single list of "events" (point events + ray events), order them by a
+      shared 3D anchor (x_anchor), and emit tokens in that unified event order.
 
     - Point query token: xyz only.
     - Point answer token: dist only (xyz is zeroed to reduce coordinate leakage).
@@ -451,6 +476,7 @@ def _build_sequence_qa(
     Supported layouts:
     - interleave: [BOS] + (Q, A)* + [EOS]
     - split:      [BOS] + Q... + A... + [EOS]
+    - split_sep:  [BOS] + Q... + [SEP] + A... + [EOS]
     """
     if rng is None:
         rng = np.random
@@ -492,7 +518,7 @@ def _build_sequence_qa(
         ray_t_s = np.zeros((0,), dtype=np.float32)
         ray_n_s = np.zeros((0, 3), dtype=np.float32)
 
-    pt_xyz_s, pt_dist_s = _order_point_tokens(
+    pt_xyz_s, pt_dist_s, _p_order = _order_point_tokens(
         pt_xyz_s,
         pt_dist_s,
         rng=rng,
@@ -500,17 +526,55 @@ def _build_sequence_qa(
     )
 
     if ray_d_s.shape[0] > 0:
-        r_order = sort_by_ray_direction(ray_d_s)
-        ray_o_s = ray_o_s[r_order]
-        ray_d_s = ray_d_s[r_order]
-        ray_hit_s = ray_hit_s[r_order]
-        ray_t_s = ray_t_s[r_order]
-        ray_n_s = ray_n_s[r_order]
+        rmode = str(ray_order_mode).lower()
+        if rmode in ("theta_phi", "theta-phi", "angle"):
+            r_order = sort_by_ray_direction(ray_d_s)
+        elif rmode in ("dir_fps", "direction_fps", "ray_fps", "s2_fps"):
+            r_order = sort_rays_by_direction_fps(ray_d_s)
+        elif rmode in ("view_raster", "view-raster", "raster"):
+            r_order = sort_rays_by_view_raster(ray_o_s, ray_d_s, view_tol=float(ray_view_tol))
+        elif rmode in ("x_anchor_morton", "x-anchor-morton", "x_anchor"):
+            r_order = sort_rays_by_x_anchor(
+                ray_o_s,
+                ray_d_s,
+                ray_hit_s,
+                ray_t_s,
+                miss_t=float(ray_anchor_miss_t),
+                mode="morton",
+            )
+        elif rmode in ("x_anchor_fps", "x-anchor-fps"):
+            r_order = sort_rays_by_x_anchor(
+                ray_o_s,
+                ray_d_s,
+                ray_hit_s,
+                ray_t_s,
+                miss_t=float(ray_anchor_miss_t),
+                mode="fps",
+            )
+        elif rmode in ("random", "shuffle"):
+            r_order = rng.permutation(ray_d_s.shape[0]).astype(np.int32)
+        elif rmode in ("none", "keep"):
+            r_order = None
+        else:
+            raise ValueError(f"unknown ray_order_mode: {ray_order_mode}")
+
+        if r_order is not None:
+            ray_o_s = ray_o_s[r_order]
+            ray_d_s = ray_d_s[r_order]
+            ray_hit_s = ray_hit_s[r_order]
+            ray_t_s = ray_t_s[r_order]
+            ray_n_s = ray_n_s[r_order]
+
+    # Use effective sampled sizes (point pools may be smaller than requested).
+    n_point = int(pt_xyz_s.shape[0])
+    n_ray = int(ray_o_s.shape[0])
 
     feat_dim = 15
 
-    layout = str(qa_layout).lower()
-    if layout not in ("interleave", "split"):
+    layout = str(qa_layout).lower().replace("+", "_")
+    if layout == "split_sep":
+        pass
+    elif layout not in ("interleave", "split"):
         raise ValueError(f"unknown qa_layout: {qa_layout}")
 
     # POINT: query (xyz), answer (dist)
@@ -571,62 +635,192 @@ def _build_sequence_qa(
     bos_feat = np.zeros((1, feat_dim), dtype=np.float32)
     eos_feat = np.zeros((1, feat_dim), dtype=np.float32)
 
-    if layout == "interleave":
-        pt_qa = np.zeros((2 * n_point, feat_dim), dtype=np.float32)
-        pt_type = np.zeros((2 * n_point,), dtype=np.int64)
-        if n_point > 0:
-            pt_qa[0::2] = pt_q
-            pt_qa[1::2] = pt_a
-            pt_type[0::2] = TYPE_Q_POINT
-            pt_type[1::2] = TYPE_A_POINT
+    seq_mode = str(sequence_mode).lower()
+    if seq_mode not in ("block", "event", "bundle"):
+        raise ValueError(f"unknown sequence_mode: {sequence_mode}")
+    if seq_mode == "bundle":
+        seq_mode = "event"
 
-        ray_qa = np.zeros((2 * n_ray, feat_dim), dtype=np.float32)
-        ray_type = np.zeros((2 * n_ray,), dtype=np.int64)
+    if seq_mode == "event":
+        # Build a unified list of (point-events + ray-events) ordered by a shared anchor.
+        # This helps remove the discontinuity at the point->ray boundary in block layouts.
+
+        # Point events.
+        pt_anchor = pt_xyz_s.astype(np.float32, copy=False)
+        pt_kind = np.full((n_point,), 0, dtype=np.int64)  # 0=point
+
+        # Ray events.
         if n_ray > 0:
-            ray_qa[0::2] = ray_q
-            ray_qa[1::2] = ray_a
+            x_hit = ray_o_s + ray_t_s[:, None] * ray_d_s
+            miss_mask = (ray_hit_s <= 0.5)
             if ray_missing:
-                ray_type[:] = TYPE_MISSING_RAY
-                ray_qa[:] = 0.0
-            else:
-                ray_type[0::2] = TYPE_Q_RAY
-                ray_type[1::2] = TYPE_A_RAY
+                miss_mask = np.ones_like(miss_mask, dtype=bool)
+            ray_anchor = x_hit.astype(np.float32, copy=False)
+            if np.any(miss_mask):
+                ray_anchor = ray_anchor.copy()
+                ray_anchor[miss_mask] = (ray_o_s + float(ray_anchor_miss_t) * ray_d_s)[miss_mask]
+            ray_kind = np.full((n_ray,), 1, dtype=np.int64)  # 1=ray
+            if np.any(miss_mask):
+                ray_kind = ray_kind.copy()
+                ray_kind[miss_mask] = 2  # 2=missing_ray
+        else:
+            ray_anchor = np.zeros((0, 3), dtype=np.float32)
+            ray_kind = np.zeros((0,), dtype=np.int64)
 
-        feat_list = [bos_feat, pt_qa, ray_qa]
-        type_list = [
-            np.array([TYPE_BOS], dtype=np.int64),
-            pt_type,
-            ray_type,
-        ]
+        anchors = np.concatenate([pt_anchor, ray_anchor], axis=0) if (n_point + n_ray) > 0 else np.zeros((0, 3))
+        q_all = np.concatenate([pt_q, ray_q], axis=0) if (n_point + n_ray) > 0 else np.zeros((0, feat_dim), dtype=np.float32)
+        a_all = np.concatenate([pt_a, ray_a], axis=0) if (n_point + n_ray) > 0 else np.zeros((0, feat_dim), dtype=np.float32)
+        kind_all = np.concatenate([pt_kind, ray_kind], axis=0) if (n_point + n_ray) > 0 else np.zeros((0,), dtype=np.int64)
+
+        non_missing = np.nonzero(kind_all != 2)[0]
+        missing = np.nonzero(kind_all == 2)[0]
+
+        emode = str(event_order_mode).lower()
+        if non_missing.size > 0:
+            if emode == "morton":
+                code = morton3d(anchors[non_missing])
+                non_order = non_missing[np.argsort(code)]
+            elif emode == "fps":
+                from nepa3d.utils.fps import fps_order
+
+                local = fps_order(anchors[non_missing], non_missing.size)
+                non_order = non_missing[local]
+            elif emode in ("random", "shuffle"):
+                non_order = non_missing[rng.permutation(non_missing.size)]
+            else:
+                raise ValueError(f"unknown event_order_mode: {event_order_mode}")
+        else:
+            non_order = non_missing
+
+        # Missing rays are appended in their current order (already ray-ordered).
+        order = np.concatenate([non_order, missing], axis=0) if missing.size > 0 else non_order
+
+        q_all = q_all[order]
+        a_all = a_all[order]
+        kind_all = kind_all[order]
+
+        # Map kind -> token types.
+        q_type = np.zeros((order.size,), dtype=np.int64)
+        a_type = np.zeros((order.size,), dtype=np.int64)
+        if order.size > 0:
+            is_pt = kind_all == 0
+            is_ray = kind_all == 1
+            is_miss = kind_all == 2
+            q_type[is_pt] = TYPE_Q_POINT
+            a_type[is_pt] = TYPE_A_POINT
+            q_type[is_ray] = TYPE_Q_RAY
+            a_type[is_ray] = TYPE_A_RAY
+            q_type[is_miss] = TYPE_MISSING_RAY
+            a_type[is_miss] = TYPE_MISSING_RAY
+
+        if layout == "interleave":
+            qa = np.zeros((2 * order.size, feat_dim), dtype=np.float32)
+            ty = np.zeros((2 * order.size,), dtype=np.int64)
+            if order.size > 0:
+                qa[0::2] = q_all
+                qa[1::2] = a_all
+                ty[0::2] = q_type
+                ty[1::2] = a_type
+            feat_list = [bos_feat, qa]
+            type_list = [np.array([TYPE_BOS], dtype=np.int64), ty]
+        else:
+            if layout == "split_sep":
+                sep_feat = np.zeros((1, feat_dim), dtype=np.float32)
+                feat_list = [bos_feat, q_all, sep_feat, a_all]
+                type_list = [
+                    np.array([TYPE_BOS], dtype=np.int64),
+                    q_type,
+                    np.array([TYPE_SEP], dtype=np.int64),
+                    a_type,
+                ]
+            else:
+                feat_list = [bos_feat, q_all, a_all]
+                type_list = [np.array([TYPE_BOS], dtype=np.int64), q_type, a_type]
+
     else:
-        q_parts = []
-        q_types = []
-        a_parts = []
-        a_types = []
+        # Default: block layout (points then rays), with optional split separator.
+        if layout == "interleave":
+            pt_qa = np.zeros((2 * n_point, feat_dim), dtype=np.float32)
+            pt_type = np.zeros((2 * n_point,), dtype=np.int64)
+            if n_point > 0:
+                pt_qa[0::2] = pt_q
+                pt_qa[1::2] = pt_a
+                pt_type[0::2] = TYPE_Q_POINT
+                pt_type[1::2] = TYPE_A_POINT
 
-        if n_point > 0:
-            q_parts.append(pt_q)
-            q_types.append(np.full((n_point,), TYPE_Q_POINT, dtype=np.int64))
-            a_parts.append(pt_a)
-            a_types.append(np.full((n_point,), TYPE_A_POINT, dtype=np.int64))
+            ray_qa = np.zeros((2 * n_ray, feat_dim), dtype=np.float32)
+            ray_type = np.zeros((2 * n_ray,), dtype=np.int64)
+            if n_ray > 0:
+                ray_qa[0::2] = ray_q
+                ray_qa[1::2] = ray_a
+                if ray_missing:
+                    ray_type[:] = TYPE_MISSING_RAY
+                    ray_qa[:] = 0.0
+                else:
+                    ray_type[0::2] = TYPE_Q_RAY
+                    ray_type[1::2] = TYPE_A_RAY
 
-        if n_ray > 0:
-            q_parts.append(ray_q)
-            a_parts.append(ray_a)
-            if ray_missing:
-                q_types.append(np.full((n_ray,), TYPE_MISSING_RAY, dtype=np.int64))
-                a_types.append(np.full((n_ray,), TYPE_MISSING_RAY, dtype=np.int64))
+            feat_list = [bos_feat, pt_qa, ray_qa]
+            type_list = [
+                np.array([TYPE_BOS], dtype=np.int64),
+                pt_type,
+                ray_type,
+            ]
+        else:
+            q_parts = []
+            q_types = []
+            a_parts = []
+            a_types = []
+
+            if n_point > 0:
+                q_parts.append(pt_q)
+                q_types.append(np.full((n_point,), TYPE_Q_POINT, dtype=np.int64))
+                a_parts.append(pt_a)
+                a_types.append(np.full((n_point,), TYPE_A_POINT, dtype=np.int64))
+
+            if n_ray > 0:
+                q_parts.append(ray_q)
+                a_parts.append(ray_a)
+                if ray_missing:
+                    q_types.append(np.full((n_ray,), TYPE_MISSING_RAY, dtype=np.int64))
+                    a_types.append(np.full((n_ray,), TYPE_MISSING_RAY, dtype=np.int64))
+                else:
+                    q_types.append(np.full((n_ray,), TYPE_Q_RAY, dtype=np.int64))
+                    a_types.append(np.full((n_ray,), TYPE_A_RAY, dtype=np.int64))
+
+            q_feat = (
+                np.concatenate(q_parts, axis=0)
+                if len(q_parts) > 0
+                else np.zeros((0, feat_dim), dtype=np.float32)
+            )
+            q_type = (
+                np.concatenate(q_types, axis=0)
+                if len(q_types) > 0
+                else np.zeros((0,), dtype=np.int64)
+            )
+            a_feat = (
+                np.concatenate(a_parts, axis=0)
+                if len(a_parts) > 0
+                else np.zeros((0, feat_dim), dtype=np.float32)
+            )
+            a_type = (
+                np.concatenate(a_types, axis=0)
+                if len(a_types) > 0
+                else np.zeros((0,), dtype=np.int64)
+            )
+
+            if layout == "split_sep":
+                sep_feat = np.zeros((1, feat_dim), dtype=np.float32)
+                feat_list = [bos_feat, q_feat, sep_feat, a_feat]
+                type_list = [
+                    np.array([TYPE_BOS], dtype=np.int64),
+                    q_type,
+                    np.array([TYPE_SEP], dtype=np.int64),
+                    a_type,
+                ]
             else:
-                q_types.append(np.full((n_ray,), TYPE_Q_RAY, dtype=np.int64))
-                a_types.append(np.full((n_ray,), TYPE_A_RAY, dtype=np.int64))
-
-        q_feat = np.concatenate(q_parts, axis=0) if len(q_parts) > 0 else np.zeros((0, feat_dim), dtype=np.float32)
-        q_type = np.concatenate(q_types, axis=0) if len(q_types) > 0 else np.zeros((0,), dtype=np.int64)
-        a_feat = np.concatenate(a_parts, axis=0) if len(a_parts) > 0 else np.zeros((0, feat_dim), dtype=np.float32)
-        a_type = np.concatenate(a_types, axis=0) if len(a_types) > 0 else np.zeros((0,), dtype=np.int64)
-
-        feat_list = [bos_feat, q_feat, a_feat]
-        type_list = [np.array([TYPE_BOS], dtype=np.int64), q_type, a_type]
+                feat_list = [bos_feat, q_feat, a_feat]
+                type_list = [np.array([TYPE_BOS], dtype=np.int64), q_type, a_type]
 
     if add_eos:
         feat_list.append(eos_feat)
@@ -653,6 +847,11 @@ def build_sequence(
     rng=None,
     qa_tokens=False,
     qa_layout="interleave",
+    sequence_mode="block",
+    event_order_mode="morton",
+    ray_order_mode="theta_phi",
+    ray_anchor_miss_t=4.0,
+    ray_view_tol=1e-6,
     pt_sample_mode="random",
     pt_fps_order=None,
     pt_rfps_m=4096,
@@ -692,6 +891,11 @@ def build_sequence(
             add_eos=add_eos,
             rng=rng,
             qa_layout=qa_layout,
+            sequence_mode=sequence_mode,
+            event_order_mode=event_order_mode,
+            ray_order_mode=ray_order_mode,
+            ray_anchor_miss_t=ray_anchor_miss_t,
+            ray_view_tol=ray_view_tol,
             pt_sample_mode=pt_sample_mode,
             pt_fps_order=pt_fps_order,
             pt_rfps_m=pt_rfps_m,

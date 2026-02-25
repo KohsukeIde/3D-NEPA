@@ -19,7 +19,12 @@ from ..backends.pointcloud_backend import (
 from ..backends.udfgrid_backend import UDFGridBackend
 from ..backends.voxel_backend import VoxelBackend
 from ..models.query_nepa import QueryNepa
-from ..utils.ckpt_utils import load_state_dict_flexible, maybe_resize_pos_emb_in_state_dict
+from ..utils.ckpt_utils import (
+    load_state_dict_flexible,
+    maybe_resize_pos_emb_in_state_dict,
+    maybe_resize_type_emb_in_state_dict,
+    maybe_resize_type_pos_emb_in_state_dict,
+)
 from ..token.ordering import morton3d
 from ..token.tokenizer import (
     TYPE_BOS,
@@ -691,6 +696,9 @@ def build_model_from_ckpt(ckpt_path, device, max_len_override: Optional[int] = N
         print(f"[ckpt] resizing pos_emb: ckpt_len={ckpt_max_len} -> max_len={max_len}")
         state = maybe_resize_pos_emb_in_state_dict(dict(state), max_len)
 
+    state = maybe_resize_type_emb_in_state_dict(dict(state), int(n_types))
+    state = maybe_resize_type_pos_emb_in_state_dict(dict(state), int(n_types), int(max_len))
+
     model = QueryNepa(
         feat_dim=15,
         d_model=d_model,
@@ -698,6 +706,7 @@ def build_model_from_ckpt(ckpt_path, device, max_len_override: Optional[int] = N
         nhead=nhead,
         num_layers=num_layers,
         max_len=max_len,
+        type_specific_pos=bool(int(pre_args.get("type_specific_pos", 0))),
         arch=str(pre_args.get("arch", "causal")),
         topo_k=int(pre_args.get("topo_k", 0)),
         topo_include_bos=bool(int(pre_args.get("topo_include_bos", 1))),
@@ -1003,8 +1012,8 @@ def extract_xy_for_path(
     n_q_eff = int(q_xyz.shape[0])
 
     if bool(qa_tokens):
-        layout = str(qa_layout).lower()
-        if layout not in ("interleave", "split"):
+        layout = str(qa_layout).lower().replace("+", "_")
+        if layout not in ("interleave", "split", "split_sep"):
             raise ValueError(f"unknown qa_layout: {qa_layout}")
 
         ctx_q = np.zeros((int(n_ctx_eff), 15), dtype=np.float32)

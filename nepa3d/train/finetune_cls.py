@@ -29,7 +29,12 @@ from ..token.tokenizer import (
     TYPE_A_RAY,
 )
 from ..utils.seed import set_seed
-from ..utils.ckpt_utils import load_state_dict_flexible, maybe_resize_pos_emb_in_state_dict
+from ..utils.ckpt_utils import (
+    load_state_dict_flexible,
+    maybe_resize_pos_emb_in_state_dict,
+    maybe_resize_type_emb_in_state_dict,
+    maybe_resize_type_pos_emb_in_state_dict,
+)
 
 
 def stratified_kshot(paths, k, seed=0):
@@ -748,6 +753,9 @@ def main():
     if model_max_len != ckpt_max_len:
         log(f"[ckpt] resizing pos_emb: ckpt_len={ckpt_max_len} -> max_len={model_max_len}")
         state = maybe_resize_pos_emb_in_state_dict(dict(state), model_max_len)
+    # Allow loading checkpoints across type-vocab updates (e.g. SEP token).
+    state = maybe_resize_type_emb_in_state_dict(dict(state), int(ckpt_n_types))
+    state = maybe_resize_type_pos_emb_in_state_dict(dict(state), int(ckpt_n_types), int(model_max_len))
 
     backbone = QueryNepa(
         feat_dim=15,
@@ -757,6 +765,7 @@ def main():
         num_layers=pre_args["layers"],
         drop_path=float(args.drop_path),
         max_len=model_max_len,
+        type_specific_pos=bool(int(pre_args.get("type_specific_pos", 0))),
     )
     load_state_dict_flexible(backbone, state, strict=True)
     backbone.to(device)

@@ -83,6 +83,15 @@ CPAC_HEAD_TRAIN_RATIO="${CPAC_HEAD_TRAIN_RATIO:-0.2}"
 CPAC_RIDGE_LAMBDA="${CPAC_RIDGE_LAMBDA:-1e-3}"
 CPAC_TAU="${CPAC_TAU:-0.03}"
 CPAC_EVAL_SEED="${CPAC_EVAL_SEED:-0}"
+CPAC_MESH_EVAL="${CPAC_MESH_EVAL:-0}"
+CPAC_MESH_EVAL_MAX_SHAPES="${CPAC_MESH_EVAL_MAX_SHAPES:-0}"
+CPAC_MESH_GRID_RES="${CPAC_MESH_GRID_RES:-24}"
+CPAC_MESH_CHUNK_N_QUERY="${CPAC_MESH_CHUNK_N_QUERY:-512}"
+CPAC_MESH_MC_LEVEL="${CPAC_MESH_MC_LEVEL:-0.03}"
+CPAC_MESH_NUM_SAMPLES="${CPAC_MESH_NUM_SAMPLES:-10000}"
+CPAC_MESH_FSCORE_TAU="${CPAC_MESH_FSCORE_TAU:-0.01}"
+CPAC_MESH_SAVE_DIR="${CPAC_MESH_SAVE_DIR:-}"
+CPAC_MESH_STORE_PER_SHAPE="${CPAC_MESH_STORE_PER_SHAPE:-0}"
 
 cd "${WORKDIR}"
 mkdir -p "${LOG_ROOT}" "${RESULTS_ROOT}" "${EVAL_ROOT}"
@@ -351,6 +360,15 @@ if [[ "${RUN_CPAC_LOCAL}" == "1" ]]; then
     --ridge_lambda "${CPAC_RIDGE_LAMBDA}" \
     --tau "${CPAC_TAU}" \
     --eval_seed "${CPAC_EVAL_SEED}" \
+    --mesh_eval "${CPAC_MESH_EVAL}" \
+    --mesh_eval_max_shapes "${CPAC_MESH_EVAL_MAX_SHAPES}" \
+    --mesh_grid_res "${CPAC_MESH_GRID_RES}" \
+    --mesh_chunk_n_query "${CPAC_MESH_CHUNK_N_QUERY}" \
+    --mesh_mc_level "${CPAC_MESH_MC_LEVEL}" \
+    --mesh_num_samples "${CPAC_MESH_NUM_SAMPLES}" \
+    --mesh_fscore_tau "${CPAC_MESH_FSCORE_TAU}" \
+    --mesh_save_dir "${CPAC_MESH_SAVE_DIR}" \
+    --mesh_store_per_shape "${CPAC_MESH_STORE_PER_SHAPE}" \
     --disjoint_context_query 1 \
     --context_mode_test normal \
     --rep_source h \

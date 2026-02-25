@@ -77,6 +77,101 @@ def maybe_resize_pos_emb_in_state_dict(
     return new_state
 
 
+def maybe_resize_type_emb_in_state_dict(
+    state_dict: Dict[str, torch.Tensor],
+    new_n_types: int,
+    *,
+    key: str = "type_emb.weight",
+    init: str = "copy_bos",
+) -> Dict[str, torch.Tensor]:
+    """Return a (shallow) copied state_dict with resized type embedding if needed.
+
+    Useful when the code adds new token types (e.g., SEP) but we still want to load
+    checkpoints trained with an older/smaller type vocabulary.
+    """
+
+    if key not in state_dict:
+        return state_dict
+
+    w = state_dict[key]
+    if not torch.is_tensor(w) or w.ndim != 2:
+        return state_dict
+
+    old_n, d = int(w.shape[0]), int(w.shape[1])
+    new_n = int(new_n_types)
+    if old_n == new_n:
+        return state_dict
+
+    new_state = dict(state_dict)
+    new_w = torch.zeros((new_n, d), dtype=w.dtype, device=w.device)
+    n = min(old_n, new_n)
+    new_w[:n] = w[:n]
+
+    if new_n > old_n:
+        if init == "copy_bos" and old_n > 0:
+            new_w[old_n:new_n] = w[0:1].repeat(new_n - old_n, 1)
+        # else: keep zeros
+
+    new_state[key] = new_w
+    return new_state
+
+
+def maybe_resize_type_pos_emb_in_state_dict(
+    state_dict: Dict[str, torch.Tensor],
+    new_n_types: int,
+    new_len: int,
+    *,
+    key: str = "type_pos_emb.weight",
+    pos_key: str = "pos_emb",
+) -> Dict[str, torch.Tensor]:
+    """Resize flattened (n_types * max_len, d) type_pos_emb in a checkpoint.
+
+    We infer old max_len from `pos_emb` in the same checkpoint.
+    """
+
+    if key not in state_dict or pos_key not in state_dict:
+        return state_dict
+    w = state_dict[key]
+    pos = state_dict[pos_key]
+    if (not torch.is_tensor(w)) or (not torch.is_tensor(pos)):
+        return state_dict
+    if w.ndim != 2 or pos.ndim != 3:
+        return state_dict
+
+    old_total, d = int(w.shape[0]), int(w.shape[1])
+    old_len = int(pos.shape[1])
+    if old_len <= 0:
+        return state_dict
+    if old_total % old_len != 0:
+        return state_dict
+    old_n_types = old_total // old_len
+
+    new_len = int(new_len)
+    new_n_types = int(new_n_types)
+    new_total = new_n_types * new_len
+    if old_total == new_total:
+        return state_dict
+
+    w3 = w.reshape(old_n_types, old_len, d)
+    new3 = torch.zeros((new_n_types, new_len, d), dtype=w.dtype, device=w.device)
+
+    nt = min(old_n_types, new_n_types)
+    nl = min(old_len, new_len)
+    new3[:nt, :nl] = w3[:nt, :nl]
+
+    # Expand length: tile first position.
+    if new_len > old_len:
+        new3[:nt, old_len:new_len] = new3[:nt, :1].repeat(1, new_len - old_len, 1)
+
+    # Expand types: copy type-0.
+    if new_n_types > old_n_types and old_n_types > 0:
+        new3[old_n_types:new_n_types] = new3[0:1].repeat(new_n_types - old_n_types, 1, 1)
+
+    new_state = dict(state_dict)
+    new_state[key] = new3.reshape(new_total, d)
+    return new_state
+
+
 @dataclass
 class LoadStateReport:
     missing_keys: List[str]

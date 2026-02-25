@@ -17,6 +17,7 @@ from ..data.dataset import ModelNet40QueryDataset, collate
 from ..data.mixed_pretrain import build_mixed_pretrain
 from ..data.modelnet40_index import list_npz
 from ..models.query_nepa import QueryNepa
+from ..token.tokenizer import TYPE_VOCAB_SIZE
 from ..token.tokenizer import (
     TYPE_BOS,
     TYPE_EOS,
@@ -29,7 +30,12 @@ from ..token.tokenizer import (
     TYPE_A_RAY,
 )
 from ..utils.seed import set_seed
-from ..utils.ckpt_utils import load_state_dict_flexible, maybe_resize_pos_emb_in_state_dict
+from ..utils.ckpt_utils import (
+    load_state_dict_flexible,
+    maybe_resize_pos_emb_in_state_dict,
+    maybe_resize_type_emb_in_state_dict,
+    maybe_resize_type_pos_emb_in_state_dict,
+)
 
 
 def build_token_mask(type_id, mask_ratio):
@@ -252,6 +258,13 @@ def main():
         ),
     )
     ap.add_argument(
+        "--type_specific_pos",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Use type-specific positional embeddings (local index per token type).",
+    )
+    ap.add_argument(
         "--n_point_schedule",
         type=str,
         default="",
@@ -310,8 +323,51 @@ def main():
         "--qa_layout",
         type=str,
         default="interleave",
-        choices=["interleave", "split"],
+        choices=["interleave", "split", "split_sep"],
         help="Token layout when qa_tokens=1.",
+    )
+
+    # rethink_query: layout/ordering controls (do not change the objective)
+    ap.add_argument(
+        "--sequence_mode",
+        type=str,
+        default="block",
+        choices=["block", "event"],
+        help="How to arrange point/ray tokens. 'event' unifies point+ray events by x_anchor ordering.",
+    )
+    ap.add_argument(
+        "--event_order_mode",
+        type=str,
+        default="morton",
+        choices=["morton", "fps", "random"],
+        help="Ordering of events when sequence_mode=event.",
+    )
+    ap.add_argument(
+        "--ray_order_mode",
+        type=str,
+        default="theta_phi",
+        choices=[
+            "theta_phi",
+            "dir_fps",
+            "view_raster",
+            "x_anchor_morton",
+            "x_anchor_fps",
+            "random",
+            "none",
+        ],
+        help="Ordering of rays inside ray blocks/pools.",
+    )
+    ap.add_argument(
+        "--ray_anchor_miss_t",
+        type=float,
+        default=4.0,
+        help="When x_anchor ordering is used, miss rays are anchored at o + miss_t * d.",
+    )
+    ap.add_argument(
+        "--ray_view_tol",
+        type=float,
+        default=1e-6,
+        help="Tolerance for grouping rays into views by origin (view_raster ordering).",
     )
     ap.add_argument(
         "--pt_xyz_key",
@@ -533,8 +589,9 @@ def main():
         if int(args.qa_tokens) != 1:
             arch_warns.append("[WARN] --arch encdec implies --qa_tokens=1")
             args.qa_tokens = 1
-        if str(args.qa_layout) != "split":
-            arch_warns.append("[WARN] --arch encdec implies --qa_layout=split")
+        _layout = str(args.qa_layout).lower().replace("+", "_")
+        if _layout not in ("split", "split_sep"):
+            arch_warns.append("[WARN] --arch encdec implies --qa_layout in {split, split_sep}")
             args.qa_layout = "split"
 
     req_mp = str(args.mixed_precision)
@@ -635,8 +692,10 @@ def main():
 
     def _required_seq_len(n_point: int, n_ray: int) -> int:
         if qa_tokens:
-            # BOS + interleaved (Q,A) pairs + optional EOS
-            return 1 + 2 * int(n_point) + 2 * int(n_ray) + (1 if add_eos else 0)
+            # BOS + (Q,A) pairs + optional [SEP] (split_sep) + optional EOS
+            layout = str(args.qa_layout).lower().replace("+", "_")
+            extra_sep = 1 if layout == "split_sep" else 0
+            return 1 + 2 * int(n_point) + 2 * int(n_ray) + extra_sep + (1 if add_eos else 0)
         # legacy: BOS + points + rays + optional EOS
         return 1 + int(n_point) + int(n_ray) + (1 if add_eos else 0)
 
@@ -693,6 +752,11 @@ def main():
             args.mix_config,
             qa_tokens=bool(args.qa_tokens),
             qa_layout=str(args.qa_layout),
+            sequence_mode=str(args.sequence_mode),
+            event_order_mode=str(args.event_order_mode),
+            ray_order_mode=str(args.ray_order_mode),
+            ray_anchor_miss_t=float(args.ray_anchor_miss_t),
+            ray_view_tol=float(args.ray_view_tol),
             n_point=args.n_point,
             n_ray=args.n_ray,
             mode="train",
@@ -761,6 +825,11 @@ def main():
             add_eos=bool(args.add_eos),
             qa_tokens=bool(args.qa_tokens),
             qa_layout=str(args.qa_layout),
+            sequence_mode=str(args.sequence_mode),
+            event_order_mode=str(args.event_order_mode),
+            ray_order_mode=str(args.ray_order_mode),
+            ray_anchor_miss_t=float(args.ray_anchor_miss_t),
+            ray_view_tol=float(args.ray_view_tol),
             include_pt_grad=bool(args.include_pt_grad),
             pt_grad_mode=str(args.pt_grad_mode),
             pt_grad_eps=float(args.pt_grad_eps),
@@ -798,7 +867,7 @@ def main():
         )
 
     qa_tokens = bool(args.qa_tokens)
-    n_types = 9 if qa_tokens else 5
+    n_types = int(TYPE_VOCAB_SIZE) if qa_tokens else 5
     # max_len is the *capacity*; actual sequence length varies with n_point/n_ray.
     t = int(args.max_len)
 
@@ -810,6 +879,7 @@ def main():
         num_layers=args.layers,
         drop_path=float(args.drop_path),
         max_len=t,
+        type_specific_pos=bool(args.type_specific_pos),
         arch=str(args.arch),
         topo_k=int(args.topo_k),
         topo_ray_coord=str(args.topo_ray_coord),
@@ -833,15 +903,19 @@ def main():
         teacher_topo_ray_bbox = float(teacher_pre_args.get("topo_ray_bbox", 0.5))
         teacher_encdec_src_causal = int(teacher_pre_args.get("encdec_src_causal", 0))
         teacher_drop_path = float(teacher_pre_args.get("drop_path", 0.0))
+        teacher_type_specific_pos = bool(int(teacher_pre_args.get("type_specific_pos", 0)))
         teacher_len = int(teacher_state["pos_emb"].shape[1])
         if teacher_n_types != int(n_types):
-            raise RuntimeError(
-                f"teacher n_types mismatch: teacher={teacher_n_types}, student={n_types}. "
-                "Use a compatible checkpoint or disable teacher distillation."
+            mprint(
+                f"[teacher] resizing type_emb: ckpt_n_types={teacher_n_types} -> student_n_types={n_types}"
             )
+            teacher_state = maybe_resize_type_emb_in_state_dict(dict(teacher_state), int(n_types))
+            teacher_state = maybe_resize_type_pos_emb_in_state_dict(dict(teacher_state), int(n_types), int(t))
+            teacher_n_types = int(n_types)
         if teacher_len != int(t):
             mprint(f"[teacher] resizing pos_emb: ckpt_len={teacher_len} -> max_len={t}")
             teacher_state = maybe_resize_pos_emb_in_state_dict(dict(teacher_state), int(t))
+            teacher_state = maybe_resize_type_pos_emb_in_state_dict(dict(teacher_state), int(teacher_n_types), int(t))
         teacher_model = QueryNepa(
             feat_dim=15,
             d_model=teacher_d_model,
@@ -850,6 +924,7 @@ def main():
             num_layers=teacher_layers,
             drop_path=teacher_drop_path,
             max_len=t,
+            type_specific_pos=teacher_type_specific_pos,
             arch=teacher_arch,
             topo_k=teacher_topo_k,
             topo_ray_coord=teacher_topo_ray_coord,
@@ -926,6 +1001,10 @@ def main():
             if ckpt_pos_len != int(t):
                 mprint(f"[resume] resizing pos_emb: ckpt_len={ckpt_pos_len} -> max_len={t}")
                 ckpt_model = maybe_resize_pos_emb_in_state_dict(dict(ckpt_model), int(t))
+
+        # Resize type embedding tables if the code adds new token types (e.g. SEP).
+        ckpt_model = maybe_resize_type_emb_in_state_dict(dict(ckpt_model), int(n_types))
+        ckpt_model = maybe_resize_type_pos_emb_in_state_dict(dict(ckpt_model), int(n_types), int(t))
 
         load_state_dict_flexible(raw_model, ckpt_model, strict=True)
 

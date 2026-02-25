@@ -45,6 +45,12 @@ MAX_LEN="${MAX_LEN:--1}"
 ADD_EOS="${ADD_EOS:-1}"
 QA_TOKENS="${QA_TOKENS:-0}"
 QA_LAYOUT="${QA_LAYOUT:-interleave}"
+SEQUENCE_MODE="${SEQUENCE_MODE:-block}"
+EVENT_ORDER_MODE="${EVENT_ORDER_MODE:-morton}"
+RAY_ORDER_MODE="${RAY_ORDER_MODE:-theta_phi}"
+RAY_ANCHOR_MISS_T="${RAY_ANCHOR_MISS_T:-4.0}"
+RAY_VIEW_TOL="${RAY_VIEW_TOL:-1e-6}"
+TYPE_SPECIFIC_POS="${TYPE_SPECIFIC_POS:-0}"
 PT_XYZ_KEY="${PT_XYZ_KEY:-pt_xyz_pool}"
 PT_DIST_KEY="${PT_DIST_KEY:-pt_dist_pool}"
 ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
@@ -59,6 +65,13 @@ AUG_TRANSLATE="${AUG_TRANSLATE:-0.0}"
 AUG_JITTER_SIGMA="${AUG_JITTER_SIGMA:-0.0}"
 AUG_JITTER_CLIP="${AUG_JITTER_CLIP:-0.0}"
 AUG_RECOMPUTE_DIST="${AUG_RECOMPUTE_DIST:-0}"
+DUAL_MASK_NEAR="${DUAL_MASK_NEAR:-0.0}"
+DUAL_MASK_FAR="${DUAL_MASK_FAR:-0.0}"
+DUAL_MASK_WINDOW="${DUAL_MASK_WINDOW:-32}"
+DUAL_MASK_WARMUP_FRAC="${DUAL_MASK_WARMUP_FRAC:-0.05}"
+DUAL_MASK_TYPE_AWARE="${DUAL_MASK_TYPE_AWARE:-0}"
+DUAL_MASK_WINDOW_SCALE="${DUAL_MASK_WINDOW_SCALE:-linear}"
+DUAL_MASK_WINDOW_REF_TOTAL="${DUAL_MASK_WINDOW_REF_TOTAL:--1}"
 D_MODEL="${D_MODEL:-384}"
 LAYERS="${LAYERS:-8}"
 HEADS="${HEADS:-6}"
@@ -127,6 +140,12 @@ if [ "${NUM_PROCESSES}" -gt 1 ]; then
   --add_eos "${ADD_EOS}" \
   --qa_tokens "${QA_TOKENS}" \
   --qa_layout "${QA_LAYOUT}" \
+  --sequence_mode "${SEQUENCE_MODE}" \
+  --event_order_mode "${EVENT_ORDER_MODE}" \
+  --ray_order_mode "${RAY_ORDER_MODE}" \
+  --ray_anchor_miss_t "${RAY_ANCHOR_MISS_T}" \
+  --ray_view_tol "${RAY_VIEW_TOL}" \
+  --type_specific_pos "${TYPE_SPECIFIC_POS}" \
   --pt_xyz_key "${PT_XYZ_KEY}" \
   --pt_dist_key "${PT_DIST_KEY}" \
   --ablate_point_dist "${ABLATE_POINT_DIST}" \
@@ -141,6 +160,13 @@ if [ "${NUM_PROCESSES}" -gt 1 ]; then
   --aug_jitter_sigma "${AUG_JITTER_SIGMA}" \
   --aug_jitter_clip "${AUG_JITTER_CLIP}" \
   --aug_recompute_dist "${AUG_RECOMPUTE_DIST}" \
+  --dual_mask_near "${DUAL_MASK_NEAR}" \
+  --dual_mask_far "${DUAL_MASK_FAR}" \
+  --dual_mask_window "${DUAL_MASK_WINDOW}" \
+  --dual_mask_warmup_frac "${DUAL_MASK_WARMUP_FRAC}" \
+  --dual_mask_type_aware "${DUAL_MASK_TYPE_AWARE}" \
+  --dual_mask_window_scale "${DUAL_MASK_WINDOW_SCALE}" \
+  --dual_mask_window_ref_total "${DUAL_MASK_WINDOW_REF_TOTAL}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
   --drop_path "${DROP_PATH}" \
   --num_workers "${NUM_WORKERS}" \
@@ -161,6 +187,12 @@ else
   --add_eos "${ADD_EOS}" \
   --qa_tokens "${QA_TOKENS}" \
   --qa_layout "${QA_LAYOUT}" \
+  --sequence_mode "${SEQUENCE_MODE}" \
+  --event_order_mode "${EVENT_ORDER_MODE}" \
+  --ray_order_mode "${RAY_ORDER_MODE}" \
+  --ray_anchor_miss_t "${RAY_ANCHOR_MISS_T}" \
+  --ray_view_tol "${RAY_VIEW_TOL}" \
+  --type_specific_pos "${TYPE_SPECIFIC_POS}" \
   --pt_xyz_key "${PT_XYZ_KEY}" \
   --pt_dist_key "${PT_DIST_KEY}" \
   --ablate_point_dist "${ABLATE_POINT_DIST}" \
@@ -175,6 +207,13 @@ else
   --aug_jitter_sigma "${AUG_JITTER_SIGMA}" \
   --aug_jitter_clip "${AUG_JITTER_CLIP}" \
   --aug_recompute_dist "${AUG_RECOMPUTE_DIST}" \
+  --dual_mask_near "${DUAL_MASK_NEAR}" \
+  --dual_mask_far "${DUAL_MASK_FAR}" \
+  --dual_mask_window "${DUAL_MASK_WINDOW}" \
+  --dual_mask_warmup_frac "${DUAL_MASK_WARMUP_FRAC}" \
+  --dual_mask_type_aware "${DUAL_MASK_TYPE_AWARE}" \
+  --dual_mask_window_scale "${DUAL_MASK_WINDOW_SCALE}" \
+  --dual_mask_window_ref_total "${DUAL_MASK_WINDOW_REF_TOTAL}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
   --drop_path "${DROP_PATH}" \
   --num_workers "${NUM_WORKERS}" \

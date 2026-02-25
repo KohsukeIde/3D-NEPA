@@ -15,7 +15,12 @@ from ..backends.pointcloud_backend import (
 from ..backends.udfgrid_backend import UDFGridBackend
 from ..backends.voxel_backend import VoxelBackend
 from ..models.query_nepa import QueryNepa
-from ..utils.ckpt_utils import load_state_dict_flexible, maybe_resize_pos_emb_in_state_dict
+from ..utils.ckpt_utils import (
+    load_state_dict_flexible,
+    maybe_resize_pos_emb_in_state_dict,
+    maybe_resize_type_emb_in_state_dict,
+    maybe_resize_type_pos_emb_in_state_dict,
+)
 from ..token.tokenizer import (
     TYPE_BOS,
     TYPE_EOS,
@@ -103,6 +108,9 @@ def build_model_from_ckpt(ckpt_path, device, max_len_override: int | None = None
         print(f"[ckpt] resizing pos_emb: ckpt_len={ckpt_max_len} -> max_len={max_len}")
         state = maybe_resize_pos_emb_in_state_dict(dict(state), max_len)
 
+    state = maybe_resize_type_emb_in_state_dict(dict(state), int(n_types))
+    state = maybe_resize_type_pos_emb_in_state_dict(dict(state), int(n_types), int(max_len))
+
     model = QueryNepa(
         feat_dim=15,
         d_model=d_model,
@@ -110,6 +118,7 @@ def build_model_from_ckpt(ckpt_path, device, max_len_override: int | None = None
         nhead=nhead,
         num_layers=num_layers,
         max_len=max_len,
+        type_specific_pos=bool(int(pre_args.get("type_specific_pos", 0))),
         arch=str(pre_args.get("arch", "causal")),
         topo_k=int(pre_args.get("topo_k", 0)),
         topo_include_bos=bool(int(pre_args.get("topo_include_bos", 1))),

@@ -123,8 +123,8 @@ def _extract_rep_for_queries(model, ctx_xyz, ctx_dist, q_xyz, add_eos, qa_tokens
     eos = np.zeros((1, 15), dtype=np.float32)
 
     if bool(qa_tokens):
-        layout = str(qa_layout).lower()
-        if layout not in ("interleave", "split"):
+        layout = str(qa_layout).lower().replace("+", "_")
+        if layout not in ("interleave", "split", "split_sep"):
             raise ValueError(f"unknown qa_layout: {qa_layout}")
 
         ctx_q = np.zeros((n_ctx, 15), dtype=np.float32)

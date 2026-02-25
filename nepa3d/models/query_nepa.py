@@ -12,6 +12,7 @@ from ..token.tokenizer import (
     TYPE_A_POINT,
     TYPE_Q_RAY,
     TYPE_A_RAY,
+    TYPE_VOCAB_SIZE,
 )
 
 
@@ -27,6 +28,7 @@ class QueryNepa(nn.Module):
         dropout=0.0,
         drop_path=0.0,
         max_len=2048,
+        type_specific_pos: bool = False,
         arch="causal",
         topo_k=0,
         topo_include_bos=True,
@@ -43,6 +45,7 @@ class QueryNepa(nn.Module):
         self.topo_ray_coord = str(topo_ray_coord)
         self.topo_ray_bbox = float(topo_ray_bbox)
         self.encdec_src_causal = bool(encdec_src_causal)
+        self.type_specific_pos = bool(type_specific_pos)
 
         self.type_emb = nn.Embedding(int(n_types), int(d_model))
         self.token_mlp = nn.Sequential(
@@ -52,6 +55,15 @@ class QueryNepa(nn.Module):
         )
         self.pos_emb = nn.Parameter(torch.zeros(1, max_len, d_model))
         nn.init.trunc_normal_(self.pos_emb, std=0.02)
+
+        # Type-specific positional embedding: each token type gets its own local
+        # position index (0..count(type)-1). This avoids the single shared
+        # positional index having to represent heterogeneous token semantics
+        # (point vs ray, query vs answer, etc.).
+        if self.type_specific_pos:
+            self.type_pos_max_len = int(max_len)
+            self.type_pos_emb = nn.Embedding(int(n_types) * self.type_pos_max_len, int(d_model))
+            nn.init.trunc_normal_(self.type_pos_emb.weight, std=0.02)
 
         if self.arch == "causal":
             self.backbone = CausalTransformer(
@@ -82,7 +94,26 @@ class QueryNepa(nn.Module):
 
     def embed_tokens(self, feat, type_id):
         b, t, _ = feat.shape
-        return self.token_mlp(feat) + self.type_emb(type_id) + self.pos_emb[:, :t, :]
+        x = self.token_mlp(feat) + self.type_emb(type_id) + self.pos_emb[:, :t, :]
+
+        if self.type_specific_pos:
+            # Local position within each token type, computed by per-type cumulative sums.
+            n_types = int(self.type_emb.num_embeddings)
+            local = torch.zeros((b, t), dtype=torch.long, device=type_id.device)
+            # (small) loop over types is fine; n_types is ~5 or ~10.
+            for tt in range(n_types):
+                m = type_id == tt
+                if bool(m.any()):
+                    c = torch.cumsum(m.long(), dim=1) - 1
+                    local[m] = c[m]
+
+            # Safety clamp in case a single type exceeds configured max_len.
+            local = torch.clamp(local, 0, self.type_pos_max_len - 1)
+            type_id_safe = torch.clamp(type_id, 0, n_types - 1)
+            idx = type_id_safe * self.type_pos_max_len + local
+            x = x + self.type_pos_emb(idx)
+
+        return x
 
     def forward(
         self,
@@ -128,7 +159,9 @@ class QueryNepa(nn.Module):
             eos = t - 1
             is_answer_like = is_a | (type_id == TYPE_MISSING_RAY)
             if not bool(is_answer_like[:, a0:eos].all()):
-                raise ValueError("encdec arch requires qa_layout='split' (answers contiguous)")
+                raise ValueError(
+                    "encdec arch requires answers to be contiguous (qa_layout='split' or 'split_sep')"
+                )
 
             enc_in = z[:, :a0, :]
             dec_in = z[:, a0:eos, :]

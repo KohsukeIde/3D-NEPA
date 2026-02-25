@@ -160,6 +160,11 @@ class ModelNet40QueryDataset(Dataset):
         add_eos=True,
         qa_tokens=0,
         qa_layout="interleave",
+        sequence_mode="block",
+        event_order_mode="morton",
+        ray_order_mode="theta_phi",
+        ray_anchor_miss_t=4.0,
+        ray_view_tol=1e-6,
         include_pt_grad=False,
         pt_grad_mode="raw",
         pt_grad_eps=1e-3,
@@ -202,6 +207,11 @@ class ModelNet40QueryDataset(Dataset):
         self.add_eos = bool(add_eos)
         self.qa_tokens = int(qa_tokens)
         self.qa_layout = str(qa_layout)
+        self.sequence_mode = str(sequence_mode)
+        self.event_order_mode = str(event_order_mode)
+        self.ray_order_mode = str(ray_order_mode)
+        self.ray_anchor_miss_t = float(ray_anchor_miss_t)
+        self.ray_view_tol = float(ray_view_tol)
         self.include_pt_grad = bool(include_pt_grad)
         self.pt_grad_mode = str(pt_grad_mode)
         self.pt_grad_eps = float(pt_grad_eps)
@@ -442,6 +452,11 @@ class ModelNet40QueryDataset(Dataset):
                 add_eos=self.add_eos,
                 qa_tokens=self.qa_tokens,
                 qa_layout=self.qa_layout,
+                sequence_mode=self.sequence_mode,
+                event_order_mode=self.event_order_mode,
+                ray_order_mode=self.ray_order_mode,
+                ray_anchor_miss_t=self.ray_anchor_miss_t,
+                ray_view_tol=self.ray_view_tol,
                 pt_sample_mode=self.pt_sample_mode,
                 pt_fps_order=pt_fps_order,
                 pt_rfps_m=self.pt_rfps_m,
