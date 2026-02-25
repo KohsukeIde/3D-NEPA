@@ -896,3 +896,68 @@ Purpose:
 - Eval logs (once dependency is released):
   - `logs/eval/abcd_cls_cpac_fps_tta_retry_20260225_013044_sotafair_*/run*.out`
   - `logs/eval/abcd_cls_cpac_fps_tta_retry_20260225_013044_sotafair_*/run*.err`
+
+## 23. ScanObjectNN protocol-variant split hotfix (2026-02-25)
+
+Purpose:
+
+- Enforce ScanObjectNN reporting by protocol variant (`obj_bg`, `obj_only`, `pb_t50_rs`) instead of mixed `main_split` cache.
+
+### 23.1 Issue found
+
+- `scripts/eval/submit_abcd_cls_cpac_qf.sh` did not propagate several eval-control env vars to PBS jobs.
+- As a result, caller-side overrides for:
+  - `RUN_SCAN`, `RUN_MODELNET`, `RUN_CPAC`
+  - `SCAN_CACHE_ROOT`, `MODELNET_CACHE_ROOT`, `UNPAIRED_CACHE_ROOT`
+  - `SCAN_AUG_PRESET`, `MODELNET_AUG_PRESET`
+  - `MC_EVAL_K_VAL`, `MC_EVAL_K_TEST`
+  were ignored in actual launched jobs.
+
+### 23.2 Fix applied
+
+- `scripts/eval/submit_abcd_cls_cpac_qf.sh`
+  - now defines and forwards the env vars above in `qsub -v`.
+- `scripts/eval/submit_sotafair_llrd_droppath_ablation_qf.sh`
+  - now explicitly passes through:
+    - `SCAN_CACHE_ROOT`, `MODELNET_CACHE_ROOT`, `UNPAIRED_CACHE_ROOT`
+    - existing run toggles (`RUN_SCAN`, `RUN_MODELNET`, `RUN_CPAC`) and `AUG_EVAL`.
+- new helper:
+  - `scripts/eval/submit_sotafair_variants_llrd_droppath_ablation_qf.sh`
+  - loops over `VARIANTS` (default `obj_bg,obj_only,pb_t50_rs`) and maps each to:
+    - `data/scanobjectnn_obj_bg_v2`
+    - `data/scanobjectnn_obj_only_v2`
+    - `data/scanobjectnn_pb_t50_rs_v2`
+  - per variant, calls existing SOTA-fair LLRD/drop_path ablation submitter.
+- `scripts/pipeline/submit_pretrain_then_sotafair_eval_qf.sh`
+  - supports optional `SCAN_VARIANTS=...`.
+  - when set, stage2 uses the new variant submit helper.
+  - variant mode defaults to `RUN_MODELNET=0`, `RUN_CPAC=0` (scan classification only).
+
+### 23.3 Usage
+
+Variant-split eval only (no pretrain submit):
+
+```bash
+RUN_SET_BASE_PREFIX=fix20260225_scan3 \
+VARIANTS=obj_bg,obj_only,pb_t50_rs \
+RUN_MODELNET=0 RUN_CPAC=0 \
+bash scripts/eval/submit_sotafair_variants_llrd_droppath_ablation_qf.sh
+```
+
+End-to-end pretrain -> variant-split eval:
+
+```bash
+RUN_TAG_BASE=fix20260225_scan3 \
+SCAN_VARIANTS=obj_bg,obj_only,pb_t50_rs \
+RUN_MODELNET=0 RUN_CPAC=0 \
+bash scripts/pipeline/submit_pretrain_then_sotafair_eval_qf.sh
+```
+
+### 23.4 Job count (default ablations=`base,llrd,dp,llrd_dp`)
+
+- variant-split eval only:
+  - `3 variants x 4 runs x 4 ablations = 48 jobs`
+- pretrain + variant-split eval chain:
+  - `4 pretrain + 48 eval = 52 jobs`
+- if adding one extra non-variant ModelNet/CPAC matrix (`4x4=16`) separately:
+  - total becomes `68 jobs`.
