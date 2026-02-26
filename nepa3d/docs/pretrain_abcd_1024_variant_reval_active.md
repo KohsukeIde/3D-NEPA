@@ -158,3 +158,39 @@ Interpretation rule:
 - Canonical benchmark tables are maintained in:
   - `nepa3d/docs/active/benchmark_scanobjectnn_variant.md`
 - This file now keeps only policy, protocol, and run-scope decisions.
+
+## 9. Point-MAE Sanity Baseline (2026-02-26)
+
+Purpose:
+
+- confirm variant-specific ScanObjectNN data integrity with an external baseline.
+
+Setup:
+
+- repo: `3D-NEPA/Point-MAE`
+- ckpts: official release weights (`scan_hardest / scan_objbg / scan_objonly`)
+- test mode only (`--test`, no fine-tune), variant-specific config roots.
+
+Jobs:
+
+- `97974.qjcm` `pm_sanity_pb_t50` (`Exit_status=0`)
+- `97977.qjcm` `pm_sanity_obj_bg` (`Exit_status=0`)
+- `97978.qjcm` `pm_sanity_obj_on` (`Exit_status=0`)
+
+Test accuracy (from `logs/sanity/pointmae/*.log`):
+
+| variant | test_acc |
+|---|---:|
+| `pb_t50_rs` | `84.5940` |
+| `obj_bg` | `73.3219` |
+| `obj_only` | `81.7556` |
+
+Notes:
+
+- run scripts:
+  - `scripts/sanity/pointmae_scan_sanity_qf.sh`
+  - `scripts/sanity/submit_pointmae_scan_sanity_qf.sh`
+- Point-MAE local sanity configs:
+  - `Point-MAE/cfgs/finetune_scan_hardest_sanity.yaml`
+  - `Point-MAE/cfgs/finetune_scan_objbg_sanity.yaml`
+  - `Point-MAE/cfgs/finetune_scan_objonly_sanity.yaml`
