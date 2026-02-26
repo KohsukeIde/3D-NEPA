@@ -1494,6 +1494,22 @@ Run roots:
 - outputs: `runs/eval_ab_ab_llrd_linear035_groupauto_20260225_213924`
 - results: `results/ab_ab_llrd_linear035_groupauto_20260225_213924`
 
+### 31.3 Final metrics (A/B, linear LLRD)
+
+Source logs/results:
+
+- `logs/eval/ab_cls_cpac_ab_llrd_linear035_groupauto_20260225_213924/runA_llrdlin_classification_scan.log`
+- `logs/eval/ab_cls_cpac_ab_llrd_linear035_groupauto_20260225_213924/runB_llrdlin_classification_scan.log`
+- `logs/eval/ab_cls_cpac_ab_llrd_linear035_groupauto_20260225_213924/runA_llrdlin_classification_modelnet.log`
+- `logs/eval/ab_cls_cpac_ab_llrd_linear035_groupauto_20260225_213924/runB_llrdlin_classification_modelnet.log`
+- `results/ab_ab_llrd_linear035_groupauto_20260225_213924/cpac_abcd_1024_runA_llrdlin.json`
+- `results/ab_ab_llrd_linear035_groupauto_20260225_213924/cpac_abcd_1024_runB_llrdlin.json`
+
+| Run | ScanObjectNN `test_acc` | ModelNet40 `test_acc` | CPAC `mae` | CPAC `rmse` | CPAC `iou@tau` |
+|---|---:|---:|---:|---:|---:|
+| `runA_llrdlin` | 0.6300 | 0.8639 | 0.0581 | 0.0815 | 0.6326 |
+| `runB_llrdlin` | 0.6207 | 0.8659 | 0.0955 | 0.1303 | 0.4925 |
+
 ## 32. Augmentation fine-tune results (A/B) + no-augmentation comparison (2026-02-25)
 
 ### 32.1 Status summary
@@ -1523,6 +1539,8 @@ Source roots:
 | `fps_runA_nepafull` | 0.3341 | 0.8327 |
 | `fps_runB_sotafair` | 0.6654 | 0.8695 |
 | `fps_runB_nepafull` | 0.5389 | 0.8682 |
+| `rfps_runA_sotafair` | 0.6571 | 0.8734 |
+| `rfps_runA_nepafull` | 0.3298 | 0.8291 |
 | `rfps_runB_sotafair` | 0.6654 | 0.8717 |
 | `rfps_runB_nepafull` | 0.5660 | 0.8620 |
 
@@ -2089,3 +2107,89 @@ Confirmed in eval job variables (`97191.qjcm`):
 - `CPAC_MESH_EVAL=1`
 - `CPAC_MESH_EVAL_MAX_SHAPES=800`
 - `CPAC_N_CONTEXT=256`, `CPAC_N_QUERY=256`, `CPAC_MAX_LEN=1300`
+
+### 37.5 Final status check (all jobs finished) (2026-02-26)
+
+Queue state:
+
+- `qselect -u $USER` returned empty (no running/held jobs).
+
+`rfps + augmentation (1024)` completion:
+
+- `96560.qjcm` (`runA_rfps_aug_rfps_aug_ab_20260225_171018`): `F`, `Exit_status=0`
+- `96561.qjcm` (`runB_rfps_aug_rfps_aug_ab_20260225_171018`): `F`, `Exit_status=0`
+
+`a256_queryrethink` ablation completion:
+
+- pretrain `97182`..`97190`: all `F`, `Exit_status=0`
+- eval `97191`..`97208`: all `F`, `Exit_status=1`
+
+Common eval failure reason (`97191`..`97208`):
+
+- CPAC mesh-eval stage failed with max-length mismatch:
+  - `ValueError: mesh_eval requires sequence length 1538, but model max_len=1300`
+  - source logs: `logs/eval/a256_queryrethink_a256_queryrethink_20260226_024537/*.out`
+
+Interpretation:
+
+- classification stages (ScanObjectNN / ModelNet40) reached final `test_acc` lines in the eval logs,
+- but job exit became non-zero at CPAC mesh-eval, so this batch is not a clean end-to-end success.
+
+### 37.6 Classification results extracted from failed eval bundle
+
+Even though all `97191`..`97208` jobs failed at CPAC mesh-eval, classification logs contain final metrics.
+
+Source root:
+
+- `logs/eval/a256_queryrethink_a256_queryrethink_20260226_024537`
+
+ScanObjectNN (`*_classification_scan.log`):
+
+| variant | protocol | best_val | best_ep | test_acc |
+|---|---|---:|---:|---:|
+| `b00_interleave_theta` | `sotafair` | 0.7756 | 98 | 0.5548 |
+| `b00_interleave_theta` | `nepafull` | 0.3181 | 49 | 0.3045 |
+| `b01_split_theta` | `sotafair` | 0.7656 | 92 | 0.5210 |
+| `b01_split_theta` | `nepafull` | 0.3261 | 24 | 0.3161 |
+| `b02_split_theta_typepos` | `sotafair` | 0.8141 | 99 | 0.6003 |
+| `b02_split_theta_typepos` | `nepafull` | 0.3007 | 28 | 0.2930 |
+| `b03_split_viewraster_typepos` | `sotafair` | 0.7841 | 92 | 0.5324 |
+| `b03_split_viewraster_typepos` | `nepafull` | 0.3365 | 38 | 0.3067 |
+| `b04_split_xanchor_morton_typepos` | `sotafair` | 0.8638 | 89 | 0.6335 |
+| `b04_split_xanchor_morton_typepos` | `nepafull` | 0.3444 | 33 | 0.3354 |
+| `b05_split_xanchor_fps_typepos` | `sotafair` | 0.8482 | 87 | 0.6021 |
+| `b05_split_xanchor_fps_typepos` | `nepafull` | 0.3233 | 45 | 0.3049 |
+| `b06_split_dirfps_typepos` | `sotafair` | 0.8349 | 90 | 0.6015 |
+| `b06_split_dirfps_typepos` | `nepafull` | 0.3269 | 35 | 0.3069 |
+| `b07_event_xanchor_typepos` | `sotafair` | 0.7334 | 98 | 0.5670 |
+| `b07_event_xanchor_typepos` | `nepafull` | 0.3017 | 39 | 0.2840 |
+| `b08_event_dirfps_typepos` | `sotafair` | 0.8073 | 99 | 0.5889 |
+| `b08_event_dirfps_typepos` | `nepafull` | 0.3065 | 28 | 0.2957 |
+
+ModelNet40 (`*_classification_modelnet.log`):
+
+| variant | protocol | best_val | best_ep | test_acc |
+|---|---|---:|---:|---:|
+| `b00_interleave_theta` | `sotafair` | 0.8677 | 45 | 0.8509 |
+| `b00_interleave_theta` | `nepafull` | 0.6274 | 99 | 0.6152 |
+| `b01_split_theta` | `sotafair` | 0.8711 | 88 | 0.8610 |
+| `b01_split_theta` | `nepafull` | 0.6724 | 80 | 0.6901 |
+| `b02_split_theta_typepos` | `sotafair` | 0.8623 | 96 | 0.8636 |
+| `b02_split_theta_typepos` | `nepafull` | 0.6177 | 90 | 0.5967 |
+| `b03_split_viewraster_typepos` | `sotafair` | 0.8701 | 85 | 0.8630 |
+| `b03_split_viewraster_typepos` | `nepafull` | 0.6982 | 86 | 0.7272 |
+| `b04_split_xanchor_morton_typepos` | `sotafair` | 0.8657 | 74 | 0.8626 |
+| `b04_split_xanchor_morton_typepos` | `nepafull` | 0.7520 | 99 | 0.7728 |
+| `b05_split_xanchor_fps_typepos` | `sotafair` | 0.8745 | 57 | 0.8581 |
+| `b05_split_xanchor_fps_typepos` | `nepafull` | 0.7212 | 90 | 0.7432 |
+| `b06_split_dirfps_typepos` | `sotafair` | 0.8687 | 59 | 0.8649 |
+| `b06_split_dirfps_typepos` | `nepafull` | 0.7349 | 89 | 0.7510 |
+| `b07_event_xanchor_typepos` | `sotafair` | 0.8643 | 95 | 0.8525 |
+| `b07_event_xanchor_typepos` | `nepafull` | 0.5845 | 97 | 0.5833 |
+| `b08_event_dirfps_typepos` | `sotafair` | 0.8667 | 80 | 0.8568 |
+| `b08_event_dirfps_typepos` | `nepafull` | 0.5889 | 89 | 0.5719 |
+
+CPAC/chamfer status in this run set:
+
+- all variants stopped at mesh precheck with `ValueError: mesh_eval requires sequence length 1538, but model max_len=1300`
+- therefore no valid CPAC/chamfer summary is available from this bundle.
