@@ -34,8 +34,14 @@ def sample_mesh_points(vertices: np.ndarray, faces: np.ndarray, n: int, seed: in
         raise e
 
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
-    rng = np.random.RandomState(seed)
-    pts, _ = trimesh.sample.sample_surface(mesh, n, seed=rng)
+    # trimesh API differs by version:
+    # - newer: seed expects int-like entropy
+    # - older: seed may accept RandomState
+    try:
+        pts, _ = trimesh.sample.sample_surface(mesh, n, seed=int(seed))
+    except TypeError:
+        rng = np.random.RandomState(int(seed))
+        pts, _ = trimesh.sample.sample_surface(mesh, n, seed=rng)
     return pts.astype(np.float32)
 
 

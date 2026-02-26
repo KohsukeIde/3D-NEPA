@@ -354,7 +354,8 @@ Re-submitted classification 18 jobs with explicit variant cache and dependency:
   - `RUN_CPAC=0`
   - `QSUB_DEPEND=afterok:97630.qjcm`
 - jobs:
-  - `97716`..`97733` (`18` jobs), all currently `H` waiting on `97630`.
+  - `97716`..`97733` (`18` jobs), all completed (`job_state=F`, `Exit_status=0`).
+  - final classification metrics are summarized in §15.
 
 ## 11. Mesh+UDF-only 1024 pretrain submission
 
@@ -402,6 +403,10 @@ Interpretation:
 - Mesh/chamfer fields were emitted but are invalid in this batch:
   - `mesh_eval.fail_count=800` (`n_eval_shapes=800`) for all variants
   - `chamfer_l2_n=0`, `chamfer_l1_n=0`, `fscore_n=0` for all variants
+  - root cause (verified by 10-shape debug with `--mesh_store_per_shape 1`):
+    - per-shape error: `No module named 'skimage'`
+    - `completion_cpac_udf.py` uses `skimage.measure.marching_cubes` for mesh reconstruction;
+      without `scikit-image`, mesh stage fails for every shape.
 
 CPAC metrics by variant (same for both protocols):
 
@@ -416,3 +421,147 @@ CPAC metrics by variant (same for both protocols):
 | `b06_split_dirfps_typepos` | 0.2406 | 0.2852 | 0.0002 | 800/800 | 0/0/0 |
 | `b07_event_xanchor_typepos` | 0.2389 | 0.2840 | 0.0012 | 800/800 | 0/0/0 |
 | `b08_event_dirfps_typepos` | 0.2433 | 0.2864 | 0.0008 | 800/800 | 0/0/0 |
+
+## 13. CPAC seq2seq + mesh pipeline validation patch (2026-02-26)
+
+### 13.1 Root cause confirmed for `split_sep` checkpoints
+
+`completion_cpac_udf.py` had a serialization mismatch for `qa_layout=split_sep`:
+
+- CPAC path built split-style sequence without `[SEP]` token.
+- query-position extraction treated only `split` as split-layout and routed `split_sep` through interleave indexing.
+- mesh/cpac max-length precheck did not include the extra separator token.
+
+Patch applied:
+
+- `nepa3d/analysis/completion_cpac_udf.py`
+  - added `TYPE_SEP` handling in both CPAC feature builders
+  - unified split handling for `split` + `split_sep` in query-index extraction
+  - included `split_sep` separator in required sequence-length check
+
+Sanity rerun (small subset, same CPAC protocol):
+
+- `b00_interleave_theta`:
+  - `--head_train_max_shapes 200 --max_shapes 80` -> `iou@tau=0.8026`
+- `b04_split_xanchor_morton_typepos`:
+  - `--head_train_max_shapes 200 --max_shapes 80` -> `iou@tau=0.6697`
+
+Interpretation:
+
+- prior near-zero CPAC of `b01`..`b08` in §12 is consistent with evaluation-side layout mismatch,
+  not sufficient evidence of model collapse.
+
+### 13.2 Mesh/chamfer path unblocked
+
+Two independent issues were fixed:
+
+1. Runtime dependency:
+   - installed `scikit-image` in `.venv` (`skimage.measure.marching_cubes` dependency).
+2. API compatibility:
+   - `completion_cpac_udf.py`: robust `mesh_metrics(...)` kwargs dispatch by signature.
+   - `nepa3d/analysis/mesh_metrics.py`: `trimesh.sample.sample_surface` seed compatibility
+     (`int` seed first, fallback to `RandomState`).
+
+Mesh smoke result after fixes:
+
+- `b04_split_xanchor_morton_typepos`, `--head_train_max_shapes 20 --max_shapes 2 --mesh_eval=1`
+  - `mesh_eval.fail_count=0`
+  - `chamfer_l2_n=2`, `chamfer_l1_n=2`, `fscore_n=2`
+
+Note:
+
+- §12 mesh fail (`800/800`) and `b01..b08` near-zero CPAC should now be treated as
+  **pre-fix historical artifact**.
+
+## 14. CPAC/mesh official rerun submission (post-fix, 18 jobs)
+
+Submitted on: `2026-02-26`
+
+Purpose:
+
+- run the full 18-job `a256_queryrethink` CPAC-only matrix with the fixed evaluator:
+  - `split_sep` serialization/query-index/max-len fixes in `completion_cpac_udf.py`
+  - mesh path fixes (`skimage` dependency + `mesh_metrics` API compatibility + trimesh seed compatibility)
+
+Submission:
+
+- script: `scripts/eval/submit_a256_queryrethink_cpac_retry_qf.sh`
+- run set: `a256_queryrethink_cpac_retry3_20260226_152442`
+- log root:
+  - `logs/eval/a256_queryrethink_cpac_retry3_20260226_152442`
+- result root:
+  - `results/a256_queryrethink_cpac_retry3_20260226_152442`
+- submitted jobs record:
+  - `logs/eval/a256_queryrethink_cpac_retry3_20260226_152442/submitted_jobs_a256_queryrethink_cpac_retry3_20260226_152442.txt`
+
+Submitted jobs (`18`):
+
+- `97791.qjcm` `b00_interleave_theta_sotafair_cpacfix`
+- `97792.qjcm` `b00_interleave_theta_nepafull_cpacfix`
+- `97793.qjcm` `b01_split_theta_sotafair_cpacfix`
+- `97794.qjcm` `b01_split_theta_nepafull_cpacfix`
+- `97795.qjcm` `b02_split_theta_typepos_sotafair_cpacfix`
+- `97796.qjcm` `b02_split_theta_typepos_nepafull_cpacfix`
+- `97797.qjcm` `b03_split_viewraster_typepos_sotafair_cpacfix`
+- `97798.qjcm` `b03_split_viewraster_typepos_nepafull_cpacfix`
+- `97799.qjcm` `b04_split_xanchor_morton_typepos_sotafair_cpacfix`
+- `97800.qjcm` `b04_split_xanchor_morton_typepos_nepafull_cpacfix`
+- `97801.qjcm` `b05_split_xanchor_fps_typepos_sotafair_cpacfix`
+- `97802.qjcm` `b05_split_xanchor_fps_typepos_nepafull_cpacfix`
+- `97803.qjcm` `b06_split_dirfps_typepos_sotafair_cpacfix`
+- `97804.qjcm` `b06_split_dirfps_typepos_nepafull_cpacfix`
+- `97805.qjcm` `b07_event_xanchor_typepos_sotafair_cpacfix`
+- `97806.qjcm` `b07_event_xanchor_typepos_nepafull_cpacfix`
+- `97807.qjcm` `b08_event_dirfps_typepos_sotafair_cpacfix`
+- `97808.qjcm` `b08_event_dirfps_typepos_nepafull_cpacfix`
+
+Immediate scheduler check:
+
+- all `97791`..`97808` are `job_state=R`.
+
+## 15. 256 classification results (eval18, `pb_t50_rs`, 18 jobs complete)
+
+Status check (`97716`..`97733`):
+
+- all jobs: `job_state=F`, `Exit_status=0`
+- run set: `a256_queryrethink_eval18_cls_pb_t50_rs_20260226_141335`
+- log root:
+  - `logs/eval/a256_queryrethink_eval18_cls_pb_t50_rs_20260226_141335`
+- result root:
+  - `results/a256_queryrethink_eval18_cls_pb_t50_rs_20260226_141335`
+
+Run settings:
+
+- `SCAN_CACHE_ROOT=data/scanobjectnn_pb_t50_rs_v2`
+- `RUN_SCAN=1`, `RUN_MODELNET=1`, `RUN_CPAC=0`
+
+Final metrics (from `*_classification_scan.log` and `*_classification_modelnet.log`):
+
+| variant | protocol | scan `best_val` | scan `best_ep` | scan `test_acc` | modelnet `best_val` | modelnet `best_ep` | modelnet `test_acc` |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `b00_interleave_theta` | `sotafair` | 0.5443 | 70 | 0.4342 | 0.8677 | 54 | 0.8568 |
+| `b00_interleave_theta` | `nepafull` | 0.3220 | 88 | 0.2861 | 0.6206 | 93 | 0.6084 |
+| `b01_split_theta` | `sotafair` | 0.5208 | 51 | 0.4261 | 0.8682 | 69 | 0.8551 |
+| `b01_split_theta` | `nepafull` | 0.3351 | 61 | 0.2998 | 0.7104 | 98 | 0.7122 |
+| `b02_split_theta_typepos` | `sotafair` | 0.5833 | 76 | 0.4753 | 0.8594 | 71 | 0.8555 |
+| `b02_split_theta_typepos` | `nepafull` | 0.3151 | 86 | 0.2904 | 0.6152 | 96 | 0.6003 |
+| `b03_split_viewraster_typepos` | `sotafair` | 0.5095 | 86 | 0.4245 | 0.8750 | 65 | 0.8630 |
+| `b03_split_viewraster_typepos` | `nepafull` | 0.3351 | 64 | 0.3044 | 0.7036 | 93 | 0.7344 |
+| `b04_split_xanchor_morton_typepos` | `sotafair` | 0.6441 | 89 | 0.5059 | 0.8721 | 87 | 0.8652 |
+| `b04_split_xanchor_morton_typepos` | `nepafull` | 0.3663 | 71 | 0.3275 | 0.7563 | 90 | 0.7738 |
+| `b05_split_xanchor_fps_typepos` | `sotafair` | 0.5920 | 79 | 0.4785 | 0.8672 | 91 | 0.8607 |
+| `b05_split_xanchor_fps_typepos` | `nepafull` | 0.3255 | 61 | 0.2894 | 0.7363 | 84 | 0.7588 |
+| `b06_split_dirfps_typepos` | `sotafair` | 0.5964 | 76 | 0.4863 | 0.8657 | 50 | 0.8652 |
+| `b06_split_dirfps_typepos` | `nepafull` | 0.3429 | 70 | 0.3079 | 0.7402 | 97 | 0.7562 |
+| `b07_event_xanchor_typepos` | `sotafair` | 0.4575 | 85 | 0.4206 | 0.8472 | 59 | 0.8438 |
+| `b07_event_xanchor_typepos` | `nepafull` | 0.3212 | 96 | 0.2884 | 0.5933 | 94 | 0.5827 |
+| `b08_event_dirfps_typepos` | `sotafair` | 0.5113 | 81 | 0.4554 | 0.8647 | 48 | 0.8545 |
+| `b08_event_dirfps_typepos` | `nepafull` | 0.3220 | 85 | 0.2975 | 0.5952 | 94 | 0.5765 |
+
+Quick read:
+
+- ScanObjectNN (`test_acc`) best in both protocols: `b04_split_xanchor_morton_typepos`
+  - `sotafair=0.5059`, `nepafull=0.3275`
+- ModelNet40 (`test_acc`) best:
+  - `sotafair`: `b04_split_xanchor_morton_typepos` and `b06_split_dirfps_typepos` tie at `0.8652`
+  - `nepafull`: `b04_split_xanchor_morton_typepos=0.7738`

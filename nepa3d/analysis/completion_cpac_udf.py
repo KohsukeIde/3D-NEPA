@@ -1,5 +1,6 @@
 import argparse
 import glob
+import inspect
 import json
 import os
 from typing import Optional, Union
@@ -32,6 +33,7 @@ from ..token.tokenizer import (
     TYPE_POINT,
     TYPE_Q_POINT,
     TYPE_A_POINT,
+    TYPE_SEP,
 )
 
 try:
@@ -641,14 +643,25 @@ def infer_qa_tokens(ckpt, qa_tokens_arg):
 
 def infer_qa_layout(ckpt):
     pre_args = ckpt.get("args", {})
-    return str(pre_args.get("qa_layout", "interleave"))
+    layout = str(pre_args.get("qa_layout", "interleave")).lower().replace("+", "_")
+    if layout not in ("interleave", "split", "split_sep"):
+        layout = "interleave"
+    return layout
 
 
-def _required_seq_len(n_context: int, n_query: int, qa_tokens: bool, add_eos: bool) -> int:
+def _required_seq_len(
+    n_context: int,
+    n_query: int,
+    qa_tokens: bool,
+    add_eos: bool,
+    qa_layout: str = "interleave",
+) -> int:
     n_ctx = max(0, int(n_context))
     n_q = max(0, int(n_query))
     per_item = 2 if bool(qa_tokens) else 1
-    return 1 + per_item * (n_ctx + n_q) + (1 if bool(add_eos) else 0)
+    layout = str(qa_layout).lower().replace("+", "_")
+    sep = 1 if (bool(qa_tokens) and layout == "split_sep") else 0
+    return 1 + per_item * (n_ctx + n_q) + sep + (1 if bool(add_eos) else 0)
 
 
 def _validate_model_max_len(
@@ -657,6 +670,7 @@ def _validate_model_max_len(
     n_context: int,
     n_query: int,
     qa_tokens: bool,
+    qa_layout: str = "interleave",
     add_eos: bool,
     stage: str,
 ) -> None:
@@ -664,6 +678,7 @@ def _validate_model_max_len(
         n_context=n_context,
         n_query=n_query,
         qa_tokens=qa_tokens,
+        qa_layout=qa_layout,
         add_eos=add_eos,
     )
     try:
@@ -1060,27 +1075,54 @@ def extract_xy_for_path(
             a_part = np.concatenate([ctx_a, qry_a], axis=0)
             q_type = np.full((q_part.shape[0],), TYPE_Q_POINT, dtype=np.int64)
             a_type = np.full((a_part.shape[0],), TYPE_A_POINT, dtype=np.int64)
-            if add_eos:
-                feat = np.concatenate([bos, q_part, a_part, eos], axis=0)
-                type_id = np.concatenate(
-                    [
-                        np.array([TYPE_BOS], dtype=np.int64),
-                        q_type,
-                        a_type,
-                        np.array([TYPE_EOS], dtype=np.int64),
-                    ],
-                    axis=0,
-                )
+            if layout == "split_sep":
+                sep_feat = np.zeros((1, 15), dtype=np.float32)
+                sep_type = np.array([TYPE_SEP], dtype=np.int64)
+                if add_eos:
+                    feat = np.concatenate([bos, q_part, sep_feat, a_part, eos], axis=0)
+                    type_id = np.concatenate(
+                        [
+                            np.array([TYPE_BOS], dtype=np.int64),
+                            q_type,
+                            sep_type,
+                            a_type,
+                            np.array([TYPE_EOS], dtype=np.int64),
+                        ],
+                        axis=0,
+                    )
+                else:
+                    feat = np.concatenate([bos, q_part, sep_feat, a_part], axis=0)
+                    type_id = np.concatenate(
+                        [
+                            np.array([TYPE_BOS], dtype=np.int64),
+                            q_type,
+                            sep_type,
+                            a_type,
+                        ],
+                        axis=0,
+                    )
             else:
-                feat = np.concatenate([bos, q_part, a_part], axis=0)
-                type_id = np.concatenate(
-                    [
-                        np.array([TYPE_BOS], dtype=np.int64),
-                        q_type,
-                        a_type,
-                    ],
-                    axis=0,
-                )
+                if add_eos:
+                    feat = np.concatenate([bos, q_part, a_part, eos], axis=0)
+                    type_id = np.concatenate(
+                        [
+                            np.array([TYPE_BOS], dtype=np.int64),
+                            q_type,
+                            a_type,
+                            np.array([TYPE_EOS], dtype=np.int64),
+                        ],
+                        axis=0,
+                    )
+                else:
+                    feat = np.concatenate([bos, q_part, a_part], axis=0)
+                    type_id = np.concatenate(
+                        [
+                            np.array([TYPE_BOS], dtype=np.int64),
+                            q_type,
+                            a_type,
+                        ],
+                        axis=0,
+                    )
     else:
         ctx_feat = np.zeros((int(n_ctx_eff), 15), dtype=np.float32)
         if n_ctx_eff > 0:
@@ -1121,7 +1163,8 @@ def extract_xy_for_path(
     rep = rep.squeeze(0).detach().cpu().numpy().astype(np.float32)
 
     if bool(qa_tokens):
-        if str(qa_layout).lower() == "split":
+        layout = str(qa_layout).lower().replace("+", "_")
+        if layout in ("split", "split_sep"):
             q_start = 1 + int(n_ctx_eff)
             q_pos = q_start + np.arange(n_q_eff, dtype=np.int64)
             X = rep[q_pos]
@@ -1256,13 +1299,29 @@ def _build_feat_type_for_ctx_and_queries(
         q_a[:, 10] = 0.0
         q_a_type = np.full((n_q,), TYPE_A_POINT, dtype=np.int64)
 
-        if str(qa_layout) == "split":
-            feat = np.concatenate([bos, ctx_q, q_q, ctx_a, q_a], axis=0)
-            type_id = np.concatenate(
-                [bos_type, ctx_q_type, q_q_type, ctx_a_type, q_a_type], axis=0
-            )
-            q_pos: Union[slice, np.ndarray] = slice(1 + n_ctx, 1 + n_ctx + n_q)
-        else:
+        layout = str(qa_layout).lower().replace("+", "_")
+        if layout in ("split", "split_sep"):
+            if layout == "split_sep":
+                sep_feat = np.zeros((1, feat_dim), dtype=np.float32)
+                feat = np.concatenate([bos, ctx_q, q_q, sep_feat, ctx_a, q_a], axis=0)
+                type_id = np.concatenate(
+                    [
+                        bos_type,
+                        ctx_q_type,
+                        q_q_type,
+                        np.array([TYPE_SEP], dtype=np.int64),
+                        ctx_a_type,
+                        q_a_type,
+                    ],
+                    axis=0,
+                )
+            else:
+                feat = np.concatenate([bos, ctx_q, q_q, ctx_a, q_a], axis=0)
+                type_id = np.concatenate(
+                    [bos_type, ctx_q_type, q_q_type, ctx_a_type, q_a_type], axis=0
+                )
+            q_pos = slice(1 + n_ctx, 1 + n_ctx + n_q)
+        elif layout == "interleave":
             ctx_qa = np.stack([ctx_q, ctx_a], axis=1).reshape(2 * n_ctx, feat_dim)
             ctx_qa_type = np.stack([ctx_q_type, ctx_a_type], axis=1).reshape(2 * n_ctx)
             q_qa = np.stack([q_q, q_a], axis=1).reshape(2 * n_q, feat_dim)
@@ -1271,6 +1330,8 @@ def _build_feat_type_for_ctx_and_queries(
             type_id = np.concatenate([bos_type, ctx_qa_type, q_qa_type], axis=0)
             base = 1 + 2 * n_ctx
             q_pos = base + 2 * np.arange(n_q, dtype=np.int64)
+        else:
+            raise ValueError(f"unknown qa_layout: {qa_layout}")
     else:
         ctx_feat = np.zeros((n_ctx, feat_dim), dtype=np.float32)
         ctx_feat[:, 0:3] = ctx_xyz
@@ -1403,6 +1464,7 @@ def _mesh_eval_chamfer_for_paths(
             n_context=int(getattr(args, "n_context", 0)),
             n_query=int(getattr(args, "mesh_chunk_n_query", 512)),
             qa_tokens=bool(qa_tokens),
+            qa_layout=str(qa_layout),
             add_eos=bool(add_eos),
             stage="mesh_eval",
         )
@@ -1483,27 +1545,21 @@ def _mesh_eval_chamfer_for_paths(
             v_gt, f_gt = _mesh_from_udf_grid(gt_vals, level=level)
             tau = float(getattr(args, "mesh_fscore_tau", 0.01))
             n_samples = int(getattr(args, "mesh_num_samples", 10000))
-            # Support current mesh_metrics.py API, while keeping compatibility
-            # with older call signatures.
-            try:
-                m = mesh_metrics(
-                    v_pred,
-                    f_pred,
-                    v_gt,
-                    f_gt,
-                    n_samples=n_samples,
-                    taus=(tau,),
-                    seed=int(getattr(args, "eval_seed", 0)),
-                )
-            except TypeError:
-                m = mesh_metrics(
-                    v_pred,
-                    f_pred,
-                    v_gt,
-                    f_gt,
-                    num_samples=n_samples,
-                    fscore_tau=tau,
-                )
+            # Handle API drift in mesh_metrics() without swallowing internal errors.
+            sig = inspect.signature(mesh_metrics)
+            params = sig.parameters
+            mm_kwargs = {}
+            if "n_samples" in params:
+                mm_kwargs["n_samples"] = n_samples
+            elif "num_samples" in params:
+                mm_kwargs["num_samples"] = n_samples
+            if "taus" in params:
+                mm_kwargs["taus"] = (tau,)
+            elif "fscore_tau" in params:
+                mm_kwargs["fscore_tau"] = tau
+            if "seed" in params:
+                mm_kwargs["seed"] = int(getattr(args, "eval_seed", 0))
+            m = mesh_metrics(v_pred, f_pred, v_gt, f_gt, **mm_kwargs)
 
             fscore_key = f"fscore@{tau}"
             fscore_val = m.get("fscore", m.get(fscore_key, float("nan")))
@@ -2071,6 +2127,7 @@ def main():
         n_context=int(args.n_context),
         n_query=int(args.n_query),
         qa_tokens=bool(qa_tokens),
+        qa_layout=str(qa_layout),
         add_eos=bool(add_eos),
         stage="cpac_eval",
     )
