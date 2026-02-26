@@ -1,6 +1,10 @@
 # 1024-Point Pretrain A/B/C/D (Active Plan)
 
-Last updated: 2026-02-25
+Last updated: 2026-02-26
+
+> Legacy note (2026-02-26): this file is now treated as a historical execution ledger.
+> Active protocol-correct re-evaluation planning is tracked in:
+> `nepa3d/docs/pretrain_abcd_1024_variant_reval_active.md`
 
 ## 1. Scope
 
@@ -2193,3 +2197,269 @@ CPAC/chamfer status in this run set:
 
 - all variants stopped at mesh precheck with `ValueError: mesh_eval requires sequence length 1538, but model max_len=1300`
 - therefore no valid CPAC/chamfer summary is available from this bundle.
+
+### 37.7 CPAC/chamfer retry submission (mesh precheck fix) (2026-02-26)
+
+Purpose:
+
+- Re-run only the failed CPAC part (including mesh/chamfer) for the same `a256_queryrethink` checkpoints.
+- Keep classification results from §37.6 as-is.
+
+Fix applied for retry:
+
+- Keep:
+  - `CPAC_N_CONTEXT=256`
+  - `CPAC_N_QUERY=256`
+  - `CPAC_MAX_LEN=1300`
+- Change:
+  - `CPAC_MESH_CHUNK_N_QUERY: 512 -> 256`
+- rationale:
+  - mesh precheck length uses `1 + 2*(n_context + mesh_chunk_n_query) + eos`
+  - old `256+512` required `1538` (`>1300`)
+  - new `256+256` requires `1026` (`<=1300`)
+
+Submission:
+
+- helper script: `scripts/eval/submit_a256_queryrethink_cpac_retry_qf.sh`
+- source checkpoint set: `a256_queryrethink_20260226_024537`
+- retry run set: `a256_queryrethink_cpac_retry_20260226_125022`
+- log root: `logs/eval/a256_queryrethink_cpac_retry_20260226_125022`
+- result root: `results/a256_queryrethink_cpac_retry_20260226_125022`
+- submitted jobs list:
+  - `logs/eval/a256_queryrethink_cpac_retry_20260226_125022/submitted_jobs_a256_queryrethink_cpac_retry_20260226_125022.txt`
+
+Submitted 18 CPAC-only jobs:
+
+- `97569.qjcm` `b00_interleave_theta_sotafair_cpacfix`
+- `97570.qjcm` `b00_interleave_theta_nepafull_cpacfix`
+- `97571.qjcm` `b01_split_theta_sotafair_cpacfix`
+- `97572.qjcm` `b01_split_theta_nepafull_cpacfix`
+- `97573.qjcm` `b02_split_theta_typepos_sotafair_cpacfix`
+- `97574.qjcm` `b02_split_theta_typepos_nepafull_cpacfix`
+- `97575.qjcm` `b03_split_viewraster_typepos_sotafair_cpacfix`
+- `97576.qjcm` `b03_split_viewraster_typepos_nepafull_cpacfix`
+- `97577.qjcm` `b04_split_xanchor_morton_typepos_sotafair_cpacfix`
+- `97578.qjcm` `b04_split_xanchor_morton_typepos_nepafull_cpacfix`
+- `97579.qjcm` `b05_split_xanchor_fps_typepos_sotafair_cpacfix`
+- `97580.qjcm` `b05_split_xanchor_fps_typepos_nepafull_cpacfix`
+- `97581.qjcm` `b06_split_dirfps_typepos_sotafair_cpacfix`
+- `97582.qjcm` `b06_split_dirfps_typepos_nepafull_cpacfix`
+- `97583.qjcm` `b07_event_xanchor_typepos_sotafair_cpacfix`
+- `97584.qjcm` `b07_event_xanchor_typepos_nepafull_cpacfix`
+- `97585.qjcm` `b08_event_dirfps_typepos_sotafair_cpacfix`
+- `97586.qjcm` `b08_event_dirfps_typepos_nepafull_cpacfix`
+
+State at submission check:
+
+- all 18 jobs are `R` (`qstat -x`, immediate post-submit check).
+
+### 37.8 Unreported-status clarification (2026-02-26)
+
+Definition used in this document:
+
+- `unreported` means there is no finalized metric table yet for that checkpoint/runset.
+
+Current unreported items asked in review:
+
+- Pretrain augmentation train/test-domain-gap track (§30):
+  - pretrain checkpoints are completed (`96560`, `96561`),
+  - but no downstream eval logs/results were found that reference:
+    - `runs/pretrain_ab_1024_rfps_aug_rfps_aug_ab_20260225_171018_runA/last.pt`
+    - `runs/pretrain_ab_1024_rfps_aug_rfps_aug_ab_20260225_171018_runB/last.pt`
+  - therefore this track is still unreported.
+- Protocol-variant split benchmark (`obj_bg` / `obj_only` / `pb_t50_rs`, §23):
+  - submit path is implemented,
+  - but no executed runset/result table is recorded yet; still unreported.
+- Train-variant thinning / overfit-suppression setting (for example, original-only train):
+  - no dedicated implementation+run table is recorded yet; still unreported.
+- ECCV-style reporting policy (test-only headline):
+  - policy intent is noted, but existing tables still include `best_val`;
+  - final protocol tables should be emitted as `test_acc`-first when runs complete.
+
+Note on CPAC/chamfer retry:
+
+- `97569`..`97586` are currently running (`R`) in `a256_queryrethink_cpac_retry_20260226_125022`;
+- CPAC/chamfer numbers remain pending until these jobs finish successfully.
+
+## 38. Protocol-Correct Re-evaluation Policy (2026-02-26)
+
+For external/fair comparison tables, ScanObjectNN must use protocol-variant split caches
+instead of mixed `main_split` cache.
+
+Canonical variant protocol (one train h5 per variant):
+
+- `obj_bg`:
+  - train: `main_split/training_objectdataset.h5`
+  - test: `main_split/test_objectdataset.h5`
+- `obj_only`:
+  - train: `main_split_nobg/training_objectdataset.h5`
+  - test: `main_split_nobg/test_objectdataset.h5`
+- `pb_t50_rs`:
+  - train: `main_split/training_objectdataset_augmentedrot_scale75.h5`
+  - test: `main_split/test_objectdataset_augmentedrot_scale75.h5`
+
+Operational rule:
+
+- Any ScanObjectNN result from `data/scanobjectnn_main_split_v2` is treated as
+  internal/provisional and not used as final fair benchmark evidence.
+- Final benchmark tables should headline `test_acc` only.
+- `best_val` / `best_ep` are kept as internal diagnostics, not as headline metrics.
+
+## 39. Re-evaluation Scope (Must-check Ablations)
+
+Not every historical run is re-executed. The following ablations are considered mandatory
+for protocol-correct re-evaluation.
+
+### 39.1 Phase-1 (must-run for fair benchmark)
+
+1. Variant cache build:
+   - build `data/scanobjectnn_obj_bg_v2`
+   - build `data/scanobjectnn_obj_only_v2`
+   - build `data/scanobjectnn_pb_t50_rs_v2`
+2. 1024 core pretrain comparison:
+   - `Run A` vs `Run B` (at minimum; add `C/D` if resources permit)
+3. Fine-tune regularization ablation on each variant:
+   - `base`, `llrd`, `dp`, `llrd_dp`
+4. Pretrain sampling-mode check on each variant:
+   - `fps` pretrain checkpoint vs `rfps` pretrain checkpoint
+
+### 39.2 Phase-2 (high-value follow-ups after Phase-1)
+
+1. point-order sensitivity:
+   - `point_order_mode=morton` vs `fps` (variant-split protocol)
+2. augmentation sensitivity:
+   - `scanobjectnn` vs `none` (variant-split protocol)
+3. dual-mask ON/OFF:
+   - run when comparable 1024 checkpoints are ready for both states.
+
+### 39.3 Reporting policy for this re-evaluation cycle
+
+- Publish one table per variant (`obj_bg`, `obj_only`, `pb_t50_rs`).
+- Keep SOTA-fair and NEPA-full as separate tables.
+- For each row, record metadata:
+  - checkpoint path/job id
+  - pretrain `pt_sample_mode_train` / `pt_rfps_m`
+  - eval `pt_sample_mode_train` / `pt_sample_mode_eval`
+  - ScanObjectNN cache root (must be one of variant caches above)
+
+## 40. Change-Driven Verification Matrix (2026-02-26)
+
+This section narrows what must be re-tested after switching to protocol-variant
+reporting as the default.
+
+### 40.1 Should 256 be re-run?
+
+Yes. Re-run `256` as a low-cost gate before expensive `1024` reruns.
+
+Role of `256`:
+
+- validate protocol wiring (`SCAN_CACHE_ROOT` is variant cache, not main_split)
+- validate trend direction quickly
+- de-risk job scripts and dependency chain
+
+Limitation:
+
+- `256` is not the final headline benchmark; final claims should be from `1024`.
+
+### 40.2 Must-test hypotheses after this policy change
+
+1. Variant split can change ranking:
+   - re-check core checkpoints on `obj_bg` / `obj_only` / `pb_t50_rs`.
+2. In-domain Scan pretrain contamination risk:
+   - compare pretrain corpus:
+     - `mesh+udf+scan` (`pretrain_mixed_shapenet_mesh_udf_scan_mainsplit.yaml`)
+     - `mesh+udf only` (`pretrain_mixed_shapenet_mesh_udf.yaml`)
+3. Sampling robustness:
+   - `fps` pretrain vs `rfps` pretrain under the same variant protocol.
+4. Fine-tune ablation stability:
+   - `base` vs `llrd` vs `dp` vs `llrd_dp` after (1)-(3) are confirmed.
+
+### 40.3 Minimal execution order (recommended)
+
+Phase A (protocol sanity):
+
+1. build three variant caches (`obj_bg`, `obj_only`, `pb_t50_rs`)
+2. check `_meta/scanobjectnn_{train,test}_source.txt` for each cache:
+   - expected `h5_count=1` per split
+
+Phase B (256 gate):
+
+1. run small comparison for corpus effect:
+   - `mesh+udf+scan` vs `mesh+udf only`
+2. evaluate per variant, at least with `base`
+3. if ranking/trend is unstable, do not scale to 1024 yet
+
+Phase C (1024 core rerun):
+
+1. re-evaluate key checkpoints on all three variants:
+   - at minimum `A/B`; include `C/D` if resources allow
+2. include `fps` vs `rfps` check for the same checkpoint family
+
+Phase D (secondary ablations):
+
+1. run `llrd/dp/llrd_dp` on top checkpoints from Phase C
+2. optional follow-up:
+   - point order (`morton` vs `fps`)
+   - augmentation preset (`scanobjectnn` vs `none`)
+
+### 40.4 What does not need full rerun immediately
+
+- CPAC/chamfer is not directly affected by ScanObjectNN variant split itself.
+- So CPAC/chamfer rerun is required only for newly trained checkpoints used for
+  final tables, not for every intermediate Scan-only protocol test.
+
+## 41. Historical Comparison Backfill Policy (2026-02-26)
+
+Clarification for this cycle:
+
+- yes, augmentation comparisons are included.
+- For ScanObjectNN, the target is to re-check all previously claimed comparison axes
+  under variant-split protocol (`obj_bg` / `obj_only` / `pb_t50_rs`).
+- execution can be staged, but omission from final report is not allowed for axes
+  that were previously used for conclusions.
+
+### 41.1 Backfill target axes (ScanObjectNN)
+
+1. Pretrain corpus axis:
+   - `mesh+udf+scan` vs `mesh+udf only` vs `scan-pointcloud`
+2. Pretrain sampling axis:
+   - `fps` vs `rfps`
+3. Pretrain architecture/tokenization axis:
+   - A/B/C/D core settings
+   - query serialization/rethink variants (use `256` gate first, then selected `1024`)
+4. Fine-tune optimization axis:
+   - `base`, `llrd`, `dp`, `llrd_dp`
+   - `llrd_mode` (`exp`, `linear`) when relevant to prior claims
+5. Fine-tune representation axis:
+   - `point_order_mode` (`morton`, `fps`)
+   - `cls_pooling` (`mean_q`, `mean_a`) where previously compared
+6. Fine-tune regularization axis:
+   - label smoothing sweep (`0.0`, `0.1`)
+   - `use_fc_norm` and norm no-decay split ablation
+7. Fine-tune augmentation axis:
+   - `scanobjectnn` vs `none`
+   - include legacy preset only when reproducing legacy claims
+8. Dual-mask axis:
+   - ON/OFF comparison for comparable checkpoint families
+
+### 41.2 Practical execution rule
+
+- If a past section contains a comparative claim on ScanObjectNN, that axis enters
+  this backfill scope.
+- `256` runs are allowed as fast gate/screening, but final claim updates should be
+  confirmed on `1024`.
+- final public-facing tables must be variant-split and `test_acc`-headline.
+
+### 41.3 Recommended bundling to control queue size
+
+1. Bundle A (protocol + core):
+   - variant cache build
+   - A/B core on 3 variants (base only), `256` then `1024`
+2. Bundle B (optimization/regularization):
+   - `llrd/dp/llrd_dp`, pooling, label smoothing, fc_norm/wd-split
+3. Bundle C (representation/augmentation):
+   - point order, augmentation preset, dual-mask
+4. Bundle D (corpus/sampling/tokenization follow-up):
+   - mesh+udf-only comparisons
+   - `fps` vs `rfps`
+   - selected query-rethink variants promoted from `256` to `1024`

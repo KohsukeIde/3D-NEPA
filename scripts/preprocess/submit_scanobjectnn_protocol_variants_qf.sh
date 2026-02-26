@@ -1,0 +1,72 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT="${SCRIPT_DIR}/preprocess_scanobjectnn_protocol_variants.sh"
+WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+
+RT_QF="${RT_QF:-1}"
+WALLTIME="${WALLTIME:-24:00:00}"
+GROUP_LIST="${GROUP_LIST:-qgah50055}"
+JOB_NAME="${JOB_NAME:-preprocess_scanobjectnn_variants_v2}"
+QSUB_DEPEND="${QSUB_DEPEND:-}"
+
+MAIN_SPLIT_DIR="${MAIN_SPLIT_DIR:-data/ScanObjectNN/h5_files/main_split}"
+MAIN_SPLIT_NO_BG_DIR="${MAIN_SPLIT_NO_BG_DIR:-data/ScanObjectNN/h5_files/main_split_nobg}"
+VARIANT_H5_ROOT="${VARIANT_H5_ROOT:-data/ScanObjectNN/h5_files_protocol_variants}"
+OBJ_BG_CACHE="${OBJ_BG_CACHE:-data/scanobjectnn_obj_bg_v2}"
+OBJ_ONLY_CACHE="${OBJ_ONLY_CACHE:-data/scanobjectnn_obj_only_v2}"
+PB_T50_RS_CACHE="${PB_T50_RS_CACHE:-data/scanobjectnn_pb_t50_rs_v2}"
+
+PT_POOL="${PT_POOL:-4000}"
+RAY_POOL="${RAY_POOL:-256}"
+PT_SURFACE_RATIO="${PT_SURFACE_RATIO:-0.5}"
+PT_SURFACE_SIGMA="${PT_SURFACE_SIGMA:-0.02}"
+SEED="${SEED:-0}"
+ALLOW_DUPLICATE_STEMS="${ALLOW_DUPLICATE_STEMS:-0}"
+
+LOG_DIR="${LOG_DIR:-${WORKDIR}/logs/preprocess/scanobjectnn_variants_v2}"
+mkdir -p "${LOG_DIR}"
+
+if ! command -v qsub >/dev/null 2>&1; then
+  echo "[error] qsub not found"
+  exit 1
+fi
+
+qvars=(
+  "WORKDIR=${WORKDIR}"
+  "MAIN_SPLIT_DIR=${MAIN_SPLIT_DIR}"
+  "MAIN_SPLIT_NO_BG_DIR=${MAIN_SPLIT_NO_BG_DIR}"
+  "VARIANT_H5_ROOT=${VARIANT_H5_ROOT}"
+  "OBJ_BG_CACHE=${OBJ_BG_CACHE}"
+  "OBJ_ONLY_CACHE=${OBJ_ONLY_CACHE}"
+  "PB_T50_RS_CACHE=${PB_T50_RS_CACHE}"
+  "PT_POOL=${PT_POOL}"
+  "RAY_POOL=${RAY_POOL}"
+  "PT_SURFACE_RATIO=${PT_SURFACE_RATIO}"
+  "PT_SURFACE_SIGMA=${PT_SURFACE_SIGMA}"
+  "SEED=${SEED}"
+  "ALLOW_DUPLICATE_STEMS=${ALLOW_DUPLICATE_STEMS}"
+)
+QVARS="$(IFS=,; echo "${qvars[*]}")"
+
+cmd=(
+  qsub
+  -l "rt_QF=${RT_QF}"
+  -l "walltime=${WALLTIME}"
+  -W "group_list=${GROUP_LIST}"
+  -N "${JOB_NAME}"
+  -o "${LOG_DIR}/${JOB_NAME}.out"
+  -e "${LOG_DIR}/${JOB_NAME}.err"
+  -v "${QVARS}"
+)
+if [[ -n "${QSUB_DEPEND}" ]]; then
+  cmd+=( -W "depend=${QSUB_DEPEND}" )
+fi
+cmd+=( "${SCRIPT}" )
+
+echo "[submit] ${JOB_NAME}"
+echo "[submit] obj_bg=${OBJ_BG_CACHE}"
+echo "[submit] obj_only=${OBJ_ONLY_CACHE}"
+echo "[submit] pb_t50_rs=${PB_T50_RS_CACHE}"
+"${cmd[@]}"

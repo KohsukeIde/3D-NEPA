@@ -14,9 +14,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}" || exit 1
 
 PYTHON_BIN="${PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"
-# Paper-safe default: use split-specific cache generated from h5_files/main_split.
-# Legacy/internal tables may still use data/scanobjectnn_cache_v2 explicitly.
-CACHE_ROOT="${CACHE_ROOT:-data/scanobjectnn_main_split_v2}"
+# Benchmark policy: use protocol-variant cache explicitly.
+CACHE_ROOT="${CACHE_ROOT:-}"
 BACKEND="${BACKEND:-pointcloud_noray}"
 
 BATCH="${BATCH:-128}"
@@ -90,6 +89,15 @@ if [ ! -x "${PYTHON_BIN}" ]; then
   exit 1
 fi
 
+if [ -z "${CACHE_ROOT}" ]; then
+  echo "[error] CACHE_ROOT is required."
+  echo "        Use: data/scanobjectnn_obj_bg_v2 | data/scanobjectnn_obj_only_v2 | data/scanobjectnn_pb_t50_rs_v2"
+  exit 1
+fi
+if [[ "${CACHE_ROOT}" == *"scanobjectnn_main_split_v2"* ]]; then
+  echo "[error] CACHE_ROOT=${CACHE_ROOT} is disallowed (main_split deprecated)."
+  exit 1
+fi
 if [ ! -d "${CACHE_ROOT}" ]; then
   echo "[error] missing cache root: ${CACHE_ROOT}"
   exit 1

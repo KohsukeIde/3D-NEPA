@@ -104,6 +104,7 @@ else
     RUN_SCAN="${RUN_SCAN:-1}" \
     RUN_MODELNET="${RUN_MODELNET:-1}" \
     RUN_CPAC="${RUN_CPAC:-0}" \
+    SCAN_CACHE_ROOT="${SCAN_CACHE_ROOT:-}" \
     SCAN_AUG_PRESET="${SCAN_AUG_PRESET:-scanobjectnn}" \
     MODELNET_AUG_PRESET="${MODELNET_AUG_PRESET:-modelnet40}" \
     AUG_EVAL="${AUG_EVAL:-1}" \

@@ -9,7 +9,13 @@ set -eu
 # This script creates small variant-specific h5 roots via symlink, then runs
 # preprocess_scanobjectnn.py per variant so train/test are cleanly separated.
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [[ -n "${WORKDIR:-}" ]] && [[ -f "${WORKDIR}/nepa3d/data/preprocess_scanobjectnn.py" ]]; then
+  ROOT_DIR="${WORKDIR}"
+elif [[ -n "${PBS_O_WORKDIR:-}" ]] && [[ -f "${PBS_O_WORKDIR}/nepa3d/data/preprocess_scanobjectnn.py" ]]; then
+  ROOT_DIR="${PBS_O_WORKDIR}"
+else
+  ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
 cd "${ROOT_DIR}" || exit 1
 
 PYTHON_BIN="${PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"

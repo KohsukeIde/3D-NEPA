@@ -50,8 +50,12 @@ for variant in "${_var_arr[@]}"; do
   esac
 
   if [[ ! -d "${cache_root}" ]]; then
-    echo "[error] missing cache for ${variant}: ${cache_root}"
-    exit 3
+    if [[ -n "${QSUB_DEPEND:-}" ]]; then
+      echo "[warn] cache not found yet for ${variant}: ${cache_root} (allowed because QSUB_DEPEND is set)"
+    else
+      echo "[error] missing cache for ${variant}: ${cache_root}"
+      exit 3
+    fi
   fi
 
   run_set_base="${RUN_SET_BASE_PREFIX}_${variant}"
@@ -70,4 +74,3 @@ n_variants="${#_var_arr[@]}"
 n_abl="${#_ab_arr[@]}"
 n_eval_jobs=$((n_variants * 4 * n_abl))
 echo "[summary] variants=${n_variants} ablations=${n_abl} eval_jobs=${n_eval_jobs}"
-

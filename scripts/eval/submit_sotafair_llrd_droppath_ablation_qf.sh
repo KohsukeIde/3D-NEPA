@@ -33,12 +33,24 @@ VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-group_auto}"
 RUN_CPAC="${RUN_CPAC:-0}"
 RUN_SCAN="${RUN_SCAN:-1}"
 RUN_MODELNET="${RUN_MODELNET:-1}"
-SCAN_CACHE_ROOT="${SCAN_CACHE_ROOT:-data/scanobjectnn_main_split_v2}"
+SCAN_CACHE_ROOT="${SCAN_CACHE_ROOT:-}"
 MODELNET_CACHE_ROOT="${MODELNET_CACHE_ROOT:-data/modelnet40_cache_v2}"
 UNPAIRED_CACHE_ROOT="${UNPAIRED_CACHE_ROOT:-data/shapenet_unpaired_cache_v1}"
 SCAN_AUG_PRESET="${SCAN_AUG_PRESET:-scanobjectnn}"
 MODELNET_AUG_PRESET="${MODELNET_AUG_PRESET:-modelnet40}"
 AUG_EVAL="${AUG_EVAL:-1}"
+
+if [[ "${RUN_SCAN}" == "1" ]]; then
+  if [[ -z "${SCAN_CACHE_ROOT}" ]]; then
+    echo "[error] SCAN_CACHE_ROOT is required when RUN_SCAN=1."
+    echo "        Use variant cache roots (obj_bg/obj_only/pb_t50_rs)."
+    exit 2
+  fi
+  if [[ "${SCAN_CACHE_ROOT}" == *"scanobjectnn_main_split_v2"* ]]; then
+    echo "[error] SCAN_CACHE_ROOT=${SCAN_CACHE_ROOT} is disallowed (main_split deprecated)."
+    exit 2
+  fi
+fi
 
 IFS=',' read -r -a ablation_arr <<< "${ABLATIONS}"
 

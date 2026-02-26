@@ -50,7 +50,7 @@ AUG_RECOMPUTE_DIST="${AUG_RECOMPUTE_DIST:-1}"
 RUN_SCAN="${RUN_SCAN:-1}"
 RUN_MODELNET="${RUN_MODELNET:-1}"
 RUN_CPAC="${RUN_CPAC:-1}"
-SCAN_CACHE_ROOT="${SCAN_CACHE_ROOT:-data/scanobjectnn_main_split_v2}"
+SCAN_CACHE_ROOT="${SCAN_CACHE_ROOT:-}"
 MODELNET_CACHE_ROOT="${MODELNET_CACHE_ROOT:-data/modelnet40_cache_v2}"
 UNPAIRED_CACHE_ROOT="${UNPAIRED_CACHE_ROOT:-data/shapenet_unpaired_cache_v1}"
 SCAN_AUG_PRESET="${SCAN_AUG_PRESET:-scanobjectnn}"
@@ -65,6 +65,19 @@ CKPT_RUNA="${CKPT_RUNA:-${WORKDIR}/runs/pretrain_abcd_1024_runA/last.pt}"
 CKPT_RUNB="${CKPT_RUNB:-${WORKDIR}/runs/pretrain_abcd_1024_runB/last.pt}"
 CKPT_RUNC="${CKPT_RUNC:-${WORKDIR}/runs/pretrain_abcd_1024_runC/last.pt}"
 CKPT_RUND="${CKPT_RUND:-${WORKDIR}/runs/pretrain_abcd_1024_runD/last.pt}"
+RUN_IDS="${RUN_IDS:-A,B,C,D}"
+
+if [[ "${RUN_SCAN}" == "1" ]]; then
+  if [[ -z "${SCAN_CACHE_ROOT}" ]]; then
+    echo "[error] SCAN_CACHE_ROOT is required when RUN_SCAN=1."
+    echo "        Use variant cache roots (obj_bg/obj_only/pb_t50_rs)."
+    exit 2
+  fi
+  if [[ "${SCAN_CACHE_ROOT}" == *"scanobjectnn_main_split_v2"* ]]; then
+    echo "[error] SCAN_CACHE_ROOT=${SCAN_CACHE_ROOT} is disallowed (main_split deprecated)."
+    exit 2
+  fi
+fi
 
 mkdir -p "${WORKDIR}/${LOG_ROOT}" "${WORKDIR}/${RESULTS_ROOT}" "${WORKDIR}/${EVAL_ROOT}"
 
@@ -106,9 +119,39 @@ submit() {
   "${cmd[@]}"
 }
 
-submit "runA" "${CKPT_RUNA}"
-submit "runB" "${CKPT_RUNB}"
-submit "runC" "${CKPT_RUNC}"
-submit "runD" "${CKPT_RUND}"
+IFS=',' read -r -a _run_arr <<< "${RUN_IDS}"
+_n_submit=0
+for _rid in "${_run_arr[@]}"; do
+  _rid="$(echo "${_rid}" | xargs | tr '[:lower:]' '[:upper:]')"
+  case "${_rid}" in
+    A)
+      submit "runA" "${CKPT_RUNA}"
+      _n_submit=$((_n_submit + 1))
+      ;;
+    B)
+      submit "runB" "${CKPT_RUNB}"
+      _n_submit=$((_n_submit + 1))
+      ;;
+    C)
+      submit "runC" "${CKPT_RUNC}"
+      _n_submit=$((_n_submit + 1))
+      ;;
+    D)
+      submit "runD" "${CKPT_RUND}"
+      _n_submit=$((_n_submit + 1))
+      ;;
+    "")
+      ;;
+    *)
+      echo "[error] unknown RUN_IDS entry: ${_rid} (use comma-separated A,B,C,D)"
+      exit 3
+      ;;
+  esac
+done
 
-echo "[done] submitted A/B/C/D classification+CPAC jobs"
+if [[ "${_n_submit}" -le 0 ]]; then
+  echo "[error] no runs selected by RUN_IDS=${RUN_IDS}"
+  exit 4
+fi
+
+echo "[done] submitted ${_n_submit} classification+CPAC jobs (RUN_IDS=${RUN_IDS})"

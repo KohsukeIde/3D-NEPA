@@ -49,7 +49,7 @@ AUG_RECOMPUTE_DIST="${AUG_RECOMPUTE_DIST:-1}"
 RUN_SCAN="${RUN_SCAN:-1}"
 RUN_MODELNET="${RUN_MODELNET:-1}"
 RUN_CPAC="${RUN_CPAC:-0}"
-SCAN_CACHE_ROOT="${SCAN_CACHE_ROOT:-data/scanobjectnn_main_split_v2}"
+SCAN_CACHE_ROOT="${SCAN_CACHE_ROOT:-}"
 MODELNET_CACHE_ROOT="${MODELNET_CACHE_ROOT:-data/modelnet40_cache_v2}"
 UNPAIRED_CACHE_ROOT="${UNPAIRED_CACHE_ROOT:-data/shapenet_unpaired_cache_v1}"
 SCAN_AUG_PRESET="${SCAN_AUG_PRESET:-scanobjectnn}"
@@ -59,6 +59,18 @@ MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-10}"
 CPAC_N_CONTEXT="${CPAC_N_CONTEXT:-256}"
 CPAC_N_QUERY="${CPAC_N_QUERY:-256}"
 CPAC_MAX_LEN="${CPAC_MAX_LEN:--1}"
+
+if [[ "${RUN_SCAN}" == "1" ]]; then
+  if [[ -z "${SCAN_CACHE_ROOT}" ]]; then
+    echo "[error] SCAN_CACHE_ROOT is required when RUN_SCAN=1."
+    echo "        Use variant cache roots (obj_bg/obj_only/pb_t50_rs)."
+    exit 2
+  fi
+  if [[ "${SCAN_CACHE_ROOT}" == *"scanobjectnn_main_split_v2"* ]]; then
+    echo "[error] SCAN_CACHE_ROOT=${SCAN_CACHE_ROOT} is disallowed (main_split deprecated)."
+    exit 2
+  fi
+fi
 
 # 256 dual-mask pretrain run metadata
 PRETRAIN_RUN_SET="${PRETRAIN_RUN_SET:-rfps_aug_dm256_20260226_001557}"

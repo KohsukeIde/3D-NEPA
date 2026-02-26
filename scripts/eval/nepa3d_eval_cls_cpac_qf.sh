@@ -15,7 +15,7 @@ CUDA_MODULE="${CUDA_MODULE:-cuda/12.9}"
 RUN_TAG="${RUN_TAG:?set RUN_TAG}"
 CKPT="${CKPT:?set CKPT}"
 
-SCAN_CACHE_ROOT="${SCAN_CACHE_ROOT:-data/scanobjectnn_main_split_v2}"
+SCAN_CACHE_ROOT="${SCAN_CACHE_ROOT:-}"
 MODELNET_CACHE_ROOT="${MODELNET_CACHE_ROOT:-data/modelnet40_cache_v2}"
 UNPAIRED_CACHE_ROOT="${UNPAIRED_CACHE_ROOT:-data/shapenet_unpaired_cache_v1}"
 
@@ -128,9 +128,21 @@ if [[ ! -f "${CKPT}" ]]; then
   exit 2
 fi
 
-if [[ "${RUN_SCAN}" == "1" ]] && [[ ! -d "${SCAN_CACHE_ROOT}" ]]; then
-  echo "[error] missing ScanObjectNN cache: ${SCAN_CACHE_ROOT}"
-  exit 2
+if [[ "${RUN_SCAN}" == "1" ]]; then
+  if [[ -z "${SCAN_CACHE_ROOT}" ]]; then
+    echo "[error] SCAN_CACHE_ROOT is required when RUN_SCAN=1."
+    echo "        Use a protocol-variant cache: data/scanobjectnn_obj_bg_v2 | data/scanobjectnn_obj_only_v2 | data/scanobjectnn_pb_t50_rs_v2"
+    exit 2
+  fi
+  if [[ "${SCAN_CACHE_ROOT}" == *"scanobjectnn_main_split_v2"* ]]; then
+    echo "[error] SCAN_CACHE_ROOT=${SCAN_CACHE_ROOT} is disallowed."
+    echo "        main_split cache is deprecated for benchmark reporting; use variant-specific cache roots."
+    exit 2
+  fi
+  if [[ ! -d "${SCAN_CACHE_ROOT}" ]]; then
+    echo "[error] missing ScanObjectNN cache: ${SCAN_CACHE_ROOT}"
+    exit 2
+  fi
 fi
 
 if [[ "${RUN_CPAC}" == "1" ]] && [[ ! -d "${UNPAIRED_CACHE_ROOT}" ]]; then
