@@ -121,7 +121,7 @@ class ClsWrapper(nn.Module):
             denom = w.sum(dim=1).clamp(min=1.0)
             return (x * w).sum(dim=1) / denom
 
-        if pool == "mean":
+        if pool in ("mean", "mean_all"):
             pooled = h.mean(dim=1)
         elif pool == "bos":
             pooled = h[:, 0, :]
@@ -273,8 +273,8 @@ def main():
         "--cls_pooling",
         type=str,
         default="mean_a",
-        choices=["auto", "eos", "bos", "mean", "mean_no_special", "mean_pts", "mean_q", "mean_a"],
-        help="classification pooling (default=mean_a): auto(mean_a for qa_tokens else eos), eos, bos, mean, mean_no_special, mean_pts, mean_q, mean_a",
+        choices=["auto", "eos", "bos", "mean", "mean_all", "mean_no_special", "mean_pts", "mean_q", "mean_a"],
+        help="classification pooling (default=mean_a): auto(mean_a for qa_tokens else eos), eos, bos, mean/mean_all, mean_no_special, mean_pts, mean_q, mean_a",
     )
     ap.add_argument(
         "--use_fc_norm",

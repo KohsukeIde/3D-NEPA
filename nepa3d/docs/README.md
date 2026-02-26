@@ -28,3 +28,5 @@ Last updated: 2026-02-26
 
 - `scanobjectnn_main_split_v2` mixed-cache reporting is not used for fair benchmark headline.
 - Variant-split caches (`obj_bg`, `obj_only`, `pb_t50_rs`) are the default benchmark protocol.
+- Raw log pruning helper:
+  - `scripts/logs/prune_superseded_logs.sh` (`--dry-run` / `--apply`)

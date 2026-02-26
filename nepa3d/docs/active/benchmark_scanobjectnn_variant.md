@@ -12,6 +12,27 @@ This file is the canonical benchmark summary for protocol-correct ScanObjectNN e
 
 Detailed job history is tracked in `nepa3d/docs/active/runlog_202602.md`.
 
+### 1.1 Validity boundary (read first)
+
+To avoid over-interpretation, results are classified as follows:
+
+- `VALID (benchmark-eligible)`:
+  - variant-split cache (`obj_bg` / `obj_only` / `pb_t50_rs`)
+  - protocol wiring fixed (env propagation + cache guard active)
+  - job finished successfully (`Exit_status=0`)
+- `INTERNAL/ABLATION ONLY`:
+  - mixed cache (`scanobjectnn_main_split_v2`) runs
+  - historical checkpoints with known config mismatch for intended design
+    (for example `qa_tokens` mismatch in old `runs/pretrain_abcd_1024_run*`)
+- `INVALID`:
+  - runtime-failed runs (`Exit_status!=0`)
+  - known precheck/import failures (for example CPAC mesh precheck/import failures)
+
+Scope note for historical issues:
+
+- Python 3.9 type-hint import failure was a CPAC path issue, not a Scan classification issue.
+- Env propagation issue affected specific old submissions and is fixed; canonical tables use re-submitted protocol-correct jobs.
+
 ## 2. Non-Negotiable Protocol
 
 - `SCAN_CACHE_ROOT` must be one of:
@@ -48,6 +69,18 @@ Source: `nepa3d/docs/pretrain_abcd_1024_variant_reval_active.md` section 18.1
 | `rfps` | A | `pb_t50_rs` | 0.5098 |
 | `rfps` | B | `pb_t50_rs` | 0.4990 |
 
+### 4.1 Newly Finalized Extension Rows (NEPA-full / `pb_t50_rs`)
+
+Source logs:
+
+- `logs/eval/abcd_cls_cpac_variant_ext_20260226_1346_nepafull_a_fps_lr1e4_pb_t50_rs_base/runA_classification_scan.log`
+- `logs/eval/abcd_cls_cpac_variant_ext_20260226_1346_nepafull_a_fps_lr5e4_pb_t50_rs_base/runA_classification_scan.log`
+
+| job_id | pretrain | protocol | variant | lr_cls | test_acc |
+|---|---|---|---|---:|---:|
+| `97653` | `A_fps` | `nepafull` | `pb_t50_rs` | `1e-4` | 0.3190 |
+| `97656` | `A_fps` | `nepafull` | `pb_t50_rs` | `5e-4` | 0.3171 |
+
 ## 5. Latest 256 Query-Rethink Classification Snapshot (18 jobs)
 
 Source run set:
@@ -60,6 +93,12 @@ ScanObjectNN (`test_acc`) best variant in this set:
 - `b04_split_xanchor_morton_typepos`
   - `sotafair=0.5059`
   - `nepafull=0.3275`
+
+Log-reading caution:
+
+- In this run set, each `*.out` contains both ScanObjectNN and ModelNet40 stages.
+- Therefore `test_acc` lines around `0.84~0.86` in `*.out` belong to ModelNet40, not ScanObjectNN.
+- For ScanObjectNN benchmark values, read only `*_classification_scan.log`.
 
 ## 6. Reporting Checklist
 

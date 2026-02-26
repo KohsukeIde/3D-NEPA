@@ -7,6 +7,10 @@ Last updated: 2026-02-26
 > `nepa3d/docs/pretrain_abcd_1024_variant_reval_active.md`
 > Canonical benchmark/read path:
 > `nepa3d/docs/README.md`
+> Interpretation guard:
+> this ledger intentionally contains failed/superseded/misaligned historical runs.
+> Do not use this file alone for benchmark claims; use the canonical validity boundary in
+> `nepa3d/docs/active/benchmark_scanobjectnn_variant.md`.
 
 ## 1. Scope
 

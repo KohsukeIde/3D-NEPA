@@ -8,6 +8,8 @@ Last updated: 2026-02-26
 > `nepa3d/docs/active/benchmark_scanobjectnn_variant.md`
 > Job-by-job updates moved to:
 > `nepa3d/docs/active/runlog_202602.md`
+> Validity classes (`VALID` / `INTERNAL` / `INVALID`) are defined in:
+> `nepa3d/docs/active/benchmark_scanobjectnn_variant.md` section 1.1
 
 ## 1. Scope
 
@@ -194,3 +196,30 @@ Notes:
   - `Point-MAE/cfgs/finetune_scan_hardest_sanity.yaml`
   - `Point-MAE/cfgs/finetune_scan_objbg_sanity.yaml`
   - `Point-MAE/cfgs/finetune_scan_objonly_sanity.yaml`
+
+## 10. Post-backfill verification rerun (pb_t50_rs, NEPA-full, 2026-02-26)
+
+Purpose:
+
+- verify ScanObjectNN variant cache after `pt_fps_order` backfill (`98004.qjcm`, `Exit_status=0`)
+- isolate classifier pooling effect under the same protocol (`mean_q` vs `mean_all`)
+
+Common settings:
+
+- checkpoint: `runs/pretrain_abcd_1024_runA/last.pt`
+- protocol: `NEPA-full` (`PT_XYZ_KEY_CLS=pt_xyz_pool`, `PT_DIST_KEY_CLS=pt_dist_pool`, `ABLATE_POINT_DIST=0`, `POINT_ORDER_MODE=fps`)
+- cache: `SCAN_CACHE_ROOT=data/scanobjectnn_pb_t50_rs_v2`
+- eval shape: `N_POINT_CLS=1024`, `N_RAY_CLS=0`
+- schedule: `EPOCHS_CLS=300`, `VAL_SPLIT_MODE=group_auto`
+- toggles: `RUN_SCAN=1`, `RUN_MODELNET=0`, `RUN_CPAC=0`
+
+Submitted jobs:
+
+- `98018.qjcm`: `mean_q`, `LR_CLS=5e-4`, run set `scan_pb_nepafull_backfillcheck_meanq_lr5e4_20260226_194113`
+- `98019.qjcm`: `mean_q`, `LR_CLS=1e-4`, run set `scan_pb_nepafull_backfillcheck_meanq_lr1e4_20260226_194140`
+- `98021.qjcm`: `mean_all`, `LR_CLS=1e-4`, run set `scan_pb_nepafull_backfillcheck_meanall_lr1e4_20260226_195200`
+- `98022.qjcm`: `mean_all`, `LR_CLS=5e-4`, run set `scan_pb_nepafull_backfillcheck_meanall_lr5e4_20260226_195200`
+
+Status at submit check:
+
+- all four jobs are `job_state=R`
