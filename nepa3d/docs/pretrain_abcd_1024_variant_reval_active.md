@@ -2,6 +2,13 @@
 
 Last updated: 2026-02-26
 
+> Transition note (2026-02-26):
+> This file remains as a detailed execution ledger.
+> Canonical benchmark summary moved to:
+> `nepa3d/docs/active/benchmark_scanobjectnn_variant.md`
+> Job-by-job updates moved to:
+> `nepa3d/docs/active/runlog_202602.md`
+
 ## 1. Scope
 
 This document is the active plan for protocol-correct ScanObjectNN re-evaluation:
@@ -517,7 +524,8 @@ Submitted jobs (`18`):
 
 Immediate scheduler check:
 
-- all `97791`..`97808` are `job_state=R`.
+- at submission time, all `97791`..`97808` were `job_state=R`.
+- latest completion/result status is summarized in `§18.3`.
 
 ## 15. 256 classification results (eval18, `pb_t50_rs`, 18 jobs complete)
 
@@ -590,8 +598,8 @@ Submission:
   - `RUN_SET=shapenet_pointonly1024_20260226_154047 JOB_IDS_OUT=logs/pretrain/shapenet_pointonly1024_job_ids.txt bash scripts/pretrain/submit_pretrain_shapenet_pointonly_1024_qf.sh`
 - submitted job:
   - `97814.qjcm` `runB_shapenetpc_shapenet_pointonly1024_20260226_154047`
-- immediate state:
-  - `job_state=R`
+- latest state:
+  - `job_state=F`, `Exit_status=0` (`obittime=2026-02-26 17:01:32`)
 
 Runtime args (from `qstat -fx`):
 
@@ -607,8 +615,7 @@ Checked on: `2026-02-26`
 
 Status:
 
-- `97659` (`eval_runA`): `job_state=R` (running)
-- `97660`..`97664` (`eval_runB`): all `job_state=F`, `Exit_status=0`
+- `97659`..`97664`: all `job_state=F`, `Exit_status=0`
 
 Scope confirmation:
 
@@ -618,12 +625,112 @@ Scope confirmation:
   - `SCAN_CACHE_ROOT=data/scanobjectnn_pb_t50_rs_v2`
   - `RUN_CPAC=0` (classification-only)
 
-Completed metrics (`runB_classification_scan.log`):
+Completed metrics (`*_classification_scan.log`):
 
 | job | setting | best_val | best_ep | test_acc |
 |---|---|---:|---:|---:|
+| `97659` | `A_rfps_aug`, `LR=5e-4`, `aug=scanobjectnn` | 0.6918 | 222 | 0.5485 |
 | `97660` | `B_rfps_aug`, `LR=5e-4`, `aug=scanobjectnn` | 0.2474 | 230 | 0.2402 |
 | `97661` | `B_fps`, `LR=5e-4`, `aug=none` | 0.7049 | 234 | 0.5716 |
 | `97662` | `B_fps`, `LR=5e-4`, `aug=scanobjectnn` | 0.7361 | 245 | 0.5505 |
 | `97663` | `B_fps`, `LR=5e-4`, `drop_path=0.0` | 0.7422 | 254 | 0.5544 |
 | `97664` | `B_fps`, `LR=5e-4`, `drop_path=0.1` | 0.7526 | 281 | 0.5641 |
+
+## 18. Completion refresh (latest check: 2026-02-26)
+
+Scheduler snapshot:
+
+- running: `97653.qjcm`, `97656.qjcm`, `97738.qjcm`
+- completed (`Exit_status=0`): tracked sets except the 3 running jobs above
+  - preprocess: `97630`
+  - variant eval (minimum + extension): `97631`..`97652`, `97654`..`97664`
+  - CPAC retry2: `97667`..`97684`
+  - CPAC/mesh official rerun: `97791`..`97808`
+  - ShapeNet point-only pretrain: `97814`
+
+### 18.1 Operational minimum 12 jobs (`97631`..`97642`) final results
+
+Protocol:
+
+- `SOTA-fair`, `LR=1e-4`, `RUN_MODELNET=0`, `RUN_CPAC=0`
+- variant-split cache (`obj_bg` / `obj_only` / `pb_t50_rs`)
+
+ScanObjectNN `test_acc`:
+
+| job | pretrain family | run | variant | test_acc |
+|---|---|---|---|---:|
+| `97631` | `fps` | A | `obj_bg` | 0.5143 |
+| `97632` | `fps` | B | `obj_bg` | 0.5247 |
+| `97633` | `fps` | A | `obj_only` | 0.5742 |
+| `97634` | `fps` | B | `obj_only` | 0.5742 |
+| `97635` | `fps` | A | `pb_t50_rs` | 0.5264 |
+| `97636` | `fps` | B | `pb_t50_rs` | 0.5143 |
+| `97637` | `rfps` | A | `obj_bg` | 0.5013 |
+| `97638` | `rfps` | B | `obj_bg` | 0.4844 |
+| `97639` | `rfps` | A | `obj_only` | 0.5195 |
+| `97640` | `rfps` | B | `obj_only` | 0.5339 |
+| `97641` | `rfps` | A | `pb_t50_rs` | 0.5098 |
+| `97642` | `rfps` | B | `pb_t50_rs` | 0.4990 |
+
+Quick read (A/B average):
+
+- `fps`: `obj_bg=0.5195`, `obj_only=0.5742`, `pb_t50_rs=0.5204`
+- `rfps`: `obj_bg=0.4929`, `obj_only=0.5267`, `pb_t50_rs=0.5044`
+
+### 18.2 Extension add-on progress (`97645`..`97664`)
+
+Status:
+
+- completed: `18/20` jobs
+- running: `97653` (`A_fps`, `NEPA-full`, `pb_t50_rs`, `LR=1e-4`),
+  `97656` (`A_fps`, `NEPA-full`, `pb_t50_rs`, `LR=5e-4`)
+
+Completed ScanObjectNN `test_acc`:
+
+| job | setting | test_acc |
+|---|---|---:|
+| `97645` | `A_fps`, `SOTA-fair`, `obj_bg`, `LR=5e-4` | 0.6250 |
+| `97646` | `B_fps`, `SOTA-fair`, `obj_bg`, `LR=5e-4` | 0.6042 |
+| `97647` | `A_fps`, `SOTA-fair`, `obj_only`, `LR=5e-4` | 0.6094 |
+| `97648` | `B_fps`, `SOTA-fair`, `obj_only`, `LR=5e-4` | 0.6523 |
+| `97649` | `A_fps`, `SOTA-fair`, `pb_t50_rs`, `LR=5e-4` | 0.5303 |
+| `97650` | `B_fps`, `SOTA-fair`, `pb_t50_rs`, `LR=5e-4` | 0.5501 |
+| `97651` | `A_fps`, `NEPA-full`, `obj_bg`, `LR=1e-4` | 0.3190 |
+| `97652` | `A_fps`, `NEPA-full`, `obj_only`, `LR=1e-4` | 0.4062 |
+| `97654` | `A_fps`, `NEPA-full`, `obj_bg`, `LR=5e-4` | 0.3034 |
+| `97655` | `A_fps`, `NEPA-full`, `obj_only`, `LR=5e-4` | 0.3711 |
+| `97657` | `A_rfps_aug`, `SOTA-fair`, `pb_t50_rs`, `LR=1e-4` | 0.5231 |
+| `97658` | `B_rfps_aug`, `SOTA-fair`, `pb_t50_rs`, `LR=1e-4` | 0.2191 |
+| `97659` | `A_rfps_aug`, `SOTA-fair`, `pb_t50_rs`, `LR=5e-4` | 0.5485 |
+| `97660` | `B_rfps_aug`, `SOTA-fair`, `pb_t50_rs`, `LR=5e-4` | 0.2402 |
+| `97661` | `B_fps`, `SOTA-fair`, `pb_t50_rs`, `aug=none` | 0.5716 |
+| `97662` | `B_fps`, `SOTA-fair`, `pb_t50_rs`, `aug=scanobjectnn` | 0.5505 |
+| `97663` | `B_fps`, `SOTA-fair`, `pb_t50_rs`, `drop_path=0.0` | 0.5544 |
+| `97664` | `B_fps`, `SOTA-fair`, `pb_t50_rs`, `drop_path=0.1` | 0.5641 |
+
+### 18.3 CPAC/mesh official rerun (`97791`..`97808`) final results
+
+Status:
+
+- all `18` jobs completed (`job_state=F`, `Exit_status=0`)
+- result root: `results/a256_queryrethink_cpac_retry3_20260226_152442`
+- protocols (`sotafair` / `nepafull`) are numerically identical per variant in this CPAC-only setup
+
+CPAC + mesh summary by variant:
+
+| variant | mae | rmse | iou@tau | mesh fail | chamfer_l2 | chamfer_l1 | fscore |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `b00_interleave_theta` | 0.0312 | 0.0430 | 0.7737 | 0/800 | 0.0083 | 0.0983 | 0.0591 |
+| `b01_split_theta` | 0.0693 | 0.0941 | 0.5342 | 0/800 | 0.0529 | 0.2325 | 0.0181 |
+| `b02_split_theta_typepos` | 0.1480 | 0.1882 | 0.2910 | 0/800 | 0.0583 | 0.2550 | 0.0213 |
+| `b03_split_viewraster_typepos` | 0.0929 | 0.1239 | 0.4356 | 0/800 | 0.0761 | 0.2727 | 0.0154 |
+| `b04_split_xanchor_morton_typepos` | 0.0660 | 0.0914 | 0.5860 | 0/800 | 0.0762 | 0.2746 | 0.0152 |
+| `b05_split_xanchor_fps_typepos` | 0.0778 | 0.1071 | 0.5084 | 0/800 | 0.0331 | 0.1865 | 0.0267 |
+| `b06_split_dirfps_typepos` | 0.0618 | 0.0866 | 0.5979 | 0/800 | 0.0777 | 0.2850 | 0.0127 |
+| `b07_event_xanchor_typepos` | 0.0836 | 0.1108 | 0.4842 | 0/800 | 0.0524 | 0.2318 | 0.0196 |
+| `b08_event_dirfps_typepos` | 0.0931 | 0.1234 | 0.4787 | 0/800 | 0.1158 | 0.3382 | 0.0112 |
+
+Quick read:
+
+- best CPAC/mesh variant in this rerun: `b00_interleave_theta`
+  (`iou@tau=0.7737`, `mae=0.0312`, `chamfer_l2=0.0083`, `fscore=0.0591`)

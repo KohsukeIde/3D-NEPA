@@ -5,6 +5,8 @@ Last updated: 2026-02-26
 > Legacy note (2026-02-26): this file is now treated as a historical execution ledger.
 > Active protocol-correct re-evaluation planning is tracked in:
 > `nepa3d/docs/pretrain_abcd_1024_variant_reval_active.md`
+> Canonical benchmark/read path:
+> `nepa3d/docs/README.md`
 
 ## 1. Scope
 
