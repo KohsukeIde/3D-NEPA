@@ -7,6 +7,7 @@ Use this index to avoid mixing canonical active benchmark docs with legacy ledge
 - Docs hub: `README.md`
 - ScanObjectNN canonical benchmark: `active/benchmark_scanobjectnn_variant.md`
 - Current runlog (job history): `active/runlog_202602.md`
+- Non-retrieval results master index: `active/results_master_nonretrieval.md`
 
 ## Active (Domain/Task Specific)
 

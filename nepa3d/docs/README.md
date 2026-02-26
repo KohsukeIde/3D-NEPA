@@ -6,6 +6,7 @@ Last updated: 2026-02-26
 
 - Protocol-correct ScanObjectNN benchmark (canonical): `nepa3d/docs/active/benchmark_scanobjectnn_variant.md`
 - Current execution log (job-level): `nepa3d/docs/active/runlog_202602.md`
+- Non-retrieval results master index: `nepa3d/docs/active/results_master_nonretrieval.md`
 
 ## Legacy Ledgers
 
