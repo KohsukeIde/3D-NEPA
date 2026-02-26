@@ -186,6 +186,50 @@ print(
     f"(ckpt_max_len={ckpt_max_len}, qa_tokens={int(qa_tokens)}, add_eos={int(add_eos)})"
 )
 PY
+
+  # Mesh eval can use a larger per-forward query chunk than CPAC_N_QUERY.
+  # Clamp chunk size to model max_len so mesh evaluation does not fail later.
+  if [[ "${CPAC_MESH_EVAL}" == "1" ]]; then
+    CPAC_MESH_CHUNK_N_QUERY="$(
+      python - "${CKPT}" "${CPAC_N_CONTEXT}" "${CPAC_MAX_LEN}" "${CPAC_MESH_CHUNK_N_QUERY}" <<'PY'
+import sys
+import torch
+
+ckpt_path = sys.argv[1]
+n_context = int(sys.argv[2])
+max_len_override = int(sys.argv[3])
+requested_chunk = int(sys.argv[4])
+
+ckpt = torch.load(ckpt_path, map_location="cpu")
+state = ckpt["model"]
+pre_args = ckpt.get("args", {})
+ckpt_n_types = int(state["type_emb.weight"].shape[0])
+qa_tokens = bool(pre_args.get("qa_tokens", ckpt_n_types >= 9))
+add_eos = bool(pre_args.get("add_eos", ckpt_n_types >= 5))
+ckpt_max_len = int(state["pos_emb"].shape[1])
+max_len = ckpt_max_len if max_len_override < 0 else max_len_override
+per_item = 2 if qa_tokens else 1
+fixed = 1 + per_item * n_context + (1 if add_eos else 0)
+max_chunk = (max_len - fixed) // per_item
+if max_chunk < 1:
+    raise SystemExit(
+        f"[error] mesh_eval precheck failed: no room for query chunk "
+        f"(ckpt_max_len={ckpt_max_len}, effective_max_len={max_len}, qa_tokens={int(qa_tokens)}, "
+        f"add_eos={int(add_eos)}, n_context={n_context}, requested_chunk={requested_chunk})."
+    )
+if requested_chunk > max_chunk:
+    print(
+        f"[warn] mesh_chunk_n_query clamped: requested={requested_chunk} -> {max_chunk} "
+        f"(effective_max_len={max_len}, qa_tokens={int(qa_tokens)}, add_eos={int(add_eos)}, "
+        f"n_context={n_context})",
+        file=sys.stderr,
+    )
+    print(max_chunk)
+else:
+    print(requested_chunk)
+PY
+    )"
+  fi
 else
   echo "[skip] CPAC precheck disabled (RUN_CPAC=${RUN_CPAC}, RUN_CPAC_LOCAL=${RUN_CPAC_LOCAL})"
 fi
