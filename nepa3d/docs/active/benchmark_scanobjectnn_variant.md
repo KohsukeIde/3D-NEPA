@@ -81,6 +81,22 @@ Source logs:
 | `97653` | `A_fps` | `nepafull` | `pb_t50_rs` | `1e-4` | 0.3190 |
 | `97656` | `A_fps` | `nepafull` | `pb_t50_rs` | `5e-4` | 0.3171 |
 
+### 4.2 Post-backfill NEPA-full check (`98018`/`98019`/`98021`/`98022`)
+
+Scope:
+
+- cache: `data/scanobjectnn_pb_t50_rs_v2` (after `pt_fps_order` backfill)
+- checkpoint: `runs/pretrain_abcd_1024_runA/last.pt`
+- protocol: `NEPA-full`
+- all jobs completed with `Exit_status=0`
+
+| job_id | pooling | lr_cls | test_acc |
+|---|---|---:|---:|
+| `98018` | `mean_q` | `5e-4` | 0.2367 |
+| `98019` | `mean_q` | `1e-4` | 0.2591 |
+| `98021` | `mean_all` | `1e-4` | 0.2793 |
+| `98022` | `mean_all` | `5e-4` | 0.2292 |
+
 ## 5. Latest 256 Query-Rethink Classification Snapshot (18 jobs)
 
 Source run set:

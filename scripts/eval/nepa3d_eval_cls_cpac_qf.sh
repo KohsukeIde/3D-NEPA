@@ -71,6 +71,7 @@ RUN_MODELNET="${RUN_MODELNET:-1}"
 RUN_CPAC="${RUN_CPAC:-1}"
 MC_EVAL_K_VAL="${MC_EVAL_K_VAL:-1}"
 MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-10}"
+MC_TTA_GUARD_MODE="${MC_TTA_GUARD_MODE:-error}" # error|warn|off
 
 CPAC_SPLIT="${CPAC_SPLIT:-eval}"
 CPAC_N_CONTEXT="${CPAC_N_CONTEXT:-1024}"
@@ -148,6 +149,35 @@ fi
 if [[ "${RUN_CPAC}" == "1" ]] && [[ ! -d "${UNPAIRED_CACHE_ROOT}" ]]; then
   echo "[error] missing unpaired cache for CPAC: ${UNPAIRED_CACHE_ROOT}"
   exit 2
+fi
+
+if [[ "${MC_TTA_GUARD_MODE}" != "error" ]] && [[ "${MC_TTA_GUARD_MODE}" != "warn" ]] && [[ "${MC_TTA_GUARD_MODE}" != "off" ]]; then
+  echo "[error] invalid MC_TTA_GUARD_MODE=${MC_TTA_GUARD_MODE} (use: error|warn|off)"
+  exit 2
+fi
+
+# Guard against ineffective MC voting:
+# with eval=fps + aug_eval=0, each MC sample is deterministic duplicate.
+if [[ "${RUN_SCAN}" == "1" || "${RUN_MODELNET}" == "1" ]]; then
+  PT_SAMPLE_MODE_EVAL_CLS_L="$(echo "${PT_SAMPLE_MODE_EVAL_CLS}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${PT_SAMPLE_MODE_EVAL_CLS_L}" == "fps" ]] && [[ "${AUG_EVAL}" == "0" ]]; then
+    _mc_guard_check() {
+      local which="$1"
+      local k="$2"
+      [[ "${k}" =~ ^[0-9]+$ ]] || return 0
+      if (( k > 1 )); then
+        local msg="${which}=${k} with pt_sample_mode_eval=fps and AUG_EVAL=0 yields deterministic duplicate votes (no effective TTA). Set AUG_EVAL=1, or PT_SAMPLE_MODE_EVAL_CLS=rfps/random, or ${which}=1."
+        if [[ "${MC_TTA_GUARD_MODE}" == "error" ]]; then
+          echo "[error] ${msg}"
+          exit 2
+        elif [[ "${MC_TTA_GUARD_MODE}" == "warn" ]]; then
+          echo "[warn] ${msg}"
+        fi
+      fi
+    }
+    _mc_guard_check "mc_eval_k_val" "${MC_EVAL_K_VAL}"
+    _mc_guard_check "mc_eval_k_test" "${MC_EVAL_K_TEST}"
+  fi
 fi
 
 # Only rank0 performs CPAC in multi-node mode.

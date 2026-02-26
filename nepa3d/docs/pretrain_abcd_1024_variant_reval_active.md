@@ -220,6 +220,20 @@ Submitted jobs:
 - `98021.qjcm`: `mean_all`, `LR_CLS=1e-4`, run set `scan_pb_nepafull_backfillcheck_meanall_lr1e4_20260226_195200`
 - `98022.qjcm`: `mean_all`, `LR_CLS=5e-4`, run set `scan_pb_nepafull_backfillcheck_meanall_lr5e4_20260226_195200`
 
-Status at submit check:
+Final status check:
 
-- all four jobs are `job_state=R`
+- `98018/98019/98021/98022` are all `job_state=F`, `Exit_status=0`
+
+ScanObjectNN final metrics (`runA_classification_scan.log`):
+
+| job | pooling | lr_cls | best_val | best_ep | test_acc |
+|---|---|---:|---:|---:|---:|
+| `98018` | `mean_q` | `5e-4` | 0.2691 | 21 | 0.2367 |
+| `98019` | `mean_q` | `1e-4` | 0.3168 | 24 | 0.2591 |
+| `98021` | `mean_all` | `1e-4` | 0.3108 | 50 | 0.2793 |
+| `98022` | `mean_all` | `5e-4` | 0.2648 | 8 | 0.2292 |
+
+Quick read:
+
+- this rerun is useful as a post-backfill sanity check (pipeline completed cleanly).
+- performance remains low under this `NEPA-full` pb_t50_rs setup; best in this 4-way check is `mean_all + 1e-4` (`test_acc=0.2793`).
