@@ -301,7 +301,20 @@ def main():
         "--pt_dist_key",
         type=str,
         default="pt_dist_pool",
-        help="npz key for point dist pool (default: pt_dist_pool). If missing or length-mismatch, zeros are used.",
+        help=(
+            "npz key for point dist pool (default: pt_dist_pool). "
+            "Must exist and match pt_xyz_key length unless --ablate_point_dist is set."
+        ),
+    )
+    ap.add_argument(
+        "--allow_scan_dist",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help=(
+            "Safety guard for ScanObjectNN caches: 0 enforces --ablate_point_dist "
+            "(recommended); set 1 only for explicit dist-on experiments."
+        ),
     )
     ap.add_argument(
         "--pt_sample_mode_train",
@@ -499,6 +512,15 @@ def main():
     if not (0.0 <= float(args.drop_path) < 1.0):
         raise ValueError(f"--drop_path must be in [0,1), got {args.drop_path}")
 
+    cache_root_l = os.path.abspath(args.cache_root).lower()
+    is_scan_cache = "scanobjectnn" in cache_root_l
+    if is_scan_cache and (not args.ablate_point_dist) and (int(args.allow_scan_dist) != 1):
+        raise ValueError(
+            "ScanObjectNN cache detected but --ablate_point_dist is OFF. "
+            "This is blocked by default to avoid dist/augmentation/domain-mismatch pitfalls. "
+            "Set --ablate_point_dist, or pass --allow_scan_dist 1 for an intentional dist-on run."
+        )
+
     train_paths_full = list_npz(args.cache_root, "train")
     test_paths = list_npz(args.cache_root, "test")
     way_seed = args.fewshot_seed if args.fewshot_way_seed < 0 else args.fewshot_way_seed
@@ -525,8 +547,7 @@ def main():
     if args.val_split_mode == "group_scanobjectnn":
         val_group_key_fn = scanobjectnn_group_key
     elif args.val_split_mode == "group_auto":
-        cache_root_l = os.path.abspath(args.cache_root).lower()
-        if "scanobjectnn" in cache_root_l:
+        if is_scan_cache:
             val_group_key_fn = scanobjectnn_group_key
             resolved_val_split_mode = "group_scanobjectnn(auto)"
         else:
@@ -1014,6 +1035,7 @@ def main():
         f"pt_fps_key={args.pt_fps_key} pt_rfps_m={args.pt_rfps_m} "
         f"aug_recompute_dist={bool(int(args.aug_recompute_dist))} "
         f"ablate_point_dist={bool(args.ablate_point_dist)} "
+        f"allow_scan_dist={bool(int(args.allow_scan_dist))} "
         f"n_point={args.n_point}/{pre_n_point} n_ray={args.n_ray}/{pre_n_ray} "
         f"model_max_len={model_max_len} world_size={accelerator.num_processes} "
         f"use_fc_norm={bool(int(args.use_fc_norm))} "

@@ -19,9 +19,9 @@ fi
 VARIANTS="${VARIANTS:-obj_bg,obj_only,pb_t50_rs}"
 RUN_SET_BASE_PREFIX="${RUN_SET_BASE_PREFIX:-$(date +%Y%m%d_%H%M%S)}"
 
-SCAN_CACHE_ROOT_OBJ_BG="${SCAN_CACHE_ROOT_OBJ_BG:-data/scanobjectnn_obj_bg_v2}"
-SCAN_CACHE_ROOT_OBJ_ONLY="${SCAN_CACHE_ROOT_OBJ_ONLY:-data/scanobjectnn_obj_only_v2}"
-SCAN_CACHE_ROOT_PB_T50_RS="${SCAN_CACHE_ROOT_PB_T50_RS:-data/scanobjectnn_pb_t50_rs_v2}"
+SCAN_CACHE_ROOT_OBJ_BG="${SCAN_CACHE_ROOT_OBJ_BG:-data/scanobjectnn_obj_bg_v3_nonorm}"
+SCAN_CACHE_ROOT_OBJ_ONLY="${SCAN_CACHE_ROOT_OBJ_ONLY:-data/scanobjectnn_obj_only_v3_nonorm}"
+SCAN_CACHE_ROOT_PB_T50_RS="${SCAN_CACHE_ROOT_PB_T50_RS:-data/scanobjectnn_pb_t50_rs_v3_nonorm}"
 
 RUN_SCAN="${RUN_SCAN:-1}"
 RUN_MODELNET="${RUN_MODELNET:-0}"

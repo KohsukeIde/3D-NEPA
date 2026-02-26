@@ -43,6 +43,7 @@ ACCELERATE_LAUNCH_MODULE="${ACCELERATE_LAUNCH_MODULE:-accelerate.commands.launch
 MIXED_PRECISION="${MIXED_PRECISION:-no}"
 CLS_POOLING="${CLS_POOLING:-mean_q}"
 ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-1}"
+ALLOW_SCAN_DIST="${ALLOW_SCAN_DIST:-0}"
 USE_FC_NORM="${USE_FC_NORM:-0}"
 LABEL_SMOOTHING="${LABEL_SMOOTHING:-0.0}"
 WEIGHT_DECAY_CLS="${WEIGHT_DECAY_CLS:-0.05}"
@@ -69,6 +70,7 @@ AUG_RECOMPUTE_DIST="${AUG_RECOMPUTE_DIST:-1}"
 RUN_SCAN="${RUN_SCAN:-1}"
 RUN_MODELNET="${RUN_MODELNET:-1}"
 RUN_CPAC="${RUN_CPAC:-1}"
+ALLOW_SCAN_UNISCALE_V2="${ALLOW_SCAN_UNISCALE_V2:-0}"
 MC_EVAL_K_VAL="${MC_EVAL_K_VAL:-1}"
 MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-10}"
 MC_TTA_GUARD_MODE="${MC_TTA_GUARD_MODE:-error}" # error|warn|off
@@ -132,7 +134,7 @@ fi
 if [[ "${RUN_SCAN}" == "1" ]]; then
   if [[ -z "${SCAN_CACHE_ROOT}" ]]; then
     echo "[error] SCAN_CACHE_ROOT is required when RUN_SCAN=1."
-    echo "        Use a protocol-variant cache: data/scanobjectnn_obj_bg_v2 | data/scanobjectnn_obj_only_v2 | data/scanobjectnn_pb_t50_rs_v2"
+    echo "        Use a protocol-variant cache: data/scanobjectnn_obj_bg_v3_nonorm | data/scanobjectnn_obj_only_v3_nonorm | data/scanobjectnn_pb_t50_rs_v3_nonorm"
     exit 2
   fi
   if [[ "${SCAN_CACHE_ROOT}" == *"scanobjectnn_main_split_v2"* ]]; then
@@ -140,9 +142,22 @@ if [[ "${RUN_SCAN}" == "1" ]]; then
     echo "        main_split cache is deprecated for benchmark reporting; use variant-specific cache roots."
     exit 2
   fi
+  if [[ "${SCAN_CACHE_ROOT}" == *"scanobjectnn_"*"_v2" ]] && [[ "${ALLOW_SCAN_UNISCALE_V2}" != "1" ]]; then
+    echo "[error] SCAN_CACHE_ROOT=${SCAN_CACHE_ROOT} is a uniscale v2 cache and is disallowed by policy."
+    echo "        Use scanobjectnn_*_v3_nonorm variant caches, or set ALLOW_SCAN_UNISCALE_V2=1 for intentional legacy reruns."
+    exit 2
+  fi
   if [[ ! -d "${SCAN_CACHE_ROOT}" ]]; then
     echo "[error] missing ScanObjectNN cache: ${SCAN_CACHE_ROOT}"
     exit 2
+  fi
+  if [[ "${ABLATE_POINT_DIST}" != "1" ]] && [[ "${ALLOW_SCAN_DIST}" != "1" ]]; then
+    echo "[error] ScanObjectNN classification with dist enabled is blocked by default."
+    echo "        Use ABLATE_POINT_DIST=1 (recommended), or set ALLOW_SCAN_DIST=1 for intentional dist-on runs."
+    exit 2
+  fi
+  if [[ "${ABLATE_POINT_DIST}" != "1" ]] && [[ "${ALLOW_SCAN_DIST}" == "1" ]]; then
+    echo "[warn] running ScanObjectNN with ABLATE_POINT_DIST=0 (dist-on) by explicit override ALLOW_SCAN_DIST=1."
   fi
 fi
 
@@ -153,6 +168,14 @@ fi
 
 if [[ "${MC_TTA_GUARD_MODE}" != "error" ]] && [[ "${MC_TTA_GUARD_MODE}" != "warn" ]] && [[ "${MC_TTA_GUARD_MODE}" != "off" ]]; then
   echo "[error] invalid MC_TTA_GUARD_MODE=${MC_TTA_GUARD_MODE} (use: error|warn|off)"
+  exit 2
+fi
+if [[ "${ALLOW_SCAN_DIST}" != "0" ]] && [[ "${ALLOW_SCAN_DIST}" != "1" ]]; then
+  echo "[error] invalid ALLOW_SCAN_DIST=${ALLOW_SCAN_DIST} (use: 0|1)"
+  exit 2
+fi
+if [[ "${ALLOW_SCAN_UNISCALE_V2}" != "0" ]] && [[ "${ALLOW_SCAN_UNISCALE_V2}" != "1" ]]; then
+  echo "[error] invalid ALLOW_SCAN_UNISCALE_V2=${ALLOW_SCAN_UNISCALE_V2} (use: 0|1)"
   exit 2
 fi
 
@@ -301,7 +324,7 @@ fi
 if [[ "${RUN_SCAN}" == "1" ]]; then
   mkdir -p "${SCAN_SAVE_DIR}"
   echo "=== CLASSIFICATION: ScanObjectNN ==="
-  echo "cls_pooling=${CLS_POOLING} ablate_point_dist=${ABLATE_POINT_DIST} point_order_mode=${POINT_ORDER_MODE} aug_preset=${SCAN_AUG_PRESET}"
+  echo "cls_pooling=${CLS_POOLING} ablate_point_dist=${ABLATE_POINT_DIST} allow_scan_dist=${ALLOW_SCAN_DIST} point_order_mode=${POINT_ORDER_MODE} aug_preset=${SCAN_AUG_PRESET}"
   echo "pt_xyz_key=${PT_XYZ_KEY_CLS} pt_dist_key=${PT_DIST_KEY_CLS}"
   echo "lr_scheduler=${LR_SCHEDULER} warmup_epochs=${WARMUP_EPOCHS} min_lr=${MIN_LR} llrd=${LLRD} llrd_mode=${LLRD_MODE} drop_path=${DROP_PATH} grad_accum_steps=${GRAD_ACCUM_STEPS} max_grad_norm=${MAX_GRAD_NORM}"
   echo "val_split_mode=${VAL_SPLIT_MODE} pt_sample_mode_train=${PT_SAMPLE_MODE_TRAIN_CLS} pt_sample_mode_eval=${PT_SAMPLE_MODE_EVAL_CLS} pt_rfps_m=${PT_RFPS_M_CLS} aug_eval=${AUG_EVAL} aug_recompute_dist=${AUG_RECOMPUTE_DIST}"
@@ -333,6 +356,7 @@ if [[ "${RUN_SCAN}" == "1" ]]; then
     --ddp_find_unused_parameters "${DDP_FIND_UNUSED_PARAMETERS}" \
     --cls_is_causal 0 \
     --cls_pooling "${CLS_POOLING}" \
+    --allow_scan_dist "${ALLOW_SCAN_DIST}" \
     --pt_xyz_key "${PT_XYZ_KEY_CLS}" \
     --pt_dist_key "${PT_DIST_KEY_CLS}" \
     "${ABLATE_POINT_DIST_FLAG[@]}" \
@@ -395,6 +419,7 @@ if [[ "${RUN_MODELNET}" == "1" ]] && [[ -d "${MODELNET_CACHE_ROOT}" ]]; then
     --ddp_find_unused_parameters "${DDP_FIND_UNUSED_PARAMETERS}" \
     --cls_is_causal 0 \
     --cls_pooling "${CLS_POOLING}" \
+    --allow_scan_dist "${ALLOW_SCAN_DIST}" \
     --pt_xyz_key "${PT_XYZ_KEY_CLS}" \
     --pt_dist_key "${PT_DIST_KEY_CLS}" \
     "${ABLATE_POINT_DIST_FLAG[@]}" \

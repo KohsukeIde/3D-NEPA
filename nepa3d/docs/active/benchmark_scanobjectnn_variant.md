@@ -1,6 +1,6 @@
 # ScanObjectNN Variant Benchmark (Active Canonical)
 
-Last updated: 2026-02-26
+Last updated: 2026-02-27
 
 ## 1. Scope
 
@@ -36,10 +36,11 @@ Scope note for historical issues:
 ## 2. Non-Negotiable Protocol
 
 - `SCAN_CACHE_ROOT` must be one of:
-  - `data/scanobjectnn_obj_bg_v2`
-  - `data/scanobjectnn_obj_only_v2`
-  - `data/scanobjectnn_pb_t50_rs_v2`
+  - `data/scanobjectnn_obj_bg_v3_nonorm`
+  - `data/scanobjectnn_obj_only_v3_nonorm`
+  - `data/scanobjectnn_pb_t50_rs_v3_nonorm`
 - No mixed-cache headline table (`data/scanobjectnn_main_split_v2`) for fair comparison.
+- `scanobjectnn_*_v2` (uni-scale) is legacy-only and excluded from new benchmark rows.
 - `test_acc` is benchmark headline.
 - `best_val` / `best_ep` are diagnostics only.
 
@@ -64,6 +65,8 @@ Status:
 
 - already completed (`Exit_status=0`): `97974`, `97977`, `97978`
 - source logs: `logs/sanity/pointmae/*.log`
+- important: this block is **pretrained-checkpoint inference sanity** (`--test --ckpts ...`),
+  not `scratch` training baseline.
 
 | variant | test_acc | log |
 |---|---:|---|
@@ -78,7 +81,7 @@ Reference:
 Cache-input follow-up (`USE_NEPA_CACHE=1`) completed:
 
 - purpose: run Point-MAE using data derived from NEPA NPZ cache
-  (`scanobjectnn_*_v2`) via NPZ->H5 bridge.
+  (`scanobjectnn_*_v2`, legacy cache) via NPZ->H5 bridge.
 - jobs (`Exit_status=0`):
   - `98326.qjcm` (`obj_bg`)
   - `98327.qjcm` (`pb_t50_rs`)
@@ -129,6 +132,74 @@ Cache-derived source logs:
 - `logs/sanity/pointmae/pointmae_obj_bg_nepacache_20260227_030616.log`
 - `logs/sanity/pointmae/pointmae_obj_only_nepacache_20260227_030616.log`
 
+### 2.2.2 Scratch sanity baseline (`Transformer [54]` reference)
+
+Status:
+
+- `v3_nonorm` rerun submitted:
+  - `98390.qjcm` (`pb_t50_rs`)
+  - `98391.qjcm` (`obj_bg`)
+  - `98392.qjcm` (`obj_only`)
+
+Why it is needed:
+
+- confirms whether current ScanObjectNN variant protocol can reach expected
+  supervised-from-scratch range before attributing gaps to NEPA-specific design.
+- separates "dataset/protocol viability" from "self-supervised transfer gain".
+
+Reference targets (reported in Point-MAE table, supervised scratch `Transformer [54]`):
+
+| variant | target test_acc |
+|---|---:|
+| `obj_bg` | 79.86 |
+| `obj_only` | 80.55 |
+| `pb_t50_rs` | 77.24 |
+
+Note:
+
+- This is the scratch baseline row in the table (not the `Point-MAE` SSL row).
+- `Point-MAE` row itself is SSL-pretrained and higher (`90.02 / 88.29 / 85.10`).
+
+Planned first target:
+
+- variant: `pb_t50_rs` (hardest)
+- baseline runner: Point-MAE codepath with `--scratch_model` (no pretrained ckpt load)
+- criterion: first pass should reach the scratch target band (around high-70s)
+- cache policy for this run: use `scanobjectnn_*_v3_nonorm` (no new `v2` runs)
+
+### 2.2.3 Non-normalized cache + dynamic query-bbox follow-up (`v3_nonorm`)
+
+Purpose:
+
+- remove cache-time normalization for `pc_xyz` and avoid fixed `[-1,1]` query-space assumptions.
+- confirm whether Point-MAE sanity recovers to official-H5 scores when using cache-derived H5 from non-normalized NPZ.
+- this is **not** the same as 2.2.2 scratch baseline; this block is pretrained-checkpoint sanity on `v3_nonorm`.
+
+Build/eval jobs:
+
+- preprocess variants (`normalize_pc=0`, `query_bbox_mode=auto`): `98338` (`Exit_status=0`)
+- Point-MAE sanity:
+  - `98339` (`pb_t50_rs`, `Exit_status=0`)
+  - `98352` (`obj_bg`, `Exit_status=0`)
+  - `98355` (`obj_only`, `Exit_status=0`)
+
+Result:
+
+| variant | official H5 sanity | cache-derived H5 sanity (`v3_nonorm`) | delta |
+|---|---:|---:|---:|
+| `pb_t50_rs` | 84.5940 | 84.5940 | +0.0000 |
+| `obj_bg` | 73.3219 | 73.3219 | +0.0000 |
+| `obj_only` | 81.7556 | 81.7556 | +0.0000 |
+
+Interpretation:
+
+- observed gap in the earlier cache-derived run (`v2`) was dominated by cache preprocessing domain shift (normalized vs non-normalized), not by split/label mismatch.
+- with non-normalized cache + dynamic bbox sampling, Point-MAE sanity matches official H5 exactly for all three variants.
+
+Implementation note:
+
+- `scripts/sanity/pointmae_scan_sanity_qf.sh` now resolves relative cache paths to absolute paths to avoid broken symlink targets during `USE_NEPA_CACHE=1`.
+
 ### 2.3 NEPA NPZ cache sanity executed (integrity check)
 
 Purpose:
@@ -142,28 +213,28 @@ Command:
 
 ```bash
 python scripts/sanity/check_scanobjectnn_variant_cache.py \
-  --cache_roots data/scanobjectnn_obj_bg_v2,data/scanobjectnn_obj_only_v2,data/scanobjectnn_pb_t50_rs_v2 \
-  --out_json logs/sanity/scanobjectnn_variant_cache_sanity_20260226.json
+  --cache_roots data/scanobjectnn_obj_bg_v3_nonorm,data/scanobjectnn_obj_only_v3_nonorm,data/scanobjectnn_pb_t50_rs_v3_nonorm \
+  --out_json logs/sanity/scanobjectnn_variant_cache_sanity_v3_nonorm_20260227.json
 ```
 
 Summary:
 
 | cache_root | split | n_files | n_classes | bad_npz | missing_key_files |
 |---|---|---:|---:|---:|---:|
-| `scanobjectnn_obj_bg_v2` | train | 2309 | 15 | 0 | 0 |
-| `scanobjectnn_obj_bg_v2` | test | 581 | 15 | 0 | 0 |
-| `scanobjectnn_obj_only_v2` | train | 2309 | 15 | 0 | 0 |
-| `scanobjectnn_obj_only_v2` | test | 581 | 15 | 0 | 0 |
-| `scanobjectnn_pb_t50_rs_v2` | train | 11416 | 15 | 0 | 0 |
-| `scanobjectnn_pb_t50_rs_v2` | test | 2882 | 15 | 0 | 0 |
+| `scanobjectnn_obj_bg_v3_nonorm` | train | 2309 | 15 | 0 | 0 |
+| `scanobjectnn_obj_bg_v3_nonorm` | test | 581 | 15 | 0 | 0 |
+| `scanobjectnn_obj_only_v3_nonorm` | train | 2309 | 15 | 0 | 0 |
+| `scanobjectnn_obj_only_v3_nonorm` | test | 581 | 15 | 0 | 0 |
+| `scanobjectnn_pb_t50_rs_v3_nonorm` | train | 11416 | 15 | 0 | 0 |
+| `scanobjectnn_pb_t50_rs_v3_nonorm` | test | 2882 | 15 | 0 | 0 |
 
-Artifacts:
+Artifacts (v3_nonorm canonical):
 
-- `logs/sanity/scanobjectnn_variant_cache_sanity_20260226.json`
-- `logs/sanity/scanobjectnn_variant_cache_sanity_20260226.out`
+- `logs/sanity/scanobjectnn_variant_cache_sanity_v3_nonorm_20260227.json`
+- `logs/sanity/scanobjectnn_variant_cache_sanity_v3_nonorm_20260227.out`
 - checker script: `scripts/sanity/check_scanobjectnn_variant_cache.py`
 
-### 2.4 Cache-loaded model eval evidence (`pb_t50_rs_v2`)
+### 2.4 Cache-loaded model eval evidence (`pb_t50_rs_v2`, legacy reference)
 
 This confirms actual classification runs reading variant cache (not integrity-only):
 
@@ -174,6 +245,7 @@ This confirms actual classification runs reading variant cache (not integrity-on
   - `logs/eval/abcd_cls_cpac_scan_pb_nepafull_backfillcheck_meanall_lr1e4_20260226_195200/runA_classification_scan.log`
   - `logs/eval/abcd_cls_cpac_scan_pb_nepafull_backfillcheck_meanall_lr5e4_20260226_195200/runA_classification_scan.log`
 - log evidence (all four): `num_train=10282 num_val=1134 num_test=2882` and final `best_val=... test_acc=...` lines present.
+- policy note: this block is kept as historical troubleshooting evidence only; new benchmark runs use `*_v3_nonorm`.
 
 ## 3. Checkpoint Families in Use
 
@@ -213,11 +285,11 @@ Source logs:
 | `97653` | `A_fps` | `nepafull` | `pb_t50_rs` | `1e-4` | 0.3190 |
 | `97656` | `A_fps` | `nepafull` | `pb_t50_rs` | `5e-4` | 0.3171 |
 
-### 4.2 Post-backfill NEPA-full check (`98018`/`98019`/`98021`/`98022`)
+### 4.2 Post-backfill NEPA-full check (`98018`/`98019`/`98021`/`98022`, legacy cache)
 
 Scope:
 
-- cache: `data/scanobjectnn_pb_t50_rs_v2` (after `pt_fps_order` backfill)
+- cache: `data/scanobjectnn_pb_t50_rs_v2` (after `pt_fps_order` backfill, legacy)
 - checkpoint: `runs/pretrain_abcd_1024_runA/last.pt`
 - protocol: `NEPA-full`
 - all jobs completed with `Exit_status=0`

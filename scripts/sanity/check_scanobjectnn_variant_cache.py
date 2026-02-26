@@ -91,7 +91,7 @@ def main() -> None:
         "--cache_roots",
         type=str,
         required=True,
-        help="Comma-separated roots, e.g. data/scanobjectnn_obj_bg_v2,data/scanobjectnn_obj_only_v2",
+        help="Comma-separated roots, e.g. data/scanobjectnn_obj_bg_v3_nonorm,data/scanobjectnn_obj_only_v3_nonorm",
     )
     ap.add_argument("--out_json", type=str, default="")
     args = ap.parse_args()
@@ -109,4 +109,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

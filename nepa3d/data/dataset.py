@@ -230,7 +230,6 @@ class ModelNet40QueryDataset(Dataset):
         self.pt_sample_mode = str(pt_sample_mode)
         self.pt_fps_key = str(pt_fps_key)
         self._warned_missing_fps_order = False
-        self._warned_dist_mismatch = False
         self.pt_rfps_m = int(pt_rfps_m)
         self.point_order_mode = str(point_order_mode)
 
@@ -323,17 +322,19 @@ class ModelNet40QueryDataset(Dataset):
         pt_dist_pool = None
         if self.pt_dist_key:
             pt_dist_pool = pools.get(self.pt_dist_key)
-        # If dist pool is missing or mismatched length, fall back to zeros.
+        # Fail-fast for missing/incompatible dist pool unless explicitly ablated.
         if (pt_dist_pool is None) or (getattr(pt_dist_pool, "shape", None) is None) or (
             pt_dist_pool.shape[0] != pt_xyz_pool.shape[0]
         ):
-            if (not self.ablate_point_dist) and (not self._warned_dist_mismatch):
-                warnings.warn(
-                    f"pt_dist_key='{self.pt_dist_key}' is missing or incompatible with "
-                    f"pt_xyz_key='{self.pt_xyz_key}' (path={path}). Falling back to zeros."
+            if self.ablate_point_dist:
+                pt_dist_pool = np.zeros((pt_xyz_pool.shape[0], 1), dtype=np.float32)
+            else:
+                got_shape = getattr(pt_dist_pool, "shape", None)
+                raise ValueError(
+                    f"CRITICAL: pt_dist_key='{self.pt_dist_key}' is missing or incompatible with "
+                    f"pt_xyz_key='{self.pt_xyz_key}' (path={path}). "
+                    f"Expected first dim {pt_xyz_pool.shape[0]}, got {got_shape}."
                 )
-                self._warned_dist_mismatch = True
-            pt_dist_pool = np.zeros((pt_xyz_pool.shape[0], 1), dtype=np.float32)
         else:
             # enforce (N,1)
             if pt_dist_pool.ndim == 1:

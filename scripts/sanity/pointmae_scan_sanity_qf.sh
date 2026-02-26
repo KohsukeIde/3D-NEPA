@@ -13,6 +13,7 @@ POINTMAE_ROOT="${POINTMAE_ROOT:-${WORKDIR}/Point-MAE}"
 VENV_ACTIVATE="${VENV_ACTIVATE:-${WORKDIR}/.venv/bin/activate}"
 CUDA_MODULE="${CUDA_MODULE:-cuda/12.9}"
 USE_NEPA_CACHE="${USE_NEPA_CACHE:-0}"  # 1: build Point-MAE h5 from NEPA NPZ cache and use it
+ALLOW_SCAN_UNISCALE_V2="${ALLOW_SCAN_UNISCALE_V2:-0}"
 
 VARIANT="${VARIANT:-pb_t50_rs}"  # pb_t50_rs|obj_bg|obj_only
 RUN_TAG="${RUN_TAG:-pointmae_${VARIANT}_sanity_$(date +%Y%m%d_%H%M%S)}"
@@ -21,6 +22,15 @@ SEED="${SEED:-0}"
 
 LOG_ROOT="${LOG_ROOT:-${WORKDIR}/logs/sanity/pointmae}"
 mkdir -p "${LOG_ROOT}"
+
+to_abs_path() {
+  local p="$1"
+  if [[ "${p}" = /* ]]; then
+    echo "${p}"
+  else
+    echo "${WORKDIR}/${p}"
+  fi
+}
 
 if [[ ! -d "${POINTMAE_ROOT}" ]]; then
   echo "[error] Point-MAE root not found: ${POINTMAE_ROOT}"
@@ -46,13 +56,13 @@ mkdir -p "${POINTMAE_ROOT}/data/ScanObjectNN"
 if [[ "${USE_NEPA_CACHE}" == "1" ]]; then
   case "${VARIANT}" in
     pb_t50_rs)
-      NEPA_CACHE_ROOT="${NEPA_CACHE_ROOT:-${WORKDIR}/data/scanobjectnn_pb_t50_rs_v2}"
+      NEPA_CACHE_ROOT="${NEPA_CACHE_ROOT:-${WORKDIR}/data/scanobjectnn_pb_t50_rs_v3_nonorm}"
       ;;
     obj_bg)
-      NEPA_CACHE_ROOT="${NEPA_CACHE_ROOT:-${WORKDIR}/data/scanobjectnn_obj_bg_v2}"
+      NEPA_CACHE_ROOT="${NEPA_CACHE_ROOT:-${WORKDIR}/data/scanobjectnn_obj_bg_v3_nonorm}"
       ;;
     obj_only)
-      NEPA_CACHE_ROOT="${NEPA_CACHE_ROOT:-${WORKDIR}/data/scanobjectnn_obj_only_v2}"
+      NEPA_CACHE_ROOT="${NEPA_CACHE_ROOT:-${WORKDIR}/data/scanobjectnn_obj_only_v3_nonorm}"
       ;;
     *)
       echo "[error] unsupported VARIANT=${VARIANT} (pb_t50_rs|obj_bg|obj_only)"
@@ -60,7 +70,15 @@ if [[ "${USE_NEPA_CACHE}" == "1" ]]; then
       ;;
   esac
 
+  NEPA_CACHE_ROOT="$(to_abs_path "${NEPA_CACHE_ROOT}")"
+  if [[ "${NEPA_CACHE_ROOT}" == *"scanobjectnn_"*"_v2" ]] && [[ "${ALLOW_SCAN_UNISCALE_V2}" != "1" ]]; then
+    echo "[error] NEPA_CACHE_ROOT=${NEPA_CACHE_ROOT} is a uniscale v2 cache and is disallowed by policy."
+    echo "        Use scanobjectnn_*_v3_nonorm, or set ALLOW_SCAN_UNISCALE_V2=1 for intentional legacy reruns."
+    exit 2
+  fi
+
   CACHE_H5_ROOT_BASE="${CACHE_H5_ROOT_BASE:-${WORKDIR}/data/ScanObjectNN_h5_from_nepa_cache}"
+  CACHE_H5_ROOT_BASE="$(to_abs_path "${CACHE_H5_ROOT_BASE}")"
   CACHE_H5_OVERWRITE="${CACHE_H5_OVERWRITE:-0}"
   CACHE_H5_ROOT="${CACHE_H5_ROOT_BASE}/${VARIANT}"
   mkdir -p "${CACHE_H5_ROOT_BASE}"
