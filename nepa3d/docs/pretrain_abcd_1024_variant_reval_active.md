@@ -565,3 +565,65 @@ Quick read:
 - ModelNet40 (`test_acc`) best:
   - `sotafair`: `b04_split_xanchor_morton_typepos` and `b06_split_dirfps_typepos` tie at `0.8652`
   - `nepafull`: `b04_split_xanchor_morton_typepos=0.7738`
+
+## 16. ShapeNet pointcloud-only 1024 pretrain (new fairness baseline)
+
+Submitted on: `2026-02-26`
+
+Purpose:
+
+- add missing `ShapeNet-only pointcloud` pretrain baseline (no ScanObjectNN in pretrain corpus).
+- use this as additional fair-comparison baseline alongside `mesh+UDF-only`.
+
+Added files:
+
+- config:
+  - `nepa3d/configs/pretrain_mixed_shapenet_pointcloud_only.yaml`
+  - dataset: `shapenet_pc` only (`data/shapenet_cache_v0`, `backend=pointcloud_noray`, `weight=1.0`)
+- submit helper:
+  - `scripts/pretrain/submit_pretrain_shapenet_pointonly_1024_qf.sh`
+  - default scope: `RUN_IDS=B` (XYZ-only profile)
+
+Submission:
+
+- command:
+  - `RUN_SET=shapenet_pointonly1024_20260226_154047 JOB_IDS_OUT=logs/pretrain/shapenet_pointonly1024_job_ids.txt bash scripts/pretrain/submit_pretrain_shapenet_pointonly_1024_qf.sh`
+- submitted job:
+  - `97814.qjcm` `runB_shapenetpc_shapenet_pointonly1024_20260226_154047`
+- immediate state:
+  - `job_state=R`
+
+Runtime args (from `qstat -fx`):
+
+- `MIX_CONFIG=nepa3d/configs/pretrain_mixed_shapenet_pointcloud_only.yaml`
+- `N_POINT=1024`, `N_RAY=0`, `QA_TOKENS=0`, `MAX_LEN=2500`
+- `PT_XYZ_KEY=pc_xyz`, `ABLATE_POINT_DIST=1`, `POINT_ORDER_MODE=morton`
+- checkpoint dir:
+  - `runs/pretrain_shapenet_pointonly_1024_shapenet_pointonly1024_20260226_154047_runB`
+
+## 17. 1024 eval status update (`97659`..`97664`)
+
+Checked on: `2026-02-26`
+
+Status:
+
+- `97659` (`eval_runA`): `job_state=R` (running)
+- `97660`..`97664` (`eval_runB`): all `job_state=F`, `Exit_status=0`
+
+Scope confirmation:
+
+- these jobs are `1024` eval runs (`N_POINT_CLS=1024`, `N_RAY_CLS=0`)
+- protocol: `SOTA-fair` on `pb_t50_rs`
+  - `PT_XYZ_KEY_CLS=pc_xyz`, `ABLATE_POINT_DIST=1`
+  - `SCAN_CACHE_ROOT=data/scanobjectnn_pb_t50_rs_v2`
+  - `RUN_CPAC=0` (classification-only)
+
+Completed metrics (`runB_classification_scan.log`):
+
+| job | setting | best_val | best_ep | test_acc |
+|---|---|---:|---:|---:|
+| `97660` | `B_rfps_aug`, `LR=5e-4`, `aug=scanobjectnn` | 0.2474 | 230 | 0.2402 |
+| `97661` | `B_fps`, `LR=5e-4`, `aug=none` | 0.7049 | 234 | 0.5716 |
+| `97662` | `B_fps`, `LR=5e-4`, `aug=scanobjectnn` | 0.7361 | 245 | 0.5505 |
+| `97663` | `B_fps`, `LR=5e-4`, `drop_path=0.0` | 0.7422 | 254 | 0.5544 |
+| `97664` | `B_fps`, `LR=5e-4`, `drop_path=0.1` | 0.7526 | 281 | 0.5641 |
