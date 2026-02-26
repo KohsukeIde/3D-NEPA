@@ -21,6 +21,7 @@ from ..backends.udfgrid_backend import UDFGridBackend
 from ..backends.voxel_backend import VoxelBackend
 from ..models.query_nepa import QueryNepa
 from ..utils.ckpt_utils import (
+    infer_causal_support_kwargs,
     load_state_dict_flexible,
     maybe_resize_pos_emb_in_state_dict,
     maybe_resize_type_emb_in_state_dict,
@@ -713,6 +714,7 @@ def build_model_from_ckpt(ckpt_path, device, max_len_override: Optional[int] = N
 
     state = maybe_resize_type_emb_in_state_dict(dict(state), int(n_types))
     state = maybe_resize_type_pos_emb_in_state_dict(dict(state), int(n_types), int(max_len))
+    support = infer_causal_support_kwargs(pre_args, state)
 
     model = QueryNepa(
         feat_dim=15,
@@ -720,6 +722,18 @@ def build_model_from_ckpt(ckpt_path, device, max_len_override: Optional[int] = N
         n_types=n_types,
         nhead=nhead,
         num_layers=num_layers,
+        backbone_impl=str(support["backbone_impl"]),
+        qkv_bias=bool(support["qkv_bias"]),
+        qk_norm=bool(support["qk_norm"]),
+        qk_norm_affine=bool(support["qk_norm_affine"]),
+        qk_norm_bias=bool(support["qk_norm_bias"]),
+        layerscale_value=float(support["layerscale_value"]),
+        rope_theta=float(support["rope_theta"]),
+        layer_norm_eps=float(support["layer_norm_eps"]),
+        hidden_dropout_prob=float(support["hidden_dropout_prob"]),
+        attention_probs_dropout_prob=float(support["attention_probs_dropout_prob"]),
+        use_gated_mlp=bool(support["use_gated_mlp"]),
+        final_layernorm=bool(support["final_layernorm"]),
         max_len=max_len,
         type_specific_pos=bool(int(pre_args.get("type_specific_pos", 0))),
         arch=str(pre_args.get("arch", "causal")),

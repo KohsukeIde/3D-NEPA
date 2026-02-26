@@ -12,6 +12,7 @@ WORKDIR="${WORKDIR:-${DEFAULT_WORKDIR}}"
 POINTMAE_ROOT="${POINTMAE_ROOT:-${WORKDIR}/Point-MAE}"
 VENV_ACTIVATE="${VENV_ACTIVATE:-${WORKDIR}/.venv/bin/activate}"
 CUDA_MODULE="${CUDA_MODULE:-cuda/12.9}"
+USE_NEPA_CACHE="${USE_NEPA_CACHE:-0}"  # 1: build Point-MAE h5 from NEPA NPZ cache and use it
 
 VARIANT="${VARIANT:-pb_t50_rs}"  # pb_t50_rs|obj_bg|obj_only
 RUN_TAG="${RUN_TAG:-pointmae_${VARIANT}_sanity_$(date +%Y%m%d_%H%M%S)}"
@@ -38,12 +39,48 @@ if command -v module >/dev/null 2>&1; then
 fi
 
 python -V
-python -m pip install -q easydict tensorboardX termcolor timm==0.4.5 transforms3d matplotlib torchvision
+python -m pip install -q easydict tensorboardX termcolor timm==0.4.5 transforms3d matplotlib torchvision h5py
 
 # Point-MAE expected ScanObjectNN layout.
 mkdir -p "${POINTMAE_ROOT}/data/ScanObjectNN"
-ln -sfn "${WORKDIR}/data/ScanObjectNN/h5_files/main_split" "${POINTMAE_ROOT}/data/ScanObjectNN/main_split"
-ln -sfn "${WORKDIR}/data/ScanObjectNN/h5_files/main_split_nobg" "${POINTMAE_ROOT}/data/ScanObjectNN/main_split_nobg"
+if [[ "${USE_NEPA_CACHE}" == "1" ]]; then
+  case "${VARIANT}" in
+    pb_t50_rs)
+      NEPA_CACHE_ROOT="${NEPA_CACHE_ROOT:-${WORKDIR}/data/scanobjectnn_pb_t50_rs_v2}"
+      ;;
+    obj_bg)
+      NEPA_CACHE_ROOT="${NEPA_CACHE_ROOT:-${WORKDIR}/data/scanobjectnn_obj_bg_v2}"
+      ;;
+    obj_only)
+      NEPA_CACHE_ROOT="${NEPA_CACHE_ROOT:-${WORKDIR}/data/scanobjectnn_obj_only_v2}"
+      ;;
+    *)
+      echo "[error] unsupported VARIANT=${VARIANT} (pb_t50_rs|obj_bg|obj_only)"
+      exit 2
+      ;;
+  esac
+
+  CACHE_H5_ROOT_BASE="${CACHE_H5_ROOT_BASE:-${WORKDIR}/data/ScanObjectNN_h5_from_nepa_cache}"
+  CACHE_H5_OVERWRITE="${CACHE_H5_OVERWRITE:-0}"
+  CACHE_H5_ROOT="${CACHE_H5_ROOT_BASE}/${VARIANT}"
+  mkdir -p "${CACHE_H5_ROOT_BASE}"
+  python "${WORKDIR}/scripts/sanity/build_scanobjectnn_h5_from_nepa_cache.py" \
+    --cache_root "${NEPA_CACHE_ROOT}" \
+    --variant "${VARIANT}" \
+    --out_root "${CACHE_H5_ROOT}" \
+    --overwrite "${CACHE_H5_OVERWRITE}"
+
+  if [[ "${VARIANT}" == "obj_only" ]]; then
+    ln -sfn "${WORKDIR}/data/ScanObjectNN/h5_files/main_split" "${POINTMAE_ROOT}/data/ScanObjectNN/main_split"
+    ln -sfn "${CACHE_H5_ROOT}" "${POINTMAE_ROOT}/data/ScanObjectNN/main_split_nobg"
+  else
+    ln -sfn "${CACHE_H5_ROOT}" "${POINTMAE_ROOT}/data/ScanObjectNN/main_split"
+    ln -sfn "${WORKDIR}/data/ScanObjectNN/h5_files/main_split_nobg" "${POINTMAE_ROOT}/data/ScanObjectNN/main_split_nobg"
+  fi
+else
+  ln -sfn "${WORKDIR}/data/ScanObjectNN/h5_files/main_split" "${POINTMAE_ROOT}/data/ScanObjectNN/main_split"
+  ln -sfn "${WORKDIR}/data/ScanObjectNN/h5_files/main_split_nobg" "${POINTMAE_ROOT}/data/ScanObjectNN/main_split_nobg"
+fi
 
 case "${VARIANT}" in
   pb_t50_rs|hardest)
@@ -83,6 +120,11 @@ echo "host=$(hostname)"
 echo "pbs_jobid=${PBS_JOBID:-}"
 echo "variant=${VARIANT}"
 echo "run_tag=${RUN_TAG}"
+echo "use_nepa_cache=${USE_NEPA_CACHE}"
+if [[ "${USE_NEPA_CACHE}" == "1" ]]; then
+  echo "nepa_cache_root=${NEPA_CACHE_ROOT}"
+  echo "cache_h5_root=${CACHE_H5_ROOT}"
+fi
 echo "config=${CONFIG_PATH}"
 echo "ckpt=${CKPT_PATH}"
 echo "log=${OUT_LOG}"

@@ -1,9 +1,291 @@
 from __future__ import annotations
 
+import math
+from typing import Optional
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from ..token.tokenizer import TYPE_POINT, TYPE_Q_POINT, TYPE_Q_RAY, TYPE_RAY
+
+
+def _drop_path(x: torch.Tensor, drop_prob: float, training: bool) -> torch.Tensor:
+    p = float(drop_prob)
+    if p <= 0.0 or (not training):
+        return x
+    keep_prob = 1.0 - p
+    shape = (x.shape[0],) + (1,) * (x.ndim - 1)
+    rnd = keep_prob + torch.rand(shape, device=x.device, dtype=x.dtype)
+    rnd.floor_()
+    return x.div(keep_prob) * rnd
+
+
+class _QKNorm(nn.Module):
+    def __init__(
+        self,
+        head_dim: int,
+        *,
+        eps: float,
+        affine: bool,
+        bias: bool,
+    ) -> None:
+        super().__init__()
+        self.eps = float(eps)
+        self.head_dim = int(head_dim)
+        self.weight = nn.Parameter(torch.ones(self.head_dim)) if bool(affine) else None
+        self.bias = nn.Parameter(torch.zeros(self.head_dim)) if bool(bias) else None
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.layer_norm(x, (self.head_dim,), self.weight, self.bias, self.eps)
+
+
+class _LayerScale(nn.Module):
+    def __init__(self, dim: int, init_value: float | None) -> None:
+        super().__init__()
+        if init_value is None:
+            self.gamma = None
+        else:
+            v = float(init_value)
+            self.gamma = nn.Parameter(v * torch.ones(int(dim))) if v > 0.0 else None
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.gamma is None:
+            return x
+        return x * self.gamma
+
+
+def _rotate_half(x: torch.Tensor) -> torch.Tensor:
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
+    return torch.cat((-x2, x1), dim=-1)
+
+
+def _apply_rope(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    cos: torch.Tensor,
+    sin: torch.Tensor,
+    *,
+    num_prefix_tokens: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    t = int(q.shape[-2])
+    prefix = max(0, int(num_prefix_tokens))
+    if prefix >= t:
+        return q, k
+
+    if prefix <= 0:
+        q_main = q
+        k_main = k
+        q_prefix = None
+        k_prefix = None
+    else:
+        q_prefix, q_main = q.split((prefix, t - prefix), dim=-2)
+        k_prefix, k_main = k.split((prefix, t - prefix), dim=-2)
+
+    q_main = (q_main * cos) + (_rotate_half(q_main) * sin)
+    k_main = (k_main * cos) + (_rotate_half(k_main) * sin)
+
+    if prefix <= 0:
+        return q_main, k_main
+    return torch.cat((q_prefix, q_main), dim=-2), torch.cat((k_prefix, k_main), dim=-2)
+
+
+class _NepaSelfAttention(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        *,
+        hidden_dropout_prob: float,
+        attention_probs_dropout_prob: float,
+        qkv_bias: bool,
+        qk_norm: bool,
+        qk_norm_affine: bool,
+        qk_norm_bias: bool,
+        rope_theta: float,
+        rope_prefix_tokens: int,
+        layer_norm_eps: float,
+    ) -> None:
+        super().__init__()
+        self.d_model = int(d_model)
+        self.nhead = int(nhead)
+        if self.d_model % self.nhead != 0:
+            raise ValueError(f"d_model={self.d_model} must be divisible by nhead={self.nhead}")
+
+        self.head_dim = self.d_model // self.nhead
+        self.scaling = self.head_dim ** -0.5
+
+        self.query = nn.Linear(self.d_model, self.d_model, bias=bool(qkv_bias))
+        self.key = nn.Linear(self.d_model, self.d_model, bias=bool(qkv_bias))
+        self.value = nn.Linear(self.d_model, self.d_model, bias=bool(qkv_bias))
+        self.proj = nn.Linear(self.d_model, self.d_model)
+
+        self.attn_dropout = float(attention_probs_dropout_prob)
+        self.proj_dropout = float(hidden_dropout_prob)
+
+        if bool(qk_norm):
+            self.q_norm = _QKNorm(
+                self.head_dim,
+                eps=float(layer_norm_eps),
+                affine=bool(qk_norm_affine),
+                bias=bool(qk_norm_bias),
+            )
+            self.k_norm = _QKNorm(
+                self.head_dim,
+                eps=float(layer_norm_eps),
+                affine=bool(qk_norm_affine),
+                bias=bool(qk_norm_bias),
+            )
+        else:
+            self.q_norm = nn.Identity()
+            self.k_norm = nn.Identity()
+
+        self.rope_prefix_tokens = max(0, int(rope_prefix_tokens))
+        # Match ViT-NEPA-style RoPE parameterization (head_dim must be divisible by 4).
+        self.use_rope = bool(float(rope_theta) > 0.0 and (self.head_dim % 4 == 0))
+        if self.use_rope:
+            inv_freq = 1.0 / (
+                float(rope_theta)
+                ** torch.arange(0, 1, 4.0 / float(self.head_dim), dtype=torch.float32)
+            )
+            self.register_buffer("rope_inv_freq", inv_freq, persistent=False)
+
+    def _rope_cos_sin(self, seq_len: int, device: torch.device, dtype: torch.dtype) -> tuple[torch.Tensor, torch.Tensor]:
+        # 2D NEPA uses normalized patch-center coordinates in [-1, 1].
+        # For 3D sequence tokens, we map sequence centers to [-1, 1] and duplicate
+        # them into 2 channels so the angle construction is structurally identical.
+        pos = (torch.arange(int(seq_len), dtype=torch.float32, device=device) + 0.5) / float(max(1, int(seq_len)))
+        coord = 2.0 * pos - 1.0  # [-1,1]
+        coords = torch.stack([coord, coord], dim=-1)  # (T,2)
+
+        angles = 2.0 * math.pi * coords[:, :, None] * self.rope_inv_freq[None, None, :]
+        angles = angles.flatten(1, 2).tile(1, 2)  # (T, head_dim)
+        cos = angles.cos()[None, None, :, :].to(dtype=dtype)
+        sin = angles.sin()[None, None, :, :].to(dtype=dtype)
+        return cos, sin
+
+    def forward(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor]) -> torch.Tensor:
+        b, t, _ = x.shape
+
+        q = self.query(x).view(b, t, self.nhead, self.head_dim).transpose(1, 2)
+        k = self.key(x).view(b, t, self.nhead, self.head_dim).transpose(1, 2)
+        v = self.value(x).view(b, t, self.nhead, self.head_dim).transpose(1, 2)
+
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+
+        if self.use_rope and (t > self.rope_prefix_tokens):
+            cos, sin = self._rope_cos_sin(t - self.rope_prefix_tokens, device=x.device, dtype=q.dtype)
+            q, k = _apply_rope(q, k, cos, sin, num_prefix_tokens=self.rope_prefix_tokens)
+
+        scores = torch.matmul(q, k.transpose(-1, -2)) * self.scaling
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                scores = scores.masked_fill(attn_mask[None, None, :, :], torch.finfo(scores.dtype).min)
+            else:
+                scores = scores + attn_mask[None, None, :, :]
+
+        probs = torch.softmax(scores.float(), dim=-1).to(dtype=q.dtype)
+        if self.attn_dropout > 0.0 and self.training:
+            probs = F.dropout(probs, p=self.attn_dropout, training=True)
+
+        out = torch.matmul(probs, v)
+        out = out.transpose(1, 2).contiguous().view(b, t, self.d_model)
+        out = self.proj(out)
+        if self.proj_dropout > 0.0 and self.training:
+            out = F.dropout(out, p=self.proj_dropout, training=True)
+        return out
+
+
+class _NepaMLP(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        intermediate_size: int,
+        *,
+        hidden_dropout_prob: float,
+        use_gated_mlp: bool,
+        hidden_act: str = "gelu",
+    ) -> None:
+        super().__init__()
+        self.use_gated_mlp = bool(use_gated_mlp)
+        self.up_proj = nn.Linear(int(d_model), int(intermediate_size))
+        self.gate_proj = nn.Linear(int(d_model), int(intermediate_size)) if self.use_gated_mlp else None
+        self.fc2 = nn.Linear(int(intermediate_size), int(d_model))
+        self.dropout = float(hidden_dropout_prob)
+
+        if str(hidden_act).lower() == "gelu":
+            self.act = nn.GELU()
+        else:
+            raise ValueError(f"Unsupported hidden_act={hidden_act} (only 'gelu' is supported)")
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        up = self.up_proj(x)
+        if self.use_gated_mlp:
+            gate = self.act(self.gate_proj(x))
+            x = gate * up
+        else:
+            x = self.act(up)
+        x = self.fc2(x)
+        if self.dropout > 0.0 and self.training:
+            x = F.dropout(x, p=self.dropout, training=True)
+        return x
+
+
+class _NepaBlock(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        nhead: int,
+        intermediate_size: int,
+        *,
+        hidden_dropout_prob: float,
+        attention_probs_dropout_prob: float,
+        drop_path: float,
+        qkv_bias: bool,
+        qk_norm: bool,
+        qk_norm_affine: bool,
+        qk_norm_bias: bool,
+        layerscale_value: float,
+        rope_theta: float,
+        rope_prefix_tokens: int,
+        layer_norm_eps: float,
+        use_gated_mlp: bool,
+    ) -> None:
+        super().__init__()
+        self.layernorm_before = nn.LayerNorm(int(d_model), eps=float(layer_norm_eps))
+        self.attn = _NepaSelfAttention(
+            d_model=int(d_model),
+            nhead=int(nhead),
+            hidden_dropout_prob=float(hidden_dropout_prob),
+            attention_probs_dropout_prob=float(attention_probs_dropout_prob),
+            qkv_bias=bool(qkv_bias),
+            qk_norm=bool(qk_norm),
+            qk_norm_affine=bool(qk_norm_affine),
+            qk_norm_bias=bool(qk_norm_bias),
+            rope_theta=float(rope_theta),
+            rope_prefix_tokens=int(rope_prefix_tokens),
+            layer_norm_eps=float(layer_norm_eps),
+        )
+        self.layer_scale1 = _LayerScale(int(d_model), float(layerscale_value))
+
+        self.layernorm_after = nn.LayerNorm(int(d_model), eps=float(layer_norm_eps))
+        self.mlp = _NepaMLP(
+            d_model=int(d_model),
+            intermediate_size=int(intermediate_size),
+            hidden_dropout_prob=float(hidden_dropout_prob),
+            use_gated_mlp=bool(use_gated_mlp),
+            hidden_act="gelu",
+        )
+        self.layer_scale2 = _LayerScale(int(d_model), float(layerscale_value))
+
+        self.drop_path_rate = float(drop_path)
+
+    def forward(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor]) -> torch.Tensor:
+        x = x + _drop_path(self.layer_scale1(self.attn(self.layernorm_before(x), attn_mask=attn_mask)), self.drop_path_rate, self.training)
+        x = x + _drop_path(self.layer_scale2(self.mlp(self.layernorm_after(x))), self.drop_path_rate, self.training)
+        return x
 
 
 class CausalTransformer(nn.Module):
@@ -15,28 +297,72 @@ class CausalTransformer(nn.Module):
         mlp_ratio=4,
         dropout=0.0,
         drop_path=0.0,
+        *,
+        backbone_impl: str = "nepa2d",
+        qkv_bias: bool = True,
+        qk_norm: bool = True,
+        qk_norm_affine: bool = False,
+        qk_norm_bias: bool = False,
+        layerscale_value: float = 1e-5,
+        rope_theta: float = 100.0,
+        rope_prefix_tokens: int = 1,
+        layer_norm_eps: float = 1e-12,
+        hidden_dropout_prob: float = 0.0,
+        attention_probs_dropout_prob: float = 0.0,
+        use_gated_mlp: bool = False,
+        final_layernorm: bool = True,
     ):
         super().__init__()
-        self.layers = nn.ModuleList(
-            [
-                nn.TransformerEncoderLayer(
-                    d_model=d_model,
-                    nhead=nhead,
-                    dim_feedforward=d_model * mlp_ratio,
-                    dropout=dropout,
-                    batch_first=True,
-                    norm_first=True,
-                    activation="gelu",
-                )
-                for _ in range(int(num_layers))
-            ]
-        )
+        self.backbone_impl = str(backbone_impl).lower()
+
         drop_path = self._clamp01(drop_path)
         if int(num_layers) <= 1:
             rates = [drop_path]
         else:
             rates = torch.linspace(0.0, float(drop_path), int(num_layers)).tolist()
         self.drop_path_rates = [float(r) for r in rates]
+
+        if self.backbone_impl == "legacy":
+            self.layers = nn.ModuleList(
+                [
+                    nn.TransformerEncoderLayer(
+                        d_model=d_model,
+                        nhead=nhead,
+                        dim_feedforward=d_model * mlp_ratio,
+                        dropout=dropout,
+                        batch_first=True,
+                        norm_first=True,
+                        activation="gelu",
+                    )
+                    for _ in range(int(num_layers))
+                ]
+            )
+        elif self.backbone_impl == "nepa2d":
+            self.blocks = nn.ModuleList(
+                [
+                    _NepaBlock(
+                        d_model=int(d_model),
+                        nhead=int(nhead),
+                        intermediate_size=int(d_model * mlp_ratio),
+                        hidden_dropout_prob=float(hidden_dropout_prob),
+                        attention_probs_dropout_prob=float(attention_probs_dropout_prob),
+                        drop_path=float(self.drop_path_rates[i]),
+                        qkv_bias=bool(qkv_bias),
+                        qk_norm=bool(qk_norm),
+                        qk_norm_affine=bool(qk_norm_affine),
+                        qk_norm_bias=bool(qk_norm_bias),
+                        layerscale_value=float(layerscale_value),
+                        rope_theta=float(rope_theta),
+                        rope_prefix_tokens=int(rope_prefix_tokens),
+                        layer_norm_eps=float(layer_norm_eps),
+                        use_gated_mlp=bool(use_gated_mlp),
+                    )
+                    for i in range(int(num_layers))
+                ]
+            )
+            self.final_ln = nn.LayerNorm(int(d_model), eps=float(layer_norm_eps)) if bool(final_layernorm) else nn.Identity()
+        else:
+            raise ValueError(f"Unknown backbone_impl={self.backbone_impl}; use legacy|nepa2d")
 
     @staticmethod
     def _clamp01(x: float) -> float:
@@ -48,21 +374,10 @@ class CausalTransformer(nn.Module):
         return x
 
     @staticmethod
-    def _apply_drop_path(x_prev: torch.Tensor, x_next: torch.Tensor, drop_prob: float) -> torch.Tensor:
-        """Apply block-level stochastic depth to residual (x_next - x_prev)."""
-        p = float(drop_prob)
-        if p <= 0.0 or (not x_prev.requires_grad) or (not x_prev.is_floating_point()):
+    def _apply_drop_path(x_prev: torch.Tensor, x_next: torch.Tensor, drop_prob: float, training: bool) -> torch.Tensor:
+        if (not training) or float(drop_prob) <= 0.0:
             return x_next
-        if p >= 1.0:
-            return x_prev
-        if not x_prev.is_cuda and x_prev.dtype not in (torch.float16, torch.float32, torch.float64, torch.bfloat16):
-            return x_next
-        keep_prob = 1.0 - p
-        shape = (x_prev.shape[0],) + (1,) * (x_prev.ndim - 1)
-        rnd = torch.rand(shape, device=x_prev.device, dtype=x_prev.dtype)
-        mask = (rnd < keep_prob).to(x_prev.dtype)
-        residual = (x_next - x_prev) * mask / keep_prob
-        return x_prev + residual
+        return x_prev + _drop_path(x_next - x_prev, float(drop_prob), training)
 
     def forward(
         self,
@@ -138,10 +453,13 @@ class CausalTransformer(nn.Module):
                 extra = eligible & (u < prob)
                 attn_mask = attn_mask | extra
 
-        for li, layer in enumerate(self.layers):
-            x_next = layer(x, src_mask=attn_mask)
-            if self.training:
-                x = self._apply_drop_path(x, x_next, self.drop_path_rates[li])
-            else:
-                x = x_next
+        if self.backbone_impl == "legacy":
+            for li, layer in enumerate(self.layers):
+                x_next = layer(x, src_mask=attn_mask)
+                x = self._apply_drop_path(x, x_next, self.drop_path_rates[li], self.training)
+            return x
+
+        for block in self.blocks:
+            x = block(x, attn_mask=attn_mask)
+        x = self.final_ln(x)
         return x

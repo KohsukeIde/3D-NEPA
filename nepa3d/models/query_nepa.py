@@ -27,6 +27,18 @@ class QueryNepa(nn.Module):
         mlp_ratio=4,
         dropout=0.0,
         drop_path=0.0,
+        backbone_impl: str = "nepa2d",
+        qkv_bias: bool = True,
+        qk_norm: bool = True,
+        qk_norm_affine: bool = False,
+        qk_norm_bias: bool = False,
+        layerscale_value: float = 1e-5,
+        rope_theta: float = 100.0,
+        layer_norm_eps: float = 1e-12,
+        hidden_dropout_prob: float = 0.0,
+        attention_probs_dropout_prob: float = 0.0,
+        use_gated_mlp: bool = False,
+        final_layernorm: bool = True,
         max_len=2048,
         type_specific_pos: bool = False,
         arch="causal",
@@ -40,6 +52,7 @@ class QueryNepa(nn.Module):
         self.feat_dim = int(feat_dim)
         self.d_model = int(d_model)
         self.arch = str(arch)
+        self.backbone_impl = str(backbone_impl).lower()
         self.topo_k = int(topo_k)
         self.topo_include_bos = bool(topo_include_bos)
         self.topo_ray_coord = str(topo_ray_coord)
@@ -73,6 +86,18 @@ class QueryNepa(nn.Module):
                 mlp_ratio=mlp_ratio,
                 dropout=dropout,
                 drop_path=drop_path,
+                backbone_impl=str(backbone_impl),
+                qkv_bias=bool(qkv_bias),
+                qk_norm=bool(qk_norm),
+                qk_norm_affine=bool(qk_norm_affine),
+                qk_norm_bias=bool(qk_norm_bias),
+                layerscale_value=float(layerscale_value),
+                rope_theta=float(rope_theta),
+                layer_norm_eps=float(layer_norm_eps),
+                hidden_dropout_prob=float(hidden_dropout_prob),
+                attention_probs_dropout_prob=float(attention_probs_dropout_prob),
+                use_gated_mlp=bool(use_gated_mlp),
+                final_layernorm=bool(final_layernorm),
             )
         elif self.arch == "encdec":
             self.backbone = EncoderDecoderTransformer(
@@ -91,10 +116,38 @@ class QueryNepa(nn.Module):
             raise ValueError(f"Unknown arch={self.arch}")
 
         self.pred_head = nn.Linear(d_model, d_model)
+        self._init_weights_nepa2d_style()
+
+    def _init_weights_nepa2d_style(self) -> None:
+        init_std = 0.02
+
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.trunc_normal_(m.weight, std=init_std)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.LayerNorm):
+                if m.weight is not None:
+                    nn.init.ones_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.Embedding):
+                nn.init.trunc_normal_(m.weight, std=init_std)
+
+        # Keep explicit control for learned absolute/type-specific positional tables.
+        nn.init.trunc_normal_(self.pos_emb, std=init_std)
+        if self.type_specific_pos:
+            nn.init.trunc_normal_(self.type_pos_emb.weight, std=init_std)
 
     def embed_tokens(self, feat, type_id):
         b, t, _ = feat.shape
-        x = self.token_mlp(feat) + self.type_emb(type_id) + self.pos_emb[:, :t, :]
+        x = self.token_mlp(feat) + self.type_emb(type_id)
+        # NEPA2D-style backbone uses RoPE (no additive absolute position embedding).
+        # Keep pos_emb tensor for checkpoint compatibility / max_len handling.
+        if self.arch == "causal" and self.backbone_impl == "nepa2d":
+            x = x + (self.pos_emb[:, :t, :] * 0.0)
+        else:
+            x = x + self.pos_emb[:, :t, :]
 
         if self.type_specific_pos:
             # Local position within each token type, computed by per-type cumulative sums.

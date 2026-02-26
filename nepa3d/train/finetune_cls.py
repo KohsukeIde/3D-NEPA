@@ -1,4 +1,6 @@
 import argparse
+import hashlib
+import json
 import math
 import os
 import re
@@ -30,6 +32,7 @@ from ..token.tokenizer import (
 )
 from ..utils.seed import set_seed
 from ..utils.ckpt_utils import (
+    infer_causal_support_kwargs,
     load_state_dict_flexible,
     maybe_resize_pos_emb_in_state_dict,
     maybe_resize_type_emb_in_state_dict,
@@ -756,6 +759,24 @@ def main():
     # Allow loading checkpoints across type-vocab updates (e.g. SEP token).
     state = maybe_resize_type_emb_in_state_dict(dict(state), int(ckpt_n_types))
     state = maybe_resize_type_pos_emb_in_state_dict(dict(state), int(ckpt_n_types), int(model_max_len))
+    support = infer_causal_support_kwargs(pre_args, state)
+    support_required = [
+        "backbone_impl",
+        "qkv_bias",
+        "qk_norm",
+        "qk_norm_affine",
+        "qk_norm_bias",
+        "layerscale_value",
+        "rope_theta",
+        "layer_norm_eps",
+        "hidden_dropout_prob",
+        "attention_probs_dropout_prob",
+        "use_gated_mlp",
+        "final_layernorm",
+    ]
+    missing_support = [k for k in support_required if k not in support]
+    if len(missing_support) > 0:
+        raise RuntimeError(f"support config keys missing: {missing_support}")
 
     backbone = QueryNepa(
         feat_dim=15,
@@ -764,8 +785,26 @@ def main():
         nhead=pre_args["heads"],
         num_layers=pre_args["layers"],
         drop_path=float(args.drop_path),
+        backbone_impl=str(support["backbone_impl"]),
+        qkv_bias=bool(support["qkv_bias"]),
+        qk_norm=bool(support["qk_norm"]),
+        qk_norm_affine=bool(support["qk_norm_affine"]),
+        qk_norm_bias=bool(support["qk_norm_bias"]),
+        layerscale_value=float(support["layerscale_value"]),
+        rope_theta=float(support["rope_theta"]),
+        layer_norm_eps=float(support["layer_norm_eps"]),
+        hidden_dropout_prob=float(support["hidden_dropout_prob"]),
+        attention_probs_dropout_prob=float(support["attention_probs_dropout_prob"]),
+        use_gated_mlp=bool(support["use_gated_mlp"]),
+        final_layernorm=bool(support["final_layernorm"]),
         max_len=model_max_len,
         type_specific_pos=bool(int(pre_args.get("type_specific_pos", 0))),
+        arch=str(pre_args.get("arch", "causal")),
+        topo_k=int(pre_args.get("topo_k", 0)),
+        topo_include_bos=bool(int(pre_args.get("topo_include_bos", 1))),
+        topo_ray_coord=str(pre_args.get("topo_ray_coord", "origin")),
+        topo_ray_bbox=float(pre_args.get("topo_ray_bbox", 0.5)),
+        encdec_src_causal=int(pre_args.get("encdec_src_causal", 0)),
     )
     load_state_dict_flexible(backbone, state, strict=True)
     backbone.to(device)
@@ -929,6 +968,38 @@ def main():
     best_state = None
 
     model_for_log = accelerator.unwrap_model(model)
+    support_fixed = {
+        "source_ckpt": os.path.abspath(args.ckpt),
+        "source_ckpt_max_len": int(ckpt_max_len),
+        "resolved_model_max_len": int(model_max_len),
+        "required_seq_len": int(required_len),
+        "arch": str(pre_args.get("arch", "causal")),
+        "d_model": int(pre_args["d_model"]),
+        "layers": int(pre_args["layers"]),
+        "heads": int(pre_args["heads"]),
+        "n_types": int(ckpt_n_types),
+        "type_specific_pos": bool(int(pre_args.get("type_specific_pos", 0))),
+        "qa_tokens": bool(qa_tokens),
+        "qa_layout": str(pre_args.get("qa_layout", "interleave")),
+        "backbone_impl": str(support["backbone_impl"]),
+        "qkv_bias": bool(support["qkv_bias"]),
+        "qk_norm": bool(support["qk_norm"]),
+        "qk_norm_affine": bool(support["qk_norm_affine"]),
+        "qk_norm_bias": bool(support["qk_norm_bias"]),
+        "layerscale_value": float(support["layerscale_value"]),
+        "rope_theta": float(support["rope_theta"]),
+        "layer_norm_eps": float(support["layer_norm_eps"]),
+        "hidden_dropout_prob": float(support["hidden_dropout_prob"]),
+        "attention_probs_dropout_prob": float(support["attention_probs_dropout_prob"]),
+        "use_gated_mlp": bool(support["use_gated_mlp"]),
+        "final_layernorm": bool(support["final_layernorm"]),
+        # Finetune-side explicit override (kept separate from checkpoint support config).
+        "finetune_drop_path": float(args.drop_path),
+    }
+    support_fixed_json = json.dumps(support_fixed, sort_keys=True, separators=(",", ":"))
+    support_fixed_sha1 = hashlib.sha1(support_fixed_json.encode("utf-8")).hexdigest()[:16]
+    log(f"[support-fixed] {support_fixed_json}")
+    log(f"[support-fixed] sha1={support_fixed_sha1}")
     log(
         f"train_backend={train_backend} eval_backend={eval_backend} "
         f"val_ratio={args.val_ratio} val_seed={args.val_seed} "
@@ -951,6 +1022,14 @@ def main():
         f"grad_accum_steps={args.grad_accum_steps} max_grad_norm={args.max_grad_norm} "
         f"llrd={args.llrd:.4f} llrd_mode={args.llrd_mode} "
         f"drop_path={args.drop_path:.4f} "
+        f"backbone_impl={support['backbone_impl']} "
+        f"qk_norm={bool(support['qk_norm'])} "
+        f"layerscale_value={float(support['layerscale_value']):.2e} "
+        f"rope_theta={float(support['rope_theta'])} "
+        f"hidden_dropout_prob={float(support['hidden_dropout_prob'])} "
+        f"attention_probs_dropout_prob={float(support['attention_probs_dropout_prob'])} "
+        f"use_gated_mlp={bool(support['use_gated_mlp'])} "
+        f"final_layernorm={bool(support['final_layernorm'])} "
         f"lr_scheduler={args.lr_scheduler} warmup_steps={warmup_steps} total_update_steps={total_update_steps} "
         f"min_lr={args.min_lr}"
     )

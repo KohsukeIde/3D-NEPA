@@ -31,6 +31,7 @@ from ..token.tokenizer import (
 )
 from ..utils.seed import set_seed
 from ..utils.ckpt_utils import (
+    infer_causal_support_kwargs,
     load_state_dict_flexible,
     maybe_resize_pos_emb_in_state_dict,
     maybe_resize_type_emb_in_state_dict,
@@ -300,15 +301,33 @@ def main():
             "(drop mismatched per-parameter states, keep others)."
         ),
     )
-    ap.add_argument("--d_model", type=int, default=384)
-    ap.add_argument("--layers", type=int, default=8)
-    ap.add_argument("--heads", type=int, default=6)
+    ap.add_argument("--d_model", type=int, default=768)
+    ap.add_argument("--layers", type=int, default=12)
+    ap.add_argument("--heads", type=int, default=12)
     ap.add_argument(
         "--drop_path",
         type=float,
         default=0.0,
         help="Backbone drop-path (stochastic depth) rate.",
     )
+    ap.add_argument(
+        "--backbone_impl",
+        type=str,
+        default="nepa2d",
+        choices=["legacy", "nepa2d"],
+        help="Causal backbone implementation: legacy(nn.TransformerEncoderLayer) or NEPA2D-style blocks.",
+    )
+    ap.add_argument("--qkv_bias", type=int, default=1, choices=[0, 1], help="Enable QKV projection bias (NEPA2D-style).")
+    ap.add_argument("--qk_norm", type=int, default=1, choices=[0, 1], help="Enable Q/K normalization before attention.")
+    ap.add_argument("--qk_norm_affine", type=int, default=0, choices=[0, 1], help="Use affine scale in Q/K norm.")
+    ap.add_argument("--qk_norm_bias", type=int, default=0, choices=[0, 1], help="Use bias term in Q/K norm.")
+    ap.add_argument("--layerscale_value", type=float, default=1e-5, help="LayerScale init value (<=0 disables).")
+    ap.add_argument("--rope_theta", type=float, default=100.0, help="RoPE base theta (<=0 disables RoPE).")
+    ap.add_argument("--layer_norm_eps", type=float, default=1e-12, help="LayerNorm epsilon for NEPA2D-style blocks.")
+    ap.add_argument("--hidden_dropout_prob", type=float, default=0.0, help="Hidden/output dropout prob (ViT-NEPA style).")
+    ap.add_argument("--attention_probs_dropout_prob", type=float, default=0.0, help="Attention-probability dropout prob (ViT-NEPA style).")
+    ap.add_argument("--use_gated_mlp", type=int, default=0, choices=[0, 1], help="Use gated MLP (SwiGLU-like gate path).")
+    ap.add_argument("--final_layernorm", type=int, default=1, choices=[0, 1], help="Apply final LayerNorm after encoder stack.")
     ap.add_argument("--save_dir", type=str, default="runs/querynepa3d_pretrain")
     ap.add_argument("--save_every", type=int, default=1, help="save periodic checkpoints every N epochs (>=1)")
     ap.add_argument("--save_last", type=int, default=1, help="if 1, also write save_dir/last.pt at checkpoint save points")
@@ -878,6 +897,18 @@ def main():
         nhead=args.heads,
         num_layers=args.layers,
         drop_path=float(args.drop_path),
+        backbone_impl=str(args.backbone_impl),
+        qkv_bias=bool(int(args.qkv_bias)),
+        qk_norm=bool(int(args.qk_norm)),
+        qk_norm_affine=bool(int(args.qk_norm_affine)),
+        qk_norm_bias=bool(int(args.qk_norm_bias)),
+        layerscale_value=float(args.layerscale_value),
+        rope_theta=float(args.rope_theta),
+        layer_norm_eps=float(args.layer_norm_eps),
+        hidden_dropout_prob=float(args.hidden_dropout_prob),
+        attention_probs_dropout_prob=float(args.attention_probs_dropout_prob),
+        use_gated_mlp=bool(int(args.use_gated_mlp)),
+        final_layernorm=bool(int(args.final_layernorm)),
         max_len=t,
         type_specific_pos=bool(args.type_specific_pos),
         arch=str(args.arch),
@@ -886,6 +917,14 @@ def main():
         topo_ray_bbox=float(args.topo_ray_bbox),
         encdec_src_causal=int(args.encdec_src_causal),
     ).to(device)
+    mprint(
+        f"[backbone] arch={args.arch} impl={args.backbone_impl} "
+        f"drop_path={args.drop_path:.4f} qk_norm={bool(int(args.qk_norm))} "
+        f"layerscale_value={float(args.layerscale_value):.2e} rope_theta={float(args.rope_theta)} "
+        f"hidden_dropout_prob={float(args.hidden_dropout_prob)} "
+        f"attention_probs_dropout_prob={float(args.attention_probs_dropout_prob)} "
+        f"use_gated_mlp={bool(int(args.use_gated_mlp))} final_layernorm={bool(int(args.final_layernorm))}"
+    )
 
     teacher_model = None
     teacher_on = (len(str(args.teacher_ckpt).strip()) > 0) and (float(args.teacher_distill_weight) > 0.0)
@@ -904,6 +943,7 @@ def main():
         teacher_encdec_src_causal = int(teacher_pre_args.get("encdec_src_causal", 0))
         teacher_drop_path = float(teacher_pre_args.get("drop_path", 0.0))
         teacher_type_specific_pos = bool(int(teacher_pre_args.get("type_specific_pos", 0)))
+        teacher_causal_support = infer_causal_support_kwargs(teacher_pre_args, teacher_state)
         teacher_len = int(teacher_state["pos_emb"].shape[1])
         if teacher_n_types != int(n_types):
             mprint(
@@ -923,6 +963,18 @@ def main():
             nhead=teacher_heads,
             num_layers=teacher_layers,
             drop_path=teacher_drop_path,
+            backbone_impl=str(teacher_causal_support["backbone_impl"]),
+            qkv_bias=bool(teacher_causal_support["qkv_bias"]),
+            qk_norm=bool(teacher_causal_support["qk_norm"]),
+            qk_norm_affine=bool(teacher_causal_support["qk_norm_affine"]),
+            qk_norm_bias=bool(teacher_causal_support["qk_norm_bias"]),
+            layerscale_value=float(teacher_causal_support["layerscale_value"]),
+            rope_theta=float(teacher_causal_support["rope_theta"]),
+            layer_norm_eps=float(teacher_causal_support["layer_norm_eps"]),
+            hidden_dropout_prob=float(teacher_causal_support["hidden_dropout_prob"]),
+            attention_probs_dropout_prob=float(teacher_causal_support["attention_probs_dropout_prob"]),
+            use_gated_mlp=bool(teacher_causal_support["use_gated_mlp"]),
+            final_layernorm=bool(teacher_causal_support["final_layernorm"]),
             max_len=t,
             type_specific_pos=teacher_type_specific_pos,
             arch=teacher_arch,

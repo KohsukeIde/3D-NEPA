@@ -50,10 +50,22 @@ N_RAY="${N_RAY:-256}"
 MAX_LEN="${MAX_LEN:--1}"  # -1 = auto from (qa_tokens/add_eos/n_point/n_ray/schedules)
 N_POINT_SCHEDULE="${N_POINT_SCHEDULE:-}"  # e.g., '0:256,10:512,20:1024'
 N_RAY_SCHEDULE="${N_RAY_SCHEDULE:-}"      # e.g., '0:256,10:512'
-D_MODEL="${D_MODEL:-384}"
-LAYERS="${LAYERS:-8}"
-HEADS="${HEADS:-6}"
+D_MODEL="${D_MODEL:-768}"
+LAYERS="${LAYERS:-12}"
+HEADS="${HEADS:-12}"
 DROP_PATH="${DROP_PATH:-0.0}"
+BACKBONE_IMPL="${BACKBONE_IMPL:-nepa2d}"
+QKV_BIAS="${QKV_BIAS:-1}"
+QK_NORM="${QK_NORM:-1}"
+QK_NORM_AFFINE="${QK_NORM_AFFINE:-0}"
+QK_NORM_BIAS="${QK_NORM_BIAS:-0}"
+LAYERSCALE_VALUE="${LAYERSCALE_VALUE:-1e-5}"
+ROPE_THETA="${ROPE_THETA:-100.0}"
+LAYER_NORM_EPS="${LAYER_NORM_EPS:-1e-12}"
+HIDDEN_DROPOUT_PROB="${HIDDEN_DROPOUT_PROB:-0.0}"
+ATTENTION_PROBS_DROPOUT_PROB="${ATTENTION_PROBS_DROPOUT_PROB:-0.0}"
+USE_GATED_MLP="${USE_GATED_MLP:-0}"
+FINAL_LAYERNORM="${FINAL_LAYERNORM:-1}"
 SAVE_DIR="${SAVE_DIR:-runs/querynepa3d_meshpre_v0}"
 SAVE_EVERY="${SAVE_EVERY:-10}"
 SAVE_LAST="${SAVE_LAST:-1}"
@@ -186,6 +198,18 @@ if [ "${NUM_PROCESSES}" -gt 1 ]; then
   --n_ray_schedule "${N_RAY_SCHEDULE}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
   --drop_path "${DROP_PATH}" \
+  --backbone_impl "${BACKBONE_IMPL}" \
+  --qkv_bias "${QKV_BIAS}" \
+  --qk_norm "${QK_NORM}" \
+  --qk_norm_affine "${QK_NORM_AFFINE}" \
+  --qk_norm_bias "${QK_NORM_BIAS}" \
+  --layerscale_value "${LAYERSCALE_VALUE}" \
+  --rope_theta "${ROPE_THETA}" \
+  --layer_norm_eps "${LAYER_NORM_EPS}" \
+  --hidden_dropout_prob "${HIDDEN_DROPOUT_PROB}" \
+  --attention_probs_dropout_prob "${ATTENTION_PROBS_DROPOUT_PROB}" \
+  --use_gated_mlp "${USE_GATED_MLP}" \
+  --final_layernorm "${FINAL_LAYERNORM}" \
   --num_workers "${NUM_WORKERS}" \
   --drop_ray_prob "${DROP_RAY_PROB}" \
   --add_eos "${ADD_EOS}" \
@@ -264,6 +288,18 @@ else
   --n_ray_schedule "${N_RAY_SCHEDULE}" \
   --d_model "${D_MODEL}" --layers "${LAYERS}" --heads "${HEADS}" \
   --drop_path "${DROP_PATH}" \
+  --backbone_impl "${BACKBONE_IMPL}" \
+  --qkv_bias "${QKV_BIAS}" \
+  --qk_norm "${QK_NORM}" \
+  --qk_norm_affine "${QK_NORM_AFFINE}" \
+  --qk_norm_bias "${QK_NORM_BIAS}" \
+  --layerscale_value "${LAYERSCALE_VALUE}" \
+  --rope_theta "${ROPE_THETA}" \
+  --layer_norm_eps "${LAYER_NORM_EPS}" \
+  --hidden_dropout_prob "${HIDDEN_DROPOUT_PROB}" \
+  --attention_probs_dropout_prob "${ATTENTION_PROBS_DROPOUT_PROB}" \
+  --use_gated_mlp "${USE_GATED_MLP}" \
+  --final_layernorm "${FINAL_LAYERNORM}" \
   --num_workers "${NUM_WORKERS}" \
   --drop_ray_prob "${DROP_RAY_PROB}" \
   --add_eos "${ADD_EOS}" \

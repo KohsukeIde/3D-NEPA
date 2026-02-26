@@ -22,10 +22,51 @@ def normalize_points(pc):
     return pc / scale
 
 
-def make_pools(pc_xyz, pt_pool=2000, ray_pool=1000, rng=None, pt_surface_ratio=0.5, pt_surface_sigma=0.02):
+def resolve_query_bbox(pc_xyz, mode="unit", pad=0.0):
+    mode = str(mode).lower().strip()
+    if mode == "unit":
+        lo = np.array([-1.0, -1.0, -1.0], dtype=np.float32)
+        hi = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+        return lo, hi
+    if mode != "auto":
+        raise ValueError(f"unsupported query_bbox_mode={mode} (use unit|auto)")
+
+    pc_xyz = np.asarray(pc_xyz, dtype=np.float32)
+    lo = pc_xyz.min(axis=0).astype(np.float32, copy=False)
+    hi = pc_xyz.max(axis=0).astype(np.float32, copy=False)
+    span = (hi - lo).astype(np.float32, copy=False)
+    pad = float(pad)
+    if pad > 0.0:
+        lo = (lo - span * pad).astype(np.float32, copy=False)
+        hi = (hi + span * pad).astype(np.float32, copy=False)
+
+    # Guard near-degenerate axes (rare but possible).
+    tiny = (hi - lo) < 1e-6
+    if np.any(tiny):
+        c = (hi + lo) * 0.5
+        lo[tiny] = (c[tiny] - 0.5).astype(np.float32, copy=False)
+        hi[tiny] = (c[tiny] + 0.5).astype(np.float32, copy=False)
+
+    return lo.astype(np.float32, copy=False), hi.astype(np.float32, copy=False)
+
+
+def make_pools(
+    pc_xyz,
+    pt_pool=2000,
+    ray_pool=1000,
+    rng=None,
+    pt_surface_ratio=0.5,
+    pt_surface_sigma=0.02,
+    query_lo=None,
+    query_hi=None,
+):
     if rng is None:
         rng = np.random
     kdt = cKDTree(pc_xyz)
+    if query_lo is None or query_hi is None:
+        query_lo, query_hi = resolve_query_bbox(pc_xyz, mode="unit", pad=0.0)
+    query_lo = np.asarray(query_lo, dtype=np.float32).reshape(1, 3)
+    query_hi = np.asarray(query_hi, dtype=np.float32).reshape(1, 3)
 
     # Point-query pool: mix uniform and near-point samples (surface-biased).
     pt_pool = int(pt_pool)
@@ -33,13 +74,13 @@ def make_pools(pc_xyz, pt_pool=2000, ray_pool=1000, rng=None, pt_surface_ratio=0
     n_surf = pt_pool - n_uni
     pts = []
     if n_uni > 0:
-        pts.append(rng.uniform(-1.0, 1.0, size=(n_uni, 3)).astype(np.float32))
+        pts.append(rng.uniform(query_lo, query_hi, size=(n_uni, 3)).astype(np.float32))
     if n_surf > 0:
         base = pc_xyz[rng.choice(pc_xyz.shape[0], size=n_surf, replace=(pc_xyz.shape[0] < n_surf))]
         jitter = rng.normal(scale=float(pt_surface_sigma), size=(n_surf, 3)).astype(np.float32)
         pts.append((base + jitter).astype(np.float32))
     pt_xyz_pool = np.concatenate(pts, axis=0) if len(pts) > 1 else pts[0]
-    pt_xyz_pool = np.clip(pt_xyz_pool, -1.0, 1.0).astype(np.float32, copy=False)
+    pt_xyz_pool = np.clip(pt_xyz_pool, query_lo, query_hi).astype(np.float32, copy=False)
     pt_dist_pool, _ = kdt.query(pt_xyz_pool, k=1)
     pt_dist_pool = pt_dist_pool.astype(np.float32, copy=False)
 
@@ -106,7 +147,20 @@ def _assert_unique_stems(h5_paths, allow_duplicate_stems=False):
         raise RuntimeError("\n".join(msg_lines))
 
 
-def _write_preprocess_meta(out_root, split, scan_root, h5_paths, pt_pool, ray_pool, pt_surface_ratio, pt_surface_sigma, seed):
+def _write_preprocess_meta(
+    out_root,
+    split,
+    scan_root,
+    h5_paths,
+    pt_pool,
+    ray_pool,
+    pt_surface_ratio,
+    pt_surface_sigma,
+    seed,
+    normalize_pc,
+    query_bbox_mode,
+    query_bbox_pad,
+):
     meta_dir = os.path.join(out_root, "_meta")
     os.makedirs(meta_dir, exist_ok=True)
     meta_path = os.path.join(meta_dir, f"scanobjectnn_{split}_source.txt")
@@ -118,6 +172,9 @@ def _write_preprocess_meta(out_root, split, scan_root, h5_paths, pt_pool, ray_po
         f.write(f"ray_pool={int(ray_pool)}\n")
         f.write(f"pt_surface_ratio={float(pt_surface_ratio)}\n")
         f.write(f"pt_surface_sigma={float(pt_surface_sigma)}\n")
+        f.write(f"normalize_pc={int(bool(normalize_pc))}\n")
+        f.write(f"query_bbox_mode={str(query_bbox_mode)}\n")
+        f.write(f"query_bbox_pad={float(query_bbox_pad)}\n")
         f.write(f"h5_count={len(h5_paths)}\n")
         for p in h5_paths:
             f.write(f"{os.path.abspath(p)}\n")
@@ -135,6 +192,9 @@ def _process_h5_file(task):
         base_seed,
         global_offset,
         overwrite,
+        normalize_pc,
+        query_bbox_mode,
+        query_bbox_pad,
     ) = task
 
     stem = os.path.splitext(os.path.basename(h5_path))[0]
@@ -159,12 +219,17 @@ def _process_h5_file(task):
                 continue
 
             pc = data[idx]
-            pc_xyz = normalize_points(pc)
+            if normalize_pc:
+                pc_xyz = normalize_points(pc)
+            else:
+                pc_xyz = pc.astype(np.float32, copy=False)
             pc_n = np.zeros_like(pc_xyz, dtype=np.float32)
             try:
                 pc_fps_order = fps_order(pc_xyz, k=int(pc_xyz.shape[0])).astype(np.int32, copy=False)
             except Exception:
                 pc_fps_order = np.arange(pc_xyz.shape[0], dtype=np.int32)
+
+            query_lo, query_hi = resolve_query_bbox(pc_xyz, mode=query_bbox_mode, pad=query_bbox_pad)
 
             # Deterministic per-sample RNG (stable across file-parallel execution).
             seed_i = (int(base_seed) + int(global_offset) + int(idx)) & 0xFFFFFFFF
@@ -176,6 +241,8 @@ def _process_h5_file(task):
                 rng=rng,
                 pt_surface_ratio=pt_surface_ratio,
                 pt_surface_sigma=pt_surface_sigma,
+                query_lo=query_lo,
+                query_hi=query_hi,
             )
 
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -184,6 +251,8 @@ def _process_h5_file(task):
                 pc_xyz=pc_xyz.astype(np.float32, copy=False),
                 pc_n=pc_n,
                 pc_fps_order=pc_fps_order,
+                query_bbox_min=query_lo.astype(np.float32, copy=False),
+                query_bbox_max=query_hi.astype(np.float32, copy=False),
                 **pools,
             )
             n_ok += 1
@@ -203,6 +272,9 @@ def preprocess_split(
     pt_surface_sigma=0.02,
     allow_duplicate_stems=False,
     workers=1,
+    normalize_pc=True,
+    query_bbox_mode="unit",
+    query_bbox_pad=0.0,
 ):
     h5_paths = find_split_files(scan_root, split)
     if not h5_paths:
@@ -219,6 +291,9 @@ def preprocess_split(
         pt_surface_ratio,
         pt_surface_sigma,
         seed,
+        normalize_pc,
+        query_bbox_mode,
+        query_bbox_pad,
     )
 
     # Compute sample counts per file once (used for logging and deterministic offsets).
@@ -248,6 +323,9 @@ def preprocess_split(
                     seed,
                     offset,
                     overwrite,
+                    normalize_pc,
+                    query_bbox_mode,
+                    query_bbox_pad,
                 )
             )
             offset += int(n)
@@ -279,14 +357,27 @@ def preprocess_split(
         if (not overwrite) and os.path.exists(out_path):
             continue
 
-        pc_xyz = normalize_points(pc)
+        if normalize_pc:
+            pc_xyz = normalize_points(pc)
+        else:
+            pc_xyz = pc.astype(np.float32, copy=False)
         pc_n = np.zeros_like(pc_xyz, dtype=np.float32)
+        query_lo, query_hi = resolve_query_bbox(pc_xyz, mode=query_bbox_mode, pad=query_bbox_pad)
         # Deterministic FPS order over observed point cloud points.
         try:
             pc_fps_order = fps_order(pc_xyz, k=int(pc_xyz.shape[0])).astype(np.int32, copy=False)
         except Exception:
             pc_fps_order = np.arange(pc_xyz.shape[0], dtype=np.int32)
-        pools = make_pools(pc_xyz, pt_pool=pt_pool, ray_pool=ray_pool, rng=rng, pt_surface_ratio=pt_surface_ratio, pt_surface_sigma=pt_surface_sigma)
+        pools = make_pools(
+            pc_xyz,
+            pt_pool=pt_pool,
+            ray_pool=ray_pool,
+            rng=rng,
+            pt_surface_ratio=pt_surface_ratio,
+            pt_surface_sigma=pt_surface_sigma,
+            query_lo=query_lo,
+            query_hi=query_hi,
+        )
 
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         np.savez_compressed(
@@ -294,6 +385,8 @@ def preprocess_split(
             pc_xyz=pc_xyz.astype(np.float32, copy=False),
             pc_n=pc_n,
             pc_fps_order=pc_fps_order,
+            query_bbox_min=query_lo.astype(np.float32, copy=False),
+            query_bbox_max=query_hi.astype(np.float32, copy=False),
             **pools,
         )
 
@@ -308,6 +401,15 @@ def main():
     ap.add_argument("--pt_surface_ratio", type=float, default=0.5)
     ap.add_argument("--pt_surface_sigma", type=float, default=0.02)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--normalize_pc", type=int, default=1, choices=[0, 1], help="normalize input pc_xyz to unit sphere")
+    ap.add_argument(
+        "--query_bbox_mode",
+        type=str,
+        default="unit",
+        choices=["unit", "auto"],
+        help="point-query sampling bbox mode: unit=[-1,1]^3, auto=per-sample bbox",
+    )
+    ap.add_argument("--query_bbox_pad", type=float, default=0.0, help="fractional bbox padding when query_bbox_mode=auto")
     ap.add_argument(
         "--allow_duplicate_stems",
         action="store_true",
@@ -316,6 +418,9 @@ def main():
     ap.add_argument("--workers", type=int, default=1, help="parallel workers across h5 files")
     ap.add_argument("--overwrite", action="store_true")
     args = ap.parse_args()
+    normalize_pc = bool(int(args.normalize_pc))
+    if (not normalize_pc) and args.query_bbox_mode == "unit":
+        print("[warn] normalize_pc=0 with query_bbox_mode=unit may induce strong scale mismatch.")
 
     if args.split in ("train", "all"):
         preprocess_split(
@@ -330,6 +435,9 @@ def main():
             pt_surface_sigma=args.pt_surface_sigma,
             allow_duplicate_stems=args.allow_duplicate_stems,
             workers=args.workers,
+            normalize_pc=normalize_pc,
+            query_bbox_mode=args.query_bbox_mode,
+            query_bbox_pad=args.query_bbox_pad,
         )
     if args.split in ("test", "all"):
         preprocess_split(
@@ -344,6 +452,9 @@ def main():
             pt_surface_sigma=args.pt_surface_sigma,
             allow_duplicate_stems=args.allow_duplicate_stems,
             workers=args.workers,
+            normalize_pc=normalize_pc,
+            query_bbox_mode=args.query_bbox_mode,
+            query_bbox_pad=args.query_bbox_pad,
         )
 
 

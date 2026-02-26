@@ -37,6 +37,10 @@ RAY_POOL="${RAY_POOL:-256}"
 PT_SURFACE_RATIO="${PT_SURFACE_RATIO:-0.5}"
 PT_SURFACE_SIGMA="${PT_SURFACE_SIGMA:-0.02}"
 SEED="${SEED:-0}"
+WORKERS="${WORKERS:-8}"
+NORMALIZE_PC="${NORMALIZE_PC:-1}"
+QUERY_BBOX_MODE="${QUERY_BBOX_MODE:-unit}"
+QUERY_BBOX_PAD="${QUERY_BBOX_PAD:-0.0}"
 ALLOW_DUPLICATE_STEMS="${ALLOW_DUPLICATE_STEMS:-0}"
 SKIP_PREPROCESS="${SKIP_PREPROCESS:-0}"
 
@@ -82,6 +86,10 @@ run_preprocess() {
     --pt_surface_ratio "${PT_SURFACE_RATIO}" \
     --pt_surface_sigma "${PT_SURFACE_SIGMA}" \
     --seed "${SEED}" \
+    --workers "${WORKERS}" \
+    --normalize_pc "${NORMALIZE_PC}" \
+    --query_bbox_mode "${QUERY_BBOX_MODE}" \
+    --query_bbox_pad "${QUERY_BBOX_PAD}" \
     "${extra_args[@]}"
   echo "[done ] out_root=${out_root}"
 }
@@ -126,6 +134,7 @@ run_pt_fps_backfill "${OBJ_ONLY_CACHE}"
 run_pt_fps_backfill "${PB_T50_RS_CACHE}"
 
 echo "[summary]"
+echo "  preprocess normalize_pc=${NORMALIZE_PC} query_bbox_mode=${QUERY_BBOX_MODE} query_bbox_pad=${QUERY_BBOX_PAD}"
 for d in "${OBJ_BG_CACHE}" "${OBJ_ONLY_CACHE}" "${PB_T50_RS_CACHE}"; do
   tr_n="$(find "${d}/train" -type f -name '*.npz' 2>/dev/null | wc -l || true)"
   te_n="$(find "${d}/test" -type f -name '*.npz' 2>/dev/null | wc -l || true)"

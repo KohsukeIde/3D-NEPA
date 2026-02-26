@@ -43,6 +43,138 @@ Scope note for historical issues:
 - `test_acc` is benchmark headline.
 - `best_val` / `best_ep` are diagnostics only.
 
+### 2.1 Why "same-split sanity" is required
+
+Reason:
+
+- It separates **data/split integrity** from **model/recipe quality**.
+- If an external baseline reaches expected range on the same variant protocol
+  (`pb_t50_rs` / `obj_bg` / `obj_only`), then low scores in NEPA runs are not
+  explained by broken split construction alone.
+
+Operational note:
+
+- Point-MAE sanity in this repo uses the official Point-MAE ScanObjectNN
+  layout (`data/ScanObjectNN/h5_files/main_split*`) rather than NEPA NPZ cache.
+- This is split/domain-aligned sanity (not shared NPZ-loader sanity).
+
+### 2.2 External sanity already executed (`Point-MAE`)
+
+Status:
+
+- already completed (`Exit_status=0`): `97974`, `97977`, `97978`
+- source logs: `logs/sanity/pointmae/*.log`
+
+| variant | test_acc | log |
+|---|---:|---|
+| `pb_t50_rs` | 84.5940 | `logs/sanity/pointmae/pointmae_pb_t50_rs_sanity_20260226_183416.log` |
+| `obj_bg` | 73.3219 | `logs/sanity/pointmae/pointmae_obj_bg_sanity_20260226_183443.log` |
+| `obj_only` | 81.7556 | `logs/sanity/pointmae/pointmae_obj_only_sanity_20260226_183443.log` |
+
+Reference:
+
+- `nepa3d/docs/pretrain_abcd_1024_variant_reval_active.md` section 9
+
+Cache-input follow-up (`USE_NEPA_CACHE=1`) completed:
+
+- purpose: run Point-MAE using data derived from NEPA NPZ cache
+  (`scanobjectnn_*_v2`) via NPZ->H5 bridge.
+- jobs (`Exit_status=0`):
+  - `98326.qjcm` (`obj_bg`)
+  - `98327.qjcm` (`pb_t50_rs`)
+  - `98328.qjcm` (`obj_only`)
+- bridge script:
+  - `scripts/sanity/build_scanobjectnn_h5_from_nepa_cache.py`
+
+| variant | Point-MAE official H5 sanity | Point-MAE cache-derived H5 sanity | delta |
+|---|---:|---:|---:|
+| `pb_t50_rs` | 84.5940 | 76.8910 | -7.7030 |
+| `obj_bg` | 73.3219 | 61.4458 | -11.8761 |
+| `obj_only` | 81.7556 | 81.7556 | +0.0000 |
+
+Why this gap appears:
+
+- This is expected under the current cache pipeline.
+- NEPA ScanObjectNN cache stores normalized `pc_xyz` (center + unit-scale) at
+  preprocess time, because cache construction is query/pool-oriented.
+- reference:
+  - `nepa3d/data/preprocess_scanobjectnn.py` (`normalize_points`)
+  - `nepa3d/data/preprocess_scanobjectnn.py` (assignment `pc_xyz = normalize_points(pc)`)
+- Therefore, `official H5` and `cache-derived H5` are not byte-identical point
+  clouds even when split/label counts match; this is a preprocessing-domain
+  difference, not a label/split mismatch.
+
+Normalization contract note (important):
+
+- This is primarily an implementation/design contract, not a theoretical limit.
+- Non-normalized cache can be trained in principle, but current NEPA pipeline
+  assumes normalized coordinate space in multiple stages.
+- Practical impact:
+  - `SOTA-fair` classification (`pc_xyz`, `ablate_point_dist=1`, no CPAC) can
+    still run with non-normalized cache.
+  - `NEPA-full` / CPAC paths are scale-sensitive under current code and are
+    likely to degrade or become inconsistent unless query/eval coordinate
+    assumptions are also refactored.
+- main assumption points:
+  - query pool generation uses fixed `[-1,1]` support
+    (`nepa3d/data/preprocess_scanobjectnn.py`)
+  - distance channel is scale-dependent and consumed by model in NEPA-full
+    (`nepa3d/data/dataset.py`)
+  - CPAC/mesh conversion assumes normalized cube convention
+    (`nepa3d/analysis/completion_cpac_udf.py`)
+
+Cache-derived source logs:
+
+- `logs/sanity/pointmae/pointmae_pb_t50_rs_nepacache_20260227_030616.log`
+- `logs/sanity/pointmae/pointmae_obj_bg_nepacache_20260227_030616.log`
+- `logs/sanity/pointmae/pointmae_obj_only_nepacache_20260227_030616.log`
+
+### 2.3 NEPA NPZ cache sanity executed (integrity check)
+
+Purpose:
+
+- verify variant NPZ caches are not corrupted and contain required keys
+  before interpreting classifier gaps.
+- this is an integrity-only check (no model scoring).
+- actual model evaluation using these caches is reported in Section 4+.
+
+Command:
+
+```bash
+python scripts/sanity/check_scanobjectnn_variant_cache.py \
+  --cache_roots data/scanobjectnn_obj_bg_v2,data/scanobjectnn_obj_only_v2,data/scanobjectnn_pb_t50_rs_v2 \
+  --out_json logs/sanity/scanobjectnn_variant_cache_sanity_20260226.json
+```
+
+Summary:
+
+| cache_root | split | n_files | n_classes | bad_npz | missing_key_files |
+|---|---|---:|---:|---:|---:|
+| `scanobjectnn_obj_bg_v2` | train | 2309 | 15 | 0 | 0 |
+| `scanobjectnn_obj_bg_v2` | test | 581 | 15 | 0 | 0 |
+| `scanobjectnn_obj_only_v2` | train | 2309 | 15 | 0 | 0 |
+| `scanobjectnn_obj_only_v2` | test | 581 | 15 | 0 | 0 |
+| `scanobjectnn_pb_t50_rs_v2` | train | 11416 | 15 | 0 | 0 |
+| `scanobjectnn_pb_t50_rs_v2` | test | 2882 | 15 | 0 | 0 |
+
+Artifacts:
+
+- `logs/sanity/scanobjectnn_variant_cache_sanity_20260226.json`
+- `logs/sanity/scanobjectnn_variant_cache_sanity_20260226.out`
+- checker script: `scripts/sanity/check_scanobjectnn_variant_cache.py`
+
+### 2.4 Cache-loaded model eval evidence (`pb_t50_rs_v2`)
+
+This confirms actual classification runs reading variant cache (not integrity-only):
+
+- cache root used: `data/scanobjectnn_pb_t50_rs_v2`
+- source logs:
+  - `logs/eval/abcd_cls_cpac_scan_pb_nepafull_backfillcheck_meanq_lr1e4_20260226_194113/runA_classification_scan.log`
+  - `logs/eval/abcd_cls_cpac_scan_pb_nepafull_backfillcheck_meanq_lr5e4_20260226_194113/runA_classification_scan.log`
+  - `logs/eval/abcd_cls_cpac_scan_pb_nepafull_backfillcheck_meanall_lr1e4_20260226_195200/runA_classification_scan.log`
+  - `logs/eval/abcd_cls_cpac_scan_pb_nepafull_backfillcheck_meanall_lr5e4_20260226_195200/runA_classification_scan.log`
+- log evidence (all four): `num_train=10282 num_val=1134 num_test=2882` and final `best_val=... test_acc=...` lines present.
+
 ## 3. Checkpoint Families in Use
 
 - `A_fps`: `runs/pretrain_abcd_1024_runA/last.pt`

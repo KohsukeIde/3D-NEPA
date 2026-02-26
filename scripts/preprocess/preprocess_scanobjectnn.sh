@@ -43,6 +43,9 @@ RAY_POOL="${RAY_POOL:-256}"
 PT_SURFACE_RATIO="${PT_SURFACE_RATIO:-0.5}"
 PT_SURFACE_SIGMA="${PT_SURFACE_SIGMA:-0.02}"
 SEED="${SEED:-0}"
+NORMALIZE_PC="${NORMALIZE_PC:-1}"
+QUERY_BBOX_MODE="${QUERY_BBOX_MODE:-unit}"
+QUERY_BBOX_PAD="${QUERY_BBOX_PAD:-0.0}"
 WORKERS="${WORKERS:-8}"
 OVERWRITE="${OVERWRITE:-0}"
 ALLOW_DUPLICATE_STEMS="${ALLOW_DUPLICATE_STEMS:-0}"
@@ -66,6 +69,9 @@ fi
   --pt_surface_ratio "${PT_SURFACE_RATIO}" \
   --pt_surface_sigma "${PT_SURFACE_SIGMA}" \
   --seed "${SEED}" \
+  --normalize_pc "${NORMALIZE_PC}" \
+  --query_bbox_mode "${QUERY_BBOX_MODE}" \
+  --query_bbox_pad "${QUERY_BBOX_PAD}" \
   --workers "${WORKERS}" \
   "${extra_overwrite[@]}" \
   "${extra_dup[@]}"

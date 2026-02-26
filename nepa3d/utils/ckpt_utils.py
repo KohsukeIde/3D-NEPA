@@ -213,3 +213,72 @@ def load_state_dict_flexible(
             raise RuntimeError("\n".join(msg))
 
     return LoadStateReport(missing_keys=missing, unexpected_keys=unexpected)
+
+
+def infer_causal_backbone_impl(
+    pre_args: Mapping[str, object],
+    state_dict: Mapping[str, torch.Tensor],
+    *,
+    default: str = "legacy",
+) -> str:
+    """Infer 3D causal backbone implementation from checkpoint metadata/state.
+
+    Returns one of: {"legacy", "nepa2d"}.
+    """
+    impl = str(pre_args.get("backbone_impl", "")).strip().lower()
+    if impl in ("legacy", "nepa2d"):
+        return impl
+
+    # Legacy CausalTransformer (nn.TransformerEncoderLayer-based)
+    if any(k.startswith("backbone.layers.") for k in state_dict.keys()):
+        return "legacy"
+
+    # New NEPA2D-style causal blocks
+    if any(k.startswith("backbone.blocks.") for k in state_dict.keys()):
+        return "nepa2d"
+
+    d = str(default).strip().lower()
+    return d if d in ("legacy", "nepa2d") else "legacy"
+
+
+def infer_causal_support_kwargs(
+    pre_args: Mapping[str, object],
+    state_dict: Mapping[str, torch.Tensor],
+) -> Dict[str, object]:
+    """Infer causal-backbone support kwargs with sensible defaults.
+
+    Defaults are chosen to preserve old checkpoints while enabling new NEPA2D-style
+    support parts for freshly trained checkpoints.
+    """
+    impl = infer_causal_backbone_impl(pre_args, state_dict, default="legacy")
+    if impl == "legacy":
+        return {
+            "backbone_impl": "legacy",
+            "qkv_bias": True,
+            "qk_norm": False,
+            "qk_norm_affine": False,
+            "qk_norm_bias": False,
+            "layerscale_value": 0.0,
+            "rope_theta": 0.0,
+            "layer_norm_eps": 1e-5,
+            "hidden_dropout_prob": 0.0,
+            "attention_probs_dropout_prob": 0.0,
+            "use_gated_mlp": False,
+            "final_layernorm": False,
+        }
+
+    has_final_ln = any(k.startswith("backbone.final_ln.") for k in state_dict.keys())
+    return {
+        "backbone_impl": "nepa2d",
+        "qkv_bias": bool(int(pre_args.get("qkv_bias", 1))),
+        "qk_norm": bool(int(pre_args.get("qk_norm", 1))),
+        "qk_norm_affine": bool(int(pre_args.get("qk_norm_affine", 0))),
+        "qk_norm_bias": bool(int(pre_args.get("qk_norm_bias", 0))),
+        "layerscale_value": float(pre_args.get("layerscale_value", 1e-5)),
+        "rope_theta": float(pre_args.get("rope_theta", 100.0)),
+        "layer_norm_eps": float(pre_args.get("layer_norm_eps", 1e-12)),
+        "hidden_dropout_prob": float(pre_args.get("hidden_dropout_prob", 0.0)),
+        "attention_probs_dropout_prob": float(pre_args.get("attention_probs_dropout_prob", 0.0)),
+        "use_gated_mlp": bool(int(pre_args.get("use_gated_mlp", 0))),
+        "final_layernorm": bool(int(pre_args.get("final_layernorm", 1))) if ("final_layernorm" in pre_args) else bool(has_final_ln),
+    }
