@@ -38,6 +38,7 @@ class QueryNepa(nn.Module):
         hidden_dropout_prob: float = 0.0,
         attention_probs_dropout_prob: float = 0.0,
         use_gated_mlp: bool = False,
+        hidden_act: str = "gelu",
         final_layernorm: bool = True,
         max_len=2048,
         type_specific_pos: bool = False,
@@ -97,6 +98,7 @@ class QueryNepa(nn.Module):
                 hidden_dropout_prob=float(hidden_dropout_prob),
                 attention_probs_dropout_prob=float(attention_probs_dropout_prob),
                 use_gated_mlp=bool(use_gated_mlp),
+                hidden_act=str(hidden_act),
                 final_layernorm=bool(final_layernorm),
             )
         elif self.arch == "encdec":

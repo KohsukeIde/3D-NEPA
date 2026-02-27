@@ -102,20 +102,45 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--mc_eval_k_test", type=int, default=1, help="MC crops at test time (K>1 averages logits).")
 
     # Model
+    p.add_argument(
+        "--patch_embed",
+        type=str,
+        default="fps_knn",
+        choices=["fps_knn", "serial"],
+        help="Patch grouping backend: fps_knn (default) or serial (Morton/chunk).",
+    )
     p.add_argument("--num_groups", type=int, default=64)
     p.add_argument("--group_size", type=int, default=32)
     p.add_argument("--center_mode", type=str, default="fps", choices=["fps", "first"])
+    p.add_argument(
+        "--serial_order",
+        type=str,
+        default="morton",
+        choices=["morton", "morton_trans", "z", "z-trans", "random", "identity"],
+    )
+    p.add_argument("--serial_bits", type=int, default=10)
+    p.add_argument("--serial_shuffle_within_patch", type=int, default=0, choices=[0, 1])
     p.add_argument("--d_model", type=int, default=384)
     p.add_argument("--n_heads", type=int, default=6)
     p.add_argument("--n_layers", type=int, default=12)
     p.add_argument("--mlp_ratio", type=float, default=4.0)
     p.add_argument("--dropout", type=float, default=0.0)
     p.add_argument("--drop_path_rate", type=float, default=0.1)
+    p.add_argument("--backbone_mode", type=str, default="nepa2d", choices=["nepa2d", "vanilla"])
+    p.add_argument("--qk_norm", type=int, default=1, choices=[0, 1])
+    p.add_argument("--qk_norm_affine", type=int, default=0, choices=[0, 1])
+    p.add_argument("--qk_norm_bias", type=int, default=0, choices=[0, 1])
+    p.add_argument("--layerscale_value", type=float, default=1e-5)
+    p.add_argument("--rope_theta", type=float, default=100.0, help="<=0 disables RoPE in nepa2d blocks.")
+    p.add_argument("--rope_prefix_tokens", type=int, default=1)
+    p.add_argument("--use_gated_mlp", type=int, default=0, choices=[0, 1], help="Enable gated MLP path.")
+    p.add_argument("--hidden_act", type=str, default="gelu", choices=["gelu", "silu"], help="MLP activation.")
     p.add_argument("--pooling", type=str, default="cls_max", choices=["mean", "cls", "cls_max"])
     p.add_argument("--pos_mode", type=str, default="center_mlp", choices=["learned", "center_mlp"])
     p.add_argument("--head_mode", type=str, default="auto", choices=["auto", "linear", "pointmae_mlp"])
     p.add_argument("--head_hidden_dim", type=int, default=256)
     p.add_argument("--head_dropout", type=float, default=0.5)
+    p.add_argument("--init_mode", type=str, default="default", choices=["default", "pointmae"])
     p.add_argument("--is_causal", type=int, default=0)
 
     # Optim
@@ -485,21 +510,35 @@ def main() -> None:
     # Model
     model = PatchTransformerClassifier(
         num_classes=num_classes,
+        patch_embed=args.patch_embed,
         num_groups=args.num_groups,
         group_size=args.group_size,
         use_normals=use_normals,
         center_mode=args.center_mode,
+        serial_order=args.serial_order,
+        serial_bits=args.serial_bits,
+        serial_shuffle_within_patch=int(args.serial_shuffle_within_patch),
         d_model=args.d_model,
         n_heads=args.n_heads,
         n_layers=args.n_layers,
         mlp_ratio=args.mlp_ratio,
         dropout=args.dropout,
         drop_path_rate=args.drop_path_rate,
+        backbone_mode=args.backbone_mode,
+        qk_norm=bool(args.qk_norm),
+        qk_norm_affine=bool(args.qk_norm_affine),
+        qk_norm_bias=bool(args.qk_norm_bias),
+        layerscale_value=float(args.layerscale_value),
+        rope_theta=float(args.rope_theta),
+        rope_prefix_tokens=int(args.rope_prefix_tokens),
+        use_gated_mlp=bool(args.use_gated_mlp),
+        hidden_act=str(args.hidden_act),
         pooling=args.pooling,
         pos_mode=args.pos_mode,
         head_mode=args.head_mode,
         head_hidden_dim=args.head_hidden_dim,
         head_dropout=args.head_dropout,
+        init_mode=args.init_mode,
         is_causal=bool(args.is_causal),
     )
 
@@ -546,11 +585,20 @@ def main() -> None:
     best_path = save_dir / "checkpoints" / "best.pt"
 
     if accelerator.is_main_process:
+        pos_inject_note = (
+            "per_layer_explicit" if args.backbone_mode == "vanilla" else "internal_rope_only"
+        )
         print(
             f"PatchCls: classes={num_classes} train={len(train_set)} val={len(val_set)} test={len(test_set)}\n"
-            f"  n_point={args.n_point} groups={args.num_groups} group_size={args.group_size} "
+            f"  patch_embed={args.patch_embed} n_point={args.n_point} groups={args.num_groups} group_size={args.group_size} "
+            f"serial_order={args.serial_order} serial_bits={args.serial_bits} serial_shuffle={int(args.serial_shuffle_within_patch)} "
             f"d_model={args.d_model} layers={args.n_layers} heads={args.n_heads} "
-            f"pooling={args.pooling} pos_mode={args.pos_mode} head_mode={args.head_mode} "
+            f"backbone_mode={args.backbone_mode} qk_norm={int(args.qk_norm)} qk_norm_affine={int(args.qk_norm_affine)} "
+            f"qk_norm_bias={int(args.qk_norm_bias)} layerscale_value={float(args.layerscale_value):g} "
+            f"rope_theta={float(args.rope_theta):g} rope_prefix_tokens={int(args.rope_prefix_tokens)} "
+            f"use_gated_mlp={int(args.use_gated_mlp)} hidden_act={str(args.hidden_act)} "
+            f"pooling={args.pooling} pos_mode={args.pos_mode} pos_inject={pos_inject_note} head_mode={args.head_mode} "
+            f"init_mode={args.init_mode} "
             f"is_causal={bool(args.is_causal)}\n"
             f"  world_size={world_size} batch_mode={args.batch_mode} batch_arg={args.batch} batch_effective={eff_batch}\n"
             f"  data_format={args.data_format} input_root={args.cache_root if args.data_format == 'npz' else args.scan_h5_root}\n"

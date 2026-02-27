@@ -130,6 +130,7 @@ def build_model_from_ckpt(ckpt_path, device, max_len_override: int | None = None
         hidden_dropout_prob=float(support["hidden_dropout_prob"]),
         attention_probs_dropout_prob=float(support["attention_probs_dropout_prob"]),
         use_gated_mlp=bool(support["use_gated_mlp"]),
+        hidden_act=str(support["hidden_act"]),
         final_layernorm=bool(support["final_layernorm"]),
         max_len=max_len,
         type_specific_pos=bool(int(pre_args.get("type_specific_pos", 0))),

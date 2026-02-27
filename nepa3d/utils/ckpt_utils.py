@@ -264,6 +264,7 @@ def infer_causal_support_kwargs(
             "hidden_dropout_prob": 0.0,
             "attention_probs_dropout_prob": 0.0,
             "use_gated_mlp": False,
+            "hidden_act": "gelu",
             "final_layernorm": False,
         }
 
@@ -280,5 +281,6 @@ def infer_causal_support_kwargs(
         "hidden_dropout_prob": float(pre_args.get("hidden_dropout_prob", 0.0)),
         "attention_probs_dropout_prob": float(pre_args.get("attention_probs_dropout_prob", 0.0)),
         "use_gated_mlp": bool(int(pre_args.get("use_gated_mlp", 0))),
+        "hidden_act": str(pre_args.get("hidden_act", "gelu")),
         "final_layernorm": bool(int(pre_args.get("final_layernorm", 1))) if ("final_layernorm" in pre_args) else bool(has_final_ln),
     }

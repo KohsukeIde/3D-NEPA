@@ -31,6 +31,26 @@ scripts/finetune/patchcls_scanobjectnn_scratch.sh \
   EPOCHS=300 BATCH=64
 ```
 
+ScanObjectNN (serialization-based patch grouping, Morton -> chunk):
+
+```bash
+scripts/finetune/patchcls_scanobjectnn_scratch_serial.sh \
+  CACHE_ROOT=data/scanobjectnn_pb_t50_rs_v3_nonorm \
+  RUN_NAME=patchcls_scan_serial_pb_t50_rs \
+  N_POINT=1024 NUM_GROUPS=64 GROUP_SIZE=16 \
+  EPOCHS=300 BATCH=64
+```
+
+ScanObjectNN (serialization-based patch grouping, PTv3 trans variant):
+
+```bash
+scripts/finetune/patchcls_scanobjectnn_scratch_serial_trans.sh \
+  CACHE_ROOT=data/scanobjectnn_pb_t50_rs_v3_nonorm \
+  RUN_NAME=patchcls_scan_serial_ztrans_pb_t50_rs \
+  N_POINT=1024 NUM_GROUPS=64 GROUP_SIZE=16 \
+  EPOCHS=300 BATCH=64
+```
+
 ModelNet40:
 
 ```bash
@@ -43,6 +63,8 @@ scripts/finetune/patchcls_modelnet40_scratch.sh \
 ## 注意
 
 - まずは `--is_causal 0` (bidirectional) で **Transformer baseline の土俵** に乗る。
+- patch grouping backend は `PATCH_EMBED=fps_knn`（既定）と `PATCH_EMBED=serial` を切り替え可能。
+- serial の順序は `SERIAL_ORDER` で切り替え可能（`morton`, `morton_trans`, `z`, `z-trans`, `random`, `identity`）。
 - その後、NEPA の story に寄せて `--is_causal 1` (causal) の ablation を追加する。
 - `mc_eval_k_test` / `aug_eval` は必要なときだけ（Point-MAE Table の比較では通常 no-vote）。
 - Scan benchmark では variant-split cache (`obj_bg` / `obj_only` / `pb_t50_rs`) を使い、

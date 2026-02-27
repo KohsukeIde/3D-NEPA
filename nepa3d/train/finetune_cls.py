@@ -824,6 +824,7 @@ def main():
         "hidden_dropout_prob",
         "attention_probs_dropout_prob",
         "use_gated_mlp",
+        "hidden_act",
         "final_layernorm",
     ]
     missing_support = [k for k in support_required if k not in support]
@@ -848,6 +849,7 @@ def main():
         hidden_dropout_prob=float(support["hidden_dropout_prob"]),
         attention_probs_dropout_prob=float(support["attention_probs_dropout_prob"]),
         use_gated_mlp=bool(support["use_gated_mlp"]),
+        hidden_act=str(support["hidden_act"]),
         final_layernorm=bool(support["final_layernorm"]),
         max_len=model_max_len,
         type_specific_pos=bool(int(pre_args.get("type_specific_pos", 0))),
@@ -1044,6 +1046,7 @@ def main():
         "hidden_dropout_prob": float(support["hidden_dropout_prob"]),
         "attention_probs_dropout_prob": float(support["attention_probs_dropout_prob"]),
         "use_gated_mlp": bool(support["use_gated_mlp"]),
+        "hidden_act": str(support["hidden_act"]),
         "final_layernorm": bool(support["final_layernorm"]),
         # Finetune-side explicit override (kept separate from checkpoint support config).
         "finetune_drop_path": float(args.drop_path),
@@ -1082,6 +1085,7 @@ def main():
         f"hidden_dropout_prob={float(support['hidden_dropout_prob'])} "
         f"attention_probs_dropout_prob={float(support['attention_probs_dropout_prob'])} "
         f"use_gated_mlp={bool(support['use_gated_mlp'])} "
+        f"hidden_act={str(support['hidden_act'])} "
         f"final_layernorm={bool(support['final_layernorm'])} "
         f"lr_scheduler={args.lr_scheduler} warmup_steps={warmup_steps} total_update_steps={total_update_steps} "
         f"min_lr={args.min_lr}"

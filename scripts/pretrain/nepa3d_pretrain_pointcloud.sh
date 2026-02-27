@@ -87,6 +87,7 @@ LAYER_NORM_EPS="${LAYER_NORM_EPS:-1e-12}"
 HIDDEN_DROPOUT_PROB="${HIDDEN_DROPOUT_PROB:-0.0}"
 ATTENTION_PROBS_DROPOUT_PROB="${ATTENTION_PROBS_DROPOUT_PROB:-0.0}"
 USE_GATED_MLP="${USE_GATED_MLP:-0}"
+HIDDEN_ACT="${HIDDEN_ACT:-gelu}"
 FINAL_LAYERNORM="${FINAL_LAYERNORM:-1}"
 SAVE_DIR="${SAVE_DIR:-runs/querynepa3d_pcpre_v0}"
 SAVE_EVERY="${SAVE_EVERY:-10}"
@@ -192,6 +193,7 @@ if [ "${NUM_PROCESSES}" -gt 1 ]; then
   --hidden_dropout_prob "${HIDDEN_DROPOUT_PROB}" \
   --attention_probs_dropout_prob "${ATTENTION_PROBS_DROPOUT_PROB}" \
   --use_gated_mlp "${USE_GATED_MLP}" \
+  --hidden_act "${HIDDEN_ACT}" \
   --final_layernorm "${FINAL_LAYERNORM}" \
   --num_workers "${NUM_WORKERS}" \
   --mixed_precision "${LAUNCH_MIXED_PRECISION}" \
@@ -251,6 +253,7 @@ else
   --hidden_dropout_prob "${HIDDEN_DROPOUT_PROB}" \
   --attention_probs_dropout_prob "${ATTENTION_PROBS_DROPOUT_PROB}" \
   --use_gated_mlp "${USE_GATED_MLP}" \
+  --hidden_act "${HIDDEN_ACT}" \
   --final_layernorm "${FINAL_LAYERNORM}" \
   --num_workers "${NUM_WORKERS}" \
   --mixed_precision "${LAUNCH_MIXED_PRECISION}" \

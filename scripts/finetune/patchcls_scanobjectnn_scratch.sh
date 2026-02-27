@@ -34,6 +34,19 @@ WARMUP_EPOCHS="${WARMUP_EPOCHS:-10}"
 N_POINT="${N_POINT:-1024}"
 NUM_GROUPS="${NUM_GROUPS:-64}"
 GROUP_SIZE="${GROUP_SIZE:-32}"
+PATCH_EMBED="${PATCH_EMBED:-fps_knn}"  # fps_knn | serial
+SERIAL_ORDER="${SERIAL_ORDER:-morton}"  # morton | morton_trans | z | z-trans | random | identity
+SERIAL_BITS="${SERIAL_BITS:-10}"
+SERIAL_SHUFFLE_WITHIN_PATCH="${SERIAL_SHUFFLE_WITHIN_PATCH:-0}"  # 0 | 1
+BACKBONE_MODE="${BACKBONE_MODE:-nepa2d}"  # nepa2d | vanilla
+QK_NORM="${QK_NORM:-1}"                   # 0 | 1 (nepa2d path)
+QK_NORM_AFFINE="${QK_NORM_AFFINE:-0}"     # 0 | 1
+QK_NORM_BIAS="${QK_NORM_BIAS:-0}"         # 0 | 1
+LAYERSCALE_VALUE="${LAYERSCALE_VALUE:-1e-5}"
+ROPE_THETA="${ROPE_THETA:-100.0}"         # <=0 disables RoPE in nepa2d path
+ROPE_PREFIX_TOKENS="${ROPE_PREFIX_TOKENS:-1}"
+USE_GATED_MLP="${USE_GATED_MLP:-0}"       # 0 | 1
+HIDDEN_ACT="${HIDDEN_ACT:-gelu}"          # gelu | silu
 PT_SAMPLE_MODE_TRAIN="${PT_SAMPLE_MODE_TRAIN:-random}"
 PT_SAMPLE_MODE_EVAL="${PT_SAMPLE_MODE_EVAL:-fps}"
 
@@ -49,6 +62,7 @@ POS_MODE="${POS_MODE:-center_mlp}"  # learned | center_mlp
 HEAD_MODE="${HEAD_MODE:-pointmae_mlp}"  # auto | linear | pointmae_mlp
 HEAD_HIDDEN_DIM="${HEAD_HIDDEN_DIM:-256}"
 HEAD_DROPOUT="${HEAD_DROPOUT:-0.5}"
+INIT_MODE="${INIT_MODE:-default}"  # default | pointmae
 AUG_PRESET="${AUG_PRESET:-pointmae}"  # none | default | strong | pointmae
 
 SAVE_DIR="${SAVE_DIR:-runs/patchcls}"
@@ -97,8 +111,12 @@ ARGS=(
   --lr_scheduler cosine
   --warmup_epochs "${WARMUP_EPOCHS}"
   --n_point "${N_POINT}"
+  --patch_embed "${PATCH_EMBED}"
   --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN}"
   --pt_sample_mode_eval "${PT_SAMPLE_MODE_EVAL}"
+  --serial_order "${SERIAL_ORDER}"
+  --serial_bits "${SERIAL_BITS}"
+  --serial_shuffle_within_patch "${SERIAL_SHUFFLE_WITHIN_PATCH}"
   --aug_preset "${AUG_PRESET}"
   --val_ratio "${VAL_RATIO}"
   --val_seed "${VAL_SEED}"
@@ -107,11 +125,21 @@ ARGS=(
   --seed "${SEED}"
   --num_groups "${NUM_GROUPS}"
   --group_size "${GROUP_SIZE}"
+  --backbone_mode "${BACKBONE_MODE}"
+  --qk_norm "${QK_NORM}"
+  --qk_norm_affine "${QK_NORM_AFFINE}"
+  --qk_norm_bias "${QK_NORM_BIAS}"
+  --layerscale_value "${LAYERSCALE_VALUE}"
+  --rope_theta "${ROPE_THETA}"
+  --rope_prefix_tokens "${ROPE_PREFIX_TOKENS}"
+  --use_gated_mlp "${USE_GATED_MLP}"
+  --hidden_act "${HIDDEN_ACT}"
   --pooling "${POOLING}"
   --pos_mode "${POS_MODE}"
   --head_mode "${HEAD_MODE}"
   --head_hidden_dim "${HEAD_HIDDEN_DIM}"
   --head_dropout "${HEAD_DROPOUT}"
+  --init_mode "${INIT_MODE}"
   --is_causal 0
   --num_workers "${NUM_WORKERS}"
 )

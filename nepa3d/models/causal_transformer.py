@@ -215,10 +215,13 @@ class _NepaMLP(nn.Module):
         self.fc2 = nn.Linear(int(intermediate_size), int(d_model))
         self.dropout = float(hidden_dropout_prob)
 
-        if str(hidden_act).lower() == "gelu":
+        act_name = str(hidden_act).lower()
+        if act_name == "gelu":
             self.act = nn.GELU()
+        elif act_name in {"silu", "swish"}:
+            self.act = nn.SiLU()
         else:
-            raise ValueError(f"Unsupported hidden_act={hidden_act} (only 'gelu' is supported)")
+            raise ValueError(f"Unsupported hidden_act={hidden_act} (supported: gelu|silu)")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         up = self.up_proj(x)
@@ -252,6 +255,7 @@ class _NepaBlock(nn.Module):
         rope_prefix_tokens: int,
         layer_norm_eps: float,
         use_gated_mlp: bool,
+        hidden_act: str,
     ) -> None:
         super().__init__()
         self.layernorm_before = nn.LayerNorm(int(d_model), eps=float(layer_norm_eps))
@@ -276,7 +280,7 @@ class _NepaBlock(nn.Module):
             intermediate_size=int(intermediate_size),
             hidden_dropout_prob=float(hidden_dropout_prob),
             use_gated_mlp=bool(use_gated_mlp),
-            hidden_act="gelu",
+            hidden_act=str(hidden_act),
         )
         self.layer_scale2 = _LayerScale(int(d_model), float(layerscale_value))
 
@@ -310,6 +314,7 @@ class CausalTransformer(nn.Module):
         hidden_dropout_prob: float = 0.0,
         attention_probs_dropout_prob: float = 0.0,
         use_gated_mlp: bool = False,
+        hidden_act: str = "gelu",
         final_layernorm: bool = True,
     ):
         super().__init__()
@@ -326,10 +331,10 @@ class CausalTransformer(nn.Module):
             self.layers = nn.ModuleList(
                 [
                     nn.TransformerEncoderLayer(
-                        d_model=d_model,
-                        nhead=nhead,
-                        dim_feedforward=d_model * mlp_ratio,
-                        dropout=dropout,
+                        d_model=int(d_model),
+                        nhead=int(nhead),
+                        dim_feedforward=int(d_model * mlp_ratio),
+                        dropout=float(dropout),
                         batch_first=True,
                         norm_first=True,
                         activation="gelu",
@@ -356,6 +361,7 @@ class CausalTransformer(nn.Module):
                         rope_prefix_tokens=int(rope_prefix_tokens),
                         layer_norm_eps=float(layer_norm_eps),
                         use_gated_mlp=bool(use_gated_mlp),
+                        hidden_act=str(hidden_act),
                     )
                     for i in range(int(num_layers))
                 ]
@@ -384,6 +390,7 @@ class CausalTransformer(nn.Module):
         x,
         is_causal: bool = True,
         type_id=None,
+        pos: Optional[torch.Tensor] = None,
         dual_mask_near: float = 0.0,
         dual_mask_far: float = 0.0,
         dual_mask_window: int = 0,
@@ -455,7 +462,10 @@ class CausalTransformer(nn.Module):
 
         if self.backbone_impl == "legacy":
             for li, layer in enumerate(self.layers):
-                x_next = layer(x, src_mask=attn_mask)
+                # Point-MAE-style positional injection for vanilla encoder path:
+                # add positional embedding at every block input.
+                x_in = x + pos if pos is not None else x
+                x_next = layer(x_in, src_mask=attn_mask)
                 x = self._apply_drop_path(x, x_next, self.drop_path_rates[li], self.training)
             return x
 

@@ -327,6 +327,7 @@ def main():
     ap.add_argument("--hidden_dropout_prob", type=float, default=0.0, help="Hidden/output dropout prob (ViT-NEPA style).")
     ap.add_argument("--attention_probs_dropout_prob", type=float, default=0.0, help="Attention-probability dropout prob (ViT-NEPA style).")
     ap.add_argument("--use_gated_mlp", type=int, default=0, choices=[0, 1], help="Use gated MLP (SwiGLU-like gate path).")
+    ap.add_argument("--hidden_act", type=str, default="gelu", choices=["gelu", "silu"], help="MLP activation (gelu or silu).")
     ap.add_argument("--final_layernorm", type=int, default=1, choices=[0, 1], help="Apply final LayerNorm after encoder stack.")
     ap.add_argument("--save_dir", type=str, default="runs/querynepa3d_pretrain")
     ap.add_argument("--save_every", type=int, default=1, help="save periodic checkpoints every N epochs (>=1)")
@@ -908,6 +909,7 @@ def main():
         hidden_dropout_prob=float(args.hidden_dropout_prob),
         attention_probs_dropout_prob=float(args.attention_probs_dropout_prob),
         use_gated_mlp=bool(int(args.use_gated_mlp)),
+        hidden_act=str(args.hidden_act),
         final_layernorm=bool(int(args.final_layernorm)),
         max_len=t,
         type_specific_pos=bool(args.type_specific_pos),
@@ -923,7 +925,8 @@ def main():
         f"layerscale_value={float(args.layerscale_value):.2e} rope_theta={float(args.rope_theta)} "
         f"hidden_dropout_prob={float(args.hidden_dropout_prob)} "
         f"attention_probs_dropout_prob={float(args.attention_probs_dropout_prob)} "
-        f"use_gated_mlp={bool(int(args.use_gated_mlp))} final_layernorm={bool(int(args.final_layernorm))}"
+        f"use_gated_mlp={bool(int(args.use_gated_mlp))} hidden_act={str(args.hidden_act)} "
+        f"final_layernorm={bool(int(args.final_layernorm))}"
     )
 
     teacher_model = None
@@ -974,6 +977,7 @@ def main():
             hidden_dropout_prob=float(teacher_causal_support["hidden_dropout_prob"]),
             attention_probs_dropout_prob=float(teacher_causal_support["attention_probs_dropout_prob"]),
             use_gated_mlp=bool(teacher_causal_support["use_gated_mlp"]),
+            hidden_act=str(teacher_causal_support["hidden_act"]),
             final_layernorm=bool(teacher_causal_support["final_layernorm"]),
             max_len=t,
             type_specific_pos=teacher_type_specific_pos,
