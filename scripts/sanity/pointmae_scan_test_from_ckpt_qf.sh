@@ -19,21 +19,43 @@ NUM_WORKERS="${NUM_WORKERS:-8}"
 SEED="${SEED:-0}"
 CFG_PROFILE="${CFG_PROFILE:-standard}"  # standard|sanity
 CKPT_PATH="${CKPT_PATH:-}"
+CKPT_RUN_TAG="${CKPT_RUN_TAG:-}"
+CKPT_PICK="${CKPT_PICK:-best}"   # best | last
+CONFIG_PATH_OVERRIDE="${CONFIG_PATH_OVERRIDE:-}"
 LOG_ROOT="${LOG_ROOT:-${WORKDIR}/logs/sanity/pointmae_scratch_tests}"
 if [[ "${LOG_ROOT}" != /* ]]; then
   LOG_ROOT="${WORKDIR}/${LOG_ROOT}"
 fi
 
-if [[ -z "${CKPT_PATH}" ]]; then
-  echo "[error] CKPT_PATH is required"
+if [[ "${CKPT_PICK}" != "best" && "${CKPT_PICK}" != "last" ]]; then
+  echo "[error] CKPT_PICK must be one of: best | last (got: ${CKPT_PICK})"
   exit 2
 fi
-if [[ "${CKPT_PATH}" != /* ]]; then
-  CKPT_PATH="${WORKDIR}/${CKPT_PATH}"
-fi
-if [[ ! -f "${CKPT_PATH}" ]]; then
-  echo "[error] CKPT_PATH not found: ${CKPT_PATH}"
-  exit 2
+
+if [[ -n "${CKPT_PATH}" ]]; then
+  if [[ "${CKPT_PATH}" != /* ]]; then
+    CKPT_PATH="${WORKDIR}/${CKPT_PATH}"
+  fi
+  if [[ ! -f "${CKPT_PATH}" ]]; then
+    echo "[error] CKPT_PATH not found: ${CKPT_PATH}"
+    exit 2
+  fi
+else
+  if [[ -z "${CKPT_RUN_TAG}" ]]; then
+    echo "[error] either CKPT_PATH or CKPT_RUN_TAG is required"
+    exit 2
+  fi
+  CKPT_FILE="ckpt-${CKPT_PICK}.pth"
+  mapfile -t _cand < <(find "${POINTMAE_ROOT}/experiments" -type f -path "*/${CKPT_RUN_TAG}/${CKPT_FILE}" 2>/dev/null | sort)
+  if [[ "${#_cand[@]}" -eq 0 ]]; then
+    echo "[error] could not resolve checkpoint by CKPT_RUN_TAG=${CKPT_RUN_TAG} (wanted ${CKPT_FILE})"
+    exit 2
+  fi
+  if [[ "${#_cand[@]}" -gt 1 ]]; then
+    echo "[warn] multiple checkpoints matched CKPT_RUN_TAG=${CKPT_RUN_TAG}; using first:"
+    printf '  %s\n' "${_cand[@]}"
+  fi
+  CKPT_PATH="${_cand[0]}"
 fi
 
 if [[ ! -d "${POINTMAE_ROOT}" ]]; then
@@ -77,6 +99,24 @@ case "${VARIANT}" in
     ;;
 esac
 
+CONFIG_PATH_EXEC="${POINTMAE_ROOT}/${CONFIG_PATH}"
+if [[ -n "${CONFIG_PATH_OVERRIDE}" ]]; then
+  if [[ "${CONFIG_PATH_OVERRIDE}" != /* ]]; then
+    CONFIG_PATH_EXEC="${WORKDIR}/${CONFIG_PATH_OVERRIDE}"
+  else
+    CONFIG_PATH_EXEC="${CONFIG_PATH_OVERRIDE}"
+  fi
+elif [[ -n "${CKPT_RUN_TAG}" ]]; then
+  CKPT_CFG_CAND="$(dirname "${CKPT_PATH}")/config.yaml"
+  if [[ -f "${CKPT_CFG_CAND}" ]]; then
+    CONFIG_PATH_EXEC="${CKPT_CFG_CAND}"
+  fi
+fi
+if [[ ! -f "${CONFIG_PATH_EXEC}" ]]; then
+  echo "[error] config not found: ${CONFIG_PATH_EXEC}"
+  exit 2
+fi
+
 OUT_LOG="${LOG_ROOT}/${RUN_TAG}.log"
 
 echo "=== POINT-MAE TEST (from ckpt) ==="
@@ -85,15 +125,18 @@ echo "host=$(hostname)"
 echo "pbs_jobid=${PBS_JOBID:-}"
 echo "variant=${VARIANT}"
 echo "run_tag=${RUN_TAG}"
-echo "config=${POINTMAE_ROOT}/${CONFIG_PATH}"
+echo "config=${CONFIG_PATH_EXEC}"
 echo "ckpt=${CKPT_PATH}"
+if [[ -n "${CKPT_RUN_TAG}" ]]; then
+  echo "ckpt_run_tag=${CKPT_RUN_TAG}"
+fi
 echo "log=${OUT_LOG}"
 echo
 
 cd "${POINTMAE_ROOT}"
 python main.py \
   --test \
-  --config "${CONFIG_PATH}" \
+  --config "${CONFIG_PATH_EXEC}" \
   --exp_name "${RUN_TAG}" \
   --ckpts "${CKPT_PATH}" \
   --num_workers "${NUM_WORKERS}" \

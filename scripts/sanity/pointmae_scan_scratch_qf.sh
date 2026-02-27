@@ -17,9 +17,12 @@ VARIANT="${VARIANT:-pb_t50_rs}"  # pb_t50_rs|obj_bg|obj_only
 RUN_TAG="${RUN_TAG:-pointmae_${VARIANT}_scratch_$(date +%Y%m%d_%H%M%S)}"
 NUM_WORKERS="${NUM_WORKERS:-8}"
 SEED="${SEED:-0}"
+NPROC_PER_NODE="${NPROC_PER_NODE:-4}"
 CFG_PROFILE="${CFG_PROFILE:-standard}"  # standard|sanity
 TOTAL_BS_OVERRIDE="${TOTAL_BS_OVERRIDE:-}"
 NPOINT_OVERRIDE="${NPOINT_OVERRIDE:-}"
+NUM_GROUP_OVERRIDE="${NUM_GROUP_OVERRIDE:-}"
+GROUP_SIZE_OVERRIDE="${GROUP_SIZE_OVERRIDE:-}"
 NO_TEST_AS_VAL="${NO_TEST_AS_VAL:-1}"   # 1: split train->(train/val), 0: legacy Point-MAE test-as-val
 VAL_RATIO="${VAL_RATIO:-0.1}"
 VAL_SEED="${VAL_SEED:-0}"
@@ -87,7 +90,7 @@ if [[ -n "${TOTAL_BS_OVERRIDE}" ]]; then
   sed -E -i "s/^(total_bs[[:space:]]*:[[:space:]]*).*/\\1${TOTAL_BS_OVERRIDE}/" "${TMP_CFG}"
   CONFIG_PATH_EXEC="${TMP_CFG}"
 fi
-if [[ -n "${NPOINT_OVERRIDE}" ]]; then
+if [[ -n "${NPOINT_OVERRIDE}" || -n "${NUM_GROUP_OVERRIDE}" || -n "${GROUP_SIZE_OVERRIDE}" ]]; then
   if [[ -z "${TMP_CFG_DIR:-}" ]]; then
     TMP_CFG_DIR="${WORKDIR}/tmp/pointmae_scratch_cfg_override"
     mkdir -p "${TMP_CFG_DIR}"
@@ -95,7 +98,26 @@ if [[ -n "${NPOINT_OVERRIDE}" ]]; then
     cp "${CONFIG_PATH_EXEC}" "${TMP_CFG}"
     CONFIG_PATH_EXEC="${TMP_CFG}"
   fi
-  sed -E -i "s/^(npoints[[:space:]]*:[[:space:]]*).*/\\1${NPOINT_OVERRIDE}/" "${CONFIG_PATH_EXEC}"
+  python - "${CONFIG_PATH_EXEC}" "${NPOINT_OVERRIDE}" "${NUM_GROUP_OVERRIDE}" "${GROUP_SIZE_OVERRIDE}" <<'PY'
+import sys
+import yaml
+
+cfg_path, npoints, num_group, group_size = sys.argv[1:5]
+with open(cfg_path, "r") as f:
+    cfg = yaml.safe_load(f)
+
+if npoints:
+    cfg["npoints"] = int(npoints)
+if num_group:
+    cfg.setdefault("model", {})
+    cfg["model"]["num_group"] = int(num_group)
+if group_size:
+    cfg.setdefault("model", {})
+    cfg["model"]["group_size"] = int(group_size)
+
+with open(cfg_path, "w") as f:
+    yaml.safe_dump(cfg, f, sort_keys=False)
+PY
 fi
 
 # Default policy: do not use test-as-val. Build val split from train set.
@@ -144,11 +166,18 @@ echo "pbs_jobid=${PBS_JOBID:-}"
 echo "variant=${VARIANT}"
 echo "run_tag=${RUN_TAG}"
 echo "config=${CONFIG_PATH_EXEC}"
+echo "nproc_per_node=${NPROC_PER_NODE}"
 if [[ -n "${TOTAL_BS_OVERRIDE}" ]]; then
   echo "total_bs_override=${TOTAL_BS_OVERRIDE}"
 fi
 if [[ -n "${NPOINT_OVERRIDE}" ]]; then
   echo "npoints_override=${NPOINT_OVERRIDE}"
+fi
+if [[ -n "${NUM_GROUP_OVERRIDE}" ]]; then
+  echo "num_group_override=${NUM_GROUP_OVERRIDE}"
+fi
+if [[ -n "${GROUP_SIZE_OVERRIDE}" ]]; then
+  echo "group_size_override=${GROUP_SIZE_OVERRIDE}"
 fi
 echo "no_test_as_val=${NO_TEST_AS_VAL}"
 if [[ "${NO_TEST_AS_VAL}" == "1" ]]; then
@@ -162,13 +191,25 @@ echo "log=${OUT_LOG}"
 echo
 
 cd "${POINTMAE_ROOT}"
-python main.py \
-  --scratch_model \
-  --config "${CONFIG_PATH_EXEC}" \
-  --exp_name "${RUN_TAG}" \
-  --num_workers "${NUM_WORKERS}" \
-  --seed "${SEED}" \
-  2>&1 | tee "${OUT_LOG}"
+if [[ "${NPROC_PER_NODE}" -gt 1 ]]; then
+  torchrun --nproc_per_node "${NPROC_PER_NODE}" main.py \
+    --launcher pytorch \
+    --scratch_model \
+    --config "${CONFIG_PATH_EXEC}" \
+    --exp_name "${RUN_TAG}" \
+    --num_workers "${NUM_WORKERS}" \
+    --seed "${SEED}" \
+    2>&1 | tee "${OUT_LOG}"
+else
+  python main.py \
+    --launcher none \
+    --scratch_model \
+    --config "${CONFIG_PATH_EXEC}" \
+    --exp_name "${RUN_TAG}" \
+    --num_workers "${NUM_WORKERS}" \
+    --seed "${SEED}" \
+    2>&1 | tee "${OUT_LOG}"
+fi
 
 VAL_LINE="$(grep -n \"\\[Validation\\]\" "${OUT_LOG}" | tail -n 1 || true)"
 if [[ -n "${VAL_LINE}" ]]; then

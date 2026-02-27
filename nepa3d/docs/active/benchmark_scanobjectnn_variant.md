@@ -249,7 +249,18 @@ Strict protocol rerun (`NO_TEST_AS_VAL=1`, `npoints=1024`) status:
   - `99105.qjcm` (`obj_bg`)
   - `99106.qjcm` (`obj_only`)
   - `99107.qjcm` (`pb_t50_rs`)
-- current: running (`R`)
+- current scheduler state:
+  - `99105`: finished (`F`, `Exit_status=0`)
+  - `99106`: finished (`F`, `Exit_status=0`)
+  - `99107`: running (`R`)
+
+Test-from-ckpt (strict run checkpoints):
+
+- `99171` (`obj_bg`): `[TEST] acc = 83.3046`
+  - `logs/sanity/pointmae_scratch_tests/pm_obj_bg_pointmae_scan3_scratch_n1024_notestval_fix_20260227_174052_test.out`
+- `99172` (`obj_only`): `[TEST] acc = 83.6489`
+  - `logs/sanity/pointmae_scratch_tests/pm_obj_only_pointmae_scan3_scratch_n1024_notestval_fix_20260227_174052_test.out`
+- `99173` (`pb_t50_rs`) is submitted with dependency (`afterok:99107`) and pending.
 
 ### 2.2.3 Non-normalized cache + dynamic query-bbox follow-up (`v3_nonorm`)
 
@@ -330,6 +341,38 @@ This confirms actual classification runs reading variant cache (not integrity-on
   - `logs/eval/abcd_cls_cpac_scan_pb_nepafull_backfillcheck_meanall_lr5e4_20260226_195200/runA_classification_scan.log`
 - log evidence (all four): `num_train=10282 num_val=1134 num_test=2882` and final `best_val=... test_acc=...` lines present.
 - policy note: this block is kept as historical troubleshooting evidence only; new benchmark runs use `*_v3_nonorm`.
+
+### 2.5 Point-MAE vs patchcls pipeline diff audit (why gap remains)
+
+Purpose:
+
+- Confirm whether current gap is caused by patch-construction method itself.
+- Decide whether to switch from `FPS+kNN` patches to serialization chunks at this stage.
+
+Conclusion (current stage):
+
+- **Do not switch patch construction to serialization yet.**
+- Both paths already use `FPS+kNN`-style local grouping as the core patch constructor, and the larger gap is dominated by recipe/backbone/head mismatches.
+
+Confirmed major diffs (code-level):
+
+| item | Point-MAE path | patchcls path | impact |
+|---|---|---|---|
+| patch token count | `num_group=128` (`Point-MAE/cfgs/finetune_scan_objonly.yaml`) | default `num_groups=64` (`nepa3d/train/finetune_patch_cls.py`) | fewer tokens in patchcls by default |
+| points per sample | config default `npoints=2048` (recent strict run overrides to `1024`) | default `n_point=1024` | effective input density differs unless explicitly aligned |
+| train sampling | `_fps_then_sample(points, npoints)` with `point_all` pre-pool (`Point-MAE/tools/runner_finetune.py`) | direct random/fps subset from dataset (`nepa3d/data/cls_patch_dataset.py`) | crop distribution differs |
+| augmentation | `PointcloudScaleAndTranslate` (`Point-MAE/tools/runner_finetune.py`) | `_apply_point_aug` preset (`scale/shift/jitter/rot`) (`nepa3d/data/cls_patch_dataset.py`) | train-time geometry noise differs |
+| backbone block | Point-MAE `TransformerEncoder` (`Point-MAE/models/Point_MAE.py`) | `CausalTransformer(backbone_impl='nepa2d')` (`nepa3d/models/patch_classifier.py`) | attention block implementation differs |
+| positional encoding | center-MLP positional embedding (`Point-MAE/models/Point_MAE.py`) | learned absolute `pos_emb` table (`nepa3d/models/patch_classifier.py`) | token position signal differs |
+| classifier head | concat(`[CLS]`, token-max) + MLP head (`Point-MAE/models/Point_MAE.py`) | single linear head after pooled feature (`nepa3d/models/patch_classifier.py`) | head capacity differs |
+| optimization | `lr=5e-4`, `grad_norm_clip=10` (`Point-MAE/cfgs/finetune_scan_objonly.yaml`) | commonly used parity run used `lr=1e-3`, `grad_clip=1` (`runs/patchcls/.../args.json`) | update scale/clip regime differs |
+| validation protocol | legacy test-as-val (`subset=test`) or strict split override (`NO_TEST_AS_VAL=1`) | `group_auto` / `pointmae` switchable (`nepa3d/train/finetune_patch_cls.py`) | model-selection target can differ |
+
+Practical implication:
+
+- The present gap is not evidence that `FPS+kNN` patch construction is insufficient.
+- First close recipe parity (sampling/aug/head/optimizer/selection protocol), then re-measure.
+- If serialization is explored, keep it as **patch ordering** (inter-patch sequence) first; avoid replacing local patch membership before parity is established.
 
 ## 3. Checkpoint Families in Use
 

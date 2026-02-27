@@ -86,7 +86,7 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--use_normals", type=int, default=0)
 
     # Aug
-    p.add_argument("--aug_preset", type=str, default="default", choices=["none", "default", "strong"])
+    p.add_argument("--aug_preset", type=str, default="pointmae", choices=["none", "default", "strong", "pointmae"])
     p.add_argument("--aug_prob", type=float, default=0.5)
     p.add_argument("--aug_scale_min", type=float, default=0.9)
     p.add_argument("--aug_scale_max", type=float, default=1.1)
@@ -110,7 +110,11 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--mlp_ratio", type=float, default=4.0)
     p.add_argument("--dropout", type=float, default=0.0)
     p.add_argument("--drop_path_rate", type=float, default=0.1)
-    p.add_argument("--pooling", type=str, default="mean", choices=["mean", "cls"])
+    p.add_argument("--pooling", type=str, default="cls_max", choices=["mean", "cls", "cls_max"])
+    p.add_argument("--pos_mode", type=str, default="center_mlp", choices=["learned", "center_mlp"])
+    p.add_argument("--head_mode", type=str, default="auto", choices=["auto", "linear", "pointmae_mlp"])
+    p.add_argument("--head_hidden_dim", type=int, default=256)
+    p.add_argument("--head_dropout", type=float, default=0.5)
     p.add_argument("--is_causal", type=int, default=0)
 
     # Optim
@@ -128,12 +132,12 @@ def add_args(p: argparse.ArgumentParser) -> None:
         ),
     )
     p.add_argument("--num_workers", type=int, default=8)
-    p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--weight_decay", type=float, default=0.05)
     p.add_argument("--lr_scheduler", type=str, default="cosine", choices=["none", "cosine"])
     p.add_argument("--warmup_epochs", type=float, default=10.0)
     p.add_argument("--warmup_start_factor", type=float, default=0.1)
-    p.add_argument("--grad_clip", type=float, default=1.0)
+    p.add_argument("--grad_clip", type=float, default=10.0)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument(
         "--allow_scan_uniscale_v2",
@@ -327,6 +331,23 @@ def main() -> None:
     if args.aug_preset == "none":
         aug_cfg = PointAugConfig(prob=0.0)
         aug_train = False
+    elif args.aug_preset == "pointmae":
+        # Point-MAE ScanObjectNN transform:
+        # PointcloudScaleAndTranslate(scale=[2/3, 3/2], translate=0.2)
+        # No jitter/rotation/dropout in this preset.
+        aug_cfg = PointAugConfig(
+            prob=1.0,
+            scale_min=2.0 / 3.0,
+            scale_max=3.0 / 2.0,
+            shift_std=0.2,
+            jitter_std=0.0,
+            jitter_clip=0.0,
+            rot_axis="y",
+            rot_deg=0.0,
+            dropout_ratio=0.0,
+            dropout_prob=0.0,
+        )
+        aug_train = True
     else:
         # default / strong
         prob = args.aug_prob if args.aug_preset == "default" else max(0.8, args.aug_prob)
@@ -474,6 +495,10 @@ def main() -> None:
         dropout=args.dropout,
         drop_path_rate=args.drop_path_rate,
         pooling=args.pooling,
+        pos_mode=args.pos_mode,
+        head_mode=args.head_mode,
+        head_hidden_dim=args.head_hidden_dim,
+        head_dropout=args.head_dropout,
         is_causal=bool(args.is_causal),
     )
 
@@ -524,7 +549,8 @@ def main() -> None:
             f"PatchCls: classes={num_classes} train={len(train_set)} val={len(val_set)} test={len(test_set)}\n"
             f"  n_point={args.n_point} groups={args.num_groups} group_size={args.group_size} "
             f"d_model={args.d_model} layers={args.n_layers} heads={args.n_heads} "
-            f"pooling={args.pooling} is_causal={bool(args.is_causal)}\n"
+            f"pooling={args.pooling} pos_mode={args.pos_mode} head_mode={args.head_mode} "
+            f"is_causal={bool(args.is_causal)}\n"
             f"  world_size={world_size} batch_mode={args.batch_mode} batch_arg={args.batch} batch_effective={eff_batch}\n"
             f"  data_format={args.data_format} input_root={args.cache_root if args.data_format == 'npz' else args.scan_h5_root}\n"
             f"  val_split_mode={resolved_val_split_mode}\n"

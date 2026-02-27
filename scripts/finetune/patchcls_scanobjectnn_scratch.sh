@@ -27,7 +27,7 @@ RUN_NAME="${RUN_NAME:-patchcls_scan_scratch}"
 CKPT="${CKPT:-}"
 EPOCHS="${EPOCHS:-300}"
 BATCH="${BATCH:-64}"
-LR="${LR:-1e-3}"
+LR="${LR:-5e-4}"
 WD="${WD:-0.05}"
 WARMUP_EPOCHS="${WARMUP_EPOCHS:-10}"
 
@@ -44,6 +44,12 @@ SEED="${SEED:-0}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-1}"
 BATCH_MODE="${BATCH_MODE:-global}"  # global | per_proc
 MASTER_PORT="${MASTER_PORT:-29577}"
+POOLING="${POOLING:-cls_max}"  # mean | cls | cls_max
+POS_MODE="${POS_MODE:-center_mlp}"  # learned | center_mlp
+HEAD_MODE="${HEAD_MODE:-pointmae_mlp}"  # auto | linear | pointmae_mlp
+HEAD_HIDDEN_DIM="${HEAD_HIDDEN_DIM:-256}"
+HEAD_DROPOUT="${HEAD_DROPOUT:-0.5}"
+AUG_PRESET="${AUG_PRESET:-pointmae}"  # none | default | strong | pointmae
 
 SAVE_DIR="${SAVE_DIR:-runs/patchcls}"
 VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-group_auto}"
@@ -93,7 +99,7 @@ ARGS=(
   --n_point "${N_POINT}"
   --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN}"
   --pt_sample_mode_eval "${PT_SAMPLE_MODE_EVAL}"
-  --aug_preset default
+  --aug_preset "${AUG_PRESET}"
   --val_ratio "${VAL_RATIO}"
   --val_seed "${VAL_SEED}"
   --val_split_mode "${VAL_SPLIT_MODE}"
@@ -101,7 +107,11 @@ ARGS=(
   --seed "${SEED}"
   --num_groups "${NUM_GROUPS}"
   --group_size "${GROUP_SIZE}"
-  --pooling cls
+  --pooling "${POOLING}"
+  --pos_mode "${POS_MODE}"
+  --head_mode "${HEAD_MODE}"
+  --head_hidden_dim "${HEAD_HIDDEN_DIM}"
+  --head_dropout "${HEAD_DROPOUT}"
   --is_causal 0
   --num_workers "${NUM_WORKERS}"
 )
