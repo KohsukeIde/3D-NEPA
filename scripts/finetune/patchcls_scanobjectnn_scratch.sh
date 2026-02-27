@@ -52,7 +52,7 @@ HEAD_DROPOUT="${HEAD_DROPOUT:-0.5}"
 AUG_PRESET="${AUG_PRESET:-pointmae}"  # none | default | strong | pointmae
 
 SAVE_DIR="${SAVE_DIR:-runs/patchcls}"
-VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-group_auto}"
+VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}"  # file | group_auto | group_scanobjectnn | pointmae
 
 if [ ! -x "${PYTHON_BIN}" ]; then
   echo "[error] python not found: ${PYTHON_BIN}"

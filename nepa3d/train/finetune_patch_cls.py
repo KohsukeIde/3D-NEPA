@@ -71,12 +71,13 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--val_split_mode",
         type=str,
-        default="group_auto",
+        default="file",
         choices=["file", "group_auto", "group_scanobjectnn", "pointmae"],
         help=(
             "Validation split mode from TRAIN. "
             "group_auto resolves to ScanObjectNN group split when cache_root contains 'scanobjectnn'. "
-            "pointmae uses official train for training and official test for validation (Point-MAE style)."
+            "pointmae uses official train for training and official test for validation (Point-MAE legacy test-as-val). "
+            "Default=file to match current Point-MAE strict policy (train->train/val split)."
         ),
     )
 

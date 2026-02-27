@@ -277,6 +277,32 @@ PatchCls PM-aligned scratch rerun (1024, all variants finalized):
 | `obj_only` | 0.8176 |
 | `pb_t50_rs` | 0.7609 |
 
+Point-MAE strict retry5 (`NO_TEST_AS_VAL=1`, `npoints=1024`, BS64 extfix) finalized:
+
+- scratch jobs: `99275` (`obj_bg`), `99277` (`obj_only`), `99279` (`pb_t50_rs`) all `Exit_status=0`
+- test jobs: `99276`, `99278`, `99280` all `Exit_status=0`
+- source logs:
+  - `logs/sanity/pointmae_scratch_tests/obj_bg_pointmae_scan3_scratch_bs64_extfix_retry5_20260227_220742_test.out`
+  - `logs/sanity/pointmae_scratch_tests/obj_only_pointmae_scan3_scratch_bs64_extfix_retry5_20260227_220742_test.out`
+  - `logs/sanity/pointmae_scratch_tests/pb_t50_rs_pointmae_scan3_scratch_bs64_extfix_retry5_20260227_220742_test.out`
+
+| variant | Point-MAE strict retry5 `test_acc` |
+|---|---:|
+| `obj_bg` | 0.8296 |
+| `obj_only` | 0.8399 |
+| `pb_t50_rs` | 0.8012 |
+
+PatchCls split-only parity check (`obj_bg`, PM-aligned recipe fixed):
+
+- run: `99285.qjcm` (`pc_objbg_splitf`), `Exit_status=0`
+- log: `logs/sanity/patchcls/patchcls_obj_bg_pmalign_splitfile_20260227_223435/obj_bg.out`
+- result: `TEST acc=0.7831`
+
+Interpretation:
+
+- `group_auto` -> `file` split change on patchcls (with other settings fixed) produced `delta=0.0000` on `obj_bg` in this run.
+- `obj_bg` gap vs Point-MAE strict retry5 remains about `-4.65pt` (`0.7831 - 0.8296`).
+
 ### 2.2.3 Non-normalized cache + dynamic query-bbox follow-up (`v3_nonorm`)
 
 Purpose:
