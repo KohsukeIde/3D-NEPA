@@ -252,7 +252,7 @@ Strict protocol rerun (`NO_TEST_AS_VAL=1`, `npoints=1024`) status:
 - current scheduler state:
   - `99105`: finished (`F`, `Exit_status=0`)
   - `99106`: finished (`F`, `Exit_status=0`)
-  - `99107`: running (`R`)
+  - `99107`: finished with walltime termination (`F`, `Exit_status=271`)
 
 Test-from-ckpt (strict run checkpoints):
 
@@ -260,7 +260,22 @@ Test-from-ckpt (strict run checkpoints):
   - `logs/sanity/pointmae_scratch_tests/pm_obj_bg_pointmae_scan3_scratch_n1024_notestval_fix_20260227_174052_test.out`
 - `99172` (`obj_only`): `[TEST] acc = 83.6489`
   - `logs/sanity/pointmae_scratch_tests/pm_obj_only_pointmae_scan3_scratch_n1024_notestval_fix_20260227_174052_test.out`
-- `99173` (`pb_t50_rs`) is submitted with dependency (`afterok:99107`) and pending.
+- `99173` (`pb_t50_rs`) dependency was unsatisfied (`afterok:99107`); finalized without execution (`Walltime=0`), so no test metric.
+
+PatchCls PM-aligned scratch rerun (1024, all variants finalized):
+
+- run set:
+  - `logs/sanity/patchcls/patchcls_scan3_scratch_pmalign_20260227_202814`
+- jobs (`Exit_status=0`):
+  - `99181.qjcm` (`obj_bg`)
+  - `99182.qjcm` (`obj_only`)
+  - `99183.qjcm` (`pb_t50_rs`)
+
+| variant | PatchCls PM-aligned `test_acc` |
+|---|---:|
+| `obj_bg` | 0.7831 |
+| `obj_only` | 0.8176 |
+| `pb_t50_rs` | 0.7609 |
 
 ### 2.2.3 Non-normalized cache + dynamic query-bbox follow-up (`v3_nonorm`)
 

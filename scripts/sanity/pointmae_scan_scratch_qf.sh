@@ -12,6 +12,9 @@ WORKDIR="${WORKDIR:-${DEFAULT_WORKDIR}}"
 POINTMAE_ROOT="${POINTMAE_ROOT:-${WORKDIR}/Point-MAE}"
 VENV_ACTIVATE="${VENV_ACTIVATE:-${WORKDIR}/.venv/bin/activate}"
 CUDA_MODULE="${CUDA_MODULE:-cuda/12.9}"
+REQUIRE_POINT_EXT="${REQUIRE_POINT_EXT:-1}"  # 1: require pointnet2_ops + knn_cuda imports
+TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-7.0;7.5;8.0;8.6;8.9;9.0}"
+TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-}"
 
 VARIANT="${VARIANT:-pb_t50_rs}"  # pb_t50_rs|obj_bg|obj_only
 RUN_TAG="${RUN_TAG:-pointmae_${VARIANT}_scratch_$(date +%Y%m%d_%H%M%S)}"
@@ -53,9 +56,34 @@ source /etc/profile.d/modules.sh 2>/dev/null || true
 if command -v module >/dev/null 2>&1; then
   module load "${CUDA_MODULE}" 2>/dev/null || true
 fi
+if [[ -z "${TORCH_EXTENSIONS_DIR}" ]]; then
+  if [[ -n "${PBS_JOBID:-}" ]]; then
+    TORCH_EXTENSIONS_DIR="/local/${PBS_JOBID}/torch_extensions"
+  else
+    TORCH_EXTENSIONS_DIR="${WORKDIR}/.cache/torch_extensions"
+  fi
+fi
+mkdir -p "${TORCH_EXTENSIONS_DIR}"
+export TORCH_CUDA_ARCH_LIST
+export TORCH_EXTENSIONS_DIR
 
 python -V
 python -m pip install -q easydict tensorboardX termcolor timm==0.4.5 transforms3d matplotlib torchvision h5py
+if [[ "${REQUIRE_POINT_EXT}" == "1" ]]; then
+  python - <<'PY'
+try:
+    from pointnet2_ops import pointnet2_utils  # noqa: F401
+except Exception as e:
+    print(f"[error] pointnet2_ops unavailable: {e}")
+    raise SystemExit(2)
+try:
+    from knn_cuda import KNN  # noqa: F401
+except Exception as e:
+    print(f"[error] knn_cuda unavailable: {e}")
+    raise SystemExit(2)
+print("[env-check] pointnet2_ops + knn_cuda available")
+PY
+fi
 
 # Point-MAE expected ScanObjectNN layout.
 mkdir -p "${POINTMAE_ROOT}/data/ScanObjectNN"
@@ -166,7 +194,11 @@ echo "pbs_jobid=${PBS_JOBID:-}"
 echo "variant=${VARIANT}"
 echo "run_tag=${RUN_TAG}"
 echo "config=${CONFIG_PATH_EXEC}"
+echo "venv_activate=${VENV_ACTIVATE}"
 echo "nproc_per_node=${NPROC_PER_NODE}"
+echo "require_point_ext=${REQUIRE_POINT_EXT}"
+echo "torch_cuda_arch_list=${TORCH_CUDA_ARCH_LIST}"
+echo "torch_extensions_dir=${TORCH_EXTENSIONS_DIR}"
 if [[ -n "${TOTAL_BS_OVERRIDE}" ]]; then
   echo "total_bs_override=${TOTAL_BS_OVERRIDE}"
 fi
