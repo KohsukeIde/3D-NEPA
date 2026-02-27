@@ -61,6 +61,7 @@ class PatchClsPointDataset(Dataset):
         # test-time multi-crop (MC) evaluation
         mc_eval_k: int = 1,
         aug_eval: bool = False,
+        deterministic_eval_sampling: bool = True,
     ) -> None:
         super().__init__()
         self.npz_paths = list(npz_paths)
@@ -77,18 +78,24 @@ class PatchClsPointDataset(Dataset):
         self._rng: Optional[np.random.RandomState] = None
         self.mc_eval_k = int(mc_eval_k)
         self.aug_eval = bool(aug_eval)
+        self.deterministic_eval_sampling = bool(deterministic_eval_sampling)
 
     def __len__(self) -> int:
         return len(self.npz_paths)
 
-    def _sample_indices(self, pc_xyz: np.ndarray, npz: dict) -> np.ndarray:
+    def _sample_indices(self, pc_xyz: np.ndarray, npz: dict, *, sample_uid: int = 0) -> np.ndarray:
         n_total = pc_xyz.shape[0]
         n = min(self.n_point, n_total)
         if self.sample_mode == "fps" and "pc_fps_order" in npz:
             idx = npz["pc_fps_order"][:n]
         else:
             # random subset
-            rng = self._get_rng()
+            if (not self.aug) and self.deterministic_eval_sampling:
+                # Make eval crop selection invariant to worker/process order.
+                seed = (int(self.rng_seed) * 1315423911 + int(sample_uid) * 2654435761) & 0xFFFFFFFF
+                rng = np.random.RandomState(seed)
+            else:
+                rng = self._get_rng()
             idx = rng.choice(n_total, size=n, replace=False)
         return idx.astype(np.int64, copy=False)
 
@@ -151,8 +158,8 @@ class PatchClsPointDataset(Dataset):
                 # MC evaluation: generate K crops (augmented if aug_eval)
                 xyz_list = []
                 n_list = [] if pc_n is not None else None
-                for _ in range(self.mc_eval_k):
-                    idx = self._sample_indices(pc_xyz, npz)
+                for k in range(self.mc_eval_k):
+                    idx = self._sample_indices(pc_xyz, npz, sample_uid=(index * 10007 + k))
                     xyz = pc_xyz[idx]
                     nn = pc_n[idx] if pc_n is not None else None
                     if self.aug_eval:
@@ -163,7 +170,7 @@ class PatchClsPointDataset(Dataset):
                 xyz = np.stack(xyz_list, axis=0)  # (K,N,3)
                 normals = np.stack(n_list, axis=0) if n_list is not None else None
             else:
-                idx = self._sample_indices(pc_xyz, npz)
+                idx = self._sample_indices(pc_xyz, npz, sample_uid=index)
                 xyz = pc_xyz[idx]
                 normals = pc_n[idx] if pc_n is not None else None
                 xyz, normals = self._maybe_augment(xyz, normals)
@@ -208,6 +215,7 @@ class PatchClsArrayDataset(Dataset):
         rng_seed: int = 0,
         mc_eval_k: int = 1,
         aug_eval: bool = False,
+        deterministic_eval_sampling: bool = True,
     ) -> None:
         super().__init__()
         if points.ndim != 3 or points.shape[-1] != 3:
@@ -225,6 +233,7 @@ class PatchClsArrayDataset(Dataset):
         self._rng: Optional[np.random.RandomState] = None
         self.mc_eval_k = int(mc_eval_k)
         self.aug_eval = bool(aug_eval)
+        self.deterministic_eval_sampling = bool(deterministic_eval_sampling)
         self._warned_fps_fallback = False
 
     def __len__(self) -> int:
@@ -238,9 +247,13 @@ class PatchClsArrayDataset(Dataset):
             self._rng = np.random.RandomState(seed)
         return self._rng
 
-    def _sample_indices(self, n_total: int) -> np.ndarray:
+    def _sample_indices(self, n_total: int, *, sample_uid: int = 0) -> np.ndarray:
         n = min(self.n_point, int(n_total))
-        rng = self._get_rng()
+        if (not self.aug) and self.deterministic_eval_sampling:
+            seed = (int(self.rng_seed) * 1315423911 + int(sample_uid) * 2654435761) & 0xFFFFFFFF
+            rng = np.random.RandomState(seed)
+        else:
+            rng = self._get_rng()
         # For direct h5 route we don't have precomputed fps order.
         # Keep behavior explicit and deterministic-per-worker.
         if self.sample_mode == "fps" and (not self._warned_fps_fallback):
@@ -279,15 +292,15 @@ class PatchClsArrayDataset(Dataset):
 
         if self.mc_eval_k > 1:
             xyz_list = []
-            for _ in range(self.mc_eval_k):
-                idx = self._sample_indices(pc_xyz.shape[0])
+            for k in range(self.mc_eval_k):
+                idx = self._sample_indices(pc_xyz.shape[0], sample_uid=(index * 10007 + k))
                 xyz = pc_xyz[idx]
                 if self.aug_eval:
                     xyz = self._maybe_augment(xyz)
                 xyz_list.append(xyz)
             xyz = np.stack(xyz_list, axis=0)  # (K,N,3)
         else:
-            idx = self._sample_indices(pc_xyz.shape[0])
+            idx = self._sample_indices(pc_xyz.shape[0], sample_uid=index)
             xyz = pc_xyz[idx]
             xyz = self._maybe_augment(xyz)
 

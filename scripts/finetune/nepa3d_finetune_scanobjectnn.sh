@@ -22,7 +22,7 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
-CACHE_ROOT="${CACHE_ROOT:-data/scanobjectnn_cache_v1}"
+CACHE_ROOT="${CACHE_ROOT:-data/scanobjectnn_pb_t50_rs_v3_nonorm}"
 BACKEND="${BACKEND:-pointcloud_noray}"
 # Use n_types=5 ckpt by default (compatible with pointcloud_noray / TYPE_MISSING_RAY).
 CKPT="${CKPT:-runs/querynepa3d_ab_meshpre_p0/ckpt_ep049.pt}"
@@ -39,7 +39,9 @@ FEWSHOT_K="${FEWSHOT_K:-0}"
 FEWSHOT_SEED="${FEWSHOT_SEED:-0}"
 VAL_RATIO="${VAL_RATIO:-0.1}"
 VAL_SEED="${VAL_SEED:-0}"
-VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}"
+VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-group_auto}"
+ALLOW_SCAN_UNISCALE_V2="${ALLOW_SCAN_UNISCALE_V2:-0}"
+ALLOW_SCAN_MAIN_SPLIT_V2="${ALLOW_SCAN_MAIN_SPLIT_V2:-0}"
 ADD_EOS="${ADD_EOS:--1}"
 PT_SAMPLE_MODE_TRAIN="${PT_SAMPLE_MODE_TRAIN:-random}"
 PT_SAMPLE_MODE_EVAL="${PT_SAMPLE_MODE_EVAL:-fps}"
@@ -79,6 +81,8 @@ fi
   --val_ratio "${VAL_RATIO}" \
   --val_seed "${VAL_SEED}" \
   --val_split_mode "${VAL_SPLIT_MODE}" \
+  --allow_scan_uniscale_v2 "${ALLOW_SCAN_UNISCALE_V2}" \
+  --allow_scan_main_split_v2 "${ALLOW_SCAN_MAIN_SPLIT_V2}" \
   --fewshot_k "${FEWSHOT_K}" \
   --fewshot_seed "${FEWSHOT_SEED}" \
   --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN}" \

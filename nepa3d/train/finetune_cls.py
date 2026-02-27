@@ -216,14 +216,27 @@ def main():
     ap.add_argument(
         "--val_split_mode",
         type=str,
-        default="file",
-        choices=["file", "group_auto", "group_scanobjectnn"],
+        default="group_auto",
+        choices=["file", "group_auto", "group_scanobjectnn", "pointmae"],
         help=(
             "Validation split mode from TRAIN. "
             "file: legacy file-level split; "
             "group_auto: group-aware split for ScanObjectNN caches only; "
-            "group_scanobjectnn: always use ScanObjectNN group key."
+            "group_scanobjectnn: always use ScanObjectNN group key; "
+            "pointmae: use official test split as validation (Point-MAE style)."
         ),
+    )
+    ap.add_argument(
+        "--allow_scan_uniscale_v2",
+        type=int,
+        default=0,
+        help="Safety guard: disallow scanobjectnn_*_v2 caches unless explicitly set to 1.",
+    )
+    ap.add_argument(
+        "--allow_scan_main_split_v2",
+        type=int,
+        default=0,
+        help="Safety guard: disallow scanobjectnn_main_split_v2 for benchmark runs unless explicitly set to 1.",
     )
     ap.add_argument("--fewshot_k", type=int, default=0, help="K-shot fine-tuning: number of training samples per class (0=full train)")
     ap.add_argument("--fewshot_seed", type=int, default=0, help="seed for K-shot subset selection")
@@ -514,6 +527,17 @@ def main():
 
     cache_root_l = os.path.abspath(args.cache_root).lower()
     is_scan_cache = "scanobjectnn" in cache_root_l
+    if ("scanobjectnn_" in cache_root_l) and ("_v2" in cache_root_l) and (int(args.allow_scan_uniscale_v2) != 1):
+        raise ValueError(
+            f"cache_root={args.cache_root} is a uniscale v2 cache and is disallowed by policy. "
+            "Use scanobjectnn_*_v3_nonorm, or set --allow_scan_uniscale_v2 1 for intentional legacy reruns."
+        )
+    if ("scanobjectnn_main_split_v2" in cache_root_l) and (int(args.allow_scan_main_split_v2) != 1):
+        raise ValueError(
+            f"cache_root={args.cache_root} is disallowed for benchmark runs (main_split deprecated). "
+            "Use variant cache roots: scanobjectnn_obj_bg_v3_nonorm | "
+            "scanobjectnn_obj_only_v3_nonorm | scanobjectnn_pb_t50_rs_v3_nonorm."
+        )
     if is_scan_cache and (not args.ablate_point_dist) and (int(args.allow_scan_dist) != 1):
         raise ValueError(
             "ScanObjectNN cache detected but --ablate_point_dist is OFF. "
@@ -544,21 +568,28 @@ def main():
 
     val_group_key_fn = None
     resolved_val_split_mode = str(args.val_split_mode)
-    if args.val_split_mode == "group_scanobjectnn":
-        val_group_key_fn = scanobjectnn_group_key
-    elif args.val_split_mode == "group_auto":
-        if is_scan_cache:
+    if args.val_split_mode == "pointmae":
+        # Point-MAE style: keep official train for optimization and reuse official
+        # test split for model selection/validation.
+        train_paths = train_paths_full
+        val_paths = test_paths
+        resolved_val_split_mode = "pointmae(test-as-val)"
+    else:
+        if args.val_split_mode == "group_scanobjectnn":
             val_group_key_fn = scanobjectnn_group_key
-            resolved_val_split_mode = "group_scanobjectnn(auto)"
-        else:
-            resolved_val_split_mode = "file(auto-fallback)"
+        elif args.val_split_mode == "group_auto":
+            if is_scan_cache:
+                val_group_key_fn = scanobjectnn_group_key
+                resolved_val_split_mode = "group_scanobjectnn(auto)"
+            else:
+                resolved_val_split_mode = "file(auto-fallback)"
 
-    train_paths, val_paths = stratified_train_val_split(
-        train_paths_full,
-        val_ratio=args.val_ratio,
-        seed=args.val_seed,
-        group_key_fn=val_group_key_fn,
-    )
+        train_paths, val_paths = stratified_train_val_split(
+            train_paths_full,
+            val_ratio=args.val_ratio,
+            seed=args.val_seed,
+            group_key_fn=val_group_key_fn,
+        )
     if args.fewshot_k and args.fewshot_k > 0:
         train_paths = stratified_kshot(train_paths, k=args.fewshot_k, seed=args.fewshot_seed)
         log(f"[fewshot] k={args.fewshot_k} selected_train={len(train_paths)} (from split-train)")

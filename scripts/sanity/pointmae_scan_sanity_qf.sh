@@ -14,6 +14,8 @@ VENV_ACTIVATE="${VENV_ACTIVATE:-${WORKDIR}/.venv/bin/activate}"
 CUDA_MODULE="${CUDA_MODULE:-cuda/12.9}"
 USE_NEPA_CACHE="${USE_NEPA_CACHE:-0}"  # 1: build Point-MAE h5 from NEPA NPZ cache and use it
 ALLOW_SCAN_UNISCALE_V2="${ALLOW_SCAN_UNISCALE_V2:-0}"
+INSTALL_POINT_EXT="${INSTALL_POINT_EXT:-1}"  # 1: ensure pointnet2_ops + knn_cuda are importable
+CKPT_PATH_OVERRIDE="${CKPT_PATH_OVERRIDE:-}"  # optional explicit checkpoint path
 
 VARIANT="${VARIANT:-pb_t50_rs}"  # pb_t50_rs|obj_bg|obj_only
 RUN_TAG="${RUN_TAG:-pointmae_${VARIANT}_sanity_$(date +%Y%m%d_%H%M%S)}"
@@ -47,9 +49,58 @@ source /etc/profile.d/modules.sh 2>/dev/null || true
 if command -v module >/dev/null 2>&1; then
   module load "${CUDA_MODULE}" 2>/dev/null || true
 fi
+if command -v nvcc >/dev/null 2>&1; then
+  CUDA_HOME_AUTO="$(dirname "$(dirname "$(readlink -f "$(command -v nvcc)")")")"
+  export CUDA_HOME="${CUDA_HOME:-${CUDA_HOME_AUTO}}"
+fi
 
 python -V
 python -m pip install -q easydict tensorboardX termcolor timm==0.4.5 transforms3d matplotlib torchvision h5py
+
+if [[ "${INSTALL_POINT_EXT}" == "1" ]]; then
+  if ! python - <<'PY'
+import sys
+ok = True
+try:
+    from pointnet2_ops import pointnet2_utils  # noqa: F401
+except Exception:
+    ok = False
+try:
+    from knn_cuda import KNN  # noqa: F401
+except Exception:
+    ok = False
+sys.exit(0 if ok else 1)
+PY
+  then
+    echo "[ext] installing pointnet2_ops + knn_cuda"
+    python -m pip install -q --no-cache-dir --no-build-isolation \
+      "git+https://github.com/erikwijmans/Pointnet2_PyTorch.git#egg=pointnet2_ops&subdirectory=pointnet2_ops_lib"
+    python -m pip install -q --no-cache-dir --upgrade \
+      "https://github.com/unlimblue/KNN_CUDA/releases/download/0.2/KNN_CUDA-0.2-py3-none-any.whl"
+  fi
+
+  python - <<'PY'
+try:
+    from pointnet2_ops import pointnet2_utils  # noqa: F401
+    pointnet_ok = True
+except Exception as e:
+    pointnet_ok = False
+    pointnet_err = str(e)
+try:
+    from knn_cuda import KNN  # noqa: F401
+    knn_ok = True
+except Exception as e:
+    knn_ok = False
+    knn_err = str(e)
+if not pointnet_ok or not knn_ok:
+    if not pointnet_ok:
+        print(f"[error] pointnet2_ops unavailable: {pointnet_err}")
+    if not knn_ok:
+        print(f"[error] knn_cuda unavailable: {knn_err}")
+    raise SystemExit(2)
+print("[ext] pointnet2_ops + knn_cuda ready")
+PY
+fi
 
 # Point-MAE expected ScanObjectNN layout.
 mkdir -p "${POINTMAE_ROOT}/data/ScanObjectNN"
@@ -125,9 +176,17 @@ esac
 CKPT_DIR="${POINTMAE_ROOT}/pretrained"
 CKPT_PATH="${CKPT_DIR}/${CKPT_NAME}"
 mkdir -p "${CKPT_DIR}"
-if [[ ! -f "${CKPT_PATH}" ]]; then
-  echo "[download] ${CKPT_URL} -> ${CKPT_PATH}"
-  curl -L --fail -o "${CKPT_PATH}" "${CKPT_URL}"
+if [[ -n "${CKPT_PATH_OVERRIDE}" ]]; then
+  CKPT_PATH="$(to_abs_path "${CKPT_PATH_OVERRIDE}")"
+  if [[ ! -f "${CKPT_PATH}" ]]; then
+    echo "[error] CKPT_PATH_OVERRIDE not found: ${CKPT_PATH}"
+    exit 2
+  fi
+else
+  if [[ ! -f "${CKPT_PATH}" ]]; then
+    echo "[download] ${CKPT_URL} -> ${CKPT_PATH}"
+    curl -L --fail -o "${CKPT_PATH}" "${CKPT_URL}"
+  fi
 fi
 
 OUT_LOG="${LOG_ROOT}/${RUN_TAG}.log"

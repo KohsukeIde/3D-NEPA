@@ -136,7 +136,9 @@ Cache-derived source logs:
 
 Status:
 
-- `v3_nonorm` rerun submitted:
+- completed run set:
+  - `logs/sanity/patchcls/patchcls_scan3_scratch_v3nonorm_20260227_055706`
+- jobs (`Exit_status=0`):
   - `98390.qjcm` (`pb_t50_rs`)
   - `98391.qjcm` (`obj_bg`)
   - `98392.qjcm` (`obj_only`)
@@ -159,13 +161,84 @@ Note:
 
 - This is the scratch baseline row in the table (not the `Point-MAE` SSL row).
 - `Point-MAE` row itself is SSL-pretrained and higher (`90.02 / 88.29 / 85.10`).
+- this block is `patchcls` scratch baseline (`patchify + transformer`, bidirectional, `is_causal=0`),
+  not Point-MAE codepath.
 
-Planned first target:
+Result (`patchcls_scan3_scratch_v3nonorm_20260227_055706`):
 
-- variant: `pb_t50_rs` (hardest)
-- baseline runner: Point-MAE codepath with `--scratch_model` (no pretrained ckpt load)
-- criterion: first pass should reach the scratch target band (around high-70s)
-- cache policy for this run: use `scanobjectnn_*_v3_nonorm` (no new `v2` runs)
+| variant | target (Transformer [54]) | observed `test_acc` | delta |
+|---|---:|---:|---:|
+| `obj_bg` | 79.86 | 71.08 | -8.78 |
+| `obj_only` | 80.55 | 76.76 | -3.79 |
+| `pb_t50_rs` | 77.24 | 68.77 | -8.47 |
+
+Source logs:
+
+- `logs/sanity/patchcls/patchcls_scan3_scratch_v3nonorm_20260227_055706/obj_bg.out`
+- `logs/sanity/patchcls/patchcls_scan3_scratch_v3nonorm_20260227_055706/obj_only.out`
+- `logs/sanity/patchcls/patchcls_scan3_scratch_v3nonorm_20260227_055706/pb_t50_rs.out`
+
+Additional cross-check (`scan_h5` direct input):
+
+- completed run set:
+  - `logs/sanity/patchcls/patchcls_scan3_scratch_h5_20260227_061351`
+- jobs (`Exit_status=0`):
+  - `98407.qjcm` (`pb_t50_rs`)
+  - `98408.qjcm` (`obj_bg`)
+  - `98409.qjcm` (`obj_only`)
+
+| variant | `v3_nonorm` (`npz`) | official H5 (`scan_h5`) | delta (h5 - npz) |
+|---|---:|---:|---:|
+| `obj_bg` | 0.7108 | 0.7074 | -0.0034 |
+| `obj_only` | 0.7676 | 0.7797 | +0.0121 |
+| `pb_t50_rs` | 0.6877 | 0.6731 | -0.0146 |
+
+Obj-only random-sampling parity check (seed-fixed):
+
+- run set:
+  - `logs/sanity/patchcls/patchcls_objonly_parity_randomseed_20260227_063811`
+- jobs (`Exit_status=0`):
+  - `98413.qjcm` (`obj_only_v3_random`)
+  - `98414.qjcm` (`obj_only_h5_random`)
+- observed:
+  - `obj_only_v3_random`: `test_acc=0.7728`
+  - `obj_only_h5_random`: `test_acc=0.7745`
+  - delta: `+0.0017` (h5 - v3)
+
+Interpretation note:
+
+- random-seed parity looks consistent between `npz(v3_nonorm)` and `scan_h5`.
+- strict apples-to-apples still requires matching val split mode (`group_scanobjectnn` vs `stratified_label(h5)` currently differ by implementation path).
+
+Obj-only parity recheck (Point-MAE split unified):
+
+- run set:
+  - `logs/sanity/patchcls/patchcls_objonly_parity_pointmae_20260227_070409`
+- jobs (`Exit_status=0`):
+  - `98427.qjcm` (`obj_only_v3_pointmae`)
+  - `98428.qjcm` (`obj_only_h5_pointmae`)
+- observed:
+  - `obj_only_v3_pointmae`: `test_acc=0.7900`
+  - `obj_only_h5_pointmae`: `test_acc=0.7900`
+  - delta: `+0.0000` (h5 - v3)
+
+Interpretation update:
+
+- once split policy is unified to Point-MAE style (`val_split_mode=pointmae`), `v3_nonorm npz` and `scan_h5` are parity-consistent on `obj_only`.
+
+Point-MAE scratch ckpt direct test extraction:
+
+- script: `scripts/sanity/pointmae_scan_test_from_ckpt_qf.sh`
+- clean run set:
+  - `logs/sanity/pointmae_scratch_tests/pointmae_scan3_scratch_test_from_ckpt_fixlog_20260227_164410`
+- jobs:
+  - `98998.qjcm` (`obj_bg`, `Exit_status=0`)
+  - `98999.qjcm` (`obj_only`, `Exit_status=0`)
+- results (`--test`, ckpt-best from scratch run `pointmae_scan3_scratch_stdbs32_20260227_142324`):
+  - `obj_bg`: `[TEST] acc = 86.7470`
+  - `obj_only`: `[TEST] acc = 86.4028`
+- pending:
+  - `pb_t50_rs` test submitted as `98997.qjcm` with dependency `afterok:98824.qjcm`.
 
 ### 2.2.3 Non-normalized cache + dynamic query-bbox follow-up (`v3_nonorm`)
 

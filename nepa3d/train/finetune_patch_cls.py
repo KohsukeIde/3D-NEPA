@@ -16,16 +16,22 @@ import argparse
 import json
 import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 from accelerate import Accelerator
 from torch import optim
 from torch.utils.data import DataLoader
 
-from nepa3d.data.cls_patch_dataset import PatchClsPointDataset, PointAugConfig
+from nepa3d.data.cls_patch_dataset import (
+    PatchClsArrayDataset,
+    PatchClsPointDataset,
+    PointAugConfig,
+    load_scanobjectnn_h5_arrays,
+)
 from nepa3d.data.modelnet40_index import (
     build_label_map,
     list_npz,
@@ -42,7 +48,22 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--run_name", type=str, default="", help="Optional run name subfolder.")
 
     # Dataset
-    p.add_argument("--cache_root", type=str, required=True, help="Cache root (preprocessed npz tree).")
+    p.add_argument("--cache_root", type=str, default="", help="Cache root (preprocessed npz tree).")
+    p.add_argument(
+        "--data_format",
+        type=str,
+        default="npz",
+        choices=["npz", "scan_h5"],
+        help="Input backend: npz cache or ScanObjectNN h5 direct.",
+    )
+    p.add_argument("--scan_h5_root", type=str, default="", help="ScanObjectNN h5 root for --data_format=scan_h5.")
+    p.add_argument(
+        "--scan_variant",
+        type=str,
+        default="auto",
+        choices=["auto", "obj_bg", "obj_only", "pb_t50_rs"],
+        help="Variant selector for scan_h5 route.",
+    )
     p.add_argument("--split_train", type=str, default="train")
     p.add_argument("--split_test", type=str, default="test")
     p.add_argument("--val_ratio", type=float, default=0.1)
@@ -51,10 +72,11 @@ def add_args(p: argparse.ArgumentParser) -> None:
         "--val_split_mode",
         type=str,
         default="group_auto",
-        choices=["file", "group_auto", "group_scanobjectnn"],
+        choices=["file", "group_auto", "group_scanobjectnn", "pointmae"],
         help=(
             "Validation split mode from TRAIN. "
-            "group_auto resolves to ScanObjectNN group split when cache_root contains 'scanobjectnn'."
+            "group_auto resolves to ScanObjectNN group split when cache_root contains 'scanobjectnn'. "
+            "pointmae uses official train for training and official test for validation (Point-MAE style)."
         ),
     )
 
@@ -94,6 +116,17 @@ def add_args(p: argparse.ArgumentParser) -> None:
     # Optim
     p.add_argument("--epochs", type=int, default=300)
     p.add_argument("--batch", type=int, default=64)
+    p.add_argument(
+        "--batch_mode",
+        type=str,
+        default="global",
+        choices=["global", "per_proc"],
+        help=(
+            "Batch interpretation. "
+            "'global' keeps total batch fixed across DDP world-size (per-proc=batch/world_size). "
+            "'per_proc' uses --batch as per-process batch."
+        ),
+    )
     p.add_argument("--num_workers", type=int, default=8)
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--weight_decay", type=float, default=0.05)
@@ -117,11 +150,61 @@ def _set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
+def _stratified_split_indices(labels: np.ndarray, val_ratio: float, seed: int) -> Tuple[np.ndarray, np.ndarray]:
+    rng = np.random.RandomState(seed)
+    labels = labels.astype(np.int64, copy=False)
+    train_idx = []
+    val_idx = []
+    for c in np.unique(labels):
+        idx = np.flatnonzero(labels == c)
+        idx = idx.copy()
+        rng.shuffle(idx)
+        n = len(idx)
+        n_val = int(n * float(val_ratio))
+        # Match modelnet40_index.stratified_train_val_split behavior.
+        if n_val <= 0 and n >= 2:
+            n_val = 1
+        val_idx.append(idx[:n_val])
+        train_idx.append(idx[n_val:])
+    train_idx = np.concatenate(train_idx, axis=0) if train_idx else np.zeros((0,), dtype=np.int64)
+    val_idx = np.concatenate(val_idx, axis=0) if val_idx else np.zeros((0,), dtype=np.int64)
+    rng.shuffle(train_idx)
+    rng.shuffle(val_idx)
+    return train_idx, val_idx
+
+
+def _resolve_scan_h5_files(scan_h5_root: str, scan_variant: str) -> Tuple[Path, Path]:
+    root = Path(scan_h5_root)
+    if not root.exists():
+        raise FileNotFoundError(f"scan_h5_root not found: {scan_h5_root}")
+
+    variant = scan_variant
+    if variant == "auto":
+        name_l = str(root).lower()
+        if "nobg" in name_l or "obj_only" in name_l:
+            variant = "obj_only"
+        elif "pb_t50_rs" in name_l or "scale75" in name_l:
+            variant = "pb_t50_rs"
+        else:
+            variant = "obj_bg"
+
+    if variant == "pb_t50_rs":
+        tr = root / "training_objectdataset_augmentedrot_scale75.h5"
+        te = root / "test_objectdataset_augmentedrot_scale75.h5"
+    else:
+        tr = root / "training_objectdataset.h5"
+        te = root / "test_objectdataset.h5"
+
+    if not tr.exists() or not te.exists():
+        raise FileNotFoundError(f"missing h5 files: train={tr} test={te}")
+    return tr, te
+
+
 @torch.no_grad()
-def evaluate(
+def evaluate_local(
     model: PatchTransformerClassifier,
     loader: DataLoader,
-    accelerator: Accelerator,
+    device: torch.device,
     use_normals: bool,
 ) -> Dict[str, float]:
     model.eval()
@@ -130,11 +213,11 @@ def evaluate(
     loss_sum = 0.0
 
     for batch in loader:
-        xyz = batch["xyz"].to(accelerator.device)
-        label = batch["label"].to(accelerator.device)
+        xyz = batch["xyz"].to(device)
+        label = batch["label"].to(device)
         normal = batch.get("normal", None)
         if use_normals and normal is not None:
-            normal = normal.to(accelerator.device)
+            normal = normal.to(device)
 
         # MC eval: xyz is (B,K,N,3)
         if xyz.dim() == 4:
@@ -154,11 +237,6 @@ def evaluate(
         correct += (preds == label).sum().item()
         total += label.numel()
         loss_sum += loss.item() * label.size(0)
-
-    # gather across processes
-    correct = accelerator.gather_for_metrics(torch.tensor(correct, device=accelerator.device)).sum().item()
-    total = accelerator.gather_for_metrics(torch.tensor(total, device=accelerator.device)).sum().item()
-    loss_sum = accelerator.gather_for_metrics(torch.tensor(loss_sum, device=accelerator.device)).sum().item()
 
     acc = float(correct) / float(max(1, total))
     loss_avg = float(loss_sum) / float(max(1, total))
@@ -184,43 +262,66 @@ def main() -> None:
             json.dump(vars(args), f, indent=2)
     accelerator.wait_for_everyone()
 
-    # Dataset lists
-    cache_root = args.cache_root
-    cache_root_abs_l = os.path.abspath(cache_root).lower()
-    if ("scanobjectnn_" in cache_root_abs_l) and ("_v2" in cache_root_abs_l) and (int(args.allow_scan_uniscale_v2) != 1):
-        raise ValueError(
-            f"cache_root={cache_root} is a uniscale v2 cache and is disallowed by policy. "
-            "Use scanobjectnn_*_v3_nonorm, or set --allow_scan_uniscale_v2 1 for intentional legacy reruns."
-        )
-    if "scanobjectnn_main_split_v2" in cache_root_abs_l:
-        raise ValueError(
-            f"cache_root={cache_root} is disallowed for benchmark runs (main_split deprecated). "
-            "Use variant cache roots: scanobjectnn_obj_bg_v3_nonorm | scanobjectnn_obj_only_v3_nonorm | scanobjectnn_pb_t50_rs_v3_nonorm."
-        )
-    train_paths = list_npz(cache_root, split=args.split_train)
-    test_paths = list_npz(cache_root, split=args.split_test)
+    if args.data_format == "npz":
+        if not args.cache_root:
+            raise ValueError("--cache_root is required when --data_format=npz")
+        cache_root = args.cache_root
+        cache_root_abs_l = os.path.abspath(cache_root).lower()
+        if ("scanobjectnn_" in cache_root_abs_l) and ("_v2" in cache_root_abs_l) and (int(args.allow_scan_uniscale_v2) != 1):
+            raise ValueError(
+                f"cache_root={cache_root} is a uniscale v2 cache and is disallowed by policy. "
+                "Use scanobjectnn_*_v3_nonorm, or set --allow_scan_uniscale_v2 1 for intentional legacy reruns."
+            )
+        if "scanobjectnn_main_split_v2" in cache_root_abs_l:
+            raise ValueError(
+                f"cache_root={cache_root} is disallowed for benchmark runs (main_split deprecated). "
+                "Use variant cache roots: scanobjectnn_obj_bg_v3_nonorm | scanobjectnn_obj_only_v3_nonorm | scanobjectnn_pb_t50_rs_v3_nonorm."
+            )
+        train_paths_full = list_npz(cache_root, split=args.split_train)
+        test_paths = list_npz(cache_root, split=args.split_test)
 
-    # Build label map from the available class folders.
-    label_map = build_label_map(train_paths + test_paths)
-    num_classes = max(label_map.values()) + 1
+        # Build label map from the available class folders.
+        label_map = build_label_map(train_paths_full + test_paths)
+        num_classes = max(label_map.values()) + 1
 
-    val_group_key_fn = None
-    resolved_val_split_mode = str(args.val_split_mode)
-    if args.val_split_mode == "group_scanobjectnn":
-        val_group_key_fn = scanobjectnn_group_key
-    elif args.val_split_mode == "group_auto":
-        if "scanobjectnn" in cache_root_abs_l:
-            val_group_key_fn = scanobjectnn_group_key
-            resolved_val_split_mode = "group_scanobjectnn(auto)"
+        resolved_val_split_mode = str(args.val_split_mode)
+        if args.val_split_mode == "pointmae":
+            # Point-MAE style: train on official train split, select/check by official test split.
+            train_paths = train_paths_full
+            val_paths = test_paths
+            resolved_val_split_mode = "pointmae(test-as-val)"
         else:
-            resolved_val_split_mode = "file(auto-fallback)"
+            val_group_key_fn = None
+            if args.val_split_mode == "group_scanobjectnn":
+                val_group_key_fn = scanobjectnn_group_key
+            elif args.val_split_mode == "group_auto":
+                if "scanobjectnn" in cache_root_abs_l:
+                    val_group_key_fn = scanobjectnn_group_key
+                    resolved_val_split_mode = "group_scanobjectnn(auto)"
+                else:
+                    resolved_val_split_mode = "file(auto-fallback)"
 
-    train_paths, val_paths = stratified_train_val_split(
-        train_paths,
-        val_ratio=args.val_ratio,
-        seed=args.val_seed,
-        group_key_fn=val_group_key_fn,
-    )
+            train_paths, val_paths = stratified_train_val_split(
+                train_paths_full,
+                val_ratio=args.val_ratio,
+                seed=args.val_seed,
+                group_key_fn=val_group_key_fn,
+            )
+    else:
+        if not args.scan_h5_root:
+            raise ValueError("--scan_h5_root is required when --data_format=scan_h5")
+        h5_train, h5_test = _resolve_scan_h5_files(args.scan_h5_root, args.scan_variant)
+        tr_points, tr_labels = load_scanobjectnn_h5_arrays(str(h5_train))
+        te_points, te_labels = load_scanobjectnn_h5_arrays(str(h5_test))
+        if args.val_split_mode == "pointmae":
+            tr_idx = np.arange(tr_labels.shape[0], dtype=np.int64)
+            va_points, va_labels = te_points, te_labels
+            resolved_val_split_mode = "pointmae(test-as-val)"
+        else:
+            tr_idx, va_idx = _stratified_split_indices(tr_labels, args.val_ratio, args.val_seed)
+            va_points, va_labels = tr_points[va_idx], tr_labels[va_idx]
+            resolved_val_split_mode = "stratified_label(h5)"
+        num_classes = int(max(tr_labels.max(initial=0), te_labels.max(initial=0))) + 1
 
     # Aug preset
     if args.aug_preset == "none":
@@ -244,49 +345,99 @@ def main() -> None:
         aug_train = True
 
     use_normals = bool(args.use_normals)
-    train_set = PatchClsPointDataset(
-        train_paths,
-        cache_root=cache_root,
-        label_map=label_map,
-        n_point=args.n_point,
-        sample_mode=args.pt_sample_mode_train,
-        use_normals=use_normals,
-        aug=aug_train,
-        aug_cfg=aug_cfg,
-        rng_seed=args.seed,
-        mc_eval_k=1,
-        aug_eval=False,
-    )
-    val_set = PatchClsPointDataset(
-        val_paths,
-        cache_root=cache_root,
-        label_map=label_map,
-        n_point=args.n_point,
-        sample_mode=args.pt_sample_mode_eval,
-        use_normals=use_normals,
-        aug=False,
-        aug_cfg=aug_cfg,
-        rng_seed=args.seed + 123,
-        mc_eval_k=1,
-        aug_eval=False,
-    )
-    test_set = PatchClsPointDataset(
-        test_paths,
-        cache_root=cache_root,
-        label_map=label_map,
-        n_point=args.n_point,
-        sample_mode=args.pt_sample_mode_eval,
-        use_normals=use_normals,
-        aug=False,
-        aug_cfg=aug_cfg,
-        rng_seed=args.seed + 456,
-        mc_eval_k=max(1, args.mc_eval_k_test),
-        aug_eval=bool(args.aug_eval),
-    )
+    if args.data_format == "npz":
+        train_set = PatchClsPointDataset(
+            train_paths,
+            cache_root=cache_root,
+            label_map=label_map,
+            n_point=args.n_point,
+            sample_mode=args.pt_sample_mode_train,
+            use_normals=use_normals,
+            aug=aug_train,
+            aug_cfg=aug_cfg,
+            rng_seed=args.seed,
+            mc_eval_k=1,
+            aug_eval=False,
+            deterministic_eval_sampling=False,
+        )
+        val_set = PatchClsPointDataset(
+            val_paths,
+            cache_root=cache_root,
+            label_map=label_map,
+            n_point=args.n_point,
+            sample_mode=args.pt_sample_mode_eval,
+            use_normals=use_normals,
+            aug=False,
+            aug_cfg=aug_cfg,
+            rng_seed=args.seed + 123,
+            mc_eval_k=1,
+            aug_eval=False,
+            deterministic_eval_sampling=True,
+        )
+        test_set = PatchClsPointDataset(
+            test_paths,
+            cache_root=cache_root,
+            label_map=label_map,
+            n_point=args.n_point,
+            sample_mode=args.pt_sample_mode_eval,
+            use_normals=use_normals,
+            aug=False,
+            aug_cfg=aug_cfg,
+            rng_seed=args.seed + 456,
+            mc_eval_k=max(1, args.mc_eval_k_test),
+            aug_eval=bool(args.aug_eval),
+            deterministic_eval_sampling=True,
+        )
+    else:
+        train_set = PatchClsArrayDataset(
+            tr_points[tr_idx],
+            tr_labels[tr_idx],
+            n_point=args.n_point,
+            sample_mode=args.pt_sample_mode_train,
+            aug=aug_train,
+            aug_cfg=aug_cfg,
+            rng_seed=args.seed,
+            mc_eval_k=1,
+            aug_eval=False,
+            deterministic_eval_sampling=False,
+        )
+        val_set = PatchClsArrayDataset(
+            va_points,
+            va_labels,
+            n_point=args.n_point,
+            sample_mode=args.pt_sample_mode_eval,
+            aug=False,
+            aug_cfg=aug_cfg,
+            rng_seed=args.seed + 123,
+            mc_eval_k=1,
+            aug_eval=False,
+            deterministic_eval_sampling=True,
+        )
+        test_set = PatchClsArrayDataset(
+            te_points,
+            te_labels,
+            n_point=args.n_point,
+            sample_mode=args.pt_sample_mode_eval,
+            aug=False,
+            aug_cfg=aug_cfg,
+            rng_seed=args.seed + 456,
+            mc_eval_k=max(1, args.mc_eval_k_test),
+            aug_eval=bool(args.aug_eval),
+            deterministic_eval_sampling=True,
+        )
+
+    world_size = max(1, int(accelerator.num_processes))
+    eff_batch = int(args.batch)
+    if args.batch_mode == "global" and world_size > 1:
+        if eff_batch % world_size != 0:
+            raise ValueError(
+                f"--batch {eff_batch} must be divisible by world_size={world_size} when --batch_mode=global"
+            )
+        eff_batch = eff_batch // world_size
 
     train_loader = DataLoader(
         train_set,
-        batch_size=args.batch,
+        batch_size=eff_batch,
         shuffle=True,
         num_workers=args.num_workers,
         pin_memory=True,
@@ -294,7 +445,7 @@ def main() -> None:
     )
     val_loader = DataLoader(
         val_set,
-        batch_size=args.batch,
+        batch_size=eff_batch,
         shuffle=False,
         num_workers=args.num_workers,
         pin_memory=True,
@@ -302,7 +453,7 @@ def main() -> None:
     )
     test_loader = DataLoader(
         test_set,
-        batch_size=args.batch,
+        batch_size=eff_batch,
         shuffle=False,
         num_workers=args.num_workers,
         pin_memory=True,
@@ -361,9 +512,9 @@ def main() -> None:
         else:
             lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, args.epochs), eta_min=0.0)
 
-    model, optimizer, train_loader, val_loader, test_loader = accelerator.prepare(
-        model, optimizer, train_loader, val_loader, test_loader
-    )
+    # Only train loader is distributed. Val/test are evaluated on main process only
+    # to keep single-GPU and DDP metrics strictly comparable.
+    model, optimizer, train_loader = accelerator.prepare(model, optimizer, train_loader)
 
     best_val = -1.0
     best_path = save_dir / "checkpoints" / "best.pt"
@@ -374,6 +525,8 @@ def main() -> None:
             f"  n_point={args.n_point} groups={args.num_groups} group_size={args.group_size} "
             f"d_model={args.d_model} layers={args.n_layers} heads={args.n_heads} "
             f"pooling={args.pooling} is_causal={bool(args.is_causal)}\n"
+            f"  world_size={world_size} batch_mode={args.batch_mode} batch_arg={args.batch} batch_effective={eff_batch}\n"
+            f"  data_format={args.data_format} input_root={args.cache_root if args.data_format == 'npz' else args.scan_h5_root}\n"
             f"  val_split_mode={resolved_val_split_mode}\n"
             f"  train_sample={args.pt_sample_mode_train} eval_sample={args.pt_sample_mode_eval} "
             f"aug_train={aug_train} aug_preset={args.aug_preset} aug_eval={bool(args.aug_eval)} mc_test={args.mc_eval_k_test}"
@@ -400,19 +553,25 @@ def main() -> None:
         if lr_scheduler is not None:
             lr_scheduler.step()
 
-        # val
-        val_metrics = evaluate(model, val_loader, accelerator, use_normals=use_normals)
+        # val (main process only, full dataset)
+        accelerator.wait_for_everyone()
         if accelerator.is_main_process:
+            # Rank-0-only eval must run on the unwrapped module. Running forward on
+            # DDP-wrapped model only on rank0 causes collective mismatch.
+            val_metrics = evaluate_local(
+                accelerator.unwrap_model(model), val_loader, accelerator.device, use_normals=use_normals
+            )
             lr_now = optimizer.param_groups[0]["lr"]
             print(
                 f"[ep {epoch+1:03d}/{args.epochs}] lr={lr_now:.2e} "
                 f"val_acc={val_metrics['acc']:.4f} val_loss={val_metrics['loss']:.4f}"
             )
 
-        if val_metrics["acc"] > best_val and accelerator.is_main_process:
-            best_val = val_metrics["acc"]
-            torch.save({"model": accelerator.unwrap_model(model).state_dict(), "args": vars(args)}, best_path)
-            print(f"  saved best -> {best_path} (val_acc={best_val:.4f})")
+            if val_metrics["acc"] > best_val:
+                best_val = val_metrics["acc"]
+                torch.save({"model": accelerator.unwrap_model(model).state_dict(), "args": vars(args)}, best_path)
+                print(f"  saved best -> {best_path} (val_acc={best_val:.4f})")
+        accelerator.wait_for_everyone()
 
     # Load best on all processes for a consistent final test.
     accelerator.wait_for_everyone()
@@ -421,11 +580,20 @@ def main() -> None:
         accelerator.unwrap_model(model).load_state_dict(ckpt["model"], strict=True)
 
     accelerator.wait_for_everyone()
-    test_metrics = evaluate(model, test_loader, accelerator, use_normals=use_normals)
+    test_metrics = None
+    if accelerator.is_main_process:
+        test_metrics = evaluate_local(
+            accelerator.unwrap_model(model), test_loader, accelerator.device, use_normals=use_normals
+        )
     if accelerator.is_main_process:
         print(f"TEST acc={test_metrics['acc']:.4f} loss={test_metrics['loss']:.4f}")
         with open(save_dir / "test_metrics.json", "w") as f:
             json.dump(test_metrics, f, indent=2)
+    accelerator.wait_for_everyone()
+    if dist.is_available() and dist.is_initialized():
+        dist.destroy_process_group()
+    if hasattr(accelerator, "end_training"):
+        accelerator.end_training()
 
 
 if __name__ == "__main__":
