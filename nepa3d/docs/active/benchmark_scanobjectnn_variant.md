@@ -237,8 +237,19 @@ Point-MAE scratch ckpt direct test extraction:
 - results (`--test`, ckpt-best from scratch run `pointmae_scan3_scratch_stdbs32_20260227_142324`):
   - `obj_bg`: `[TEST] acc = 86.7470`
   - `obj_only`: `[TEST] acc = 86.4028`
-- pending:
-  - `pb_t50_rs` test submitted as `98997.qjcm` with dependency `afterok:98824.qjcm`.
+- unresolved:
+  - `pb_t50_rs` test job `98997.qjcm` reached `job_state=F` but no valid output/test log was produced.
+  - keep `pb_t50_rs` in this block as **not recorded** until rerun emits `[TEST] acc`.
+
+Strict protocol rerun (`NO_TEST_AS_VAL=1`, `npoints=1024`) status:
+
+- run set:
+  - `logs/sanity/pointmae_scratch/pointmae_scan3_scratch_n1024_notestval_fix_20260227_174052`
+- jobs:
+  - `99105.qjcm` (`obj_bg`)
+  - `99106.qjcm` (`obj_only`)
+  - `99107.qjcm` (`pb_t50_rs`)
+- current: running (`R`)
 
 ### 2.2.3 Non-normalized cache + dynamic query-bbox follow-up (`v3_nonorm`)
 

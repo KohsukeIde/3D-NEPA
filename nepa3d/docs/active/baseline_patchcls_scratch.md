@@ -170,19 +170,26 @@ Interpretation note:
   - inference path parity is confirmed (same ckpt -> same test acc in single/ddp4).
   - training-path sensitivity exists; use multi-seed mean/std before claiming single-vs-ddp superiority.
 
-### DDP batch-size comparison run (submitted)
+### DDP batch-size comparison run (completed)
 
 Run set:
 
 - `logs/sanity/patchcls/patchcls_objonly_scratch_ddp4_bs64_vs_bs128_20260227_164159`
 - jobs:
-  - `98993` (`pcs_bs64`) : `BATCH=64`, `NPROC_PER_NODE=4`, `EPOCHS=300`
-  - `98994` (`pcs_bs128`) : `BATCH=128`, `NPROC_PER_NODE=4`, `EPOCHS=300`
+  - `98993` (`pcs_bs64`) : `BATCH=64`, `NPROC_PER_NODE=4`, `BATCH_MODE=global`, `EPOCHS=300`, `Exit_status=0`
+  - `98994` (`pcs_bs128`) : `BATCH=128`, `NPROC_PER_NODE=4`, `BATCH_MODE=global`, `EPOCHS=300`, `Exit_status=0`
 
-Status:
+Final metrics:
 
-- both are running at submission-time check.
-- objective: compare final `test_acc` under the same DDP4 recipe with only global batch size changed.
+| setting | test_acc | test_loss |
+|---|---:|---:|
+| `ddp4_bs64` | 0.8003 | 1.4273 |
+| `ddp4_bs128` | 0.7952 | 1.3677 |
+
+Quick read:
+
+- under this DDP4 setup, `BATCH=64` was slightly higher (`+0.0051`) than `BATCH=128`.
+- this is one run-pair result, not yet a multi-seed conclusion.
 
 ### Point-MAE scratch ckpt test-accuracy extraction
 
