@@ -62,6 +62,7 @@ VAL_SEED="${VAL_SEED:-0}"
 VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}"
 ALLOW_SCAN_UNISCALE_V2="${ALLOW_SCAN_UNISCALE_V2:-0}"
 SAVE_DIR="${SAVE_DIR:-runs/sanity/patchcls}"
+CKPT="${CKPT:-}"
 
 cache_root_for_variant() {
   case "$1" in
@@ -109,6 +110,7 @@ for variant in "${_variants[@]}"; do
       "SCAN_VARIANT=${variant}"
       "RUN_NAME=${run_name}"
       "SAVE_DIR=${SAVE_DIR}"
+      "CKPT=${CKPT}"
       "EPOCHS=${EPOCHS}"
       "BATCH=${BATCH}"
       "BATCH_MODE=${BATCH_MODE}"

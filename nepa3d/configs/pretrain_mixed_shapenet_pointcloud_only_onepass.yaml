@@ -1,0 +1,17 @@
+# ShapeNet-only pointcloud pretraining corpus (one-pass epoch).
+# No ScanObjectNN component is included.
+#
+# Important:
+# - replacement=false
+# - mix_num_samples is intentionally omitted
+#   => one epoch draws exactly len(mixed) unique samples.
+
+mix_seed: 0
+replacement: false
+
+datasets:
+  - name: shapenet_pc
+    cache_root: data/shapenet_cache_v0
+    split: train
+    backend: pointcloud_noray
+    weight: 1.0

@@ -12,7 +12,7 @@ WORKDIR="${WORKDIR:-${DEFAULT_WORKDIR}}"
 VENV_ACTIVATE="${VENV_ACTIVATE:-${WORKDIR}/.venv/bin/activate}"
 CUDA_MODULE="${CUDA_MODULE:-cuda/12.9}"
 
-MIX_CONFIG="${MIX_CONFIG:-nepa3d/configs/pretrain_mixed_shapenet_pointcloud_only.yaml}"
+MIX_CONFIG="${MIX_CONFIG:-nepa3d/configs/pretrain_mixed_shapenet_pointcloud_only_onepass.yaml}"
 RUN_TAG="${RUN_TAG:-patchnepa_ptonly_$(date +%Y%m%d_%H%M%S)}"
 SAVE_DIR="${SAVE_DIR:-runs/patchnepa_pointonly/${RUN_TAG}}"
 LOG_ROOT="${LOG_ROOT:-${WORKDIR}/logs/patch_nepa_pretrain}"

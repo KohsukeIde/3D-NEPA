@@ -112,3 +112,28 @@ Before accepting any run for comparison tables:
 4. Data key fallback warnings are absent (especially FPS fallback warnings).
 5. Resume behavior is explicit (`[resume] loaded=...` or disabled with reason).
 6. Fine-tune eval uses valid MC/TTA setting (guard should pass cleanly).
+
+## 7. Query-Shared Error Ledger (carry-over risks)
+
+These are not Patch-specific bugs; they are shared operational risks from the Query line.
+All should be checked in Patch-NEPA runs as well.
+
+1. DDP topology mismatch
+- Risk: allocated GPUs do not match actual training processes.
+- Guard: always verify `num_processes`, `num_machines`, and logged global batch.
+
+2. Wrapper env propagation mismatch
+- Risk: wrong `WORKDIR`/empty env variables silently change recipe.
+- Guard: validate launcher header lines (`workdir`, `mix_config`, key overrides).
+
+3. Cached-order missing fallback (FPS/RFPS)
+- Risk: on-the-fly sampling path slows jobs and breaks reproducibility assumptions.
+- Guard: precheck cache keys and reject runs with fallback warnings.
+
+4. Mixed pretrain sample-count drift
+- Risk: effective number of samples differs from Query baseline; fairness is broken.
+- Guard: enforce one-pass mix policy for parity experiments and log the exact config path.
+
+5. Retry-time recipe drift
+- Risk: scheduler/resume/sampling defaults differ across retries.
+- Guard: include full recipe dump in every log and compare before accepting metrics.

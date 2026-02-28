@@ -140,3 +140,37 @@ For each Stage-2 job, append:
 - config key overrides (`N_POINT`, `N_RAY`, `PATCH_EMBED`, grouping, `USE_RAY_PATCH`)
 - checkpoint path
 - downstream finetune/eval dependency job ids
+
+## 7. Query-NEPA Shared Failure Modes (must be logged)
+
+The following are known failures already seen in Query-NEPA and can reappear in Patch-NEPA.
+Each Stage-2 run should explicitly confirm these are clean.
+
+1. Multi-GPU allocation but non-DDP launch
+- Symptom: job gets multiple GPUs but training is effectively single-process.
+- Patch-NEPA evidence: `99602.qjcm` (stopped; replaced by DDP wrapper path).
+- Impact: wrong throughput and unfair comparability.
+- Required log check: `num_processes`, `num_machines`, global batch line.
+
+2. Launcher env/workdir propagation mismatch
+- Symptom: malformed/empty env vars or wrong root path in wrapper launch.
+- Patch-NEPA evidence: `99641.qjcm`/`99642.qjcm` retries before final corrected submit.
+- Impact: run either fails fast or runs with unintended settings.
+- Required log check: run header (`workdir`, `run_tag`, `mix_config`, key args).
+
+3. Sampling-order key mismatch -> expensive fallback path
+- Symptom: requested sampled mode cannot use cached order key and falls back to on-the-fly computation.
+- Query-NEPA precedent: repeated FPS fallback warnings and severe slowdown.
+- Patch-NEPA policy: use `rfps_cached` with bank key availability prechecked.
+- Required log check: no fallback warnings; explicit `pt_sample_mode`, `pt_rfps_key`.
+
+4. Data cardinality mismatch vs baseline protocol
+- Symptom: mixed pretrain sees inflated effective samples vs Query baseline.
+- Patch-NEPA fix: one-pass mix config (`replacement: false`) for parity.
+- Required log check: mix config path and one-pass policy in run header.
+
+5. Silent config drift across retries
+- Symptom: relaunch changes recipe unintentionally (scheduler/resume/sample mode).
+- Query-NEPA precedent: historically caused invalid cross-run comparisons.
+- Patch-NEPA policy: run header must print full training recipe each job.
+- Required log check: `lr_scheduler`, `auto_resume`, `resume_optimizer`, sampling mode.

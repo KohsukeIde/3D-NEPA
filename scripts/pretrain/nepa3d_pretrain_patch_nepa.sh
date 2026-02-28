@@ -8,7 +8,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "${ROOT_DIR}"
 export PYTHONPATH="${ROOT_DIR}"
 
-MIX_CFG="${1:-nepa3d/configs/pretrain_mixed_shapenet_pointcloud_only.yaml}"
+MIX_CFG="${1:-nepa3d/configs/pretrain_mixed_shapenet_pointcloud_only_onepass.yaml}"
 SAVE_DIR="${2:-runs/patchnepa_pointonly}"
 RUN_NAME="${3:-patchnepa_ptonly_manual_$(date +%Y%m%d_%H%M%S)}"
 LOG_ROOT="${LOG_ROOT:-${ROOT_DIR}/logs/patch_nepa_pretrain/${RUN_NAME}}"
