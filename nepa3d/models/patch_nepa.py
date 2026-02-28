@@ -40,6 +40,7 @@ from ..token.tokenizer import (
 @dataclass
 class PatchNepaOutput:
     z: torch.Tensor
+    h: torch.Tensor
     z_hat: torch.Tensor
     type_id: torch.Tensor
     centers_xyz: torch.Tensor
@@ -653,6 +654,7 @@ class PatchTransformerNepa(nn.Module):
         z_hat = self.pred_head(h)
         return PatchNepaOutput(
             z=z,
+            h=h,
             z_hat=z_hat,
             type_id=type_id,
             centers_xyz=centers_xyz,

@@ -2,7 +2,7 @@
 #PBS -l rt_QF=1
 #PBS -l walltime=24:00:00
 #PBS -j oe
-#PBS -N patchnepa_ptonly
+#PBS -N patchnepa_rayqa
 
 set -euo pipefail
 
@@ -12,13 +12,14 @@ WORKDIR="${WORKDIR:-${DEFAULT_WORKDIR}}"
 VENV_ACTIVATE="${VENV_ACTIVATE:-${WORKDIR}/.venv/bin/activate}"
 CUDA_MODULE="${CUDA_MODULE:-cuda/12.9}"
 
-MIX_CONFIG="${MIX_CONFIG:-nepa3d/configs/pretrain_mixed_shapenet_pointcloud_only_onepass.yaml}"
-RUN_TAG="${RUN_TAG:-patchnepa_ptonly_$(date +%Y%m%d_%H%M%S)}"
-SAVE_DIR="${SAVE_DIR:-runs/patchnepa_pointonly/${RUN_TAG}}"
+# Stage-2 mainline default (2026-03-01+): Ray-enabled Patch-NEPA.
+MIX_CONFIG="${MIX_CONFIG:-nepa3d/configs/pretrain_mixed_shapenet_mesh_udf_onepass.yaml}"
+RUN_TAG="${RUN_TAG:-patchnepa_rayqa_$(date +%Y%m%d_%H%M%S)}"
+SAVE_DIR="${SAVE_DIR:-runs/patchnepa_rayqa/${RUN_TAG}}"
 LOG_ROOT="${LOG_ROOT:-${WORKDIR}/logs/patch_nepa_pretrain}"
 
 N_POINT="${N_POINT:-1024}"
-N_RAY="${N_RAY:-0}"
+N_RAY="${N_RAY:-1024}"
 BATCH="${BATCH:-16}"
 EPOCHS="${EPOCHS:-100}"
 NUM_WORKERS="${NUM_WORKERS:-8}"
@@ -41,7 +42,7 @@ PT_RFPS_KEY="${PT_RFPS_KEY:-pt_rfps_order_bank}"
 PT_RFPS_M="${PT_RFPS_M:-4096}"
 POINT_ORDER_MODE="${POINT_ORDER_MODE:-morton}"
 
-USE_RAY_PATCH="${USE_RAY_PATCH:-0}"
+USE_RAY_PATCH="${USE_RAY_PATCH:-1}"
 INCLUDE_RAY_UNC="${INCLUDE_RAY_UNC:-0}"
 RAY_POOL_MODE="${RAY_POOL_MODE:-amax}"
 RAY_FUSE="${RAY_FUSE:-add}"
@@ -82,6 +83,7 @@ DUAL_MASK_FAR="${DUAL_MASK_FAR:-0.0}"
 DUAL_MASK_WINDOW="${DUAL_MASK_WINDOW:-32}"
 DUAL_MASK_TYPE_AWARE="${DUAL_MASK_TYPE_AWARE:-0}"
 DUAL_MASK_WARMUP_FRAC="${DUAL_MASK_WARMUP_FRAC:-0.05}"
+STAGE2_REQUIRE_RAY="${STAGE2_REQUIRE_RAY:-1}"
 
 WARMUP_EPOCHS="${WARMUP_EPOCHS:-}"
 WARMUP_RATIO="${WARMUP_RATIO:-0.025}"
@@ -146,7 +148,18 @@ if command -v module >/dev/null 2>&1; then
   module load "${CUDA_MODULE}" 2>/dev/null || true
 fi
 
-echo "=== PATCH-NEPA PRETRAIN (POINT-ONLY) ===" | tee "${LOG_PATH}"
+if [[ "${STAGE2_REQUIRE_RAY}" == "1" ]]; then
+  if [[ "${USE_RAY_PATCH}" != "1" ]]; then
+    echo "ERROR: Stage-2 mainline requires USE_RAY_PATCH=1 (got ${USE_RAY_PATCH})" | tee "${LOG_PATH}"
+    exit 2
+  fi
+  if ! [[ "${N_RAY}" =~ ^[0-9]+$ ]] || [[ "${N_RAY}" -le 0 ]]; then
+    echo "ERROR: Stage-2 mainline requires N_RAY>0 (got ${N_RAY})" | tee "${LOG_PATH}"
+    exit 2
+  fi
+fi
+
+echo "=== PATCH-NEPA PRETRAIN (RAY DEFAULT) ===" | tee "${LOG_PATH}"
 echo "date=$(date -Is)" | tee -a "${LOG_PATH}"
 echo "host=$(hostname)" | tee -a "${LOG_PATH}"
 echo "pbs_jobid=${PBS_JOBID:-}" | tee -a "${LOG_PATH}"

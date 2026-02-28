@@ -1,6 +1,6 @@
 # NEPA Tracks Index
 
-Last updated: 2026-02-28
+Last updated: 2026-03-01
 
 ## 1. Purpose
 
@@ -29,20 +29,21 @@ These are retained for traceability and ablation reference, not as active execut
 
 ## 4. Mapping Note: Query Settings vs Patch Settings
 
-Query-NEPA settings that do not directly apply to current Patch-NEPA point-only run:
+Query-NEPA settings that do not directly apply to current Patch-NEPA run:
 
 - `qa_layout` (`interleave` / `split` / `split_sep`)
 - `sequence_mode` (`block` / `event`)
 - `event_order_mode`
 - `ray_order_mode`
 
-Current Patch-NEPA point-only baseline recipe uses:
+Current Patch-NEPA mainline recipe uses:
 
 - patch sequence (`fps_knn`, `group_size=32`, `num_groups=64`)
-- no ray stream (`N_RAY=0`, `USE_RAY_PATCH=0`)
+- ray stream enabled (`N_RAY=1024`, `USE_RAY_PATCH=1`)
 - sample mode fixed (`pt_sample_mode=rfps_cached`, `pt_rfps_key=auto|<bank_key>`, `pt_rfps_m=4096`)
 - Stage-2 mainline disallows on-the-fly RFPS/FPS fallback (RFPS bank required)
 - NEPA next-embedding objective on patch tokens
+- transfer path fixed to direct PatchNEPA finetune (`--model_source patchnepa`)
 
 ## 5. Migration Policy
 

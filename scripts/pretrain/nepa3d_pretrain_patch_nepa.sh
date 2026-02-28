@@ -2,15 +2,15 @@
 set -euo pipefail
 
 # Patch-token NEPA pretrain (Stage-2, single-node helper).
-# This launcher keeps defaults aligned with the active point-only baseline.
+# This launcher keeps defaults aligned with the active Ray-enabled baseline.
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "${ROOT_DIR}"
 export PYTHONPATH="${ROOT_DIR}"
 
-MIX_CFG="${1:-nepa3d/configs/pretrain_mixed_shapenet_pointcloud_only_onepass.yaml}"
-SAVE_DIR="${2:-runs/patchnepa_pointonly}"
-RUN_NAME="${3:-patchnepa_ptonly_manual_$(date +%Y%m%d_%H%M%S)}"
+MIX_CFG="${1:-nepa3d/configs/pretrain_mixed_shapenet_mesh_udf_onepass.yaml}"
+SAVE_DIR="${2:-runs/patchnepa_rayqa}"
+RUN_NAME="${3:-patchnepa_rayqa_manual_$(date +%Y%m%d_%H%M%S)}"
 LOG_ROOT="${LOG_ROOT:-${ROOT_DIR}/logs/patch_nepa_pretrain/${RUN_NAME}}"
 LOG_PATH="${LOG_ROOT}/${RUN_NAME}.log"
 mkdir -p "${LOG_ROOT}"
@@ -33,11 +33,23 @@ PY
 )"
 fi
 
-echo "=== PATCH-NEPA PRETRAIN (single-node helper) ===" | tee "${LOG_PATH}"
+STAGE2_REQUIRE_RAY="${STAGE2_REQUIRE_RAY:-1}"
+if [[ "${STAGE2_REQUIRE_RAY}" == "1" ]]; then
+  if [[ "${USE_RAY_PATCH:-1}" != "1" ]]; then
+    echo "ERROR: Stage-2 mainline requires USE_RAY_PATCH=1 (got ${USE_RAY_PATCH:-1})" | tee "${LOG_PATH}"
+    exit 2
+  fi
+  if ! [[ "${N_RAY:-1024}" =~ ^[0-9]+$ ]] || [[ "${N_RAY:-1024}" -le 0 ]]; then
+    echo "ERROR: Stage-2 mainline requires N_RAY>0 (got ${N_RAY:-1024})" | tee "${LOG_PATH}"
+    exit 2
+  fi
+fi
+
+echo "=== PATCH-NEPA PRETRAIN (single-node helper, RAY DEFAULT) ===" | tee "${LOG_PATH}"
 echo "root=${ROOT_DIR}" | tee -a "${LOG_PATH}"
 echo "mix_config=${MIX_CFG}" | tee -a "${LOG_PATH}"
 echo "save_dir=${SAVE_DIR}" | tee -a "${LOG_PATH}"
-echo "qa_tokens=${QA_TOKENS:-1} qa_layout=${QA_LAYOUT:-split_sep} encdec_arch=${ENCDEC_ARCH:-0} dual_mask=(${DUAL_MASK_NEAR:-0.0},${DUAL_MASK_FAR:-0.0},w=${DUAL_MASK_WINDOW:-32})" | tee -a "${LOG_PATH}"
+echo "qa_tokens=${QA_TOKENS:-1} qa_layout=${QA_LAYOUT:-split_sep} encdec_arch=${ENCDEC_ARCH:-0} dual_mask=(${DUAL_MASK_NEAR:-0.0},${DUAL_MASK_FAR:-0.0},w=${DUAL_MASK_WINDOW:-32}) use_ray_patch=${USE_RAY_PATCH:-1} n_ray=${N_RAY:-1024}" | tee -a "${LOG_PATH}"
 echo "optimizer: lr_scheduler=${LR_SCHEDULER:-cosine} warmup_epochs=${WARMUP_EPOCHS} warmup_ratio=${WARMUP_RATIO} min_lr=${MIN_LR:-1e-6} weight_decay=${WEIGHT_DECAY:-0.05}" | tee -a "${LOG_PATH}"
 echo "run_name=${RUN_NAME}" | tee -a "${LOG_PATH}"
 
@@ -48,7 +60,7 @@ python -u -m nepa3d.train.pretrain_patch_nepa \
   --epochs "${EPOCHS:-100}" \
   --batch_size "${BATCH:-16}" \
   --n_point "${N_POINT:-1024}" \
-  --n_ray "${N_RAY:-0}" \
+  --n_ray "${N_RAY:-1024}" \
   --num_workers "${NUM_WORKERS:-8}" \
   --pt_xyz_key "${PT_XYZ_KEY:-pt_xyz_pool}" \
   --pt_dist_key "${PT_DIST_KEY:-pt_dist_pool}" \
@@ -64,7 +76,7 @@ python -u -m nepa3d.train.pretrain_patch_nepa \
   --serial_order "${SERIAL_ORDER:-morton}" \
   --serial_bits "${SERIAL_BITS:-10}" \
   --serial_shuffle_within_patch "${SERIAL_SHUFFLE_WITHIN_PATCH:-0}" \
-  --use_ray_patch "${USE_RAY_PATCH:-0}" \
+  --use_ray_patch "${USE_RAY_PATCH:-1}" \
   --include_ray_unc "${INCLUDE_RAY_UNC:-0}" \
   --ray_pool_mode "${RAY_POOL_MODE:-amax}" \
   --ray_fuse "${RAY_FUSE:-add}" \

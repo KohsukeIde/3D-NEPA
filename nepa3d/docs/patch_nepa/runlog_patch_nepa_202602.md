@@ -318,6 +318,30 @@ Scheduler bug found from `100042` log inspection:
   - `nepa3d/train/pretrain_patch_nepa.py`
     - do **not** pass scheduler into `accelerator.prepare`
     - keep explicit epoch-end `scheduler.step()` only
+
+## 11. Stage-2 Transfer Path Correction (2026-03-01)
+
+Decision:
+
+- Stage-2 pretrain->finetune path is fixed to `model_source=patchnepa` (direct path).
+- Adapter conversion into `PatchTransformerClassifier` is excluded from Stage-2 mainline reporting.
+
+Reason:
+
+- Adapter path discards pretrain-side components (`answer_embed`, `type_emb`, `center_mlp`, `sep/eos`, `pred_head`)
+  and changes the token construction path.
+- This breaks strict continuity with Query-NEPA-style "same backbone line for pretrain->finetune".
+
+Operational rule from this point:
+
+- All new Stage-2 transfer runs must use:
+  - pretrain: `nepa3d/models/patch_nepa.py`
+  - finetune: `nepa3d/models/patch_nepa_classifier.py`
+  - launch arg: `--model_source patchnepa`
+
+Note:
+
+- `PatchTransformerClassifier` remains valid for Stage-1 scratch baseline only.
     - clamp warmup/cosine scale (`warmup<=1.0`, `t in [0,1]`).
 
 Status after fix:
@@ -533,3 +557,123 @@ New split-x2 resubmission (matched pair) submitted:
   - from `100118`: `100120` (`obj_bg`), `100121` (`obj_only`), `100122` (`pb_t50_rs`)
   - from `100119`: `100123` (`obj_bg`), `100124` (`obj_only`), `100125` (`pb_t50_rs`)
   - all are currently `H` (dependency hold) until corresponding pretrain completes.
+
+## 16. Mainline policy switch: Point-only -> Ray-default (2026-03-01)
+
+Decision:
+
+- from this point onward, Stage-2 mainline no longer uses point-only pretrain.
+- Ray-enabled pretrain is the mandatory default.
+
+Default contract:
+
+- `N_RAY=1024`
+- `USE_RAY_PATCH=1`
+- `MIX_CONFIG=nepa3d/configs/pretrain_mixed_shapenet_mesh_udf_onepass.yaml`
+
+Operational changes applied:
+
+- `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh`
+  - defaults switched to Ray-enabled run naming/paths and config
+  - added strict guard (`STAGE2_REQUIRE_RAY=1`) to reject `USE_RAY_PATCH!=1` or `N_RAY<=0`
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh`
+  - defaults switched to Ray-enabled config (`N_RAY=1024`, `USE_RAY_PATCH=1`, mesh+UDF mix)
+  - added same strict guard
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa.sh` (single-node helper)
+  - defaults switched to Ray-enabled
+  - added same strict guard
+
+Note:
+
+- point-only runs are now ablation/debug only and must be explicitly labeled as non-mainline.
+
+## 17. Direct PatchNEPA-FT rerun matrix (2026-03-01)
+
+Reason:
+
+- Current transfer path was corrected to direct PatchNEPA finetune (`--model_source patchnepa`).
+- Old adapter-path runs are excluded from Stage-2 mainline transfer claims.
+
+Submitted matrix (pretrain + dependent FT):
+
+- total jobs: `8`
+  - pretrain: `2`
+  - finetune: `6` (`obj_bg`, `obj_only`, `pb_t50_rs` for each pretrain)
+
+Pretrain jobs:
+
+1. Ray mainline (split + dual-mask):
+- `100146.qjcm` (`patchnepa_rayDF`)
+- `RUN_SET=patchnepa_ray_directft_20260301_013908`
+- config:
+  - `MIX_CONFIG=pretrain_mixed_shapenet_mesh_udf_onepass.yaml`
+  - `USE_RAY_PATCH=1`, `N_RAY=1024`
+  - `QA_TOKENS=1`, `QA_LAYOUT=split_sep`, `ENCDEC_ARCH=0`
+  - `DUAL_MASK=(0.5,0.1,w=32,type_aware=1,warmup=0.05)`
+  - `PATCH_EMBED=fps_knn`, `64x32`
+  - `PT_SAMPLE_MODE=rfps_cached`, `PT_RFPS_KEY=pt_rfps_order_bank`
+  - `BATCH(per-proc)=8`, `num_processes=16`, global batch `128`
+
+2. point-only control (same recipe except ray off):
+- initial submit `100147.qjcm` failed immediately by guard propagation gap
+  (`STAGE2_REQUIRE_RAY` not forwarded to child launch env; node log showed
+  `ERROR: Stage-2 mainline requires USE_RAY_PATCH=1 (got 0)`).
+- fix applied:
+  - `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh`
+  - now forwards `STAGE2_REQUIRE_RAY` through `qsub -v`.
+- rerun:
+  - `100154.qjcm` (`patchnepa_ptDF2`)
+  - `RUN_SET=patchnepa_ptonly_directft_fix_20260301_014049`
+  - config:
+    - `MIX_CONFIG=pretrain_mixed_shapenet_pointcloud_only_onepass.yaml`
+    - `USE_RAY_PATCH=0`, `N_RAY=0`, `STAGE2_REQUIRE_RAY=0`
+    - other settings matched to `100146` (`split_sep`, dual-mask, rfps_cached, 64x32, global batch 128)
+
+Dependent finetune jobs (all use direct path):
+
+- required setting: `MODEL_SOURCE=patchnepa`
+- strict eval policy:
+  - `VAL_SPLIT_MODE=file`
+  - `AUG_EVAL=1`
+  - `MC_EVAL_K_TEST=10`
+
+From Ray pretrain `100146`:
+- `100148.qjcm` (`obj_bg`)
+- `100150.qjcm` (`obj_only`)
+- `100152.qjcm` (`pb_t50_rs`)
+- run set:
+  - `patchnepaFT_from_ray_20260301_013921`
+
+From point-only pretrain `100154`:
+- `100155.qjcm` (`obj_bg`)
+- `100156.qjcm` (`obj_only`)
+- `100157.qjcm` (`pb_t50_rs`)
+- run set:
+  - `patchnepaFT_from_ptonly_fix_20260301_014058`
+
+Operational note:
+
+- a transient first point-only FT chain (`100149/100151/100153`) was created from failed `100147`; treated invalid and superseded by `100155/100156/100157`.
+
+## 18. Ray split/interleave status + PatchNEPA-named FT launcher (2026-03-01)
+
+Status at this point:
+
+- Ray `split_sep` run: active
+  - pretrain: `100146.qjcm`
+  - dependent FT: `100148/100150/100152` (`afterok:100146`)
+- Ray `interleave` run: newly submitted
+  - pretrain: `100158.qjcm` (`patchnepa_rayIL`)
+  - key delta vs `100146`:
+    - `QA_LAYOUT=interleave`
+    - `QA_SEP_TOKEN=0`
+    - same ray/sampling/dual-mask/global-batch recipe otherwise
+  - dependent FT: `100159/100160/100161` (`afterok:100158`)
+
+Launcher naming cleanup:
+
+- Added PatchNEPA-named FT scripts (to avoid Stage-2 operation under `patchcls` naming):
+  - `scripts/finetune/patchnepa_scanobjectnn_finetune.sh`
+  - `scripts/sanity/submit_patchnepa_finetune_variants_qf.sh`
+- Runtime model path is unchanged and explicit:
+  - `MODEL_SOURCE=patchnepa` (direct PatchNEPA finetune path).

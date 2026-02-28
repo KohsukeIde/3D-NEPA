@@ -1,16 +1,37 @@
 # Patch-NEPA Stage 2 Active Plan
 
-Last updated: 2026-02-28
+Last updated: 2026-03-01
 
 ## 1. Scope
 
 This document is the active source for the new pipeline:
 
 - pretrain: `patch_nepa` (`nepa3d/models/patch_nepa.py`)
-- finetune/eval: `patchcls` (`nepa3d/train/finetune_patch_cls.py`)
+- finetune/eval: `patch_nepa_classifier` via `--model_source patchnepa`
+  (entrypoint remains `nepa3d/train/finetune_patch_cls.py`)
 - target protocol: ScanObjectNN variant split (`obj_bg`, `obj_only`, `pb_t50_rs`)
 
 `query_nepa` (`nepa3d/models/query_nepa.py`) is treated as a separate legacy line for historical comparison and is not used for new Stage-2 runs.
+
+## 1.1 Policy Update (2026-03-01, mandatory)
+
+- Stage-2 mainline default is now **Ray-enabled**:
+  - `N_RAY=1024`
+  - `USE_RAY_PATCH=1`
+  - `MIX_CONFIG=nepa3d/configs/pretrain_mixed_shapenet_mesh_udf_onepass.yaml`
+- Point-only (`N_RAY=0`, `USE_RAY_PATCH=0`) is deprecated for new mainline runs.
+  - allowed only for explicit ablation/debug runs with clear labeling.
+
+## 1.2 Transfer Path Update (2026-03-01, mandatory)
+
+- Stage-2 transfer path is now fixed to **PatchNEPA-direct finetune**:
+  - pretrain: `PatchTransformerNepa`
+  - finetune: `PatchTransformerNepaClassifier` via `--model_source patchnepa`
+- The previous adapter path
+  - `PatchTransformerNepa` checkpoint -> remap -> `PatchTransformerClassifier`
+  is no longer valid for Stage-2 mainline claims, because it drops pretrain-specific components
+  (`answer_embed`, `type_emb`, `center_mlp`, `sep/eos`, `pred_head`) and changes input construction.
+- `PatchTransformerClassifier` remains Stage-1 scratch baseline only.
 
 ## 2. Model/Script Roles
 
@@ -18,6 +39,9 @@ This document is the active source for the new pipeline:
   - `nepa3d/models/patch_nepa.py`
   - task: next-embedding prediction on patch tokens
   - optional Option-A ray bind: ray -> nearest point patch center
+- Patch finetune model (Stage-2 mainline):
+  - `nepa3d/models/patch_nepa_classifier.py`
+  - task: classification from PatchNEPA backbone without adapter conversion
 - Patch pretrain entry:
   - `nepa3d/train/pretrain_patch_nepa.py`
 - Patch pretrain launchers:
@@ -26,20 +50,24 @@ This document is the active source for the new pipeline:
   - `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh`
 - Patch finetune/eval entry:
   - `nepa3d/train/finetune_patch_cls.py`
+  - required arg: `--model_source patchnepa` for Stage-2 mainline
+  - submit/launch (PatchNEPA-named):
+    - `scripts/finetune/patchnepa_scanobjectnn_finetune.sh`
+    - `scripts/sanity/submit_patchnepa_finetune_variants_qf.sh`
 
 ## 2.1 Query-NEPA vs Patch-NEPA Settings Mapping
 
-The following Query-NEPA controls are not active in current Patch-NEPA point-only runs:
+The following Query-NEPA controls are not active in current Patch-NEPA mainline runs:
 
 - `qa_layout` (`interleave` / `split` / `split_sep`)
 - `sequence_mode` (`block` / `event`)
 - `event_order_mode`
 - `ray_order_mode`
 
-Current Stage-2 point-only run is:
+Current Stage-2 mainline run is:
 
 - patch sequence (`patch_embed=fps_knn`, `group_size=32`, `num_groups=64`)
-- `N_RAY=0`, `USE_RAY_PATCH=0`
+- ray enabled (`N_RAY=1024`, `USE_RAY_PATCH=1`)
 - NEPA next-embedding prediction on patch tokens
 
 ## 2.2 Pretrain Baseline Parity (excluding split/dual-mask/QA)
@@ -68,10 +96,10 @@ Reference audit/checklist:
 
 ## 3. Runtime Policy
 
-- Stage-2 baseline starts from point-only pretrain:
-  - `N_RAY=0`
-  - `USE_RAY_PATCH=0`
-  - ShapeNet pointcloud-only mix first
+- Stage-2 baseline is Ray-enabled pretrain:
+  - `N_RAY=1024`
+  - `USE_RAY_PATCH=1`
+  - ShapeNet mesh+UDF one-pass mix (`pretrain_mixed_shapenet_mesh_udf_onepass.yaml`)
 - Stage-2 pretrain execution is fixed to 16 GPUs:
   - topology: `4 nodes x 4 GPU/node` (`rt_QF=4`, `NPROC_PER_NODE=4`)
   - launcher: `scripts/pretrain/nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`

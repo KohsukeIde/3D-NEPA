@@ -40,6 +40,7 @@ from nepa3d.data.modelnet40_index import (
     stratified_train_val_split,
 )
 from nepa3d.models.patch_classifier import PatchTransformerClassifier
+from nepa3d.models.patch_nepa_classifier import PatchTransformerNepaClassifier
 from nepa3d.models.pointmae_patch_classifier import PointMAEPatchClassifier
 
 
@@ -142,8 +143,8 @@ def add_args(p: argparse.ArgumentParser) -> None:
         "--model_source",
         type=str,
         default="patchcls",
-        choices=["patchcls", "pointmae"],
-        help="Backbone source: patchcls(custom) or pointmae(backbone-parity).",
+        choices=["patchcls", "pointmae", "patchnepa"],
+        help="Backbone source: patchcls(custom), pointmae(backbone-parity), or patchnepa(direct pretrain->ft).",
     )
     p.add_argument("--backbone_mode", type=str, default="nepa2d", choices=["nepa2d", "vanilla"])
     p.add_argument("--qk_norm", type=int, default=1, choices=[0, 1])
@@ -342,6 +343,80 @@ def _adapt_patchnepa_pretrain_to_patchcls(
         "dst_total": int(len(target_state)),
     }
     return out, stats
+
+
+def _as_bool01(v: object, default: bool = False) -> bool:
+    if v is None:
+        return bool(default)
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(int(v))
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in {"1", "true", "yes", "y", "on"}:
+            return True
+        if s in {"0", "false", "no", "n", "off"}:
+            return False
+    return bool(v)
+
+
+def _patchnepa_kwargs_from_ckpt(ckpt_args: Dict[str, object], args: argparse.Namespace) -> Dict[str, object]:
+    """Build PatchTransformerNepa kwargs from pretrain ckpt args, with safe fallbacks."""
+    c = ckpt_args or {}
+    kw: Dict[str, object] = {
+        # patchify
+        "patch_embed": str(c.get("patch_embed", args.patch_embed)),
+        "n_point": int(c.get("n_point", args.n_point)),
+        "group_size": int(c.get("group_size", args.group_size)),
+        "num_groups": int(c.get("num_groups", args.num_groups)),
+        "serial_order": str(c.get("serial_order", args.serial_order)),
+        "serial_bits": int(c.get("serial_bits", args.serial_bits)),
+        "serial_shuffle_within_patch": int(c.get("serial_shuffle_within_patch", args.serial_shuffle_within_patch)),
+        "use_normals": _as_bool01(c.get("use_normals", args.use_normals)),
+        # transformer
+        "d_model": int(c.get("d_model", args.d_model)),
+        "n_layers": int(c.get("n_layers", args.n_layers)),
+        "n_heads": int(c.get("n_heads", args.n_heads)),
+        "mlp_ratio": float(c.get("mlp_ratio", args.mlp_ratio)),
+        "dropout": float(c.get("dropout", args.dropout)),
+        "drop_path_rate": float(c.get("drop_path_rate", args.drop_path_rate)),
+        "qk_norm": int(_as_bool01(c.get("qk_norm", args.qk_norm))),
+        "qk_norm_affine": int(_as_bool01(c.get("qk_norm_affine", args.qk_norm_affine))),
+        "qk_norm_bias": int(_as_bool01(c.get("qk_norm_bias", args.qk_norm_bias))),
+        "layerscale_value": float(c.get("layerscale_value", args.layerscale_value)),
+        "rope_theta": float(c.get("rope_theta", args.rope_theta)),
+        "use_gated_mlp": int(_as_bool01(c.get("use_gated_mlp", args.use_gated_mlp))),
+        "hidden_act": str(c.get("hidden_act", args.hidden_act)),
+        "backbone_mode": str(c.get("backbone_mode", args.backbone_mode)),
+        # Q/A
+        "qa_tokens": int(c.get("qa_tokens", 1)),
+        "qa_layout": str(c.get("qa_layout", "split_sep")),
+        "qa_sep_token": _as_bool01(c.get("qa_sep_token", 1)),
+        "qa_fuse": str(c.get("qa_fuse", "add")),
+        "use_pt_dist": _as_bool01(c.get("use_pt_dist", 1)),
+        "use_pt_grad": _as_bool01(c.get("use_pt_grad", 0)),
+        "answer_mlp_layers": int(c.get("answer_mlp_layers", 2)),
+        "answer_pool": str(c.get("answer_pool", "max")),
+        # embeddings / arch
+        "max_len": int(c.get("max_len", 4096)),
+        "nepa2d_pos": _as_bool01(c.get("nepa2d_pos", 1)),
+        "type_specific_pos": _as_bool01(c.get("type_specific_pos", 0)),
+        "type_pos_max_len": int(c.get("type_pos_max_len", 4096)),
+        "pos_mode": str(c.get("pos_mode", "center_mlp")),
+        "encdec_arch": _as_bool01(c.get("encdec_arch", 0)),
+        # ray binding
+        "use_ray_patch": _as_bool01(c.get("use_ray_patch", args.use_ray_patch)),
+        "include_ray_normal": _as_bool01(c.get("include_ray_normal", 1)),
+        "include_ray_unc": _as_bool01(c.get("include_ray_unc", 0)),
+        "use_ray_origin": _as_bool01(c.get("ray_use_origin", 0)),
+        "ray_assign_mode": str(c.get("ray_assign_mode", "proxy_sphere")),
+        "ray_proxy_radius_scale": float(c.get("ray_proxy_radius_scale", 1.05)),
+        "ray_pool_mode": str(c.get("ray_pool_mode", "amax")),
+    }
+    # FT-time override for ray usage is allowed.
+    kw["use_ray_patch"] = bool(args.use_ray_patch)
+    return kw
 
 
 def _resolve_scan_h5_files(scan_h5_root: str, scan_variant: str) -> Tuple[Path, Path]:
@@ -690,6 +765,16 @@ def main() -> None:
         drop_last=False,
     )
 
+    # Optional checkpoint preload (used by multiple model-source branches).
+    ckpt_obj: Optional[Dict[str, object]] = None
+    pretrain_state: Optional[Dict[str, torch.Tensor]] = None
+    pretrain_args: Dict[str, object] = {}
+    if args.ckpt:
+        ckpt_obj = torch.load(args.ckpt, map_location="cpu")
+        pretrain_state = ckpt_obj.get("model", ckpt_obj)
+        if isinstance(ckpt_obj.get("args", None), dict):
+            pretrain_args = ckpt_obj["args"]  # type: ignore[index]
+
     # Model
     if args.model_source == "pointmae":
         if use_normals:
@@ -706,6 +791,20 @@ def main() -> None:
             num_groups=args.num_groups,
             encoder_dims=args.d_model,
             init_mode=args.init_mode,
+        )
+    elif args.model_source == "patchnepa":
+        if pretrain_state is None:
+            raise ValueError("--model_source=patchnepa requires --ckpt (PatchNEPA pretrain checkpoint).")
+        nepa_kwargs = _patchnepa_kwargs_from_ckpt(pretrain_args, args)
+        head_mode = args.head_mode if args.head_mode != "auto" else ("pointmae_mlp" if args.pooling == "cls_max" else "linear")
+        model = PatchTransformerNepaClassifier(
+            num_classes=num_classes,
+            pooling=args.pooling,
+            head_mode=head_mode,
+            head_hidden_dim=args.head_hidden_dim,
+            head_dropout=args.head_dropout,
+            is_causal=bool(args.is_causal),
+            **nepa_kwargs,
         )
     else:
         model = PatchTransformerClassifier(
@@ -748,10 +847,9 @@ def main() -> None:
             is_causal=bool(args.is_causal),
         )
 
-    if args.ckpt:
-        ckpt = torch.load(args.ckpt, map_location="cpu")
-        state = ckpt.get("model", ckpt)
-        state_to_load = state
+    if pretrain_state is not None:
+        state = pretrain_state
+        state_to_load = pretrain_state
         # Prefer PatchNEPA->PatchCls adaptation when the pretrain checkpoint uses
         # BOS token naming (PatchNEPA) and classifier expects CLS token.
         if args.model_source == "patchcls":
@@ -820,6 +918,20 @@ def main() -> None:
                 f"  model_source=pointmae n_point={args.n_point} groups={args.num_groups} group_size={args.group_size} "
                 f"d_model={args.d_model} layers={args.n_layers} heads={args.n_heads} "
                 f"drop_path_rate={args.drop_path_rate} init_mode={args.init_mode}\n"
+                f"  world_size={world_size} batch_mode={args.batch_mode} batch_arg={args.batch} batch_effective={eff_batch}\n"
+                f"  data_format={args.data_format} input_root={args.cache_root if args.data_format == 'npz' else args.scan_h5_root}\n"
+                f"  val_split_mode={resolved_val_split_mode}\n"
+                f"  train_sample={args.pt_sample_mode_train} eval_sample={args.pt_sample_mode_eval} "
+                f"aug_train={aug_train} aug_preset={args.aug_preset} aug_eval={bool(args.aug_eval)} mc_test={args.mc_eval_k_test}"
+            )
+        elif args.model_source == "patchnepa":
+            print(
+                f"PatchCls: classes={num_classes} train={len(train_set)} val={len(val_set)} test={len(test_set)}\n"
+                f"  model_source=patchnepa(direct) n_point={args.n_point} groups={args.num_groups} group_size={args.group_size} "
+                f"use_ray_patch={int(args.use_ray_patch)} n_ray={args.n_ray} "
+                f"pooling={args.pooling} head_mode={args.head_mode} "
+                f"backbone_mode={args.backbone_mode} "
+                f"ray_query_only=1 is_causal={bool(args.is_causal)}\n"
                 f"  world_size={world_size} batch_mode={args.batch_mode} batch_arg={args.batch} batch_effective={eff_batch}\n"
                 f"  data_format={args.data_format} input_root={args.cache_root if args.data_format == 'npz' else args.scan_h5_root}\n"
                 f"  val_split_mode={resolved_val_split_mode}\n"
