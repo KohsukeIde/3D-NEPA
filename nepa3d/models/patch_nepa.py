@@ -32,10 +32,10 @@ class PatchTransformerNepa(nn.Module):
         self,
         *,
         # patching
-        patch_embed: str = "serial",
+        patch_embed: str = "fps_knn",
         n_point: int = 1024,
         group_size: int = 32,
-        num_groups: Optional[int] = None,
+        num_groups: Optional[int] = 64,
         serial_order: str = "morton",
         serial_bits: int = 10,
         serial_shuffle_within_patch: int = 0,
@@ -322,8 +322,8 @@ class PatchTransformerNepa(nn.Module):
     def nepa_loss(z: torch.Tensor, z_hat: torch.Tensor) -> torch.Tensor:
         if z.size(1) < 2:
             return z.new_zeros(())
-        target = z[:, 1:, :]
+        # Stop-gradient target branch to avoid trivial collapse.
+        target = z[:, 1:, :].detach()
         pred = z_hat[:, :-1, :]
         sim = F.cosine_similarity(pred, target, dim=-1)
         return (1.0 - sim).mean()
-

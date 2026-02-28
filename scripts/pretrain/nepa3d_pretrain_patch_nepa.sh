@@ -18,13 +18,13 @@ python -m nepa3d.train.pretrain_patch_nepa \
   --save_dir "${SAVE_DIR}" \
   --run_name "${RUN_NAME}" \
   --epochs "${EPOCHS:-50}" \
-  --batch_size "${BATCH:-32}" \
+  --batch_size "${BATCH:-96}" \
   --n_point "${N_POINT:-1024}" \
   --n_ray "${N_RAY:-1024}" \
   --num_workers "${NUM_WORKERS:-8}" \
-  --patch_embed "${PATCH_EMBED:-serial}" \
+  --patch_embed "${PATCH_EMBED:-fps_knn}" \
   --group_size "${GROUP_SIZE:-32}" \
-  --num_groups "${NUM_GROUPS:-32}" \
+  --num_groups "${NUM_GROUPS:-64}" \
   --serial_order "${SERIAL_ORDER:-morton}" \
   --serial_bits "${SERIAL_BITS:-10}" \
   --serial_shuffle_within_patch "${SERIAL_SHUFFLE_WITHIN_PATCH:-0}" \
@@ -44,4 +44,3 @@ python -m nepa3d.train.pretrain_patch_nepa \
   --warmup_epochs "${WARMUP_EPOCHS:-0}" \
   --min_lr "${MIN_LR:-1e-6}" \
   --seed "${SEED:-0}"
-

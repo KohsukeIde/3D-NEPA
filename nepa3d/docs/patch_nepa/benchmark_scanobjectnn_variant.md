@@ -10,7 +10,11 @@ This file is the canonical benchmark summary for protocol-correct ScanObjectNN e
 - Headline metric: `test_acc`
 - SOTA-fair and NEPA-full are always reported separately
 
-Detailed job history is tracked in `nepa3d/docs/active/runlog_202602.md`.
+Detailed job history is split by track:
+
+- Query-NEPA historical: `nepa3d/docs/query_nepa/runlog_202602.md`
+- Patch-NEPA Stage-2: `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`
+- Track index: `nepa3d/docs/patch_nepa/nepa_tracks_index.md`
 
 ### 1.1 Validity boundary (read first)
 
@@ -76,7 +80,7 @@ Status:
 
 Reference:
 
-- `nepa3d/docs/pretrain_abcd_1024_variant_reval_active.md` section 9
+- `nepa3d/docs/query_nepa/pretrain_abcd_1024_variant_reval_active.md` section 9
 
 Cache-input follow-up (`USE_NEPA_CACHE=1`) completed:
 
@@ -424,7 +428,7 @@ Practical implication:
 
 ## 4. Latest 1024 Variant-Split Snapshot (minimum 12 jobs)
 
-Source: `nepa3d/docs/pretrain_abcd_1024_variant_reval_active.md` section 18.1
+Source: `nepa3d/docs/query_nepa/pretrain_abcd_1024_variant_reval_active.md` section 18.1
 
 | pretrain | run | variant | test_acc |
 |---|---|---|---:|
@@ -474,7 +478,7 @@ Scope:
 Source run set:
 
 - `a256_queryrethink_eval18_cls_pb_t50_rs_20260226_141335`
-- source table: `nepa3d/docs/pretrain_abcd_1024_variant_reval_active.md` section 15
+- source table: `nepa3d/docs/query_nepa/pretrain_abcd_1024_variant_reval_active.md` section 15
 
 ScanObjectNN (`test_acc`) best variant in this set:
 

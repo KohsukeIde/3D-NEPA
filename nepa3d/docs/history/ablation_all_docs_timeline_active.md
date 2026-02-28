@@ -13,22 +13,22 @@ Use this as the primary "what happened, when, and why it matters" memo before la
 | Doc | Role | Main time window in content | Ablation value |
 |---|---|---|---|
 | `nepa3d/docs/results_index.md` | navigation hub | updated through 2026-02-25 | entry-point map; prevents active/legacy mixups |
-| `nepa3d/docs/legacy_full_history.md` | full legacy archive | up to 2026-02-19 memo | canonical source for transfer matrix, DDA metrics, early UCPR/CPAC + MUST runs |
-| `nepa3d/docs/results_modelnet40_legacy.md` | ModelNet legacy summary | v0/v1 era snapshot | historical transfer baseline table |
-| `nepa3d/docs/results_scanobjectnn_m1_legacy.md` | ScanObjectNN M1 legacy table | 2026-02-14 snapshot | old cache/protocol reference (`scanobjectnn_cache_v2`) |
-| `nepa3d/docs/results_scanobjectnn_core3_active.md` | protocol-variant causal baseline | 2026-02-15 to 2026-02-17 status note | pre-bidir reference for `obj_bg/obj_only/pb_t50_rs` |
-| `nepa3d/docs/results_scanobjectnn_review_legacy.md` | legacy review snapshot | pre-bidir causal + interim notes | comparison target for active v0->v3 audit |
-| `nepa3d/docs/results_scanobjectnn_review_active.md` | active Scan review | 2026-02-18 to 2026-02-20 | core source for v0/v1/v2/v3, D1/D2, G1/G2, protocol-integrity findings |
-| `nepa3d/docs/results_modelnet40_pointgpt_active.md` | ModelNet PointGPT protocol page | 2026-02-17 status note | causal baseline + bidir rerun context |
-| `nepa3d/docs/eccv_ucpr_cpac_tables.md` | stable table plan template | planning doc (no single snapshot date) | run-matrix contracts for UCPR/CPAC/few-shot |
-| `nepa3d/docs/results_ucpr_cpac_active.md` | active UCPR/CPAC log | mainly 2026-02-15 to 2026-02-20 | QA cycle, MAE parity, A/B/C/D/E/6 blocks, core completion metrics |
-| `nepa3d/docs/results_ucpr_cpac_active_mixed_archive.md` | raw archival backup | same era as active UCPR/CPAC | deep command/result provenance backup |
-| `nepa3d/docs/results_ucpr_cpac_plane_baselines_active.md` | plane-baseline isolate | 2026-02-15 to 2026-02-17 | tri-plane/k-plane branches separated from mainline |
-| `nepa3d/docs/plan_completion_ae6.md` | completion execution policy | 2026-02-16 with 2026-02-20 updates | priority and policy decisions (objective-preserving mainline, UCPR diagnostic-only) |
-| `nepa3d/docs/results_completion_ae6_active.md` | completion ablation ledger | 2026-02-16 to 2026-02-20 | detailed A/B/C/D/E/6 outcomes, including scale retries |
-| `nepa3d/docs/pretrain_abcd_1024_multinode_active.md` | 1024 A/B/C/D + multi-node operations | 2026-02-23 to 2026-02-25 | current infra/protocol hotfixes, A/B-only resource strategy, fps/rfps provenance policy |
-| `nepa3d/docs/answer_token_expansion_crazy_ideas.md` | answer-token idea memo | 2026-02-19 to 2026-02-20 notes | objective-preserving feature-side expansion candidates |
-| `nepa3d/docs/ablation_transfer_dda_active.md` | condensed storyline | 2026-02-25 | bridge summary (Transfer -> DDA -> Scan review), now superseded by this full-doc timeline |
+| `nepa3d/docs/history/legacy_full_history.md` | full legacy archive | up to 2026-02-19 memo | canonical source for transfer matrix, DDA metrics, early UCPR/CPAC + MUST runs |
+| `nepa3d/docs/classification/results_modelnet40_legacy.md` | ModelNet legacy summary | v0/v1 era snapshot | historical transfer baseline table |
+| `nepa3d/docs/classification/results_scanobjectnn_m1_legacy.md` | ScanObjectNN M1 legacy table | 2026-02-14 snapshot | old cache/protocol reference (`scanobjectnn_cache_v2`) |
+| `nepa3d/docs/classification/results_scanobjectnn_core3_active.md` | protocol-variant causal baseline | 2026-02-15 to 2026-02-17 status note | pre-bidir reference for `obj_bg/obj_only/pb_t50_rs` |
+| `nepa3d/docs/classification/results_scanobjectnn_review_legacy.md` | legacy review snapshot | pre-bidir causal + interim notes | comparison target for active v0->v3 audit |
+| `nepa3d/docs/classification/results_scanobjectnn_review_active.md` | active Scan review | 2026-02-18 to 2026-02-20 | core source for v0/v1/v2/v3, D1/D2, G1/G2, protocol-integrity findings |
+| `nepa3d/docs/classification/results_modelnet40_pointgpt_active.md` | ModelNet PointGPT protocol page | 2026-02-17 status note | causal baseline + bidir rerun context |
+| `nepa3d/docs/completion/eccv_ucpr_cpac_tables.md` | stable table plan template | planning doc (no single snapshot date) | run-matrix contracts for UCPR/CPAC/few-shot |
+| `nepa3d/docs/completion/results_ucpr_cpac_active.md` | active UCPR/CPAC log | mainly 2026-02-15 to 2026-02-20 | QA cycle, MAE parity, A/B/C/D/E/6 blocks, core completion metrics |
+| `nepa3d/docs/completion/results_ucpr_cpac_active_mixed_archive.md` | raw archival backup | same era as active UCPR/CPAC | deep command/result provenance backup |
+| `nepa3d/docs/completion/results_ucpr_cpac_plane_baselines_active.md` | plane-baseline isolate | 2026-02-15 to 2026-02-17 | tri-plane/k-plane branches separated from mainline |
+| `nepa3d/docs/completion/plan_completion_ae6.md` | completion execution policy | 2026-02-16 with 2026-02-20 updates | priority and policy decisions (objective-preserving mainline, UCPR diagnostic-only) |
+| `nepa3d/docs/completion/results_completion_ae6_active.md` | completion ablation ledger | 2026-02-16 to 2026-02-20 | detailed A/B/C/D/E/6 outcomes, including scale retries |
+| `nepa3d/docs/query_nepa/pretrain_abcd_1024_multinode_active.md` | 1024 A/B/C/D + multi-node operations | 2026-02-23 to 2026-02-25 | current infra/protocol hotfixes, A/B-only resource strategy, fps/rfps provenance policy |
+| `nepa3d/docs/history/answer_token_expansion_crazy_ideas.md` | answer-token idea memo | 2026-02-19 to 2026-02-20 notes | objective-preserving feature-side expansion candidates |
+| `nepa3d/docs/history/ablation_transfer_dda_active.md` | condensed storyline | 2026-02-25 | bridge summary (Transfer -> DDA -> Scan review), now superseded by this full-doc timeline |
 
 ## 3. Chronological Summary (Ablation-Focused)
 
@@ -36,9 +36,9 @@ Use this as the primary "what happened, when, and why it matters" memo before la
 
 Sources:
 
-- `nepa3d/docs/legacy_full_history.md`
-- `nepa3d/docs/results_modelnet40_legacy.md`
-- `nepa3d/docs/results_scanobjectnn_m1_legacy.md`
+- `nepa3d/docs/history/legacy_full_history.md`
+- `nepa3d/docs/classification/results_modelnet40_legacy.md`
+- `nepa3d/docs/classification/results_scanobjectnn_m1_legacy.md`
 
 Key points:
 
@@ -50,9 +50,9 @@ Key points:
 
 Sources:
 
-- `nepa3d/docs/results_ucpr_cpac_active.md`
-- `nepa3d/docs/results_ucpr_cpac_plane_baselines_active.md`
-- `nepa3d/docs/eccv_ucpr_cpac_tables.md`
+- `nepa3d/docs/completion/results_ucpr_cpac_active.md`
+- `nepa3d/docs/completion/results_ucpr_cpac_plane_baselines_active.md`
+- `nepa3d/docs/completion/eccv_ucpr_cpac_tables.md`
 
 Key points:
 
@@ -64,8 +64,8 @@ Key points:
 
 Sources:
 
-- `nepa3d/docs/results_completion_ae6_active.md`
-- `nepa3d/docs/plan_completion_ae6.md`
+- `nepa3d/docs/completion/results_completion_ae6_active.md`
+- `nepa3d/docs/completion/plan_completion_ae6.md`
 
 Key points:
 
@@ -78,9 +78,9 @@ Key points:
 
 Sources:
 
-- `nepa3d/docs/results_scanobjectnn_core3_active.md`
-- `nepa3d/docs/results_modelnet40_pointgpt_active.md`
-- `nepa3d/docs/results_completion_ae6_active.md`
+- `nepa3d/docs/classification/results_scanobjectnn_core3_active.md`
+- `nepa3d/docs/classification/results_modelnet40_pointgpt_active.md`
+- `nepa3d/docs/completion/results_completion_ae6_active.md`
 
 Key points:
 
@@ -92,10 +92,10 @@ Key points:
 
 Sources:
 
-- `nepa3d/docs/results_scanobjectnn_review_active.md`
-- `nepa3d/docs/results_scanobjectnn_review_legacy.md`
-- `nepa3d/docs/plan_completion_ae6.md`
-- `nepa3d/docs/results_completion_ae6_active.md`
+- `nepa3d/docs/classification/results_scanobjectnn_review_active.md`
+- `nepa3d/docs/classification/results_scanobjectnn_review_legacy.md`
+- `nepa3d/docs/completion/plan_completion_ae6.md`
+- `nepa3d/docs/completion/results_completion_ae6_active.md`
 
 Key points:
 
@@ -108,8 +108,8 @@ Key points:
 
 Sources:
 
-- `nepa3d/docs/answer_token_expansion_crazy_ideas.md`
-- `nepa3d/docs/plan_completion_ae6.md`
+- `nepa3d/docs/history/answer_token_expansion_crazy_ideas.md`
+- `nepa3d/docs/completion/plan_completion_ae6.md`
 
 Key points:
 
@@ -121,7 +121,7 @@ Key points:
 
 Source:
 
-- `nepa3d/docs/pretrain_abcd_1024_multinode_active.md`
+- `nepa3d/docs/query_nepa/pretrain_abcd_1024_multinode_active.md`
 
 Key points:
 

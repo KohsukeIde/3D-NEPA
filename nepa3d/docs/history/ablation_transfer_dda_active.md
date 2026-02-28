@@ -16,9 +16,9 @@ Goal: keep one "why we changed what" timeline for future ablation design.
 
 Primary sources used for this summary:
 
-- `nepa3d/docs/legacy_full_history.md`
-- `nepa3d/docs/results_scanobjectnn_review_active.md`
-- `nepa3d/docs/pretrain_abcd_1024_multinode_active.md`
+- `nepa3d/docs/history/legacy_full_history.md`
+- `nepa3d/docs/classification/results_scanobjectnn_review_active.md`
+- `nepa3d/docs/query_nepa/pretrain_abcd_1024_multinode_active.md`
 
 ## 3. Timeline (Transfer -> DDA -> ScanObjectNN)
 

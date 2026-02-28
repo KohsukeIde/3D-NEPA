@@ -4,13 +4,18 @@ Last updated: 2026-02-26
 
 > Legacy note (2026-02-26): this file is now treated as a historical execution ledger.
 > Active protocol-correct re-evaluation planning is tracked in:
-> `nepa3d/docs/pretrain_abcd_1024_variant_reval_active.md`
+> `nepa3d/docs/query_nepa/pretrain_abcd_1024_variant_reval_active.md`
 > Canonical benchmark/read path:
 > `nepa3d/docs/README.md`
+> Track classification:
+> this file belongs to the **Query-NEPA (token-level)** line.
+> It is not the active source for the new Patch-NEPA Stage-2 line.
+> Patch-NEPA active source:
+> `nepa3d/docs/patch_nepa/patch_nepa_stage2_active.md`
 > Interpretation guard:
 > this ledger intentionally contains failed/superseded/misaligned historical runs.
 > Do not use this file alone for benchmark claims; use the canonical validity boundary in
-> `nepa3d/docs/active/benchmark_scanobjectnn_variant.md`.
+> `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`.
 
 ## 1. Scope
 

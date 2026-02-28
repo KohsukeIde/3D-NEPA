@@ -13,15 +13,15 @@ Legacy means early/pre-review snapshots (including old ModelNet40-era runs). Cur
 ## Quick Links
 
 - Results index: `nepa3d/docs/results_index.md`
-- ScanObjectNN core3 active tables: `nepa3d/docs/results_scanobjectnn_core3_active.md`
-- ScanObjectNN review tables (bidir + vote10 active): `nepa3d/docs/results_scanobjectnn_review_active.md`
-- ScanObjectNN review legacy snapshot: `nepa3d/docs/results_scanobjectnn_review_legacy.md`
-- ModelNet40 PointGPT-style protocol (full + few-shot LP): `nepa3d/docs/results_modelnet40_pointgpt_active.md`
-- ScanObjectNN M1 legacy snapshot (`75/75`): `nepa3d/docs/results_scanobjectnn_m1_legacy.md`
-- UCPR/CPAC active results (incl. QA cycle): `nepa3d/docs/results_ucpr_cpac_active.md`
-- UCPR/CPAC planning doc: `nepa3d/docs/eccv_ucpr_cpac_tables.md`
-- 1024 pretrain A/B/C/D + multi-node launch plan: `nepa3d/docs/pretrain_abcd_1024_multinode_active.md`
-- K-plane/Tri-plane results (pilot + full e50) are tracked in `nepa3d/docs/results_ucpr_cpac_active.md`
+- ScanObjectNN core3 active tables: `nepa3d/docs/classification/results_scanobjectnn_core3_active.md`
+- ScanObjectNN review tables (bidir + vote10 active): `nepa3d/docs/classification/results_scanobjectnn_review_active.md`
+- ScanObjectNN review legacy snapshot: `nepa3d/docs/classification/results_scanobjectnn_review_legacy.md`
+- ModelNet40 PointGPT-style protocol (full + few-shot LP): `nepa3d/docs/classification/results_modelnet40_pointgpt_active.md`
+- ScanObjectNN M1 legacy snapshot (`75/75`): `nepa3d/docs/classification/results_scanobjectnn_m1_legacy.md`
+- UCPR/CPAC active results (incl. QA cycle): `nepa3d/docs/completion/results_ucpr_cpac_active.md`
+- UCPR/CPAC planning doc: `nepa3d/docs/completion/eccv_ucpr_cpac_tables.md`
+- 1024 pretrain A/B/C/D + multi-node launch plan: `nepa3d/docs/query_nepa/pretrain_abcd_1024_multinode_active.md`
+- K-plane/Tri-plane results (pilot + full e50) are tracked in `nepa3d/docs/completion/results_ucpr_cpac_active.md`
 
 ## Classification Attention Mode (Important)
 
@@ -343,8 +343,8 @@ bash scripts/logs/cleanup_stale_pids.sh
 
 ### 6.1 ScanObjectNN review tables
 
-- Active (corrected protocol; bidirectional + vote10): `nepa3d/docs/results_scanobjectnn_review_active.md`
-- Legacy snapshot (causal baseline + mixed interim notes): `nepa3d/docs/results_scanobjectnn_review_legacy.md`
+- Active (corrected protocol; bidirectional + vote10): `nepa3d/docs/classification/results_scanobjectnn_review_active.md`
+- Legacy snapshot (causal baseline + mixed interim notes): `nepa3d/docs/classification/results_scanobjectnn_review_legacy.md`
 
 ### 6.2 ModelNet40 PointGPT-style protocol (active, complete)
 
@@ -364,20 +364,20 @@ Best-by-setting:
 
 Full tables:
 
-- `nepa3d/docs/results_modelnet40_pointgpt_active.md`
+- `nepa3d/docs/classification/results_modelnet40_pointgpt_active.md`
 - raw/summary CSV: `results/modelnet40_pointgpt_protocol_raw.csv`, `results/modelnet40_pointgpt_protocol_summary.csv`
 
 ### 6.3 Paper-safe ScanObjectNN core3 baseline snapshot
 
-- baseline snapshot (without mix methods): `nepa3d/docs/results_scanobjectnn_core3_active.md`
+- baseline snapshot (without mix methods): `nepa3d/docs/classification/results_scanobjectnn_core3_active.md`
 
 ### 6.4 Legacy M1 (`75/75`) moved
 
-- `nepa3d/docs/results_scanobjectnn_m1_legacy.md`
+- `nepa3d/docs/classification/results_scanobjectnn_m1_legacy.md`
 
 ### 6.5 UCPR/CPAC active details moved
 
-- `nepa3d/docs/results_ucpr_cpac_active.md`
+- `nepa3d/docs/completion/results_ucpr_cpac_active.md`
 - latest follow-up (`pooling/context controls`, Feb 15, 2026) is also tracked there
 - latest MAE parity + eval-seed variance follow-up (Feb 15, 2026) is tracked there
 
@@ -395,9 +395,9 @@ Full tables:
 - retrieval evaluator fix:
   - tie-aware ranking + constant-embedding sanity check added to `retrieval_ucpr.py` and `retrieval_kplane.py`
   - details and before/after comparison are in:
-    - `nepa3d/docs/results_ucpr_cpac_active.md` (`Tie-Aware UCPR Fix + Sanity`)
+    - `nepa3d/docs/completion/results_ucpr_cpac_active.md` (`Tie-Aware UCPR Fix + Sanity`)
 - full commands and pooling/ablation/control results are in:
-  - `nepa3d/docs/results_ucpr_cpac_active.md`
+  - `nepa3d/docs/completion/results_ucpr_cpac_active.md`
 
 ### 6.7 K-plane fusion sweep (completed, e50)
 

@@ -8,8 +8,8 @@ Status note (Feb 17, 2026):
 - New bidirectional reruns (`cls_is_causal=0`) are running in:
   - `runs/scan_variants_review_ft_bidir_nray0`
   - `runs/scan_variants_review_lp_bidir_nray0`
-- Use `nepa3d/docs/results_scanobjectnn_review_active.md` as the primary bidirectional active page.
-- Legacy mixed/causal review page: `nepa3d/docs/results_scanobjectnn_review_legacy.md`.
+- Use `nepa3d/docs/classification/results_scanobjectnn_review_active.md` as the primary bidirectional active page.
+- Legacy mixed/causal review page: `nepa3d/docs/classification/results_scanobjectnn_review_legacy.md`.
 
 - Run root: `runs/scan_variants_core3/`
 - Log root: `logs/finetune/scan_variants_core3/`

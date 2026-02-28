@@ -5,11 +5,16 @@ Last updated: 2026-02-26
 > Transition note (2026-02-26):
 > This file is now a compact policy/protocol document.
 > Canonical benchmark summary moved to:
-> `nepa3d/docs/active/benchmark_scanobjectnn_variant.md`
+> `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
 > Job-by-job updates moved to:
-> `nepa3d/docs/active/runlog_202602.md`
+> `nepa3d/docs/query_nepa/runlog_202602.md`
 > Validity classes (`VALID` / `INTERNAL` / `INVALID`) are defined in:
-> `nepa3d/docs/active/benchmark_scanobjectnn_variant.md` section 1.1
+> `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md` section 1.1
+> Track classification:
+> this file belongs to the **Query-NEPA (token-level)** line and should be
+> treated as historical policy context.
+> The active new line is Patch-NEPA:
+> `nepa3d/docs/patch_nepa/patch_nepa_stage2_active.md`
 
 ## 1. Scope
 
@@ -21,7 +26,7 @@ This document is the active plan for protocol-correct ScanObjectNN re-evaluation
 
 Historical run logs remain in:
 
-- `nepa3d/docs/pretrain_abcd_1024_multinode_active.md` (legacy ledger)
+- `nepa3d/docs/query_nepa/pretrain_abcd_1024_multinode_active.md` (legacy ledger)
 
 ## 2. Protocol Baseline (non-negotiable)
 
@@ -156,9 +161,9 @@ Interpretation rule:
 ## 8. Execution History (migrated)
 
 - Detailed execution history sections were moved to:
-  - `nepa3d/docs/active/runlog_202602.md`
+  - `nepa3d/docs/query_nepa/runlog_202602.md`
 - Canonical benchmark tables are maintained in:
-  - `nepa3d/docs/active/benchmark_scanobjectnn_variant.md`
+  - `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
 - This file now keeps only policy, protocol, and run-scope decisions.
 
 ## 9. Point-MAE Sanity Baseline (2026-02-26)

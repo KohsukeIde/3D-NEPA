@@ -14,8 +14,8 @@ This migration is required to make stage-2 (NEPA pretrain on patch tokens) coher
 
 ## 2. Canonical references
 
-- Benchmark canonical: `nepa3d/docs/active/benchmark_scanobjectnn_variant.md`
-- Run ledger: `nepa3d/docs/active/runlog_202602.md`
+- Benchmark canonical: `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
+- Run ledger: `nepa3d/docs/query_nepa/runlog_202602.md`
 
 A/B naming policy:
 

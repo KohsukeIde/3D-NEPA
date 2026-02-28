@@ -1,22 +1,39 @@
 # NEPA3D Docs Hub
 
-Last updated: 2026-02-26
+Last updated: 2026-02-28
 
-## Start Here
+## Start Here (Current)
 
-- Protocol-correct ScanObjectNN benchmark (canonical): `nepa3d/docs/active/benchmark_scanobjectnn_variant.md`
-- Current execution log (job-level): `nepa3d/docs/active/runlog_202602.md`
+- Track split index (Query vs Patch):
+  - `nepa3d/docs/patch_nepa/nepa_tracks_index.md`
+- Patch-NEPA Stage-2 active plan:
+  - `nepa3d/docs/patch_nepa/patch_nepa_stage2_active.md`
+- Patch-NEPA Stage-2 runlog:
+  - `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`
+
+- Protocol-correct ScanObjectNN benchmark (canonical): `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
+- Query-NEPA historical runlog (job-level): `nepa3d/docs/query_nepa/runlog_202602.md`
 - Non-retrieval results master index: `nepa3d/docs/active/results_master_nonretrieval.md`
 
 ## Legacy Ledgers
 
-- Historical 1024 multi-node ledger: `nepa3d/docs/pretrain_abcd_1024_multinode_active.md`
-- Historical variant re-eval ledger: `nepa3d/docs/pretrain_abcd_1024_variant_reval_active.md`
+- Historical 1024 multi-node ledger: `nepa3d/docs/query_nepa/pretrain_abcd_1024_multinode_active.md`
+- Historical variant re-eval ledger: `nepa3d/docs/query_nepa/pretrain_abcd_1024_variant_reval_active.md`
+
+## Folder Map
+
+- `nepa3d/docs/query_nepa/`: Query-NEPA (token-level) historical ledgers and runlog
+- `nepa3d/docs/patch_nepa/`: Patch-NEPA active plan/runlog/benchmark
+- `nepa3d/docs/classification/`: ScanObjectNN / ModelNet result ledgers
+- `nepa3d/docs/completion/`: CPAC/UCPR/completion ledgers and planning
+- `nepa3d/docs/history/`: cross-era timeline/memos/legacy consolidated history
+- `nepa3d/docs/active/`: cross-track master index only
 
 ## Update Policy
 
-- Put headline benchmark numbers only in `active/benchmark_scanobjectnn_variant.md`.
-- Put job IDs, retry history, and failure details only in `active/runlog_202602.md`.
+- Put headline benchmark numbers only in `patch_nepa/benchmark_scanobjectnn_variant.md`.
+- Put Patch-NEPA Stage-2 job history in `patch_nepa/runlog_patch_nepa_202602.md`.
+- Keep Query-NEPA historical job history in `query_nepa/runlog_202602.md`.
 - Keep `test_acc` as headline metric for ScanObjectNN benchmark tables.
 - Keep `best_val` and `best_ep` as diagnostics (not headline).
 - Keep protocol metadata for every table row:

@@ -20,15 +20,15 @@ LOG_PATH="${LOG_ROOT}/${RUN_TAG}.log"
 
 N_POINT="${N_POINT:-1024}"
 N_RAY="${N_RAY:-0}"
-BATCH="${BATCH:-32}"
+BATCH="${BATCH:-96}"
 EPOCHS="${EPOCHS:-100}"
 NUM_WORKERS="${NUM_WORKERS:-8}"
 LR="${LR:-1e-4}"
 SEED="${SEED:-0}"
 
-PATCH_EMBED="${PATCH_EMBED:-serial}"
+PATCH_EMBED="${PATCH_EMBED:-fps_knn}"
 GROUP_SIZE="${GROUP_SIZE:-32}"
-NUM_GROUPS="${NUM_GROUPS:-32}"
+NUM_GROUPS="${NUM_GROUPS:-64}"
 SERIAL_ORDER="${SERIAL_ORDER:-morton}"
 SERIAL_BITS="${SERIAL_BITS:-10}"
 SERIAL_SHUFFLE_WITHIN_PATCH="${SERIAL_SHUFFLE_WITHIN_PATCH:-0}"
@@ -144,4 +144,3 @@ python -m nepa3d.train.pretrain_patch_nepa \
   2>&1 | tee -a "${LOG_PATH}"
 
 echo "[done] log=${LOG_PATH}" | tee -a "${LOG_PATH}"
-

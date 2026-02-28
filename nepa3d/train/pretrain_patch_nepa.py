@@ -38,9 +38,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--point_order_mode", type=str, default="morton", choices=["morton", "fps", "random"])
 
     # Model (patching)
-    p.add_argument("--patch_embed", type=str, default="serial", choices=["serial", "pointgpt", "fps_knn"])
+    p.add_argument("--patch_embed", type=str, default="fps_knn", choices=["serial", "pointgpt", "fps_knn"])
     p.add_argument("--group_size", type=int, default=32)
-    p.add_argument("--num_groups", type=int, default=None)
+    p.add_argument("--num_groups", type=int, default=64)
     p.add_argument("--serial_order", type=str, default="morton",
                    choices=["morton", "morton_trans", "z", "z-trans", "random", "identity"])
     p.add_argument("--serial_bits", type=int, default=10)
@@ -80,7 +80,7 @@ def parse_args() -> argparse.Namespace:
 
     # Train
     p.add_argument("--epochs", type=int, default=50)
-    p.add_argument("--batch_size", type=int, default=32)
+    p.add_argument("--batch_size", type=int, default=96)
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--weight_decay", type=float, default=0.05)
     p.add_argument("--warmup_epochs", type=int, default=0)
@@ -224,7 +224,7 @@ def main() -> None:
 
             if accelerator.is_main_process and (global_step % 50 == 0):
                 lr = optimizer.param_groups[0]["lr"]
-                print(f"[epoch {epoch:03d} step {global_step:06d}] loss={loss.item():.6f} lr={lr:.2e}")
+                print(f"[epoch {epoch:03d} step {global_step:06d}] loss={loss.item():.8e} lr={lr:.2e}")
             global_step += 1
 
         scheduler.step()
@@ -238,4 +238,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

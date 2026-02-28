@@ -4,7 +4,7 @@ This page tracks active ScanObjectNN classification reruns and keeps the run lin
 
 Legacy mixed/causal history:
 
-- `nepa3d/docs/results_scanobjectnn_review_legacy.md`
+- `nepa3d/docs/classification/results_scanobjectnn_review_legacy.md`
 
 Snapshot time: `2026-02-20 17:30 JST`
 
@@ -704,4 +704,4 @@ Run/log roots:
 ## Notes
 
 - This page is a **live snapshot**; LP `pb_t50_rs` values are provisional until `225/225` is reached.
-- Use `nepa3d/docs/results_scanobjectnn_review_legacy.md` for older causal/mixed snapshots.
+- Use `nepa3d/docs/classification/results_scanobjectnn_review_legacy.md` for older causal/mixed snapshots.

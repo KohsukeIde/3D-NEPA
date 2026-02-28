@@ -4,7 +4,7 @@ This file summarizes the ModelNet40-era results that were previously mixed into 
 
 For full historical context and additional old notes, see:
 
-- `nepa3d/docs/legacy_full_history.md`
+- `nepa3d/docs/history/legacy_full_history.md`
 
 ## Scope
 

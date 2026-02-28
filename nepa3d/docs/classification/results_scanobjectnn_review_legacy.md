@@ -4,7 +4,7 @@ Status note:
 
 - This file is archived as a **legacy snapshot** (causal baseline + interim follow-up notes).
 - For the corrected active track (`cls_is_causal=0`, vote-10), use:
-  - `nepa3d/docs/results_scanobjectnn_review_active.md`
+  - `nepa3d/docs/classification/results_scanobjectnn_review_active.md`
 
 Source run roots:
 
