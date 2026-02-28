@@ -89,7 +89,8 @@ Target is strict compatibility with `patchcls` training/eval settings.
 
 ### 4.3 Policy alignment
 
-- Split/selection for patchcls should follow Point-MAE-comparable settings (`val_split_mode=pointmae`) when fairness to PM strict line is required.
+- Mainline split policy is fixed to `val_split_mode=file` only.
+- `group_*` and `pointmae(test-as-val)` are treated as historical/reference modes and are excluded from new mainline comparisons.
 - Avoid legacy `scanobjectnn_*_v2` caches unless explicitly allowed (`ALLOW_SCAN_UNISCALE_V2=1`).
 
 ## 5. Active Run References

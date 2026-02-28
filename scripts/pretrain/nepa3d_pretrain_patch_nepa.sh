@@ -19,6 +19,7 @@ echo "=== PATCH-NEPA PRETRAIN (single-node helper) ===" | tee "${LOG_PATH}"
 echo "root=${ROOT_DIR}" | tee -a "${LOG_PATH}"
 echo "mix_config=${MIX_CFG}" | tee -a "${LOG_PATH}"
 echo "save_dir=${SAVE_DIR}" | tee -a "${LOG_PATH}"
+echo "qa_tokens=${QA_TOKENS:-1} qa_layout=${QA_LAYOUT:-split_sep} dual_mask=(${DUAL_MASK_NEAR:-0.0},${DUAL_MASK_FAR:-0.0},w=${DUAL_MASK_WINDOW:-32})" | tee -a "${LOG_PATH}"
 echo "run_name=${RUN_NAME}" | tee -a "${LOG_PATH}"
 
 python -u -m nepa3d.train.pretrain_patch_nepa \
@@ -32,7 +33,7 @@ python -u -m nepa3d.train.pretrain_patch_nepa \
   --num_workers "${NUM_WORKERS:-8}" \
   --pt_xyz_key "${PT_XYZ_KEY:-pc_xyz}" \
   --pt_dist_key "${PT_DIST_KEY:-pt_dist_pool}" \
-  --ablate_point_dist "${ABLATE_POINT_DIST:-1}" \
+  --ablate_point_dist "${ABLATE_POINT_DIST:-0}" \
   --pt_sample_mode "${PT_SAMPLE_MODE:-rfps_cached}" \
   --pt_fps_key "${PT_FPS_KEY:-auto}" \
   --pt_rfps_key "${PT_RFPS_KEY:-auto}" \
@@ -50,6 +51,18 @@ python -u -m nepa3d.train.pretrain_patch_nepa \
   --ray_miss_t "${RAY_MISS_T:-4.0}" \
   --ray_hit_threshold "${RAY_HIT_THRESHOLD:-0.5}" \
   --backbone_mode "${BACKBONE_MODE:-nepa2d}" \
+  --qa_tokens "${QA_TOKENS:-1}" \
+  --qa_layout "${QA_LAYOUT:-split_sep}" \
+  --qa_sep_token "${QA_SEP_TOKEN:-1}" \
+  --qa_fuse "${QA_FUSE:-add}" \
+  --use_pt_dist "${USE_PT_DIST:-1}" \
+  --use_pt_grad "${USE_PT_GRAD:-0}" \
+  --answer_mlp_layers "${ANSWER_MLP_LAYERS:-2}" \
+  --answer_pool "${ANSWER_POOL:-max}" \
+  --nepa2d_pos "${NEPA2D_POS:-1}" \
+  --type_specific_pos "${TYPE_SPECIFIC_POS:-0}" \
+  --type_pos_max_len "${TYPE_POS_MAX_LEN:-4096}" \
+  --max_len "${MAX_LEN:-4096}" \
   --qk_norm "${QK_NORM:-1}" \
   --qk_norm_affine "${QK_NORM_AFFINE:-0}" \
   --qk_norm_bias "${QK_NORM_BIAS:-0}" \
@@ -76,6 +89,11 @@ python -u -m nepa3d.train.pretrain_patch_nepa \
   --aug_jitter_sigma "${AUG_JITTER_SIGMA:-0.0}" \
   --aug_jitter_clip "${AUG_JITTER_CLIP:-0.0}" \
   --aug_recompute_dist "${AUG_RECOMPUTE_DIST:-0}" \
+  --dual_mask_near "${DUAL_MASK_NEAR:-0.0}" \
+  --dual_mask_far "${DUAL_MASK_FAR:-0.0}" \
+  --dual_mask_window "${DUAL_MASK_WINDOW:-32}" \
+  --dual_mask_type_aware "${DUAL_MASK_TYPE_AWARE:-0}" \
+  --dual_mask_warmup_frac "${DUAL_MASK_WARMUP_FRAC:-0.05}" \
   --seed "${SEED:-0}" \
   2>&1 | tee -a "${LOG_PATH}"
 

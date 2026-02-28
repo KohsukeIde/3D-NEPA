@@ -1,37 +1,105 @@
-"""Patch-token NEPA pretraining model.
+"""Patch-NEPA with QueryNEPA-parity Q/A tokenization.
 
-Stage-2 target:
-- Build point patches (serial or FPS+kNN),
-- optionally fuse ray context into each point patch (Option A),
-- train with next-embedding prediction on patch-token sequences.
+This module keeps the Patch backbone (fps+knn or serial patchify) while
+restoring QueryNEPA-side behaviors that were previously bypassed:
+- qa_tokens (Q/A split vs fused token),
+- qa_layout (interleave / split + optional SEP),
+- type_id construction (for type-aware dual-mask),
+- answer-only NEPA loss masking.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Literal, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from .causal_transformer import CausalTransformer
+from .encdec_transformer import EncoderDecoderTransformer
 from .point_patch_embed import PointPatchEmbed
 from .serial_patch_embed import SerialPatchEmbed
+from ..token.tokenizer import (
+    TYPE_A_POINT,
+    TYPE_A_RAY,
+    TYPE_BOS,
+    TYPE_EOS,
+    TYPE_POINT,
+    TYPE_Q_POINT,
+    TYPE_SEP,
+    TYPE_VOCAB_SIZE,
+)
 
 
 @dataclass
 class PatchNepaOutput:
     z: torch.Tensor
     z_hat: torch.Tensor
+    type_id: torch.Tensor
     centers_xyz: torch.Tensor
+    group_idx: Optional[torch.Tensor] = None
+
+
+class AnswerPatchEmbed(nn.Module):
+    """Embed per-point answer features into a single patch answer token."""
+
+    def __init__(
+        self,
+        in_dim: int,
+        d_model: int,
+        hidden_dim: Optional[int] = None,
+        n_layers: int = 2,
+        pool: Literal["max", "mean"] = "max",
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        assert in_dim > 0
+        assert n_layers >= 1
+        hidden = int(hidden_dim or d_model)
+
+        layers: list[nn.Module] = []
+        d = int(in_dim)
+        for _ in range(n_layers - 1):
+            layers.append(nn.Linear(d, hidden))
+            layers.append(nn.GELU())
+            if float(dropout) > 0:
+                layers.append(nn.Dropout(float(dropout)))
+            d = hidden
+        layers.append(nn.Linear(d, int(d_model)))
+        self.mlp = nn.Sequential(*layers)
+        self.pool = str(pool)
+
+    def forward(self, ans_feat: torch.Tensor, group_idx: torch.Tensor) -> torch.Tensor:
+        assert ans_feat.dim() == 3
+        assert group_idx.dim() == 3
+        B, _, C = ans_feat.shape
+        Bg, P, K = group_idx.shape
+        assert B == Bg
+
+        ans4 = ans_feat.unsqueeze(1).expand(-1, P, -1, -1)  # (B,P,N,C)
+        idx = group_idx.unsqueeze(-1).expand(-1, -1, -1, C)  # (B,P,K,C)
+        grouped = torch.gather(ans4, dim=2, index=idx)  # (B,P,K,C)
+
+        flat = grouped.reshape(B * P * K, C)
+        flat = self.mlp(flat)
+        grouped_h = flat.view(B, P, K, -1)  # (B,P,K,D)
+
+        if self.pool == "max":
+            return grouped_h.max(dim=2).values
+        if self.pool == "mean":
+            return grouped_h.mean(dim=2)
+        raise ValueError(f"unknown answer pool={self.pool}")
 
 
 class PatchTransformerNepa(nn.Module):
+    """Patch-token NEPA model with QueryNEPA-parity Q/A options."""
+
     def __init__(
         self,
         *,
-        # patching
+        # patchify
         patch_embed: str = "fps_knn",
         n_point: int = 1024,
         group_size: int = 32,
@@ -48,46 +116,63 @@ class PatchTransformerNepa(nn.Module):
         dropout: float = 0.0,
         drop_path_rate: float = 0.0,
         qk_norm: int = 1,
-        qk_norm_affine: int = 1,
-        qk_norm_bias: int = 1,
-        layerscale_value: float = 0.0,
-        rope_theta: float = 10000.0,
+        qk_norm_affine: int = 0,
+        qk_norm_bias: int = 0,
+        layerscale_value: float = 1e-5,
+        rope_theta: float = 100.0,
         use_gated_mlp: int = 0,
         hidden_act: str = "gelu",
         backbone_mode: str = "nepa2d",
-        # positional encoding (vanilla path only)
-        pos_mode: str = "center_mlp_once",
-        pos_mlp_hidden_mult: float = 2.0,
-        pos_add_times: int = 1,
-        # ray-patch binding
+        # QueryNEPA-parity Q/A
+        qa_tokens: int = 1,
+        qa_layout: str = "interleave",  # interleave|split|split_sep
+        qa_sep_token: bool = True,
+        qa_fuse: str = "add",  # add|concat
+        use_pt_dist: bool = True,
+        use_pt_grad: bool = False,
+        answer_mlp_layers: int = 2,
+        answer_pool: str = "max",
+        # embeddings / arch
+        max_len: int = 4096,
+        nepa2d_pos: bool = True,
+        type_specific_pos: bool = False,
+        type_pos_max_len: int = 4096,
+        pos_mode: str = "center_mlp",  # center_mlp|none
+        encdec_arch: bool = False,
+        # reserved compatibility arg
         use_ray_patch: bool = False,
-        ray_hit_threshold: float = 0.5,
-        ray_miss_t: float = 4.0,
-        ray_pool_k_max: int = 32,
-        ray_pool_mode: str = "mean",
-        ray_fuse: str = "add",
-        # sequence
-        use_bos: bool = True,
     ) -> None:
         super().__init__()
+
+        if qa_layout == "split_sep":
+            qa_layout = "split"
+            qa_sep_token = True
+        if int(qa_tokens) not in (0, 1):
+            raise ValueError(f"qa_tokens must be 0/1, got {qa_tokens}")
+        if str(qa_layout) not in ("interleave", "split"):
+            raise ValueError(f"qa_layout must be interleave/split, got {qa_layout}")
+        if bool(use_ray_patch):
+            raise NotImplementedError("PatchNEPA ray-patch path is not implemented yet (point-only stage).")
+
         self.d_model = int(d_model)
-        self.backbone_mode = str(backbone_mode)
-        self.pos_mode = str(pos_mode)
-        self.pos_add_times = int(pos_add_times)
         self.use_normals = bool(use_normals)
-        self.use_bos = bool(use_bos)
+        self.qa_tokens = int(qa_tokens)
+        self.qa_layout = str(qa_layout)
+        self.qa_sep_token = bool(qa_sep_token)
+        self.qa_fuse = str(qa_fuse)
+        self.nepa2d_pos = bool(nepa2d_pos)
+        self.type_specific_pos = bool(type_specific_pos)
+        self.type_pos_max_len = int(type_pos_max_len)
+        self.pos_mode = str(pos_mode)
+        self.encdec_arch = bool(encdec_arch)
+        self.use_pt_dist = bool(use_pt_dist)
+        self.use_pt_grad = bool(use_pt_grad)
+        self.backbone_mode = str(backbone_mode)
 
-        self.use_ray_patch = bool(use_ray_patch)
-        self.ray_hit_threshold = float(ray_hit_threshold)
-        self.ray_miss_t = float(ray_miss_t)
-        self.ray_pool_k_max = int(ray_pool_k_max)
-        self.ray_pool_mode = str(ray_pool_mode)
-        self.ray_fuse = str(ray_fuse)
-
-        patch_embed = str(patch_embed)
         if num_groups is None:
             num_groups = max(1, int(round(float(n_point) / float(group_size))))
 
+        patch_embed = str(patch_embed)
         if patch_embed == "serial":
             self.patch_embed = SerialPatchEmbed(
                 embed_dim=self.d_model,
@@ -107,223 +192,339 @@ class PatchTransformerNepa(nn.Module):
         else:
             raise ValueError(f"unknown patch_embed={patch_embed}")
 
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.d_model)) if self.use_bos else None
-        self.cls_pos = None
-
-        if self.backbone_mode == "vanilla":
-            if self.pos_mode == "center_mlp_once":
-                hidden = int(self.d_model * float(pos_mlp_hidden_mult))
-                self.pos_mlp = nn.Sequential(
-                    nn.Linear(3, hidden),
-                    nn.GELU(),
-                    nn.Linear(hidden, self.d_model),
-                )
-                self.pos_emb = None
-            elif self.pos_mode == "center_linear":
-                self.pos_emb = nn.Linear(3, self.d_model)
-                self.pos_mlp = None
-            elif self.pos_mode == "none":
-                self.pos_emb = None
-                self.pos_mlp = None
-            else:
-                raise ValueError(f"unknown pos_mode={self.pos_mode}")
-            self.cls_pos = nn.Parameter(torch.zeros(1, 1, self.d_model)) if self.use_bos else None
+        # Patch answer embedding from {dist, grad}.
+        ans_in = (1 if self.use_pt_dist else 0) + (3 if self.use_pt_grad else 0)
+        self.answer_embed: Optional[AnswerPatchEmbed]
+        if ans_in > 0:
+            self.answer_embed = AnswerPatchEmbed(
+                in_dim=ans_in,
+                d_model=self.d_model,
+                n_layers=int(answer_mlp_layers),
+                pool=str(answer_pool),
+                dropout=float(dropout),
+            )
         else:
-            self.pos_emb = None
-            self.pos_mlp = None
-            self.cls_pos = None
+            self.answer_embed = None
 
-        if self.cls_token is not None:
-            nn.init.trunc_normal_(self.cls_token, std=0.02)
-        if self.cls_pos is not None:
-            nn.init.trunc_normal_(self.cls_pos, std=0.02)
+        if self.qa_tokens == 0 and self.qa_fuse == "concat":
+            self.qa_fuse_proj = nn.Linear(2 * self.d_model, self.d_model)
+        else:
+            self.qa_fuse_proj = None
 
-        rope_prefix_tokens = 1 if (self.backbone_mode == "nepa2d" and self.use_bos) else 0
-        self.backbone = CausalTransformer(
-            d_model=self.d_model,
-            nhead=int(n_heads),
-            num_layers=int(n_layers),
-            mlp_ratio=float(mlp_ratio),
-            dropout=float(dropout),
-            drop_path=float(drop_path_rate),
-            qk_norm=bool(qk_norm),
-            qk_norm_affine=bool(qk_norm_affine),
-            qk_norm_bias=bool(qk_norm_bias),
-            layerscale_value=float(layerscale_value),
-            rope_theta=float(rope_theta),
-            rope_prefix_tokens=int(rope_prefix_tokens),
-            use_gated_mlp=bool(use_gated_mlp),
-            hidden_act=str(hidden_act),
-            backbone_impl="legacy" if self.backbone_mode == "vanilla" else "nepa2d",
-        )
-        self.norm = nn.LayerNorm(self.d_model)
+        # Special tokens
+        self.bos_token = nn.Parameter(torch.zeros(1, 1, self.d_model))
+        self.eos_token = nn.Parameter(torch.zeros(1, 1, self.d_model))
+        self.sep_token = nn.Parameter(torch.zeros(1, 1, self.d_model))
+        nn.init.trunc_normal_(self.bos_token, std=0.02)
+        nn.init.trunc_normal_(self.eos_token, std=0.02)
+        nn.init.trunc_normal_(self.sep_token, std=0.02)
 
-        if self.use_ray_patch:
-            self.ray_encoder = nn.Sequential(
-                nn.Linear(8, 128),
+        self.type_emb = nn.Embedding(int(TYPE_VOCAB_SIZE), self.d_model)
+
+        self.pos_emb = nn.Parameter(torch.zeros(1, int(max_len), self.d_model))
+        nn.init.trunc_normal_(self.pos_emb, std=0.02)
+        if self.nepa2d_pos:
+            with torch.no_grad():
+                self.pos_emb.zero_()
+
+        if self.type_specific_pos:
+            self.type_pos_emb = nn.Embedding(int(TYPE_VOCAB_SIZE) * int(self.type_pos_max_len), self.d_model)
+            nn.init.trunc_normal_(self.type_pos_emb.weight, std=0.02)
+        else:
+            self.type_pos_emb = None
+
+        if self.pos_mode == "center_mlp":
+            self.center_mlp = nn.Sequential(
+                nn.Linear(3, self.d_model),
                 nn.GELU(),
-                nn.Linear(128, self.d_model),
+                nn.Linear(self.d_model, self.d_model),
             )
-            if self.ray_fuse == "concat":
-                self.ray_fuse_proj = nn.Linear(2 * self.d_model, self.d_model)
-            else:
-                self.ray_fuse_proj = None
+        elif self.pos_mode == "none":
+            self.center_mlp = None
         else:
-            self.ray_encoder = None
-            self.ray_fuse_proj = None
+            raise ValueError(f"unknown pos_mode={self.pos_mode}")
 
-        self.pred_head = nn.Linear(self.d_model, self.d_model)
-
-    def _apply_pos_embed(self, x: torch.Tensor, centers_xyz: torch.Tensor, *, has_bos: bool) -> torch.Tensor:
-        if self.backbone_mode != "vanilla":
-            return x
-
-        if self.pos_mode == "none":
-            if has_bos and self.cls_pos is not None:
-                x[:, :1, :] = x[:, :1, :] + self.cls_pos
-            return x
-
-        if self.pos_mode == "center_linear":
-            pos = self.pos_emb(centers_xyz)
-        else:
-            pos = self.pos_mlp(centers_xyz)
-
-        if has_bos:
-            if self.cls_pos is not None:
-                x[:, :1, :] = x[:, :1, :] + self.cls_pos
-            for _ in range(max(1, self.pos_add_times)):
-                x[:, 1:, :] = x[:, 1:, :] + pos
-            return x
-
-        for _ in range(max(1, self.pos_add_times)):
-            x = x + pos
-        return x
-
-    def _build_ray_anchor(
-        self,
-        ray_o: torch.Tensor,
-        ray_d: torch.Tensor,
-        ray_t: torch.Tensor,
-        ray_hit: torch.Tensor,
-    ) -> torch.Tensor:
-        if ray_hit.dim() == 3 and ray_hit.size(-1) == 1:
-            ray_hit = ray_hit.squeeze(-1)
-        if ray_t.dim() == 3 and ray_t.size(-1) == 1:
-            ray_t = ray_t.squeeze(-1)
-        hit_mask = (ray_hit > float(self.ray_hit_threshold)).to(ray_o.dtype).unsqueeze(-1)
-        x_hit = ray_o + ray_t.unsqueeze(-1) * ray_d
-        x_miss = ray_o + float(self.ray_miss_t) * ray_d
-        return hit_mask * x_hit + (1.0 - hit_mask) * x_miss
-
-    def _pool_rays_to_patches(
-        self,
-        centers_xyz: torch.Tensor,
-        ray_o: torch.Tensor,
-        ray_d: torch.Tensor,
-        ray_t: torch.Tensor,
-        ray_hit: torch.Tensor,
-        ray_available: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        bsz, n_group, _ = centers_xyz.shape
-        out = centers_xyz.new_zeros((bsz, n_group, self.d_model))
-        if (self.ray_encoder is None) or (ray_o is None) or (ray_o.numel() == 0):
-            return out
-
-        ray_anchor = self._build_ray_anchor(ray_o, ray_d, ray_t, ray_hit)
-
-        for b in range(bsz):
-            if (ray_available is not None) and (int(ray_available[b].item()) == 0):
-                continue
-            n_ray = int(ray_anchor[b].shape[0])
-            if n_ray <= 0:
-                continue
-            dist = torch.cdist(ray_anchor[b].unsqueeze(0), centers_xyz[b].unsqueeze(0)).squeeze(0)
-            assign = dist.argmin(dim=-1)
-
-            ray_hit_b = ray_hit[b].squeeze(-1) if ray_hit[b].dim() == 2 else ray_hit[b]
-            ray_t_b = ray_t[b].squeeze(-1) if ray_t[b].dim() == 2 else ray_t[b]
-            ctr = centers_xyz[b][assign]
-            feat_in = torch.cat(
-                [
-                    ray_anchor[b] - ctr,
-                    ray_d[b],
-                    ray_hit_b.unsqueeze(-1),
-                    ray_t_b.unsqueeze(-1),
-                ],
-                dim=-1,
+        if self.encdec_arch:
+            self.backbone = EncoderDecoderTransformer(
+                d_model=self.d_model,
+                nhead=int(n_heads),
+                num_encoder_layers=int(n_layers),
+                num_decoder_layers=int(n_layers),
+                dim_feedforward=int(self.d_model * float(mlp_ratio)),
+                dropout=float(dropout),
+                drop_path=float(drop_path_rate),
+                src_causal=False,
             )
-            feat = self.ray_encoder(feat_in)
+        else:
+            self.backbone = CausalTransformer(
+                d_model=self.d_model,
+                nhead=int(n_heads),
+                num_layers=int(n_layers),
+                mlp_ratio=float(mlp_ratio),
+                dropout=float(dropout),
+                drop_path=float(drop_path_rate),
+                qk_norm=bool(qk_norm),
+                qk_norm_affine=bool(qk_norm_affine),
+                qk_norm_bias=bool(qk_norm_bias),
+                layerscale_value=float(layerscale_value),
+                rope_theta=float(rope_theta),
+                use_gated_mlp=bool(use_gated_mlp),
+                hidden_act=str(hidden_act),
+                backbone_impl="legacy" if self.backbone_mode == "vanilla" else "nepa2d",
+            )
 
-            for g in range(n_group):
-                m = assign == g
-                if not bool(m.any()):
-                    continue
-                v = feat[m]
-                if self.ray_pool_k_max > 0 and v.shape[0] > self.ray_pool_k_max:
-                    sel = torch.randperm(v.shape[0], device=v.device)[: self.ray_pool_k_max]
-                    v = v[sel]
-                if self.ray_pool_mode == "mean":
-                    out[b, g] = v.mean(dim=0)
-                else:
-                    out[b, g] = v.max(dim=0).values
+        self.pred_head = nn.Sequential(nn.LayerNorm(self.d_model), nn.Linear(self.d_model, self.d_model))
+
+    def _apply_type_pos_emb(self, x: torch.Tensor, type_id: torch.Tensor) -> torch.Tensor:
+        if self.type_pos_emb is None:
+            return x
+        B, T, _ = x.shape
+        local = torch.zeros((B, T), device=x.device, dtype=torch.long)
+        for ty in range(int(TYPE_VOCAB_SIZE)):
+            m = type_id == ty
+            if not bool(m.any()):
+                continue
+            local[m] = torch.cumsum(m.long(), dim=1)[m] - 1
+        if int(local.max().item()) >= int(self.type_pos_max_len):
+            raise ValueError(
+                f"type_pos_max_len={self.type_pos_max_len} too small for local_max={int(local.max().item())}"
+            )
+        idx = type_id * int(self.type_pos_max_len) + local
+        return x + self.type_pos_emb(idx)
+
+    def _add_embeddings(
+        self,
+        tokens: torch.Tensor,
+        type_id: torch.Tensor,
+        centers_seq: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        B, T, _ = tokens.shape
+        out = tokens + self.type_emb(type_id)
+        if T > self.pos_emb.shape[1]:
+            raise ValueError(f"T={T} exceeds max_len={self.pos_emb.shape[1]}")
+        out = out + self.pos_emb[:, :T, :]
+        out = self._apply_type_pos_emb(out, type_id)
+
+        if self.center_mlp is not None and centers_seq is not None:
+            cen = self.center_mlp(centers_seq)
+            special = (type_id == TYPE_BOS) | (type_id == TYPE_EOS) | (type_id == TYPE_SEP)
+            cen = cen.masked_fill(special.unsqueeze(-1), 0.0)
+            out = out + cen
         return out
+
+    def _build_seq_qa0(
+        self,
+        q_tok: torch.Tensor,
+        a_tok: torch.Tensor,
+        centers_xyz: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        B, P, D = q_tok.shape
+        if self.qa_fuse == "add":
+            patch_tok = q_tok + a_tok
+        elif self.qa_fuse == "concat":
+            if self.qa_fuse_proj is None:
+                raise RuntimeError("qa_fuse='concat' requires qa_fuse_proj")
+            patch_tok = self.qa_fuse_proj(torch.cat([q_tok, a_tok], dim=-1))
+        else:
+            raise ValueError(f"unknown qa_fuse={self.qa_fuse}")
+
+        tokens = torch.cat(
+            [self.bos_token.expand(B, 1, D), patch_tok, self.eos_token.expand(B, 1, D)],
+            dim=1,
+        )
+        type_id = torch.full((B, tokens.shape[1]), int(TYPE_POINT), device=tokens.device, dtype=torch.long)
+        type_id[:, 0] = int(TYPE_BOS)
+        type_id[:, -1] = int(TYPE_EOS)
+
+        centers_seq = torch.zeros((B, tokens.shape[1], 3), device=tokens.device, dtype=centers_xyz.dtype)
+        centers_seq[:, 1 : 1 + P, :] = centers_xyz
+        return tokens, type_id, centers_seq
+
+    def _build_seq_qa1_interleave(
+        self,
+        q_tok: torch.Tensor,
+        a_tok: torch.Tensor,
+        centers_xyz: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        B, P, D = q_tok.shape
+        qa = torch.stack([q_tok, a_tok], dim=2).reshape(B, 2 * P, D)
+        tokens = torch.cat(
+            [self.bos_token.expand(B, 1, D), qa, self.eos_token.expand(B, 1, D)],
+            dim=1,
+        )
+        type_id = torch.empty((B, tokens.shape[1]), device=tokens.device, dtype=torch.long)
+        type_id[:, 0] = int(TYPE_BOS)
+        type_id[:, 1 : 1 + 2 * P : 2] = int(TYPE_Q_POINT)
+        type_id[:, 2 : 1 + 2 * P : 2] = int(TYPE_A_POINT)
+        type_id[:, -1] = int(TYPE_EOS)
+
+        centers_seq = torch.zeros((B, tokens.shape[1], 3), device=tokens.device, dtype=centers_xyz.dtype)
+        centers_seq[:, 1 : 1 + 2 * P : 2, :] = centers_xyz
+        centers_seq[:, 2 : 1 + 2 * P : 2, :] = centers_xyz
+        return tokens, type_id, centers_seq
+
+    def _build_seq_qa1_split(
+        self,
+        q_tok: torch.Tensor,
+        a_tok: torch.Tensor,
+        centers_xyz: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        B, P, D = q_tok.shape
+        parts: list[torch.Tensor] = [self.bos_token.expand(B, 1, D), q_tok]
+        types: list[torch.Tensor] = [
+            torch.full((B, 1), int(TYPE_BOS), device=q_tok.device, dtype=torch.long),
+            torch.full((B, P), int(TYPE_Q_POINT), device=q_tok.device, dtype=torch.long),
+        ]
+        centers_parts: list[torch.Tensor] = [
+            torch.zeros((B, 1, 3), device=q_tok.device, dtype=centers_xyz.dtype),
+            centers_xyz,
+        ]
+
+        if self.qa_sep_token:
+            parts.append(self.sep_token.expand(B, 1, D))
+            types.append(torch.full((B, 1), int(TYPE_SEP), device=q_tok.device, dtype=torch.long))
+            centers_parts.append(torch.zeros((B, 1, 3), device=q_tok.device, dtype=centers_xyz.dtype))
+
+        parts.extend([a_tok, self.eos_token.expand(B, 1, D)])
+        types.extend(
+            [
+                torch.full((B, P), int(TYPE_A_POINT), device=q_tok.device, dtype=torch.long),
+                torch.full((B, 1), int(TYPE_EOS), device=q_tok.device, dtype=torch.long),
+            ]
+        )
+        centers_parts.extend(
+            [centers_xyz, torch.zeros((B, 1, 3), device=q_tok.device, dtype=centers_xyz.dtype)]
+        )
+
+        tokens = torch.cat(parts, dim=1)
+        type_id = torch.cat(types, dim=1)
+        centers_seq = torch.cat(centers_parts, dim=1)
+        return tokens, type_id, centers_seq
 
     def forward(
         self,
         *,
-        pt_xyz: torch.Tensor,
+        pt_xyz: Optional[torch.Tensor] = None,
         pt_n: Optional[torch.Tensor] = None,
         pt_dist: Optional[torch.Tensor] = None,
+        pt_grad: Optional[torch.Tensor] = None,
+        points_xyz: Optional[torch.Tensor] = None,
+        points_dist: Optional[torch.Tensor] = None,
+        points_grad: Optional[torch.Tensor] = None,
         ray_o: Optional[torch.Tensor] = None,
         ray_d: Optional[torch.Tensor] = None,
         ray_t: Optional[torch.Tensor] = None,
         ray_hit: Optional[torch.Tensor] = None,
         ray_available: Optional[torch.Tensor] = None,
-        is_causal: bool = True,
+        is_causal: bool | int = True,
+        dual_mask_near: float = 0.0,
+        dual_mask_far: float = 0.0,
+        dual_mask_window: int = 0,
+        dual_mask_type_aware: int | bool = 0,
     ) -> PatchNepaOutput:
-        del pt_dist  # reserved for future variants
-        bsz = int(pt_xyz.shape[0])
-        pt_feat = pt_n if (self.use_normals and pt_n is not None) else None
+        del ray_o, ray_d, ray_t, ray_hit, ray_available
 
-        patch_out = self.patch_embed(pt_xyz, pt_feat)
-        x = patch_out.tokens
+        if pt_xyz is None:
+            pt_xyz = points_xyz
+        if pt_dist is None:
+            pt_dist = points_dist
+        if pt_grad is None:
+            pt_grad = points_grad
+        if pt_xyz is None:
+            raise ValueError("pt_xyz/points_xyz is required")
+
+        patch_out = self.patch_embed(pt_xyz, pt_n if self.use_normals else None)
+        q_tok = patch_out.tokens
         centers_xyz = patch_out.centers_xyz
+        group_idx = patch_out.group_idx
 
-        if self.use_ray_patch and (ray_o is not None) and (ray_o.numel() > 0):
-            if ray_hit is None:
-                ray_hit = ray_o.new_zeros(ray_o.shape[:-1])
-            if ray_t is None:
-                ray_t = ray_o.new_zeros(ray_o.shape[:-1])
-            ray_feat = self._pool_rays_to_patches(
-                centers_xyz,
-                ray_o,
-                ray_d,
-                ray_t,
-                ray_hit,
-                ray_available=ray_available,
-            )
-            if self.ray_fuse == "add":
-                x = x + ray_feat
+        if self.answer_embed is None:
+            a_tok = q_tok
+        else:
+            feats: list[torch.Tensor] = []
+            if self.use_pt_dist:
+                if pt_dist is None:
+                    raise ValueError("use_pt_dist=True but pt_dist is None")
+                if pt_dist.dim() == 2:
+                    pt_dist = pt_dist.unsqueeze(-1)
+                feats.append(pt_dist)
+            if self.use_pt_grad:
+                if pt_grad is None:
+                    raise ValueError("use_pt_grad=True but pt_grad is None")
+                if pt_grad.dim() != 3 or pt_grad.size(-1) != 3:
+                    raise ValueError(f"pt_grad must be (B,N,3), got {tuple(pt_grad.shape)}")
+                feats.append(pt_grad)
+            ans_feat = torch.cat(feats, dim=-1) if len(feats) > 1 else feats[0]
+            a_tok = self.answer_embed(ans_feat, group_idx)
+
+        if self.qa_tokens == 0:
+            tokens, type_id, centers_seq = self._build_seq_qa0(q_tok, a_tok, centers_xyz)
+        else:
+            if self.qa_layout == "interleave":
+                tokens, type_id, centers_seq = self._build_seq_qa1_interleave(q_tok, a_tok, centers_xyz)
             else:
-                x = self.ray_fuse_proj(torch.cat([x, ray_feat], dim=-1))
+                tokens, type_id, centers_seq = self._build_seq_qa1_split(q_tok, a_tok, centers_xyz)
 
-        if self.use_bos:
-            bos = self.cls_token.expand(bsz, -1, -1)
-            x = torch.cat([bos, x], dim=1)
+        z = self._add_embeddings(tokens, type_id, centers_seq)
 
-        x = self._apply_pos_embed(x, centers_xyz, has_bos=self.use_bos)
-        z = x
-        h = self.backbone(x, is_causal=bool(is_causal))
-        h = self.norm(h)
+        if isinstance(self.backbone, EncoderDecoderTransformer):
+            if self.qa_tokens != 1 or self.qa_layout != "split":
+                raise ValueError("encdec_arch expects qa_tokens=1 and qa_layout='split'")
+            if self.qa_sep_token:
+                sep_pos = (type_id == int(TYPE_SEP)).int().argmax(dim=1)
+                sep = int(sep_pos[0].item())
+            else:
+                sep = 1 + q_tok.shape[1]
+            enc = z[:, :sep, :]
+            dec = z[:, sep:, :]
+            enc_out, dec_out = self.backbone(enc, dec, enc_xyz=None)
+            h = torch.cat([enc_out, dec_out], dim=1)
+        else:
+            h = self.backbone(
+                z,
+                is_causal=bool(is_causal),
+                type_id=type_id,
+                dual_mask_near=float(dual_mask_near),
+                dual_mask_far=float(dual_mask_far),
+                dual_mask_window=int(dual_mask_window),
+                dual_mask_type_aware=int(dual_mask_type_aware),
+            )
+
         z_hat = self.pred_head(h)
-        return PatchNepaOutput(z=z, z_hat=z_hat, centers_xyz=centers_xyz)
+        return PatchNepaOutput(
+            z=z,
+            z_hat=z_hat,
+            type_id=type_id,
+            centers_xyz=centers_xyz,
+            group_idx=group_idx,
+        )
 
     @staticmethod
-    def nepa_loss(z: torch.Tensor, z_hat: torch.Tensor) -> torch.Tensor:
+    def nepa_loss(
+        z: torch.Tensor,
+        z_hat: torch.Tensor,
+        type_id: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         if z.size(1) < 2:
             return z.new_zeros(())
-        # Stop-gradient target branch to avoid trivial collapse.
-        target = z[:, 1:, :].detach()
         pred = z_hat[:, :-1, :]
-        sim = F.cosine_similarity(pred, target, dim=-1)
-        return (1.0 - sim).mean()
+        tgt = z[:, 1:, :].detach()
+
+        if type_id is None:
+            mask = torch.ones(pred.shape[:2], device=z.device, dtype=torch.bool)
+        else:
+            tgt_ty = type_id[:, 1:]
+            has_answer = bool((tgt_ty == int(TYPE_A_POINT)).any() or (tgt_ty == int(TYPE_A_RAY)).any())
+            if has_answer:
+                mask = (tgt_ty == int(TYPE_A_POINT)) | (tgt_ty == int(TYPE_A_RAY))
+            else:
+                mask = (tgt_ty != int(TYPE_BOS)) & (tgt_ty != int(TYPE_SEP)) & (tgt_ty != int(TYPE_EOS))
+        if not bool(mask.any()):
+            return pred.new_zeros(())
+        loss = 1.0 - F.cosine_similarity(pred, tgt, dim=-1)
+        return loss[mask].mean()
+
+
+# Backward-compatible alias
+PatchNepa = PatchTransformerNepa
+

@@ -70,10 +70,23 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--hidden_act", type=str, default="gelu")
     p.add_argument("--backbone_mode", type=str, default="nepa2d", choices=["nepa2d", "vanilla"])
 
-    # Pos (vanilla only)
-    p.add_argument("--pos_mode", type=str, default="center_mlp_once", choices=["center_mlp_once", "center_linear", "none"])
-    p.add_argument("--pos_mlp_hidden_mult", type=float, default=2.0)
-    p.add_argument("--pos_add_times", type=int, default=1)
+    # Positional embedding
+    p.add_argument("--pos_mode", type=str, default="center_mlp", choices=["center_mlp", "none"])
+    p.add_argument("--nepa2d_pos", type=int, default=1, choices=[0, 1])
+    p.add_argument("--type_specific_pos", type=int, default=0, choices=[0, 1])
+    p.add_argument("--type_pos_max_len", type=int, default=4096)
+
+    # QueryNEPA-parity Q/A controls
+    p.add_argument("--qa_tokens", type=int, default=1, choices=[0, 1])
+    p.add_argument("--qa_layout", type=str, default="split_sep", choices=["interleave", "split", "split_sep"])
+    p.add_argument("--qa_sep_token", type=int, default=1, choices=[0, 1])
+    p.add_argument("--qa_fuse", type=str, default="add", choices=["add", "concat"])
+    p.add_argument("--encdec_arch", type=int, default=0, choices=[0, 1])
+    p.add_argument("--max_len", type=int, default=4096)
+    p.add_argument("--use_pt_dist", type=int, default=1, choices=[0, 1])
+    p.add_argument("--use_pt_grad", type=int, default=0, choices=[0, 1])
+    p.add_argument("--answer_mlp_layers", type=int, default=2)
+    p.add_argument("--answer_pool", type=str, default="max", choices=["max", "mean"])
 
     # Ray binding
     p.add_argument("--use_ray_patch", type=int, default=0)
@@ -101,6 +114,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--aug_jitter_sigma", type=float, default=0.0)
     p.add_argument("--aug_jitter_clip", type=float, default=0.0)
     p.add_argument("--aug_recompute_dist", type=int, default=0, choices=[0, 1])
+    # Dual-mask (QueryNEPA parity)
+    p.add_argument("--dual_mask_near", type=float, default=0.0)
+    p.add_argument("--dual_mask_far", type=float, default=0.0)
+    p.add_argument("--dual_mask_window", type=int, default=32)
+    p.add_argument("--dual_mask_type_aware", type=int, default=0, choices=[0, 1])
+    p.add_argument("--dual_mask_warmup_frac", type=float, default=0.05)
     p.add_argument("--seed", type=int, default=0)
     return p.parse_args()
 
@@ -174,6 +193,7 @@ def main() -> None:
         pt_rfps_key=str(args.pt_rfps_key),
         pt_rfps_m=int(args.pt_rfps_m),
         point_order_mode=str(args.point_order_mode),
+        include_pt_grad=bool(int(args.use_pt_grad)),
         aug_rotate_z=bool(int(args.aug_rotate_z)),
         aug_scale_min=float(args.aug_scale_min),
         aug_scale_max=float(args.aug_scale_max),
@@ -215,16 +235,21 @@ def main() -> None:
         use_gated_mlp=int(args.use_gated_mlp),
         hidden_act=str(args.hidden_act),
         backbone_mode=str(args.backbone_mode),
+        qa_tokens=int(args.qa_tokens),
+        qa_layout=str(args.qa_layout),
+        qa_sep_token=bool(int(args.qa_sep_token)),
+        qa_fuse=str(args.qa_fuse),
+        use_pt_dist=bool(int(args.use_pt_dist)),
+        use_pt_grad=bool(int(args.use_pt_grad)),
+        answer_mlp_layers=int(args.answer_mlp_layers),
+        answer_pool=str(args.answer_pool),
+        max_len=int(args.max_len),
+        nepa2d_pos=bool(int(args.nepa2d_pos)),
+        type_specific_pos=bool(int(args.type_specific_pos)),
+        type_pos_max_len=int(args.type_pos_max_len),
         pos_mode=str(args.pos_mode),
-        pos_mlp_hidden_mult=float(args.pos_mlp_hidden_mult),
-        pos_add_times=int(args.pos_add_times),
+        encdec_arch=bool(int(args.encdec_arch)),
         use_ray_patch=bool(args.use_ray_patch),
-        ray_hit_threshold=float(args.ray_hit_threshold),
-        ray_miss_t=float(args.ray_miss_t),
-        ray_pool_k_max=int(args.ray_pool_k_max),
-        ray_pool_mode=str(args.ray_pool_mode),
-        ray_fuse=str(args.ray_fuse),
-        use_bos=True,
     )
 
     optimizer = optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
@@ -245,6 +270,10 @@ def main() -> None:
         f"pt_sample_mode={str(args.pt_sample_mode)} pt_fps_key={str(args.pt_fps_key)} pt_rfps_m={int(args.pt_rfps_m)} "
         f"pt_rfps_key={str(args.pt_rfps_key)} "
         f"point_order_mode={str(args.point_order_mode)} "
+        f"qa_tokens={int(args.qa_tokens)} qa_layout={str(args.qa_layout)} qa_sep={int(args.qa_sep_token)} "
+        f"qa_fuse={str(args.qa_fuse)} use_pt_dist={int(args.use_pt_dist)} use_pt_grad={int(args.use_pt_grad)} "
+        f"type_specific_pos={int(args.type_specific_pos)} "
+        f"dual_mask=({float(args.dual_mask_near):.2f},{float(args.dual_mask_far):.2f},w={int(args.dual_mask_window)},type_aware={int(args.dual_mask_type_aware)}) "
         f"batch_per_proc={int(args.batch_size)} grad_accum={int(args.grad_accum)} "
         f"global_batch={int(args.batch_size) * int(accelerator.num_processes) * int(args.grad_accum)} "
         f"lr={float(args.lr):.3e} scheduler={str(args.lr_scheduler)} "
@@ -268,6 +297,9 @@ def main() -> None:
     else:
         mprint("[resume] disabled (no checkpoint found/requested)")
 
+    total_steps = max(1, int(args.epochs) * max(1, len(train_loader)))
+    warmup_steps = max(1, int(float(args.dual_mask_warmup_frac) * float(total_steps)))
+
     for epoch in range(start_epoch, int(args.epochs)):
         model.train()
         sampler_obj = getattr(train_loader, "sampler", None)
@@ -276,18 +308,29 @@ def main() -> None:
 
         for batch in train_loader:
             with accelerator.accumulate(model):
+                ramp = 1.0
+                if warmup_steps > 0:
+                    ramp = min(float(global_step) / float(warmup_steps), 1.0)
+                dm_near = float(args.dual_mask_near) * ramp
+                dm_far = float(args.dual_mask_far) * ramp
+
                 out = model(
                     pt_xyz=batch["pt_xyz"],
                     pt_n=None,
                     pt_dist=batch.get("pt_dist", None),
+                    pt_grad=batch.get("pt_grad", None),
                     ray_o=batch.get("ray_o", None),
                     ray_d=batch.get("ray_d", None),
                     ray_t=batch.get("ray_t", None),
                     ray_hit=batch.get("ray_hit", None),
                     ray_available=batch.get("ray_available", None),
                     is_causal=True,
+                    dual_mask_near=dm_near,
+                    dual_mask_far=dm_far,
+                    dual_mask_window=int(args.dual_mask_window),
+                    dual_mask_type_aware=int(args.dual_mask_type_aware),
                 )
-                loss = PatchTransformerNepa.nepa_loss(out.z, out.z_hat)
+                loss = PatchTransformerNepa.nepa_loss(out.z, out.z_hat, out.type_id)
                 accelerator.backward(loss)
                 if float(args.max_grad_norm) > 0:
                     accelerator.clip_grad_norm_(model.parameters(), float(args.max_grad_norm))
@@ -296,7 +339,11 @@ def main() -> None:
 
             if accelerator.is_main_process and (global_step % 50 == 0):
                 lr = optimizer.param_groups[0]["lr"]
-                print(f"[epoch {epoch:03d} step {global_step:06d}] loss={loss.item():.8e} lr={lr:.2e}")
+                print(
+                    f"[epoch {epoch:03d} step {global_step:06d}] "
+                    f"loss={loss.item():.8e} lr={lr:.2e} "
+                    f"dm=({dm_near:.2f},{dm_far:.2f},ramp={ramp:.2f})"
+                )
             global_step += 1
 
         if scheduler is not None:

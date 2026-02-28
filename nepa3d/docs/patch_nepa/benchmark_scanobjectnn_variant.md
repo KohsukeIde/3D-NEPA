@@ -212,7 +212,7 @@ Obj-only random-sampling parity check (seed-fixed):
 Interpretation note:
 
 - random-seed parity looks consistent between `npz(v3_nonorm)` and `scan_h5`.
-- strict apples-to-apples still requires matching val split mode (`group_scanobjectnn` vs `stratified_label(h5)` currently differ by implementation path).
+- mainline policy is now fixed to `val_split_mode=file` only; historical `group_*`/`pointmae` rows below are reference-only.
 
 Obj-only parity recheck (Point-MAE split unified):
 
@@ -228,7 +228,8 @@ Obj-only parity recheck (Point-MAE split unified):
 
 Interpretation update:
 
-- once split policy is unified to Point-MAE style (`val_split_mode=pointmae`), `v3_nonorm npz` and `scan_h5` are parity-consistent on `obj_only`.
+- this `val_split_mode=pointmae` block is historical/reference only.
+- mainline strict comparisons must use `val_split_mode=file`.
 
 Point-MAE scratch ckpt direct test extraction:
 
@@ -411,7 +412,7 @@ Confirmed major diffs (code-level):
 | positional encoding | center-MLP positional embedding (`Point-MAE/models/Point_MAE.py`) | learned absolute `pos_emb` table (`nepa3d/models/patch_classifier.py`) | token position signal differs |
 | classifier head | concat(`[CLS]`, token-max) + MLP head (`Point-MAE/models/Point_MAE.py`) | single linear head after pooled feature (`nepa3d/models/patch_classifier.py`) | head capacity differs |
 | optimization | `lr=5e-4`, `grad_norm_clip=10` (`Point-MAE/cfgs/finetune_scan_objonly.yaml`) | commonly used parity run used `lr=1e-3`, `grad_clip=1` (`runs/patchcls/.../args.json`) | update scale/clip regime differs |
-| validation protocol | legacy test-as-val (`subset=test`) or strict split override (`NO_TEST_AS_VAL=1`) | `group_auto` / `pointmae` switchable (`nepa3d/train/finetune_patch_cls.py`) | model-selection target can differ |
+| validation protocol | legacy test-as-val (`subset=test`) or strict split override (`NO_TEST_AS_VAL=1`) | mainline fixed to `file` (`nepa3d/train/finetune_patch_cls.py`) | comparison target is fixed under current policy |
 
 Practical implication:
 

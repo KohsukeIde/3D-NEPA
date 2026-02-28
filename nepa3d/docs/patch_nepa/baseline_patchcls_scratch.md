@@ -73,8 +73,9 @@ scripts/finetune/patchcls_modelnet40_scratch.sh \
 - `mc_eval_k_test` / `aug_eval` は必要なときだけ（Point-MAE Table の比較では通常 no-vote）。
 - Scan benchmark では variant-split cache (`obj_bg` / `obj_only` / `pb_t50_rs`) を使い、
   `main_split_v2` は使わない。
-- 現在の `patchcls_scanobjectnn_scratch.sh` 既定は `VAL_SPLIT_MODE=file`（Point-MAE strict 方針に合わせた train 内 val 分割）。
-- `test-as-val` は既定で無効（必要時のみ明示指定で有効化）。
+- 現在の `patchcls_scanobjectnn_scratch.sh` 既定は `VAL_SPLIT_MODE=file`。
+- **Mainline policy:** 新規の比較実験で使ってよい split は `file` のみ。
+- `test-as-val` (`val_split_mode=pointmae`) および `group_*` split は履歴/参照用途のみ（新規 mainline では使用禁止）。
 - `scripts/sanity/pointmae_scan_scratch_qf.sh` も既定で `NO_TEST_AS_VAL=1`。
   Point-MAE scratch 実行時は `subset=train` から層化分割で `subset=val` を作る。
 - 現行ポリシーでは `scanobjectnn_*_v2` (uni-scale) は使わない。

@@ -75,7 +75,8 @@ Reference audit/checklist:
   - `strict=False`
   - encoder-compatible config must be matched (`qk_norm*`, `layerscale`, `patch_embed`, grouping)
 - Split policy:
-  - follow Point-MAE-style split settings for fair scratch/finetune comparison
+  - `val_split_mode=file` only (strict mainline policy)
+  - `group_*` and `pointmae(test-as-val)` are historical/reference-only and must not be used for new mainline runs
   - avoid mixing with old `main_split_v2` headline reporting
 
 ## 4. Current Active Run Set
