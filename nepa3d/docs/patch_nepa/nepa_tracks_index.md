@@ -40,7 +40,8 @@ Current Patch-NEPA point-only baseline recipe uses:
 
 - patch sequence (`fps_knn`, `group_size=32`, `num_groups=64`)
 - no ray stream (`N_RAY=0`, `USE_RAY_PATCH=0`)
-- sample mode default (`pt_sample_mode=rfps`, `pt_rfps_m=4096`)
+- sample mode fixed (`pt_sample_mode=rfps_cached`, `pt_rfps_key=auto|<bank_key>`, `pt_rfps_m=4096`)
+- Stage-2 mainline disallows on-the-fly RFPS/FPS fallback (RFPS bank required)
 - NEPA next-embedding objective on patch tokens
 
 ## 5. Migration Policy

@@ -512,7 +512,7 @@ Run set:
 - jobs:
   - `100002` (`obj_bg_nepa2d`) done
   - `100003` (`obj_only_nepa2d`) done
-  - `100004` (`pb_t50_rs_nepa2d`) running
+  - `100004` (`pb_t50_rs_nepa2d`) done
 
 Recipe note for this run set:
 
@@ -527,7 +527,7 @@ Current results:
 |---|---:|
 | `obj_bg` | 0.8003 |
 | `obj_only` | 0.7986 |
-| `pb_t50_rs` | running (`ep 120/300`, best val `0.8854`) |
+| `pb_t50_rs` | 0.7047 |
 
 File-split scratch references (strict line):
 
@@ -537,10 +537,86 @@ File-split scratch references (strict line):
 | `obj_only` | 0.7849 | +0.0137 |
 | `pb_t50_rs` | pending | pending |
 
+## 8. New FT set from DDP16 RFPS-bank pretrain ckpt (partial complete)
+
+- source ckpt:
+  - `runs/patchnepa_pointonly/patchnepa_ptonly_ddp16_rfpsbank_20260228_223103/ckpt_latest.pt`
+- run set:
+  - `logs/sanity/patchcls/patchcls_ft_from_patchnepa_pt16_rfpsbank_20260228_231732`
+- jobs:
+  - `100028` (`obj_bg_nepa2d`) done (`Exit_status=0`)
+  - `100029` (`obj_only_nepa2d`) done (`Exit_status=0`)
+  - `100030` (`pb_t50_rs_nepa2d`) running
+- fixed recipe:
+  - `val_split_mode=file`, `aug_eval=1`, `mc_test=10`, `backbone_mode=nepa2d`
+
+Current results:
+
+| variant | PatchNEPA-pt16-rfpsbank -> PatchCls (`file + TTA`) |
+|---|---:|
+| `obj_bg` | 0.7401 |
+| `obj_only` | 0.7849 |
+| `pb_t50_rs` | pending |
+
+vs scratch reference (`file + TTA`, nepa2d):
+
+| variant | scratch (`file + TTA`) | FT (`file + TTA`) | delta |
+|---|---:|---:|---:|
+| `obj_bg` | 0.7625 | 0.7401 | -0.0224 |
+| `obj_only` | 0.7849 | 0.7849 | +0.0000 |
+| `pb_t50_rs` | pending | pending | pending |
+
+## 9. Scratch recheck (strict `file` + TTA10) partial snapshot
+
+Run sets:
+
+- `logs/sanity/patchcls/patchcls_scratch_file_tta10_recheck_20260228_232553` (backbone=`nepa2d`)
+- `logs/sanity/patchcls/patchcls_scratch_file_tta10_vanilla_recheck_20260228_233118` (backbone=`vanilla`)
+
+Jobs:
+
+- nepa2d:
+  - `100031` (`obj_bg`) done (`Exit_status=0`)
+  - `100032` (`obj_only`) done (`Exit_status=0`)
+  - `100033` (`pb_t50_rs`) running
+- vanilla:
+  - `100035` (`obj_bg`) done (`Exit_status=0`)
+  - `100036` (`obj_only`) done (`Exit_status=0`)
+  - `100037` (`pb_t50_rs`) running
+
+Current results (completed rows only):
+
+| variant | nepa2d scratch (`file + TTA10`) | vanilla scratch (`file + TTA10`) |
+|---|---:|---:|
+| `obj_bg` | 0.7625 | 0.7694 |
+| `obj_only` | 0.7849 | 0.7298 |
+| `pb_t50_rs` | pending | pending |
+
+## 10. LR-scheduler controlled comparison job (pretrain)
+
+To isolate scheduler effect only, one controlled pretrain was launched from the same
+point-only encdec split recipe as `100027`, with scheduler change only:
+
+- job: `100042.qjcm` (`patchnepa_ptE16c`) running
+- run set:
+  - `logs/patch_nepa_pretrain/patchnepa_pointonly_ddp16_encdec_split_cosine_20260301_000000`
+- key setting difference:
+  - `lr_scheduler=cosine`, `warmup_ratio=0.025` (`warmup_epochs=2.5`)
+- fixed settings kept:
+  - `N_POINT=1024`, `N_RAY=0`, `patch_embed=fps_knn`, `group_size=32`, `num_groups=64`
+  - `qa_tokens=1`, `qa_layout=split_sep`, `encdec_arch=1`
+  - `batch_per_proc=8`, `num_processes=16` (`global_batch=128`)
+
 Source logs:
 
 - `logs/sanity/patchcls/patchcls_ft_from_patchnepa_ptonly_onepass_20260228_222007/obj_bg_nepa2d.out`
 - `logs/sanity/patchcls/patchcls_ft_from_patchnepa_ptonly_onepass_20260228_222007/obj_only_nepa2d.out`
 - `logs/sanity/patchcls/patchcls_ft_from_patchnepa_ptonly_onepass_20260228_222007/pb_t50_rs_nepa2d.out`
+- `logs/sanity/patchcls/patchcls_ft_from_patchnepa_pt16_rfpsbank_20260228_231732/obj_bg_nepa2d.out`
+- `logs/sanity/patchcls/patchcls_ft_from_patchnepa_pt16_rfpsbank_20260228_231732/obj_only_nepa2d.out`
+- `logs/sanity/patchcls/patchcls_scratch_file_tta10_recheck_20260228_232553/obj_bg_nepa2d.out`
+- `logs/sanity/patchcls/patchcls_scratch_file_tta10_recheck_20260228_232553/obj_only_nepa2d.out`
+- `logs/sanity/patchcls/patchcls_scratch_file_tta10_vanilla_recheck_20260228_233118/obj_bg_vanilla.out`
+- `logs/sanity/patchcls/patchcls_scratch_file_tta10_vanilla_recheck_20260228_233118/obj_only_vanilla.out`
 - `logs/sanity/patchcls/patchcls_obj_bg_pmalign_splitfile_20260227_223435/obj_bg.out`
 - `logs/sanity/patchcls/patchcls_objonly_factor4_20260228_070858/pcf_b_file.out`

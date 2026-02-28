@@ -52,7 +52,8 @@ Current baseline policy for Patch-NEPA pretrain is:
   - `weight_decay=0.05`
   - `lr_scheduler=none` (default)
   - `auto_resume=1`
-  - `pt_sample_mode=rfps` (default, with `pt_rfps_m=4096`)
+  - `pt_sample_mode=rfps_cached` (mandatory)
+  - `pt_rfps_key=auto` (or explicit bank key), with `pt_rfps_m=4096`
 - keep PatchCLS-compatible backbone defaults:
   - `patch_embed=fps_knn`
   - `group_size=32`, `num_groups=64`
@@ -76,6 +77,10 @@ Reference audit/checklist:
   - launcher: `scripts/pretrain/nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`
   - submit entry: `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh` (16-GPU strict)
   - runs that do not print `num_processes=16` in logs are invalid for mainline reporting
+- Stage-2 sampling-order policy is fixed:
+  - `PT_SAMPLE_MODE=rfps_cached` only
+  - `PT_RFPS_KEY` must resolve to an existing RFPS bank key (no on-the-fly fallback)
+  - any run with RFPS fallback warnings is invalid for mainline reporting
 - Load policy for pretrain -> finetune:
   - `strict=False`
   - encoder-compatible config must be matched (`qk_norm*`, `layerscale`, `patch_embed`, grouping)
@@ -103,7 +108,7 @@ Reference audit/checklist:
     - node logs:
       - `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_99634.qjcm_run_pointonly_patchnepa_pointonly_ddp8_fix_20260228_153151/logs/qh138.patchnepa.log`
       - `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_99634.qjcm_run_pointonly_patchnepa_pointonly_ddp8_fix_20260228_153151/logs/qh143.patchnepa.log`
-  - `99643.qjcm`: active DDP run (2 nodes x 4 GPUs = 8 GPUs total; `rfps` default enforced)
+- `99643.qjcm`: active DDP run (2 nodes x 4 GPUs = 8 GPUs total; `rfps_cached` policy enforced)
     - run_set: `patchnepa_pointonly_ddp8_rfpsfix_20260228_154649`
     - save: `runs/patchnepa_pointonly/patchnepa_pointonly_ddp8_rfpsfix_20260228_154649`
     - pbs log: `logs/ddp_patch_nepa_pretrain/patchnepa_pointonly_ddp8_rfpsfix_20260228_154649.pbs.log`

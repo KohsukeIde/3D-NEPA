@@ -15,11 +15,30 @@ LOG_ROOT="${LOG_ROOT:-${ROOT_DIR}/logs/patch_nepa_pretrain/${RUN_NAME}}"
 LOG_PATH="${LOG_ROOT}/${RUN_NAME}.log"
 mkdir -p "${LOG_ROOT}"
 
+WARMUP_EPOCHS="${WARMUP_EPOCHS:-}"
+WARMUP_RATIO="${WARMUP_RATIO:-0.025}"
+STAGE2_STRICT_LR_POLICY="${STAGE2_STRICT_LR_POLICY:-1}"
+if [[ "${STAGE2_STRICT_LR_POLICY}" == "1" ]]; then
+  LR_SCHEDULER="cosine"
+  if [[ -z "${WARMUP_EPOCHS}" ]]; then
+    WARMUP_RATIO="0.025"
+  fi
+fi
+if [[ -z "${WARMUP_EPOCHS}" ]]; then
+  WARMUP_EPOCHS="$(python - <<PY
+epochs=float("${EPOCHS:-100}")
+ratio=float("${WARMUP_RATIO}")
+print(max(0.0, epochs * max(0.0, ratio)))
+PY
+)"
+fi
+
 echo "=== PATCH-NEPA PRETRAIN (single-node helper) ===" | tee "${LOG_PATH}"
 echo "root=${ROOT_DIR}" | tee -a "${LOG_PATH}"
 echo "mix_config=${MIX_CFG}" | tee -a "${LOG_PATH}"
 echo "save_dir=${SAVE_DIR}" | tee -a "${LOG_PATH}"
-echo "qa_tokens=${QA_TOKENS:-1} qa_layout=${QA_LAYOUT:-split_sep} dual_mask=(${DUAL_MASK_NEAR:-0.0},${DUAL_MASK_FAR:-0.0},w=${DUAL_MASK_WINDOW:-32})" | tee -a "${LOG_PATH}"
+echo "qa_tokens=${QA_TOKENS:-1} qa_layout=${QA_LAYOUT:-split_sep} encdec_arch=${ENCDEC_ARCH:-0} dual_mask=(${DUAL_MASK_NEAR:-0.0},${DUAL_MASK_FAR:-0.0},w=${DUAL_MASK_WINDOW:-32})" | tee -a "${LOG_PATH}"
+echo "optimizer: lr_scheduler=${LR_SCHEDULER:-cosine} warmup_epochs=${WARMUP_EPOCHS} warmup_ratio=${WARMUP_RATIO} min_lr=${MIN_LR:-1e-6} weight_decay=${WEIGHT_DECAY:-0.05}" | tee -a "${LOG_PATH}"
 echo "run_name=${RUN_NAME}" | tee -a "${LOG_PATH}"
 
 python -u -m nepa3d.train.pretrain_patch_nepa \
@@ -59,6 +78,7 @@ python -u -m nepa3d.train.pretrain_patch_nepa \
   --qa_layout "${QA_LAYOUT:-split_sep}" \
   --qa_sep_token "${QA_SEP_TOKEN:-1}" \
   --qa_fuse "${QA_FUSE:-add}" \
+  --encdec_arch "${ENCDEC_ARCH:-0}" \
   --use_pt_dist "${USE_PT_DIST:-1}" \
   --use_pt_grad "${USE_PT_GRAD:-0}" \
   --answer_mlp_layers "${ANSWER_MLP_LAYERS:-2}" \
@@ -79,9 +99,10 @@ python -u -m nepa3d.train.pretrain_patch_nepa \
   --drop_path_rate "${DROP_PATH_RATE:-0.0}" \
   --lr "${LR:-3e-4}" \
   --weight_decay "${WEIGHT_DECAY:-0.05}" \
-  --warmup_epochs "${WARMUP_EPOCHS:-0}" \
+  --warmup_epochs "${WARMUP_EPOCHS}" \
+  --warmup_ratio "${WARMUP_RATIO}" \
   --min_lr "${MIN_LR:-1e-6}" \
-  --lr_scheduler "${LR_SCHEDULER:-none}" \
+  --lr_scheduler "${LR_SCHEDULER:-cosine}" \
   --max_grad_norm "${MAX_GRAD_NORM:-0.0}" \
   --auto_resume "${AUTO_RESUME:-1}" \
   --resume_optimizer "${RESUME_OPTIMIZER:-1}" \

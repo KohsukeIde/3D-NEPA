@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from pathlib import Path
 
 import torch
@@ -15,6 +16,18 @@ import random
 
 from nepa3d.data.mixed_pretrain import build_mixed_pretrain
 from nepa3d.models.patch_nepa import PatchTransformerNepa
+from nepa3d.token.tokenizer import (
+    TYPE_A_POINT,
+    TYPE_A_RAY,
+    TYPE_BOS,
+    TYPE_EOS,
+    TYPE_MISSING_RAY,
+    TYPE_POINT,
+    TYPE_Q_POINT,
+    TYPE_Q_RAY,
+    TYPE_RAY,
+    TYPE_SEP,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -105,9 +118,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch_size", type=int, default=16)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--weight_decay", type=float, default=0.05)
-    p.add_argument("--warmup_epochs", type=int, default=0)
+    p.add_argument(
+        "--warmup_epochs",
+        type=float,
+        default=-1.0,
+        help="Warmup epochs. If <0, resolve from warmup_ratio * epochs.",
+    )
+    p.add_argument("--warmup_ratio", type=float, default=0.025)
     p.add_argument("--min_lr", type=float, default=1e-6)
-    p.add_argument("--lr_scheduler", type=str, default="none", choices=["none", "cosine"])
+    p.add_argument("--lr_scheduler", type=str, default="cosine", choices=["none", "cosine"])
     p.add_argument("--grad_accum", type=int, default=1)
     p.add_argument("--max_grad_norm", type=float, default=0.0)
     # Data augmentation parity knobs (same semantics as Query-NEPA pretrain).
@@ -132,6 +151,7 @@ def save_ckpt(
     save_path: Path,
     model: torch.nn.Module,
     optimizer: optim.Optimizer,
+    scheduler: optim.lr_scheduler._LRScheduler | None,
     epoch: int,
     step: int,
     args: argparse.Namespace,
@@ -144,15 +164,28 @@ def save_ckpt(
         "step": int(step),
         "args": vars(args),
     }
+    if scheduler is not None:
+        payload["scheduler"] = scheduler.state_dict()
     torch.save(payload, str(save_path))
+
+
+def _resolved_warmup_epochs(args: argparse.Namespace) -> float:
+    warmup_epochs = float(args.warmup_epochs)
+    if warmup_epochs >= 0.0:
+        return warmup_epochs
+    warmup_ratio = max(0.0, float(args.warmup_ratio))
+    if warmup_ratio <= 0.0:
+        return 0.0
+    return float(args.epochs) * warmup_ratio
 
 
 def _scheduler_scale(epoch: int, args: argparse.Namespace) -> float:
     if int(args.epochs) <= 1:
         return 1.0
-    if epoch < int(args.warmup_epochs):
-        return float(epoch + 1) / float(max(1, int(args.warmup_epochs)))
-    t = float(epoch - int(args.warmup_epochs)) / float(max(1, int(args.epochs) - int(args.warmup_epochs)))
+    warmup_epochs = _resolved_warmup_epochs(args)
+    if epoch < warmup_epochs:
+        return float(epoch + 1) / float(max(1e-8, warmup_epochs))
+    t = float(epoch - warmup_epochs) / float(max(1e-8, float(args.epochs) - warmup_epochs))
     cosine = 0.5 * (1.0 + torch.cos(torch.tensor(torch.pi * t))).item()
     min_scale = float(args.min_lr) / float(args.lr)
     return min_scale + (1.0 - min_scale) * cosine
@@ -270,6 +303,7 @@ def main() -> None:
     else:
         model, optimizer, train_loader = accelerator.prepare(model, optimizer, train_loader)
 
+    warmup_epochs_resolved = _resolved_warmup_epochs(args)
     mprint(
         "[patch_nepa_pretrain] "
         f"num_processes={accelerator.num_processes} "
@@ -289,6 +323,7 @@ def main() -> None:
         f"batch_per_proc={int(args.batch_size)} grad_accum={int(args.grad_accum)} "
         f"global_batch={int(args.batch_size) * int(accelerator.num_processes) * int(args.grad_accum)} "
         f"lr={float(args.lr):.3e} scheduler={str(args.lr_scheduler)} "
+        f"warmup_epochs={warmup_epochs_resolved:.3f} warmup_ratio={float(args.warmup_ratio):.4f} "
         f"qk_norm={int(args.qk_norm)} qk_norm_affine={int(args.qk_norm_affine)} qk_norm_bias={int(args.qk_norm_bias)} "
         f"layerscale={float(args.layerscale_value):.2e} rope_theta={float(args.rope_theta):g} "
         f"aug_rotate_z={int(args.aug_rotate_z)} aug_scale=[{float(args.aug_scale_min):.3f},{float(args.aug_scale_max):.3f}] "
@@ -303,6 +338,8 @@ def main() -> None:
         accelerator.unwrap_model(model).load_state_dict(ckpt.get("model", ckpt), strict=False)
         if bool(int(args.resume_optimizer)) and ("optimizer" in ckpt):
             optimizer.load_state_dict(ckpt["optimizer"])
+        if bool(int(args.resume_optimizer)) and (scheduler is not None) and ("scheduler" in ckpt):
+            scheduler.load_state_dict(ckpt["scheduler"])
         start_epoch = int(ckpt.get("epoch", 0)) + 1
         global_step = int(ckpt.get("step", start_epoch * max(1, len(train_loader))))
         mprint(f"[resume] loaded={resume_path} start_epoch={start_epoch} step={global_step}")
@@ -311,6 +348,7 @@ def main() -> None:
 
     total_steps = max(1, int(args.epochs) * max(1, len(train_loader)))
     warmup_steps = max(1, int(float(args.dual_mask_warmup_frac) * float(total_steps)))
+    printed_token_sanity = False
 
     for epoch in range(start_epoch, int(args.epochs)):
         model.train()
@@ -344,6 +382,26 @@ def main() -> None:
                     dual_mask_window=int(args.dual_mask_window),
                     dual_mask_type_aware=int(args.dual_mask_type_aware),
                 )
+                if (not printed_token_sanity) and (global_step == 0) and accelerator.is_main_process:
+                    c = Counter(out.type_id[0].detach().cpu().tolist())
+                    sanity_items = [
+                        ("BOS", TYPE_BOS),
+                        ("EOS", TYPE_EOS),
+                        ("POINT", TYPE_POINT),
+                        ("RAY", TYPE_RAY),
+                        ("Q_POINT", TYPE_Q_POINT),
+                        ("A_POINT", TYPE_A_POINT),
+                        ("Q_RAY", TYPE_Q_RAY),
+                        ("A_RAY", TYPE_A_RAY),
+                        ("SEP", TYPE_SEP),
+                        ("MISSING_RAY", TYPE_MISSING_RAY),
+                    ]
+                    print("\n" + "=" * 56)
+                    print("[Sanity Check] step=0 token counts (sample 0)")
+                    for name, tid in sanity_items:
+                        print(f"  {name:12s} ({int(tid):2d}): {int(c.get(int(tid), 0))}")
+                    print("=" * 56 + "\n")
+                    printed_token_sanity = True
                 loss = PatchTransformerNepa.nepa_loss(out.z, out.z_hat, out.type_id)
                 accelerator.backward(loss)
                 if float(args.max_grad_norm) > 0:
@@ -367,6 +425,7 @@ def main() -> None:
                 save_root / f"ckpt_epoch_{epoch:04d}.pt",
                 accelerator.unwrap_model(model),
                 optimizer,
+                scheduler,
                 epoch,
                 global_step,
                 args,
@@ -375,6 +434,7 @@ def main() -> None:
                 save_root / "ckpt_latest.pt",
                 accelerator.unwrap_model(model),
                 optimizer,
+                scheduler,
                 epoch,
                 global_step,
                 args,

@@ -68,6 +68,7 @@ QA_TOKENS="${QA_TOKENS:-1}"
 QA_LAYOUT="${QA_LAYOUT:-split_sep}"
 QA_SEP_TOKEN="${QA_SEP_TOKEN:-1}"
 QA_FUSE="${QA_FUSE:-add}"
+ENCDEC_ARCH="${ENCDEC_ARCH:-0}"
 USE_PT_DIST="${USE_PT_DIST:-1}"
 USE_PT_GRAD="${USE_PT_GRAD:-0}"
 ANSWER_MLP_LAYERS="${ANSWER_MLP_LAYERS:-2}"
@@ -82,12 +83,14 @@ DUAL_MASK_WINDOW="${DUAL_MASK_WINDOW:-32}"
 DUAL_MASK_TYPE_AWARE="${DUAL_MASK_TYPE_AWARE:-0}"
 DUAL_MASK_WARMUP_FRAC="${DUAL_MASK_WARMUP_FRAC:-0.05}"
 
-WARMUP_EPOCHS="${WARMUP_EPOCHS:-0}"
+WARMUP_EPOCHS="${WARMUP_EPOCHS:-}"
+WARMUP_RATIO="${WARMUP_RATIO:-0.025}"
 MIN_LR="${MIN_LR:-1e-6}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-0.05}"
 MAX_GRAD_NORM="${MAX_GRAD_NORM:-0.0}"
 GRAD_ACCUM="${GRAD_ACCUM:-1}"
-LR_SCHEDULER="${LR_SCHEDULER:-none}"   # none|cosine (Query parity: none)
+LR_SCHEDULER="${LR_SCHEDULER:-cosine}"   # none|cosine
+STAGE2_STRICT_LR_POLICY="${STAGE2_STRICT_LR_POLICY:-1}"
 AUTO_RESUME="${AUTO_RESUME:-1}"
 RESUME_OPTIMIZER="${RESUME_OPTIMIZER:-1}"
 RESUME="${RESUME:-}"
@@ -118,6 +121,22 @@ mkdir -p "${LOG_ROOT}"
 mkdir -p "$(dirname "${SAVE_DIR}")"
 cd "${WORKDIR}"
 
+if [[ "${STAGE2_STRICT_LR_POLICY}" == "1" ]]; then
+  LR_SCHEDULER="cosine"
+  if [[ -z "${WARMUP_EPOCHS}" ]]; then
+    WARMUP_RATIO="0.025"
+  fi
+fi
+
+if [[ -z "${WARMUP_EPOCHS}" ]]; then
+  WARMUP_EPOCHS="$(python - <<PY
+epochs=float("${EPOCHS}")
+ratio=float("${WARMUP_RATIO}")
+print(max(0.0, epochs * max(0.0, ratio)))
+PY
+)"
+fi
+
 if [[ -f "${VENV_ACTIVATE}" ]]; then
   # shellcheck disable=SC1090
   source "${VENV_ACTIVATE}"
@@ -138,11 +157,11 @@ echo "save_dir=${SAVE_DIR}" | tee -a "${LOG_PATH}"
 echo "n_point=${N_POINT} n_ray=${N_RAY} use_ray_patch=${USE_RAY_PATCH} ray_assign=${RAY_ASSIGN_MODE} ray_pool=${RAY_POOL_MODE} include_ray_unc=${INCLUDE_RAY_UNC}" | tee -a "${LOG_PATH}"
 echo "patch_embed=${PATCH_EMBED} group_size=${GROUP_SIZE} num_groups=${NUM_GROUPS} serial_order=${SERIAL_ORDER}" | tee -a "${LOG_PATH}"
 echo "pt_xyz_key=${PT_XYZ_KEY} pt_dist_key=${PT_DIST_KEY} ablate_point_dist=${ABLATE_POINT_DIST} pt_sample_mode=${PT_SAMPLE_MODE} pt_fps_key=${PT_FPS_KEY} pt_rfps_key=${PT_RFPS_KEY} pt_rfps_m=${PT_RFPS_M} point_order_mode=${POINT_ORDER_MODE}" | tee -a "${LOG_PATH}"
-echo "qa: tokens=${QA_TOKENS} layout=${QA_LAYOUT} sep=${QA_SEP_TOKEN} fuse=${QA_FUSE} use_pt_dist=${USE_PT_DIST} use_pt_grad=${USE_PT_GRAD}" | tee -a "${LOG_PATH}"
+echo "qa: tokens=${QA_TOKENS} layout=${QA_LAYOUT} sep=${QA_SEP_TOKEN} fuse=${QA_FUSE} encdec_arch=${ENCDEC_ARCH} use_pt_dist=${USE_PT_DIST} use_pt_grad=${USE_PT_GRAD}" | tee -a "${LOG_PATH}"
 echo "dual_mask: near=${DUAL_MASK_NEAR} far=${DUAL_MASK_FAR} window=${DUAL_MASK_WINDOW} type_aware=${DUAL_MASK_TYPE_AWARE} warmup_frac=${DUAL_MASK_WARMUP_FRAC}" | tee -a "${LOG_PATH}"
 echo "epochs=${EPOCHS} batch=${BATCH} lr=${LR}" | tee -a "${LOG_PATH}"
 echo "backbone_mode=${BACKBONE_MODE} qk_norm=${QK_NORM} qk_norm_affine=${QK_NORM_AFFINE} qk_norm_bias=${QK_NORM_BIAS} layerscale=${LAYERSCALE_VALUE} rope_theta=${ROPE_THETA}" | tee -a "${LOG_PATH}"
-echo "optimizer: weight_decay=${WEIGHT_DECAY} max_grad_norm=${MAX_GRAD_NORM} lr_scheduler=${LR_SCHEDULER} warmup_epochs=${WARMUP_EPOCHS} min_lr=${MIN_LR}" | tee -a "${LOG_PATH}"
+echo "optimizer: weight_decay=${WEIGHT_DECAY} max_grad_norm=${MAX_GRAD_NORM} lr_scheduler=${LR_SCHEDULER} warmup_epochs=${WARMUP_EPOCHS} warmup_ratio=${WARMUP_RATIO} min_lr=${MIN_LR}" | tee -a "${LOG_PATH}"
 echo "resume: auto_resume=${AUTO_RESUME} resume_optimizer=${RESUME_OPTIMIZER} resume=${RESUME}" | tee -a "${LOG_PATH}"
 echo "aug: rotate_z=${AUG_ROTATE_Z} scale=[${AUG_SCALE_MIN},${AUG_SCALE_MAX}] translate=${AUG_TRANSLATE} jitter_sigma=${AUG_JITTER_SIGMA} jitter_clip=${AUG_JITTER_CLIP} recompute_dist=${AUG_RECOMPUTE_DIST}" | tee -a "${LOG_PATH}"
 echo "ddp: num_processes=${NUM_PROCESSES} num_machines=${NUM_MACHINES} machine_rank=${MACHINE_RANK}" | tee -a "${LOG_PATH}"
@@ -171,6 +190,7 @@ TRAIN_ARGS=(
   --qa_layout "${QA_LAYOUT}"
   --qa_sep_token "${QA_SEP_TOKEN}"
   --qa_fuse "${QA_FUSE}"
+  --encdec_arch "${ENCDEC_ARCH}"
   --use_pt_dist "${USE_PT_DIST}"
   --use_pt_grad "${USE_PT_GRAD}"
   --answer_mlp_layers "${ANSWER_MLP_LAYERS}"
@@ -208,6 +228,7 @@ TRAIN_ARGS=(
   --use_gated_mlp "${USE_GATED_MLP}"
   --hidden_act "${HIDDEN_ACT}"
   --warmup_epochs "${WARMUP_EPOCHS}"
+  --warmup_ratio "${WARMUP_RATIO}"
   --min_lr "${MIN_LR}"
   --lr_scheduler "${LR_SCHEDULER}"
   --weight_decay "${WEIGHT_DECAY}"
