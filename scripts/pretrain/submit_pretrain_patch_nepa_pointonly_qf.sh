@@ -47,7 +47,7 @@ AUG_JITTER_CLIP="${AUG_JITTER_CLIP:-0.0}"
 AUG_RECOMPUTE_DIST="${AUG_RECOMPUTE_DIST:-0}"
 
 MIX_CONFIG="${MIX_CONFIG:-nepa3d/configs/pretrain_mixed_shapenet_pointcloud_only_onepass.yaml}"
-PT_XYZ_KEY="${PT_XYZ_KEY:-pc_xyz}"
+PT_XYZ_KEY="${PT_XYZ_KEY:-pt_xyz_pool}"
 PT_DIST_KEY="${PT_DIST_KEY:-pt_dist_pool}"
 ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
 PT_SAMPLE_MODE="${PT_SAMPLE_MODE:-rfps_cached}"

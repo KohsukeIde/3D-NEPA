@@ -31,7 +31,7 @@ python -u -m nepa3d.train.pretrain_patch_nepa \
   --n_point "${N_POINT:-1024}" \
   --n_ray "${N_RAY:-0}" \
   --num_workers "${NUM_WORKERS:-8}" \
-  --pt_xyz_key "${PT_XYZ_KEY:-pc_xyz}" \
+  --pt_xyz_key "${PT_XYZ_KEY:-pt_xyz_pool}" \
   --pt_dist_key "${PT_DIST_KEY:-pt_dist_pool}" \
   --ablate_point_dist "${ABLATE_POINT_DIST:-0}" \
   --pt_sample_mode "${PT_SAMPLE_MODE:-rfps_cached}" \

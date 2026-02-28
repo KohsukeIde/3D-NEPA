@@ -295,6 +295,45 @@ def _adapt_legacy_querynepa_to_patchcls_nepa2d(
     return out, stats
 
 
+def _adapt_patchnepa_pretrain_to_patchcls(
+    source_state: Dict[str, torch.Tensor],
+    target_state: Dict[str, torch.Tensor],
+) -> Tuple[Dict[str, torch.Tensor], Dict[str, int]]:
+    """Map PatchNEPA-pretrain checkpoint keys into PatchCls classifier keys.
+
+    Key intent:
+    - carry over shared backbone/patch-embed weights,
+    - map `bos_token` (pretrain) -> `cls_token` (classifier),
+    - ignore pretrain-only heads/tokens safely.
+    """
+    out: Dict[str, torch.Tensor] = {}
+    direct = 0
+    mapped = 0
+
+    # direct key/shape matches first
+    for k, v in source_state.items():
+        tv = target_state.get(k, None)
+        if tv is not None and tuple(tv.shape) == tuple(v.shape):
+            out[k] = v
+            direct += 1
+
+    # explicit remaps
+    bos = source_state.get("bos_token", None)
+    cls = target_state.get("cls_token", None)
+    if bos is not None and cls is not None and tuple(bos.shape) == tuple(cls.shape):
+        out["cls_token"] = bos
+        mapped += 1
+
+    stats = {
+        "direct": int(direct),
+        "mapped": int(mapped),
+        "total_to_load": int(len(out)),
+        "src_total": int(len(source_state)),
+        "dst_total": int(len(target_state)),
+    }
+    return out, stats
+
+
 def _resolve_scan_h5_files(scan_h5_root: str, scan_variant: str) -> Tuple[Path, Path]:
     root = Path(scan_h5_root)
     if not root.exists():
@@ -701,6 +740,18 @@ def main() -> None:
         ckpt = torch.load(args.ckpt, map_location="cpu")
         state = ckpt.get("model", ckpt)
         state_to_load = state
+        # Prefer PatchNEPA->PatchCls adaptation when the pretrain checkpoint uses
+        # BOS token naming (PatchNEPA) and classifier expects CLS token.
+        if args.model_source == "patchcls":
+            adapted_patchnepa, patchnepa_stats = _adapt_patchnepa_pretrain_to_patchcls(state, model.state_dict())
+            if patchnepa_stats["mapped"] > 0:
+                state_to_load = adapted_patchnepa
+                if accelerator.is_main_process:
+                    print(
+                        "[ckpt-adapt] patchnepa->patchcls "
+                        f"mapped={patchnepa_stats['mapped']} direct={patchnepa_stats['direct']} "
+                        f"load={patchnepa_stats['total_to_load']} src={patchnepa_stats['src_total']} dst={patchnepa_stats['dst_total']}"
+                    )
         if args.model_source == "patchcls" and args.backbone_mode == "nepa2d":
             adapted, stats = _adapt_legacy_querynepa_to_patchcls_nepa2d(state, model.state_dict())
             if stats["mapped"] > 0:
