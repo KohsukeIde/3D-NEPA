@@ -74,6 +74,8 @@ HEAD_HIDDEN_DIM="${HEAD_HIDDEN_DIM:-256}"
 HEAD_DROPOUT="${HEAD_DROPOUT:-0.5}"
 INIT_MODE="${INIT_MODE:-default}"  # default | pointmae
 AUG_PRESET="${AUG_PRESET:-pointmae}"  # none | default | strong | pointmae
+AUG_EVAL="${AUG_EVAL:-1}"             # 0 | 1 (policy default: 1)
+MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-10}" # policy default: 10
 
 SAVE_DIR="${SAVE_DIR:-runs/patchcls}"
 VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}"  # file | group_auto | group_scanobjectnn | pointmae
@@ -138,6 +140,8 @@ ARGS=(
   --serial_bits "${SERIAL_BITS}"
   --serial_shuffle_within_patch "${SERIAL_SHUFFLE_WITHIN_PATCH}"
   --aug_preset "${AUG_PRESET}"
+  --aug_eval "${AUG_EVAL}"
+  --mc_eval_k_test "${MC_EVAL_K_TEST}"
   --val_ratio "${VAL_RATIO}"
   --val_seed "${VAL_SEED}"
   --val_split_mode "${VAL_SPLIT_MODE}"
@@ -165,7 +169,7 @@ ARGS=(
 )
 
 echo "[patchcls] data_format=${DATA_FORMAT} variant=${SCAN_VARIANT} run_name=${RUN_NAME}"
-echo "[patchcls] nproc_per_node=${NPROC_PER_NODE} batch=${BATCH} batch_mode=${BATCH_MODE}"
+echo "[patchcls] nproc_per_node=${NPROC_PER_NODE} batch=${BATCH} batch_mode=${BATCH_MODE} aug_eval=${AUG_EVAL} mc_test=${MC_EVAL_K_TEST}"
 
 if [[ "${NPROC_PER_NODE}" -gt 1 ]]; then
   "${PYTHON_BIN}" -m torch.distributed.run \

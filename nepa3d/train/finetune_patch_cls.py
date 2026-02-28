@@ -100,8 +100,18 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--aug_rot_deg", type=float, default=180.0)
     p.add_argument("--aug_dropout_ratio", type=float, default=0.0)
     p.add_argument("--aug_dropout_prob", type=float, default=0.0)
-    p.add_argument("--aug_eval", type=int, default=0, help="Apply augmentation during eval (TTA).")
-    p.add_argument("--mc_eval_k_test", type=int, default=1, help="MC crops at test time (K>1 averages logits).")
+    p.add_argument(
+        "--aug_eval",
+        type=int,
+        default=1,
+        help="Apply augmentation during eval (TTA). Default on by policy.",
+    )
+    p.add_argument(
+        "--mc_eval_k_test",
+        type=int,
+        default=10,
+        help="MC crops at test time (K>1 averages logits). Default 10 by policy.",
+    )
 
     # Model
     p.add_argument(
