@@ -172,9 +172,10 @@ class PatchTransformerClassifier(nn.Module):
 
         if self.use_ray_patch:
             # Per-ray encoder over local geometric relation to assigned point patch center.
-            # Input = [x_anchor-center (3), ray_d (3), ray_hit (1), ray_t (1)] = 8 dims.
+            # Query-only input (no answer-side ray targets):
+            # [x_proxy-center (3), ray_d (3)] = 6 dims.
             self.ray_encoder = nn.Sequential(
-                nn.Linear(8, int(ray_hidden_dim)),
+                nn.Linear(6, int(ray_hidden_dim)),
                 nn.GELU(),
                 nn.Linear(int(ray_hidden_dim), d_model),
             )
@@ -251,22 +252,15 @@ class PatchTransformerClassifier(nn.Module):
         self,
         ray_o: torch.Tensor,
         ray_d: torch.Tensor,
-        ray_t: torch.Tensor,
-        ray_hit: torch.Tensor,
     ) -> torch.Tensor:
-        # hit ray: x = o + t*d, miss ray: x = o + miss_t*d
-        hit_mask = (ray_hit > float(self.ray_hit_threshold)).to(ray_o.dtype).unsqueeze(-1)
-        x_hit = ray_o + ray_t.unsqueeze(-1) * ray_d
-        x_miss = ray_o + float(self.ray_miss_t) * ray_d
-        return hit_mask * x_hit + (1.0 - hit_mask) * x_miss
+        # Query-only proxy anchor: do not use answer-side hit/t fields.
+        return ray_o + float(self.ray_miss_t) * ray_d
 
     def _pool_rays_to_patches(
         self,
         centers_xyz: torch.Tensor,
         ray_o: torch.Tensor,
         ray_d: torch.Tensor,
-        ray_t: torch.Tensor,
-        ray_hit: torch.Tensor,
     ) -> torch.Tensor:
         """Pool encoded ray features into point patches by nearest center assignment."""
         B, G, _ = centers_xyz.shape
@@ -275,7 +269,7 @@ class PatchTransformerClassifier(nn.Module):
         if ray_o is None or ray_o.numel() == 0:
             return pooled
 
-        ray_anchor = self._build_ray_anchor(ray_o, ray_d, ray_t, ray_hit)  # (B,R,3)
+        ray_anchor = self._build_ray_anchor(ray_o, ray_d)  # (B,R,3)
         for b in range(B):
             if ray_anchor[b].numel() == 0:
                 continue
@@ -288,8 +282,6 @@ class PatchTransformerClassifier(nn.Module):
                 [
                     ray_anchor[b] - ctr,
                     ray_d[b],
-                    ray_hit[b].unsqueeze(-1),
-                    ray_t[b].unsqueeze(-1),
                 ],
                 dim=-1,
             )
@@ -321,9 +313,9 @@ class PatchTransformerClassifier(nn.Module):
         B, G, D = x.shape
 
         if self.use_ray_patch:
-            if (ray_o is None) or (ray_d is None) or (ray_t is None) or (ray_hit is None):
-                raise ValueError("use_ray_patch=True requires ray_o/ray_d/ray_t/ray_hit inputs")
-            ray_tok = self._pool_rays_to_patches(centers_xyz, ray_o, ray_d, ray_t, ray_hit)  # (B,G,D)
+            if (ray_o is None) or (ray_d is None):
+                raise ValueError("use_ray_patch=True requires ray_o/ray_d inputs")
+            ray_tok = self._pool_rays_to_patches(centers_xyz, ray_o, ray_d)  # (B,G,D)
             if self.ray_fuse_mode == "add":
                 x = x + ray_tok
             else:

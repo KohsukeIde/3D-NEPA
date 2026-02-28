@@ -1,6 +1,6 @@
 # ScanObjectNN Variant Benchmark (Active Canonical)
 
-Last updated: 2026-02-27
+Last updated: 2026-03-01
 
 ## 1. Scope
 
@@ -546,7 +546,7 @@ File-split scratch references (strict line):
 - jobs:
   - `100028` (`obj_bg_nepa2d`) done (`Exit_status=0`)
   - `100029` (`obj_only_nepa2d`) done (`Exit_status=0`)
-  - `100030` (`pb_t50_rs_nepa2d`) running
+  - `100030` (`pb_t50_rs_nepa2d`) log has `TEST acc=0.7078` (queue state was `R` at capture time)
 - fixed recipe:
   - `val_split_mode=file`, `aug_eval=1`, `mc_test=10`, `backbone_mode=nepa2d`
 
@@ -556,7 +556,7 @@ Current results:
 |---|---:|
 | `obj_bg` | 0.7401 |
 | `obj_only` | 0.7849 |
-| `pb_t50_rs` | pending |
+| `pb_t50_rs` | 0.7078 (provisional) |
 
 vs scratch reference (`file + TTA`, nepa2d):
 
@@ -564,7 +564,7 @@ vs scratch reference (`file + TTA`, nepa2d):
 |---|---:|---:|---:|
 | `obj_bg` | 0.7625 | 0.7401 | -0.0224 |
 | `obj_only` | 0.7849 | 0.7849 | +0.0000 |
-| `pb_t50_rs` | pending | pending | pending |
+| `pb_t50_rs` | pending | 0.7078 | pending |
 
 ## 9. Scratch recheck (strict `file` + TTA10) partial snapshot
 
@@ -607,6 +607,43 @@ point-only encdec split recipe as `100027`, with scheduler change only:
   - `qa_tokens=1`, `qa_layout=split_sep`, `encdec_arch=1`
   - `batch_per_proc=8`, `num_processes=16` (`global_batch=128`)
 
+Update:
+
+- `100042` is invalid for comparison due to scheduler stepping bug (LR oscillation).
+- replacement run:
+  - `100045.qjcm`
+  - `patchnepa_pointonly_ddp16_encdec_split_cosine_fixsched_20260301_001200`
+  - early epoch 1-5 trend (rank0):
+    - `epoch1`: `lr=2.40e-04`, `loss_avg=0.0135`
+    - `epoch2`: `lr=3.00e-04`, `loss_avg=0.0844`
+    - `epoch3`: `lr=3.00e-04`, `loss_avg=0.1625`
+    - `epoch4`: `lr=3.00e-04`, `loss_avg=0.2124`
+    - `epoch5`: `lr=3.00e-04`, `loss_avg=0.2176`
+
+## 11. Important comparability note (`ptonly_onepass` vs `pt16_rfpsbank`)
+
+The two Stage-2 FT blocks above are not a strict same-pretrain-recipe A/B.
+
+Pretrain side differs:
+
+- `ptonly_onepass` lineage (`99710`):
+  - `PT_XYZ_KEY=pc_xyz`
+  - `ABLATE_POINT_DIST=1`
+  - `8 GPU x batch16` (`global_batch=128`)
+- `pt16_rfpsbank` lineage (`100010`):
+  - `PT_XYZ_KEY=pt_xyz_pool`
+  - `ABLATE_POINT_DIST=0`
+  - `16 GPU x batch8` (`global_batch=128`)
+
+Finetune side check:
+
+- `args.json` comparison for FT runs shows recipe parity; practical difference is ckpt path.
+
+Therefore:
+
+- the observed FT delta is interpreted as **pretrain-ckpt content/config difference**,
+  not FT recipe drift.
+
 Source logs:
 
 - `logs/sanity/patchcls/patchcls_ft_from_patchnepa_ptonly_onepass_20260228_222007/obj_bg_nepa2d.out`
@@ -620,3 +657,27 @@ Source logs:
 - `logs/sanity/patchcls/patchcls_scratch_file_tta10_vanilla_recheck_20260228_233118/obj_only_vanilla.out`
 - `logs/sanity/patchcls/patchcls_obj_bg_pmalign_splitfile_20260227_223435/obj_bg.out`
 - `logs/sanity/patchcls/patchcls_objonly_factor4_20260228_070858/pcf_b_file.out`
+
+## 12. Ray-enabled FT (`query-only ray`) result snapshot (2026-03-01)
+
+Run set:
+
+- `logs/sanity/patchcls/patchnepa_rayqa_ft_from100011_queryonly_20260301_002508`
+- recipe summary:
+  - `USE_RAY_PATCH=1`
+  - query-only ray path (`ray_o/ray_d` only; no `ray_t/ray_hit` in ray encoder)
+  - `val_split_mode=file`, `aug_eval=1`, `mc_test=10`, backbone=`nepa2d`
+
+Job status/result snapshot:
+
+- `100073` (`obj_bg`): done, `TEST acc=0.7281`
+- `100074` (`obj_only`): done, `TEST acc=0.7762`
+- `100075` (`pb_t50_rs`): running (`ep 128/300` at snapshot), `TEST acc` pending
+
+Result table (completed rows only):
+
+| variant | PatchNEPA-RayQA -> PatchCls (`file + TTA10`) |
+|---|---:|
+| `obj_bg` | 0.7281 |
+| `obj_only` | 0.7762 |
+| `pb_t50_rs` | pending |

@@ -37,7 +37,7 @@ PT_DIST_KEY="${PT_DIST_KEY:-pt_dist_pool}"
 ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
 PT_SAMPLE_MODE="${PT_SAMPLE_MODE:-rfps_cached}"
 PT_FPS_KEY="${PT_FPS_KEY:-auto}"
-PT_RFPS_KEY="${PT_RFPS_KEY:-auto}"
+PT_RFPS_KEY="${PT_RFPS_KEY:-pt_rfps_order_bank}"
 PT_RFPS_M="${PT_RFPS_M:-4096}"
 POINT_ORDER_MODE="${POINT_ORDER_MODE:-morton}"
 

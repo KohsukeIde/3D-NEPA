@@ -1,6 +1,6 @@
 # Patch-NEPA Runlog (2026-02)
 
-Last updated: 2026-02-28
+Last updated: 2026-03-01
 
 Track note:
 
@@ -268,7 +268,7 @@ Update (partial completion):
 
 - `100028.qjcm` -> `Exit_status=0`, `TEST acc=0.7401` (`obj_bg`)
 - `100029.qjcm` -> `Exit_status=0`, `TEST acc=0.7849` (`obj_only`)
-- `100030.qjcm` (`pb_t50_rs`) remains running at this snapshot.
+- `100030.qjcm` (`pb_t50_rs`) log already shows `TEST acc=0.7078` (queue state was still `R` at capture time; treat as provisional until `F`).
 
 ## 10. Scheduler-policy default lock + controlled LR comparison (2026-02-28)
 
@@ -327,3 +327,171 @@ Status after fix:
   - `100045.qjcm` (`patchnepa_ptE16cf`)
   - run set:
     - `patchnepa_pointonly_ddp16_encdec_split_cosine_fixsched_20260301_001200`
+
+## 11. Run1 vs Run2 comparability audit (2026-03-01)
+
+Question:
+
+- why `Run1 (ptonly_onepass)` improved FT while `Run2 (pt16_rfpsbank)` did not?
+
+Key finding:
+
+- this is **not** a clean same-recipe A/B. Pretrain settings differ materially.
+
+Run-1 pretrain (`99710.qjcm`, 8 GPU):
+
+- ckpt:
+  - `runs/patchnepa_pointonly/run_pointonly_patchnepa_onepass_rfpsbank_20260228_180841/ckpt_latest.pt`
+- effective pretrain settings (from `qstat -xf` / log header):
+  - `PT_XYZ_KEY=pc_xyz`
+  - `PT_DIST_KEY=pt_dist_pool`
+  - `ABLATE_POINT_DIST=1`
+  - `PT_SAMPLE_MODE=rfps_cached`
+  - `BATCH=16` per proc, `num_processes=8` (`global_batch=128`)
+
+Run-2 pretrain (`100010.qjcm`, 16 GPU):
+
+- ckpt:
+  - `runs/patchnepa_pointonly/patchnepa_ptonly_ddp16_rfpsbank_20260228_223103/ckpt_latest.pt`
+- effective pretrain settings:
+  - `PT_XYZ_KEY=pt_xyz_pool`
+  - `PT_DIST_KEY=pt_dist_pool`
+  - `ABLATE_POINT_DIST=0`
+  - `PT_SAMPLE_MODE=rfps_cached`
+  - `BATCH=8` per proc, `num_processes=16` (`global_batch=128`)
+
+Finetune comparability check:
+
+- FT args between
+  - `runs/sanity/patchcls/patchcls_obj_bg_nepa2d_patchcls_ft_from_patchnepa_ptonly_onepass_20260228_222007/args.json`
+  - `runs/sanity/patchcls/patchcls_obj_bg_nepa2d_patchcls_ft_from_patchnepa_pt16_rfpsbank_20260228_231732/args.json`
+- differ effectively only in `ckpt` path (same `val_split_mode=file`, same TTA/vote settings).
+
+Interpretation:
+
+- observed FT gap is attributable to **pretrain ckpt content/config drift**, not FT recipe drift.
+- do not conclude "DDP16 is worse" from this pair.
+
+## 12. `100045` early-phase LR/loss check (requested follow-up)
+
+Run:
+
+- `100045.qjcm`
+- log:
+  - `logs/patch_nepa_pretrain/patchnepa_pointonly_ddp16_encdec_split_cosine_fixsched_20260301_001200/patchnepa_pointonly_ddp16_encdec_split_cosine_fixsched_20260301_001200.mr0.log`
+
+Epoch 1-5 summary (rank0 step logs):
+
+- `epoch1`: `lr=2.40e-04`, `loss_avg=0.013500`, `loss_last=0.020427`
+- `epoch2`: `lr=3.00e-04`, `loss_avg=0.084359`, `loss_last=0.144582`
+- `epoch3`: `lr=3.00e-04`, `loss_avg=0.162487`, `loss_last=0.188165`
+- `epoch4`: `lr=3.00e-04`, `loss_avg=0.212389`, `loss_last=0.228000`
+- `epoch5`: `lr=3.00e-04`, `loss_avg=0.217572`, `loss_last=0.215163`
+
+Status:
+
+- scheduler bug itself (oscillatory LR from double stepping) is fixed.
+- early loss trend remains unstable/high, so efficacy judgment must wait for full run + FT.
+
+## 13. Meaningless-run cleanup + resubmit (`100047`, 2026-03-01)
+
+User request:
+
+- stop currently running non-comparable jobs and relaunch with comparable settings.
+
+Queue status at cleanup:
+
+- no stale Stage-2 run remained in `qstat`; active run is only:
+  - `100047.qjcm` (`patchnepa_ptE16r1`)
+
+Relaunch (comparison-oriented point-only run):
+
+- job: `100047.qjcm`
+- run set:
+  - `patchnepa_pointonly_ddp16_cmp_run1cfg_20260301_001213`
+- logs:
+  - `logs/patch_nepa_pretrain/patchnepa_pointonly_ddp16_cmp_run1cfg_20260301_001213/run_pointonly_patchnepa_pointonly_ddp16_cmp_run1cfg_20260301_001213.mr0.log`
+  - `logs/patch_nepa_pretrain/patchnepa_pointonly_ddp16_cmp_run1cfg_20260301_001213/run_pointonly_patchnepa_pointonly_ddp16_cmp_run1cfg_20260301_001213.pbs.log`
+
+Confirmed effective settings from startup log:
+
+- topology: `16 GPU` (`4 nodes x 4`)
+- patch: `fps_knn`, `num_groups=64`, `group_size=32`
+- sample: `pt_sample_mode=rfps_cached` (`pt_rfps_key=auto`)
+- keys: `pt_xyz_key=pc_xyz`, `pt_dist_key=pt_dist_pool`, `ablate_point_dist=1`
+- sequence: `qa_tokens=1`, `qa_layout=split_sep`, `encdec_arch=1`
+- global batch: `128` (`8 x 16 x 1`)
+
+Stage-2 sanity gate (step 0 token count) passed:
+
+- `Q_POINT=64`, `A_POINT=64`, `SEP=1`, `BOS=1`, `EOS=1`, `Q_RAY=0`, `A_RAY=0`
+
+Early optimization signal (mr0 log):
+
+- `[epoch 000 step 000000] loss=1.00048, lr=1.20e-04`
+- `[epoch 000 step 000050] loss=2.35e-03`
+- `[epoch 002 step 000800] loss=2.64e-03`
+
+Interpretation:
+
+- run is healthy (no zero-loss collapse, no token-layout mismatch), and Stage-2 pretrain is progressing normally.
+
+## 14. Ray FT protocol fix (query-only ray inputs) + resubmit (2026-03-01)
+
+Issue:
+
+- previous Ray FT launch (`100069/100070/100071`) used `USE_RAY_PATCH=1`, but
+  classifier ray branch still consumed `ray_t/ray_hit` (answer-side fields).
+- this violates strict finetune protocol where ray branch must use query-only
+  information (`ray_o/ray_d`) and not answer-like targets.
+
+Code fix applied:
+
+- `nepa3d/models/patch_classifier.py`
+  - ray encoder input changed to query-only:
+    - `[x_proxy-center (3), ray_d (3)]` (6 dims)
+  - proxy anchor now uses `ray_o + ray_miss_t * ray_d` only
+  - removed `ray_t/ray_hit` usage from ray-patch pooling features
+  - `use_ray_patch=True` now requires only `ray_o/ray_d`
+- `nepa3d/data/cls_patch_dataset.py`
+  - ray-required keys relaxed to `ray_o_pool/ray_d_pool`
+  - `ray_t/ray_hit` are optional outputs when present
+- `nepa3d/train/finetune_patch_cls.py`
+  - train/eval checks updated to require only `ray_o/ray_d`
+  - `ray_t/ray_hit` optional pass-through only
+  - startup log now prints `ray_query_only=1`
+
+Job handling:
+
+- invalid Ray FT jobs were cancelled:
+  - `100069.qjcm`, `100070.qjcm`, `100071.qjcm`
+- query-only Ray FT relaunched:
+  - `100073.qjcm` (`obj_bg`, `nepa2d`)
+  - `100074.qjcm` (`obj_only`, `nepa2d`)
+  - `100075.qjcm` (`pb_t50_rs`, `nepa2d`)
+- run set:
+  - `patchnepa_rayqa_ft_from100011_queryonly_20260301_002508`
+- logs:
+  - `logs/sanity/patchcls/patchnepa_rayqa_ft_from100011_queryonly_20260301_002508`
+
+Relaunch recipe snapshot:
+
+- ckpt:
+  - `runs/patchnepa_pointonly/patchnepa_rayqa_ddp16_rfpsbank_20260228_223103/ckpt_latest.pt`
+- `USE_RAY_PATCH=1`, `N_RAY=1024`
+- `RAY_SAMPLE_MODE_TRAIN=random`, `RAY_SAMPLE_MODE_EVAL=first`
+- `VAL_SPLIT_MODE=file`
+- `AUG_EVAL=1`, `MC_EVAL_K_TEST=10`
+
+Latest status update (2026-03-01 02:50 JST snapshot):
+
+- This run set is **Ray-enabled FT** (`USE_RAY_PATCH=1`, query-only ray inputs).
+- completed:
+  - `100073.qjcm` (`obj_bg`): `TEST acc=0.7281`
+  - `100074.qjcm` (`obj_only`): `TEST acc=0.7762`
+- running:
+  - `100075.qjcm` (`pb_t50_rs`): epoch progress continues (`ep 128/300` at snapshot), no `TEST acc` yet.
+- log files:
+  - `logs/sanity/patchcls/patchnepa_rayqa_ft_from100011_queryonly_20260301_002508/obj_bg_nepa2d.out`
+  - `logs/sanity/patchcls/patchnepa_rayqa_ft_from100011_queryonly_20260301_002508/obj_only_nepa2d.out`
+  - `logs/sanity/patchcls/patchnepa_rayqa_ft_from100011_queryonly_20260301_002508/pb_t50_rs_nepa2d.out`

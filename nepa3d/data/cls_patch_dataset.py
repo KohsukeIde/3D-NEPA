@@ -208,19 +208,22 @@ class PatchClsPointDataset(Dataset):
             ray_t = None
             ray_hit = None
             if self.use_ray_patch:
-                required = ("ray_o_pool", "ray_d_pool", "ray_t_pool", "ray_hit_pool")
+                # Query-only ray path needs only origin/direction.
+                required = ("ray_o_pool", "ray_d_pool")
                 missing = [k for k in required if k not in npz]
                 if missing:
                     raise KeyError(f"Missing ray keys in {path}: {missing}")
                 ray_o_full = npz["ray_o_pool"].astype(np.float32, copy=False)
                 ray_d_full = npz["ray_d_pool"].astype(np.float32, copy=False)
-                ray_t_full = npz["ray_t_pool"].astype(np.float32, copy=False)
-                ray_hit_full = npz["ray_hit_pool"].astype(np.float32, copy=False)
                 ridx = self._sample_ray_indices(ray_o_full.shape[0], sample_uid=(index * 7919 + 17))
                 ray_o = ray_o_full[ridx]
                 ray_d = ray_d_full[ridx]
-                ray_t = ray_t_full[ridx]
-                ray_hit = ray_hit_full[ridx]
+                # Keep optional outputs when present for compatibility/debug.
+                if ("ray_t_pool" in npz) and ("ray_hit_pool" in npz):
+                    ray_t_full = npz["ray_t_pool"].astype(np.float32, copy=False)
+                    ray_hit_full = npz["ray_hit_pool"].astype(np.float32, copy=False)
+                    ray_t = ray_t_full[ridx]
+                    ray_hit = ray_hit_full[ridx]
 
         out = {
             "xyz": torch.from_numpy(xyz),
@@ -231,8 +234,10 @@ class PatchClsPointDataset(Dataset):
         if ray_o is not None:
             out["ray_o"] = torch.from_numpy(ray_o)
             out["ray_d"] = torch.from_numpy(ray_d)
-            out["ray_t"] = torch.from_numpy(ray_t)
-            out["ray_hit"] = torch.from_numpy(ray_hit)
+            if ray_t is not None:
+                out["ray_t"] = torch.from_numpy(ray_t)
+            if ray_hit is not None:
+                out["ray_hit"] = torch.from_numpy(ray_hit)
         return out
 
 

@@ -55,7 +55,7 @@ python -u -m nepa3d.train.pretrain_patch_nepa \
   --ablate_point_dist "${ABLATE_POINT_DIST:-0}" \
   --pt_sample_mode "${PT_SAMPLE_MODE:-rfps_cached}" \
   --pt_fps_key "${PT_FPS_KEY:-auto}" \
-  --pt_rfps_key "${PT_RFPS_KEY:-auto}" \
+  --pt_rfps_key "${PT_RFPS_KEY:-pt_rfps_order_bank}" \
   --pt_rfps_m "${PT_RFPS_M:-4096}" \
   --point_order_mode "${POINT_ORDER_MODE:-morton}" \
   --patch_embed "${PATCH_EMBED:-fps_knn}" \

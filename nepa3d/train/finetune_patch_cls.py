@@ -395,12 +395,14 @@ def evaluate_local(
         ray_t = batch.get("ray_t", None)
         ray_hit = batch.get("ray_hit", None)
         if use_ray_patch:
-            if (ray_o is None) or (ray_d is None) or (ray_t is None) or (ray_hit is None):
-                raise ValueError("use_ray_patch=True but batch does not contain ray tensors")
+            if (ray_o is None) or (ray_d is None):
+                raise ValueError("use_ray_patch=True but batch does not contain ray_o/ray_d tensors")
             ray_o = ray_o.to(device)
             ray_d = ray_d.to(device)
-            ray_t = ray_t.to(device)
-            ray_hit = ray_hit.to(device)
+            if ray_t is not None:
+                ray_t = ray_t.to(device)
+            if ray_hit is not None:
+                ray_hit = ray_hit.to(device)
 
         # MC eval: xyz is (B,K,N,3)
         if xyz.dim() == 4:
@@ -414,8 +416,8 @@ def evaluate_local(
                 # Rays are sampled once per shape and shared across MC crops.
                 ray_o2 = ray_o.repeat_interleave(K, dim=0)
                 ray_d2 = ray_d.repeat_interleave(K, dim=0)
-                ray_t2 = ray_t.repeat_interleave(K, dim=0)
-                ray_hit2 = ray_hit.repeat_interleave(K, dim=0)
+                ray_t2 = ray_t.repeat_interleave(K, dim=0) if ray_t is not None else None
+                ray_hit2 = ray_hit.repeat_interleave(K, dim=0) if ray_hit is not None else None
             else:
                 ray_o2 = ray_d2 = ray_t2 = ray_hit2 = None
             logits = model(xyz2, normal2, ray_o=ray_o2, ray_d=ray_d2, ray_t=ray_t2, ray_hit=ray_hit2)
@@ -832,6 +834,7 @@ def main() -> None:
                 f"PatchCls: classes={num_classes} train={len(train_set)} val={len(val_set)} test={len(test_set)}\n"
                 f"  model_source=patchcls patch_embed={args.patch_embed} n_point={args.n_point} groups={args.num_groups} group_size={args.group_size} "
                 f"use_ray_patch={int(args.use_ray_patch)} n_ray={args.n_ray} ray_pool_mode={args.ray_pool_mode} ray_fuse_mode={args.ray_fuse_mode} "
+                f"ray_query_only=1 "
                 f"ray_sample_train={args.ray_sample_mode_train} ray_sample_eval={args.ray_sample_mode_eval} "
                 f"serial_order={args.serial_order} serial_bits={args.serial_bits} serial_shuffle={int(args.serial_shuffle_within_patch)} "
                 f"d_model={args.d_model} layers={args.n_layers} heads={args.n_heads} "
@@ -862,12 +865,14 @@ def main() -> None:
             ray_t = batch.get("ray_t", None)
             ray_hit = batch.get("ray_hit", None)
             if bool(args.use_ray_patch):
-                if (ray_o is None) or (ray_d is None) or (ray_t is None) or (ray_hit is None):
-                    raise ValueError("use_ray_patch=True but train batch does not contain ray tensors")
+                if (ray_o is None) or (ray_d is None):
+                    raise ValueError("use_ray_patch=True but train batch does not contain ray_o/ray_d tensors")
                 ray_o = ray_o.to(accelerator.device)
                 ray_d = ray_d.to(accelerator.device)
-                ray_t = ray_t.to(accelerator.device)
-                ray_hit = ray_hit.to(accelerator.device)
+                if ray_t is not None:
+                    ray_t = ray_t.to(accelerator.device)
+                if ray_hit is not None:
+                    ray_hit = ray_hit.to(accelerator.device)
 
             logits = model(xyz, normal, ray_o=ray_o, ray_d=ray_d, ray_t=ray_t, ray_hit=ray_hit)
             loss = F.cross_entropy(logits, label)
