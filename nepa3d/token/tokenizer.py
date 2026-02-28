@@ -38,7 +38,6 @@ TYPE_SEP = 9
 TYPE_VOCAB_SIZE = TYPE_SEP + 1
 
 _WARNED_FPS_FALLBACK = False
-_WARNED_RFPS_CACHED_FALLBACK = False
 
 
 def _choice(n, k, rng=None):
@@ -166,7 +165,7 @@ def _sample_point_indices(
     pt_rfps_m: int = 4096,
 ) -> np.ndarray:
     """Select point indices according to a sampling policy."""
-    global _WARNED_FPS_FALLBACK, _WARNED_RFPS_CACHED_FALLBACK
+    global _WARNED_FPS_FALLBACK
     n_pool = int(pt_xyz_pool.shape[0])
     n_point = int(n_point)
     if n_point <= 0:
@@ -260,17 +259,10 @@ def _sample_point_indices(
                         order = cand.astype(np.int64, copy=False)
 
         if order is None:
-            if not _WARNED_RFPS_CACHED_FALLBACK:
-                warnings.warn(
-                    "pt_sample_mode='rfps_cached' but no valid RFPS order bank was provided; "
-                    "falling back to on-the-fly rfps. Add a cached order bank "
-                    "(e.g., pc_rfps_order_bank / pt_rfps_order_bank) for speed."
-                )
-                _WARNED_RFPS_CACHED_FALLBACK = True
-            from nepa3d.utils.fps import rfps_order
-
-            m = min(int(pt_rfps_m), n_pool)
-            return rfps_order(pt_xyz_pool, k=k, m=m, rng=rng).astype(np.int64, copy=False)
+            raise ValueError(
+                "pt_sample_mode='rfps_cached' requires a valid RFPS order bank, but none was "
+                "provided. Backfill and pass a bank key (e.g., pt_rfps_order_bank)."
+            )
 
         k0 = min(k, int(order.shape[0]))
         chosen = order[:k0].astype(np.int64, copy=False)

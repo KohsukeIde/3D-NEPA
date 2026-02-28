@@ -472,14 +472,13 @@ class ModelNet40QueryDataset(Dataset):
                 if (
                     str(self.pt_sample_mode).lower() == "rfps_cached"
                     and pt_rfps_order is None
-                    and not self._warned_missing_rfps_order
                 ):
-                    warnings.warn(
-                        f"pt_sample_mode='rfps_cached' but RFPS order key is missing "
-                        f"(pt_rfps_key={self.pt_rfps_key}, resolved={resolved_rfps_key}, path={path}). "
-                        "Falling back to on-the-fly rfps in tokenizer (slower)."
+                    raise ValueError(
+                        f"CRITICAL: pt_sample_mode='rfps_cached' requires a cached RFPS order bank, "
+                        f"but key is missing (pt_rfps_key={self.pt_rfps_key}, "
+                        f"resolved={resolved_rfps_key}, path={path}). "
+                        "Backfill RFPS bank first (e.g., pt_rfps_order_bank)."
                     )
-                    self._warned_missing_rfps_order = True
 
             if self.return_raw:
                 p_idx = _sample_point_indices(

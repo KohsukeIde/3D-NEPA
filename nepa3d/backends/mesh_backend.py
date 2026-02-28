@@ -17,5 +17,24 @@ class MeshBackend:
             "ray_available": True,
         }
         if "pt_fps_order" in self.d:
-            pools["pt_fps_order"] = self.d["pt_fps_order"].astype(np.int32, copy=False)
+            pfo = self.d["pt_fps_order"].astype(np.int32, copy=False)
+            pools["pt_fps_order"] = pfo
+            pools["pt_xyz_pool_fps_order"] = pfo
+        if "pc_fps_order" in self.d:
+            pco = self.d["pc_fps_order"].astype(np.int32, copy=False)
+            pools["pc_fps_order"] = pco
+            pools["pc_xyz_fps_order"] = pco
+        # Optional cached RFPS order(s) / banks.
+        for k in [
+            "pt_rfps_order_bank",
+            "pc_rfps_order_bank",
+            "pt_xyz_pool_rfps_order_bank",
+            "pc_xyz_rfps_order_bank",
+            "pt_rfps_order",
+            "pc_rfps_order",
+            "pt_xyz_pool_rfps_order",
+            "pc_xyz_rfps_order",
+        ]:
+            if k in self.d:
+                pools[k] = self.d[k].astype(np.int32, copy=False)
         return pools

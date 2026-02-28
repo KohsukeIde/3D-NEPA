@@ -18,8 +18,8 @@ fi
 
 CACHE_ROOT="${CACHE_ROOT:-data/shapenet_cache_v0}"
 SPLITS="${SPLITS:-train}"
-PT_KEY="${PT_KEY:-pc_xyz}"
-OUT_KEY="${OUT_KEY:-pc_rfps_order_bank}"
+PT_KEY="${PT_KEY:-pt_xyz_pool}"
+OUT_KEY="${OUT_KEY:-pt_rfps_order_bank}"
 RFPS_K="${RFPS_K:-1024}"
 RFPS_M="${RFPS_M:-4096}"
 BANK_SIZE="${BANK_SIZE:-8}"
