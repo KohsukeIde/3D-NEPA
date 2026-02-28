@@ -1,0 +1,147 @@
+#!/bin/bash
+#PBS -l rt_QF=1
+#PBS -l walltime=24:00:00
+#PBS -j oe
+#PBS -N patchnepa_ptonly
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DEFAULT_WORKDIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+WORKDIR="${WORKDIR:-${DEFAULT_WORKDIR}}"
+VENV_ACTIVATE="${VENV_ACTIVATE:-${WORKDIR}/.venv/bin/activate}"
+CUDA_MODULE="${CUDA_MODULE:-cuda/12.9}"
+
+MIX_CONFIG="${MIX_CONFIG:-nepa3d/configs/pretrain_mixed_shapenet_pointcloud_only.yaml}"
+RUN_TAG="${RUN_TAG:-patchnepa_ptonly_$(date +%Y%m%d_%H%M%S)}"
+SAVE_DIR="${SAVE_DIR:-runs/patchnepa_pointonly/${RUN_TAG}}"
+LOG_ROOT="${LOG_ROOT:-${WORKDIR}/logs/patch_nepa_pretrain}"
+LOG_PATH="${LOG_ROOT}/${RUN_TAG}.log"
+
+N_POINT="${N_POINT:-1024}"
+N_RAY="${N_RAY:-0}"
+BATCH="${BATCH:-32}"
+EPOCHS="${EPOCHS:-100}"
+NUM_WORKERS="${NUM_WORKERS:-8}"
+LR="${LR:-1e-4}"
+SEED="${SEED:-0}"
+
+PATCH_EMBED="${PATCH_EMBED:-serial}"
+GROUP_SIZE="${GROUP_SIZE:-32}"
+NUM_GROUPS="${NUM_GROUPS:-32}"
+SERIAL_ORDER="${SERIAL_ORDER:-morton}"
+SERIAL_BITS="${SERIAL_BITS:-10}"
+SERIAL_SHUFFLE_WITHIN_PATCH="${SERIAL_SHUFFLE_WITHIN_PATCH:-0}"
+
+PT_XYZ_KEY="${PT_XYZ_KEY:-pc_xyz}"
+PT_DIST_KEY="${PT_DIST_KEY:-pt_dist_pool}"
+ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-1}"
+PT_SAMPLE_MODE="${PT_SAMPLE_MODE:-random}"
+PT_FPS_KEY="${PT_FPS_KEY:-auto}"
+PT_RFPS_M="${PT_RFPS_M:-4096}"
+POINT_ORDER_MODE="${POINT_ORDER_MODE:-morton}"
+
+USE_RAY_PATCH="${USE_RAY_PATCH:-0}"
+RAY_POOL_MODE="${RAY_POOL_MODE:-mean}"
+RAY_FUSE="${RAY_FUSE:-add}"
+RAY_MISS_T="${RAY_MISS_T:-4.0}"
+RAY_HIT_THRESHOLD="${RAY_HIT_THRESHOLD:-0.5}"
+
+D_MODEL="${D_MODEL:-384}"
+N_LAYERS="${N_LAYERS:-12}"
+N_HEADS="${N_HEADS:-6}"
+MLP_RATIO="${MLP_RATIO:-4.0}"
+BACKBONE_MODE="${BACKBONE_MODE:-nepa2d}"
+ROPE_THETA="${ROPE_THETA:-10000}"
+DROP_PATH_RATE="${DROP_PATH_RATE:-0.0}"
+QK_NORM="${QK_NORM:-1}"
+QK_NORM_AFFINE="${QK_NORM_AFFINE:-1}"
+QK_NORM_BIAS="${QK_NORM_BIAS:-1}"
+LAYERSCALE_VALUE="${LAYERSCALE_VALUE:-0.0}"
+USE_GATED_MLP="${USE_GATED_MLP:-0}"
+HIDDEN_ACT="${HIDDEN_ACT:-gelu}"
+
+WARMUP_EPOCHS="${WARMUP_EPOCHS:-0}"
+MIN_LR="${MIN_LR:-1e-6}"
+WEIGHT_DECAY="${WEIGHT_DECAY:-0.05}"
+MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
+GRAD_ACCUM="${GRAD_ACCUM:-1}"
+
+mkdir -p "${LOG_ROOT}"
+mkdir -p "$(dirname "${SAVE_DIR}")"
+cd "${WORKDIR}"
+
+if [[ -f "${VENV_ACTIVATE}" ]]; then
+  # shellcheck disable=SC1090
+  source "${VENV_ACTIVATE}"
+fi
+source /etc/profile.d/modules.sh 2>/dev/null || true
+if command -v module >/dev/null 2>&1; then
+  module load "${CUDA_MODULE}" 2>/dev/null || true
+fi
+
+echo "=== PATCH-NEPA PRETRAIN (POINT-ONLY) ===" | tee "${LOG_PATH}"
+echo "date=$(date -Is)" | tee -a "${LOG_PATH}"
+echo "host=$(hostname)" | tee -a "${LOG_PATH}"
+echo "pbs_jobid=${PBS_JOBID:-}" | tee -a "${LOG_PATH}"
+echo "workdir=${WORKDIR}" | tee -a "${LOG_PATH}"
+echo "run_tag=${RUN_TAG}" | tee -a "${LOG_PATH}"
+echo "mix_config=${MIX_CONFIG}" | tee -a "${LOG_PATH}"
+echo "save_dir=${SAVE_DIR}" | tee -a "${LOG_PATH}"
+echo "n_point=${N_POINT} n_ray=${N_RAY} use_ray_patch=${USE_RAY_PATCH}" | tee -a "${LOG_PATH}"
+echo "patch_embed=${PATCH_EMBED} group_size=${GROUP_SIZE} num_groups=${NUM_GROUPS} serial_order=${SERIAL_ORDER}" | tee -a "${LOG_PATH}"
+echo "pt_xyz_key=${PT_XYZ_KEY} pt_dist_key=${PT_DIST_KEY} ablate_point_dist=${ABLATE_POINT_DIST}" | tee -a "${LOG_PATH}"
+echo "epochs=${EPOCHS} batch=${BATCH} lr=${LR}" | tee -a "${LOG_PATH}"
+echo | tee -a "${LOG_PATH}"
+
+python -m nepa3d.train.pretrain_patch_nepa \
+  --mix_config_path "${MIX_CONFIG}" \
+  --save_dir "$(dirname "${SAVE_DIR}")" \
+  --run_name "$(basename "${SAVE_DIR}")" \
+  --epochs "${EPOCHS}" \
+  --batch_size "${BATCH}" \
+  --n_point "${N_POINT}" \
+  --n_ray "${N_RAY}" \
+  --num_workers "${NUM_WORKERS}" \
+  --pt_xyz_key "${PT_XYZ_KEY}" \
+  --pt_dist_key "${PT_DIST_KEY}" \
+  --ablate_point_dist "${ABLATE_POINT_DIST}" \
+  --pt_sample_mode "${PT_SAMPLE_MODE}" \
+  --pt_fps_key "${PT_FPS_KEY}" \
+  --pt_rfps_m "${PT_RFPS_M}" \
+  --point_order_mode "${POINT_ORDER_MODE}" \
+  --patch_embed "${PATCH_EMBED}" \
+  --group_size "${GROUP_SIZE}" \
+  --num_groups "${NUM_GROUPS}" \
+  --serial_order "${SERIAL_ORDER}" \
+  --serial_bits "${SERIAL_BITS}" \
+  --serial_shuffle_within_patch "${SERIAL_SHUFFLE_WITHIN_PATCH}" \
+  --use_ray_patch "${USE_RAY_PATCH}" \
+  --ray_pool_mode "${RAY_POOL_MODE}" \
+  --ray_fuse "${RAY_FUSE}" \
+  --ray_miss_t "${RAY_MISS_T}" \
+  --ray_hit_threshold "${RAY_HIT_THRESHOLD}" \
+  --d_model "${D_MODEL}" \
+  --n_layers "${N_LAYERS}" \
+  --n_heads "${N_HEADS}" \
+  --mlp_ratio "${MLP_RATIO}" \
+  --backbone_mode "${BACKBONE_MODE}" \
+  --rope_theta "${ROPE_THETA}" \
+  --drop_path_rate "${DROP_PATH_RATE}" \
+  --qk_norm "${QK_NORM}" \
+  --qk_norm_affine "${QK_NORM_AFFINE}" \
+  --qk_norm_bias "${QK_NORM_BIAS}" \
+  --layerscale_value "${LAYERSCALE_VALUE}" \
+  --use_gated_mlp "${USE_GATED_MLP}" \
+  --hidden_act "${HIDDEN_ACT}" \
+  --warmup_epochs "${WARMUP_EPOCHS}" \
+  --min_lr "${MIN_LR}" \
+  --weight_decay "${WEIGHT_DECAY}" \
+  --max_grad_norm "${MAX_GRAD_NORM}" \
+  --grad_accum "${GRAD_ACCUM}" \
+  --lr "${LR}" \
+  --seed "${SEED}" \
+  2>&1 | tee -a "${LOG_PATH}"
+
+echo "[done] log=${LOG_PATH}" | tee -a "${LOG_PATH}"
+

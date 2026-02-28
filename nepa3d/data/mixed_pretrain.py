@@ -218,6 +218,7 @@ def build_mixed_pretrain(
     mode: str = "train",
     eval_seed: int = 0,
     mc_eval_k: int = 1,
+    return_raw: bool = False,
     # defaults for dataset overrides:
     drop_ray_prob: float = 0.0,
     force_missing_ray: bool = False,
@@ -310,6 +311,7 @@ def build_mixed_pretrain(
             aug_jitter_clip=float(aug_jitter_clip),
             aug_recompute_dist=bool(aug_recompute_dist),
             return_label=False,
+            return_raw=bool(return_raw),
         )
         datasets.append(ds)
         names.append(s.name)

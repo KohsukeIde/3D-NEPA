@@ -14,7 +14,13 @@ from ..backends.pointcloud_backend import (
 )
 from ..backends.voxel_backend import VoxelBackend
 from ..backends.udfgrid_backend import UDFGridBackend
-from ..token.tokenizer import build_sequence
+from ..token.tokenizer import (
+    _choice,
+    _order_point_tokens,
+    _rand01,
+    _sample_point_indices,
+    build_sequence,
+)
 
 
 def _rot_z_matrix(angle_rad: float, dtype=np.float32) -> np.ndarray:
@@ -177,6 +183,7 @@ class ModelNet40QueryDataset(Dataset):
         voxel_dilate=1,
         voxel_max_steps=0,
         return_label=False,
+        return_raw=False,
         label_map=None,
         pt_xyz_key="pt_xyz_pool",
         pt_dist_key="pt_dist_pool",
@@ -224,6 +231,7 @@ class ModelNet40QueryDataset(Dataset):
         self.voxel_dilate = int(voxel_dilate)
         self.voxel_max_steps = int(voxel_max_steps)
         self.return_label = bool(return_label)
+        self.return_raw = bool(return_raw)
         self.pt_xyz_key = str(pt_xyz_key)
         self.pt_dist_key = None if pt_dist_key is None else str(pt_dist_key)
         self.ablate_point_dist = bool(ablate_point_dist)
@@ -438,6 +446,92 @@ class ModelNet40QueryDataset(Dataset):
                     )
                     self._warned_missing_fps_order = True
 
+            if self.return_raw:
+                p_idx = _sample_point_indices(
+                    pt_xyz_pool=np.asarray(xyz),
+                    n_point=self.n_point,
+                    rng=rng,
+                    pt_sample_mode=self.pt_sample_mode,
+                    pt_fps_order=pt_fps_order,
+                    pt_rfps_m=self.pt_rfps_m,
+                )
+                pt_xyz_s = np.asarray(xyz)[p_idx].astype(np.float32, copy=False)
+                dist_arr = np.asarray(dist)
+                pt_dist_1d = (
+                    dist_arr[:, 0]
+                    if dist_arr.ndim == 2
+                    else dist_arr.reshape(-1)
+                )
+                pt_dist_s = np.asarray(pt_dist_1d[p_idx], dtype=np.float32)
+                pt_xyz_s, pt_dist_s, _ = _order_point_tokens(
+                    pt_xyz_s,
+                    pt_dist_s,
+                    rng=rng,
+                    point_order_mode=self.point_order_mode,
+                )
+                pt_dist_s = pt_dist_s.reshape(-1, 1)
+
+                ray_o_s = np.zeros((0, 3), dtype=np.float32)
+                ray_d_s = np.zeros((0, 3), dtype=np.float32)
+                ray_t_s = np.zeros((0, 1), dtype=np.float32)
+                ray_hit_s = np.zeros((0, 1), dtype=np.float32)
+                ray_n_s = np.zeros((0, 3), dtype=np.float32)
+                ray_unc_s = np.zeros((0, 1), dtype=np.float32)
+                ray_ok = bool(ray_available)
+
+                if int(self.n_ray) > 0:
+                    drop_this = (float(drop_ray_prob) > 0.0) and (_rand01(rng) < float(drop_ray_prob))
+                    if drop_this:
+                        ray_ok = False
+
+                    if ray_ok:
+                        ray_o = local_pools.get("ray_o_pool", None)
+                        ray_d = local_pools.get("ray_d_pool", None)
+                        ray_hit = local_pools.get("ray_hit_pool", None)
+                        ray_t = local_pools.get("ray_t_pool", None)
+                        ray_n = local_pools.get("ray_n_pool", None)
+                        ray_unc = local_pools.get("ray_unc_pool", None)
+                        if ray_o is None or ray_d is None or ray_hit is None or ray_t is None or ray_n is None:
+                            raise ValueError("ray pools are required when n_ray > 0 and ray is available")
+
+                        ray_o = np.asarray(ray_o)
+                        ray_d = np.asarray(ray_d)
+                        ray_hit = np.asarray(ray_hit).reshape(-1)
+                        ray_t = np.asarray(ray_t).reshape(-1)
+                        ray_n = np.asarray(ray_n)
+                        if ray_unc is not None:
+                            ray_unc = np.asarray(ray_unc).reshape(-1)
+
+                        r_idx = _choice(ray_o.shape[0], self.n_ray, rng=rng)
+                        ray_o_s = ray_o[r_idx].astype(np.float32, copy=False)
+                        ray_d_s = ray_d[r_idx].astype(np.float32, copy=False)
+                        ray_t_s = ray_t[r_idx].astype(np.float32, copy=False).reshape(-1, 1)
+                        ray_hit_s = ray_hit[r_idx].astype(np.float32, copy=False).reshape(-1, 1)
+                        ray_n_s = ray_n[r_idx].astype(np.float32, copy=False)
+                        if ray_unc is None:
+                            ray_unc_s = np.zeros((ray_o_s.shape[0], 1), dtype=np.float32)
+                        else:
+                            ray_unc_s = ray_unc[r_idx].astype(np.float32, copy=False).reshape(-1, 1)
+                    else:
+                        ray_o_s = np.zeros((self.n_ray, 3), dtype=np.float32)
+                        ray_d_s = np.zeros((self.n_ray, 3), dtype=np.float32)
+                        ray_t_s = np.zeros((self.n_ray, 1), dtype=np.float32)
+                        ray_hit_s = np.zeros((self.n_ray, 1), dtype=np.float32)
+                        ray_n_s = np.zeros((self.n_ray, 3), dtype=np.float32)
+                        ray_unc_s = np.zeros((self.n_ray, 1), dtype=np.float32)
+
+                return {
+                    "pt_xyz": pt_xyz_s,
+                    "pt_dist": pt_dist_s.astype(np.float32, copy=False),
+                    "ray_o": ray_o_s,
+                    "ray_d": ray_d_s,
+                    "ray_t": ray_t_s,
+                    "ray_hit": ray_hit_s,
+                    "ray_n": ray_n_s,
+                    "ray_unc": ray_unc_s,
+                    "ray_available": np.asarray(int(ray_ok), dtype=np.int64),
+                }
+
             feat, type_id = build_sequence(
                 xyz,
                 dist,
@@ -477,22 +571,42 @@ class ModelNet40QueryDataset(Dataset):
         if self.mode == "eval":
             base = (_stable_seed(path) + self.eval_seed) & 0xFFFFFFFF
             k = max(1, self.mc_eval_k)
-            feats = []
-            types = []
-            for i in range(k):
-                rng = np.random.RandomState((base + 1000003 * i) & 0xFFFFFFFF)
-                feat, type_id = _run_one(rng, drop_ray_prob=0.0)
-                feats.append(feat)
-                types.append(type_id)
-            feat = np.stack(feats, axis=0) if k > 1 else feats[0]
-            type_id = np.stack(types, axis=0) if k > 1 else types[0]
+            if self.return_raw:
+                rng = np.random.RandomState(base)
+                raw = _run_one(rng, drop_ray_prob=0.0)
+            else:
+                feats = []
+                types = []
+                for i in range(k):
+                    rng = np.random.RandomState((base + 1000003 * i) & 0xFFFFFFFF)
+                    feat, type_id = _run_one(rng, drop_ray_prob=0.0)
+                    feats.append(feat)
+                    types.append(type_id)
+                feat = np.stack(feats, axis=0) if k > 1 else feats[0]
+                type_id = np.stack(types, axis=0) if k > 1 else types[0]
         else:
-            feat, type_id = _run_one(np.random, drop_ray_prob=self.drop_ray_prob)
+            if self.return_raw:
+                raw = _run_one(np.random, drop_ray_prob=self.drop_ray_prob)
+            else:
+                feat, type_id = _run_one(np.random, drop_ray_prob=self.drop_ray_prob)
 
-        out = {
-            "feat": torch.from_numpy(feat),
-            "type_id": torch.from_numpy(type_id),
-        }
+        if self.return_raw:
+            out = {
+                "pt_xyz": torch.from_numpy(raw["pt_xyz"]).float(),
+                "pt_dist": torch.from_numpy(raw["pt_dist"]).float(),
+                "ray_o": torch.from_numpy(raw["ray_o"]).float(),
+                "ray_d": torch.from_numpy(raw["ray_d"]).float(),
+                "ray_t": torch.from_numpy(raw["ray_t"]).float(),
+                "ray_hit": torch.from_numpy(raw["ray_hit"]).float(),
+                "ray_n": torch.from_numpy(raw["ray_n"]).float(),
+                "ray_unc": torch.from_numpy(raw["ray_unc"]).float(),
+                "ray_available": torch.tensor(int(raw["ray_available"]), dtype=torch.long),
+            }
+        else:
+            out = {
+                "feat": torch.from_numpy(feat),
+                "type_id": torch.from_numpy(type_id),
+            }
         if self.return_label:
             label = label_from_path(path)
             out["label"] = torch.tensor(self.label_map[label], dtype=torch.long)
