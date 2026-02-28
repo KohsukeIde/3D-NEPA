@@ -59,6 +59,13 @@ class PatchTransformerClassifier(nn.Module):
         pooling: str = "cls_max",  # mean | cls | cls_max
         # positional encoding
         pos_mode: str = "center_mlp",  # learned | center_mlp
+        # optional ray-patch fusion (Option-A style)
+        use_ray_patch: bool = False,
+        ray_pool_mode: str = "max",  # max | mean
+        ray_fuse_mode: str = "concat",  # concat | add
+        ray_hidden_dim: int = 128,
+        ray_miss_t: float = 4.0,
+        ray_hit_threshold: float = 0.5,
         # classifier head
         head_mode: str = "auto",  # auto | linear | pointmae_mlp
         head_hidden_dim: int = 256,
@@ -69,6 +76,8 @@ class PatchTransformerClassifier(nn.Module):
         super().__init__()
         assert pooling in {"mean", "cls", "cls_max"}
         assert pos_mode in {"learned", "center_mlp"}
+        assert ray_pool_mode in {"max", "mean"}
+        assert ray_fuse_mode in {"concat", "add"}
         assert head_mode in {"auto", "linear", "pointmae_mlp"}
         assert init_mode in {"default", "pointmae"}
         assert backbone_mode in {"nepa2d", "vanilla"}
@@ -82,6 +91,12 @@ class PatchTransformerClassifier(nn.Module):
         self.head_hidden_dim = int(head_hidden_dim)
         self.head_dropout = float(head_dropout)
         self.is_causal = bool(is_causal)
+        self.d_model = int(d_model)
+        self.use_ray_patch = bool(use_ray_patch)
+        self.ray_pool_mode = str(ray_pool_mode)
+        self.ray_fuse_mode = str(ray_fuse_mode)
+        self.ray_miss_t = float(ray_miss_t)
+        self.ray_hit_threshold = float(ray_hit_threshold)
 
         if patch_embed == "fps_knn":
             self.patch_embed = PointPatchEmbed(
@@ -155,6 +170,22 @@ class PatchTransformerClassifier(nn.Module):
         )
         self.norm = nn.LayerNorm(d_model)
 
+        if self.use_ray_patch:
+            # Per-ray encoder over local geometric relation to assigned point patch center.
+            # Input = [x_anchor-center (3), ray_d (3), ray_hit (1), ray_t (1)] = 8 dims.
+            self.ray_encoder = nn.Sequential(
+                nn.Linear(8, int(ray_hidden_dim)),
+                nn.GELU(),
+                nn.Linear(int(ray_hidden_dim), d_model),
+            )
+            if self.ray_fuse_mode == "concat":
+                self.ray_fuse_proj = nn.Linear(2 * d_model, d_model)
+            else:
+                self.ray_fuse_proj = None
+        else:
+            self.ray_encoder = None
+            self.ray_fuse_proj = None
+
         if self.pooling == "cls_max":
             self._head_in_dim = 2 * d_model
         else:
@@ -216,12 +247,87 @@ class PatchTransformerClassifier(nn.Module):
     def _resolved_pooling(self) -> str:
         return self.pooling
 
-    def forward_features(self, xyz: torch.Tensor, normals: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def _build_ray_anchor(
+        self,
+        ray_o: torch.Tensor,
+        ray_d: torch.Tensor,
+        ray_t: torch.Tensor,
+        ray_hit: torch.Tensor,
+    ) -> torch.Tensor:
+        # hit ray: x = o + t*d, miss ray: x = o + miss_t*d
+        hit_mask = (ray_hit > float(self.ray_hit_threshold)).to(ray_o.dtype).unsqueeze(-1)
+        x_hit = ray_o + ray_t.unsqueeze(-1) * ray_d
+        x_miss = ray_o + float(self.ray_miss_t) * ray_d
+        return hit_mask * x_hit + (1.0 - hit_mask) * x_miss
+
+    def _pool_rays_to_patches(
+        self,
+        centers_xyz: torch.Tensor,
+        ray_o: torch.Tensor,
+        ray_d: torch.Tensor,
+        ray_t: torch.Tensor,
+        ray_hit: torch.Tensor,
+    ) -> torch.Tensor:
+        """Pool encoded ray features into point patches by nearest center assignment."""
+        B, G, _ = centers_xyz.shape
+        D = int(self.d_model)
+        pooled = centers_xyz.new_zeros((B, G, D))
+        if ray_o is None or ray_o.numel() == 0:
+            return pooled
+
+        ray_anchor = self._build_ray_anchor(ray_o, ray_d, ray_t, ray_hit)  # (B,R,3)
+        for b in range(B):
+            if ray_anchor[b].numel() == 0:
+                continue
+            # (R,G)
+            dist = torch.cdist(ray_anchor[b].unsqueeze(0), centers_xyz[b].unsqueeze(0)).squeeze(0)
+            assign = dist.argmin(dim=-1)  # (R,)
+
+            ctr = centers_xyz[b][assign]  # (R,3)
+            feat_in = torch.cat(
+                [
+                    ray_anchor[b] - ctr,
+                    ray_d[b],
+                    ray_hit[b].unsqueeze(-1),
+                    ray_t[b].unsqueeze(-1),
+                ],
+                dim=-1,
+            )
+            feat = self.ray_encoder(feat_in)  # (R,D)
+
+            for g in range(G):
+                m = assign == g
+                if not bool(m.any()):
+                    continue
+                if self.ray_pool_mode == "mean":
+                    pooled[b, g] = feat[m].mean(dim=0)
+                else:
+                    pooled[b, g] = feat[m].max(dim=0).values
+        return pooled
+
+    def forward_features(
+        self,
+        xyz: torch.Tensor,
+        normals: Optional[torch.Tensor] = None,
+        ray_o: Optional[torch.Tensor] = None,
+        ray_d: Optional[torch.Tensor] = None,
+        ray_t: Optional[torch.Tensor] = None,
+        ray_hit: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """Return pooled features (B, D)."""
         out = self.patch_embed(xyz, normals)
         x = out.tokens  # (B,G,D)
         centers_xyz = out.centers_xyz  # (B,G,3)
         B, G, D = x.shape
+
+        if self.use_ray_patch:
+            if (ray_o is None) or (ray_d is None) or (ray_t is None) or (ray_hit is None):
+                raise ValueError("use_ray_patch=True requires ray_o/ray_d/ray_t/ray_hit inputs")
+            ray_tok = self._pool_rays_to_patches(centers_xyz, ray_o, ray_d, ray_t, ray_hit)  # (B,G,D)
+            if self.ray_fuse_mode == "add":
+                x = x + ray_tok
+            else:
+                x = self.ray_fuse_proj(torch.cat([x, ray_tok], dim=-1))
 
         if self.use_cls:
             cls = self.cls_token.expand(B, 1, D)
@@ -268,6 +374,14 @@ class PatchTransformerClassifier(nn.Module):
             feat = x.mean(dim=1)
         return feat
 
-    def forward(self, xyz: torch.Tensor, normals: Optional[torch.Tensor] = None) -> torch.Tensor:
-        feat = self.forward_features(xyz, normals)
+    def forward(
+        self,
+        xyz: torch.Tensor,
+        normals: Optional[torch.Tensor] = None,
+        ray_o: Optional[torch.Tensor] = None,
+        ray_d: Optional[torch.Tensor] = None,
+        ray_t: Optional[torch.Tensor] = None,
+        ray_hit: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        feat = self.forward_features(xyz, normals, ray_o=ray_o, ray_d=ray_d, ray_t=ray_t, ray_hit=ray_hit)
         return self.head(feat)

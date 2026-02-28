@@ -35,6 +35,16 @@ N_POINT="${N_POINT:-1024}"
 NUM_GROUPS="${NUM_GROUPS:-64}"
 GROUP_SIZE="${GROUP_SIZE:-32}"
 PATCH_EMBED="${PATCH_EMBED:-fps_knn}"  # fps_knn | serial
+MODEL_SOURCE="${MODEL_SOURCE:-patchcls}"  # patchcls | pointmae
+USE_RAY_PATCH="${USE_RAY_PATCH:-0}"       # 0 | 1
+N_RAY="${N_RAY:-256}"
+RAY_SAMPLE_MODE_TRAIN="${RAY_SAMPLE_MODE_TRAIN:-random}"  # random | first
+RAY_SAMPLE_MODE_EVAL="${RAY_SAMPLE_MODE_EVAL:-first}"     # random | first
+RAY_POOL_MODE="${RAY_POOL_MODE:-max}"      # max | mean
+RAY_FUSE_MODE="${RAY_FUSE_MODE:-concat}"   # concat | add
+RAY_HIDDEN_DIM="${RAY_HIDDEN_DIM:-128}"
+RAY_MISS_T="${RAY_MISS_T:-4.0}"
+RAY_HIT_THRESHOLD="${RAY_HIT_THRESHOLD:-0.5}"
 SERIAL_ORDER="${SERIAL_ORDER:-morton}"  # morton | morton_trans | z | z-trans | random | identity
 SERIAL_BITS="${SERIAL_BITS:-10}"
 SERIAL_SHUFFLE_WITHIN_PATCH="${SERIAL_SHUFFLE_WITHIN_PATCH:-0}"  # 0 | 1
@@ -111,6 +121,16 @@ ARGS=(
   --lr_scheduler cosine
   --warmup_epochs "${WARMUP_EPOCHS}"
   --n_point "${N_POINT}"
+  --use_ray_patch "${USE_RAY_PATCH}"
+  --n_ray "${N_RAY}"
+  --ray_sample_mode_train "${RAY_SAMPLE_MODE_TRAIN}"
+  --ray_sample_mode_eval "${RAY_SAMPLE_MODE_EVAL}"
+  --ray_pool_mode "${RAY_POOL_MODE}"
+  --ray_fuse_mode "${RAY_FUSE_MODE}"
+  --ray_hidden_dim "${RAY_HIDDEN_DIM}"
+  --ray_miss_t "${RAY_MISS_T}"
+  --ray_hit_threshold "${RAY_HIT_THRESHOLD}"
+  --model_source "${MODEL_SOURCE}"
   --patch_embed "${PATCH_EMBED}"
   --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN}"
   --pt_sample_mode_eval "${PT_SAMPLE_MODE_EVAL}"

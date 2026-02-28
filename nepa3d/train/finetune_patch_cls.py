@@ -24,6 +24,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from accelerate import Accelerator
 from torch import optim
+import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from nepa3d.data.cls_patch_dataset import (
@@ -39,6 +40,7 @@ from nepa3d.data.modelnet40_index import (
     stratified_train_val_split,
 )
 from nepa3d.models.patch_classifier import PatchTransformerClassifier
+from nepa3d.models.pointmae_patch_classifier import PointMAEPatchClassifier
 
 
 def add_args(p: argparse.ArgumentParser) -> None:
@@ -126,6 +128,13 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--mlp_ratio", type=float, default=4.0)
     p.add_argument("--dropout", type=float, default=0.0)
     p.add_argument("--drop_path_rate", type=float, default=0.1)
+    p.add_argument(
+        "--model_source",
+        type=str,
+        default="patchcls",
+        choices=["patchcls", "pointmae"],
+        help="Backbone source: patchcls(custom) or pointmae(backbone-parity).",
+    )
     p.add_argument("--backbone_mode", type=str, default="nepa2d", choices=["nepa2d", "vanilla"])
     p.add_argument("--qk_norm", type=int, default=1, choices=[0, 1])
     p.add_argument("--qk_norm_affine", type=int, default=0, choices=[0, 1])
@@ -137,6 +146,15 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--hidden_act", type=str, default="gelu", choices=["gelu", "silu"], help="MLP activation.")
     p.add_argument("--pooling", type=str, default="cls_max", choices=["mean", "cls", "cls_max"])
     p.add_argument("--pos_mode", type=str, default="center_mlp", choices=["learned", "center_mlp"])
+    p.add_argument("--use_ray_patch", type=int, default=0, choices=[0, 1])
+    p.add_argument("--n_ray", type=int, default=256)
+    p.add_argument("--ray_sample_mode_train", type=str, default="random", choices=["random", "first"])
+    p.add_argument("--ray_sample_mode_eval", type=str, default="first", choices=["random", "first"])
+    p.add_argument("--ray_pool_mode", type=str, default="max", choices=["max", "mean"])
+    p.add_argument("--ray_fuse_mode", type=str, default="concat", choices=["concat", "add"])
+    p.add_argument("--ray_hidden_dim", type=int, default=128)
+    p.add_argument("--ray_miss_t", type=float, default=4.0)
+    p.add_argument("--ray_hit_threshold", type=float, default=0.5)
     p.add_argument("--head_mode", type=str, default="auto", choices=["auto", "linear", "pointmae_mlp"])
     p.add_argument("--head_hidden_dim", type=int, default=256)
     p.add_argument("--head_dropout", type=float, default=0.5)
@@ -232,10 +250,11 @@ def _resolve_scan_h5_files(scan_h5_root: str, scan_variant: str) -> Tuple[Path, 
 
 @torch.no_grad()
 def evaluate_local(
-    model: PatchTransformerClassifier,
+    model: nn.Module,
     loader: DataLoader,
     device: torch.device,
     use_normals: bool,
+    use_ray_patch: bool,
 ) -> Dict[str, float]:
     model.eval()
     correct = 0
@@ -248,6 +267,17 @@ def evaluate_local(
         normal = batch.get("normal", None)
         if use_normals and normal is not None:
             normal = normal.to(device)
+        ray_o = batch.get("ray_o", None)
+        ray_d = batch.get("ray_d", None)
+        ray_t = batch.get("ray_t", None)
+        ray_hit = batch.get("ray_hit", None)
+        if use_ray_patch:
+            if (ray_o is None) or (ray_d is None) or (ray_t is None) or (ray_hit is None):
+                raise ValueError("use_ray_patch=True but batch does not contain ray tensors")
+            ray_o = ray_o.to(device)
+            ray_d = ray_d.to(device)
+            ray_t = ray_t.to(device)
+            ray_hit = ray_hit.to(device)
 
         # MC eval: xyz is (B,K,N,3)
         if xyz.dim() == 4:
@@ -257,10 +287,18 @@ def evaluate_local(
                 normal2 = normal.reshape(B * K, N, 3)
             else:
                 normal2 = None
-            logits = model(xyz2, normal2)
+            if use_ray_patch:
+                # Rays are sampled once per shape and shared across MC crops.
+                ray_o2 = ray_o.repeat_interleave(K, dim=0)
+                ray_d2 = ray_d.repeat_interleave(K, dim=0)
+                ray_t2 = ray_t.repeat_interleave(K, dim=0)
+                ray_hit2 = ray_hit.repeat_interleave(K, dim=0)
+            else:
+                ray_o2 = ray_d2 = ray_t2 = ray_hit2 = None
+            logits = model(xyz2, normal2, ray_o=ray_o2, ray_d=ray_d2, ray_t=ray_t2, ray_hit=ray_hit2)
             logits = logits.reshape(B, K, -1).mean(dim=1)
         else:
-            logits = model(xyz, normal)
+            logits = model(xyz, normal, ray_o=ray_o, ray_d=ray_d, ray_t=ray_t, ray_hit=ray_hit)
 
         loss = F.cross_entropy(logits, label)
         preds = logits.argmax(dim=-1)
@@ -340,6 +378,8 @@ def main() -> None:
     else:
         if not args.scan_h5_root:
             raise ValueError("--scan_h5_root is required when --data_format=scan_h5")
+        if bool(args.use_ray_patch):
+            raise ValueError("--use_ray_patch is not supported with --data_format=scan_h5")
         h5_train, h5_test = _resolve_scan_h5_files(args.scan_h5_root, args.scan_variant)
         tr_points, tr_labels = load_scanobjectnn_h5_arrays(str(h5_train))
         te_points, te_labels = load_scanobjectnn_h5_arrays(str(h5_test))
@@ -403,6 +443,9 @@ def main() -> None:
             aug=aug_train,
             aug_cfg=aug_cfg,
             rng_seed=args.seed,
+            use_ray_patch=bool(args.use_ray_patch),
+            n_ray=args.n_ray,
+            ray_sample_mode=args.ray_sample_mode_train,
             mc_eval_k=1,
             aug_eval=False,
             deterministic_eval_sampling=False,
@@ -417,6 +460,9 @@ def main() -> None:
             aug=False,
             aug_cfg=aug_cfg,
             rng_seed=args.seed + 123,
+            use_ray_patch=bool(args.use_ray_patch),
+            n_ray=args.n_ray,
+            ray_sample_mode=args.ray_sample_mode_eval,
             mc_eval_k=1,
             aug_eval=False,
             deterministic_eval_sampling=True,
@@ -431,6 +477,9 @@ def main() -> None:
             aug=False,
             aug_cfg=aug_cfg,
             rng_seed=args.seed + 456,
+            use_ray_patch=bool(args.use_ray_patch),
+            n_ray=args.n_ray,
+            ray_sample_mode=args.ray_sample_mode_eval,
             mc_eval_k=max(1, args.mc_eval_k_test),
             aug_eval=bool(args.aug_eval),
             deterministic_eval_sampling=True,
@@ -508,39 +557,62 @@ def main() -> None:
     )
 
     # Model
-    model = PatchTransformerClassifier(
-        num_classes=num_classes,
-        patch_embed=args.patch_embed,
-        num_groups=args.num_groups,
-        group_size=args.group_size,
-        use_normals=use_normals,
-        center_mode=args.center_mode,
-        serial_order=args.serial_order,
-        serial_bits=args.serial_bits,
-        serial_shuffle_within_patch=int(args.serial_shuffle_within_patch),
-        d_model=args.d_model,
-        n_heads=args.n_heads,
-        n_layers=args.n_layers,
-        mlp_ratio=args.mlp_ratio,
-        dropout=args.dropout,
-        drop_path_rate=args.drop_path_rate,
-        backbone_mode=args.backbone_mode,
-        qk_norm=bool(args.qk_norm),
-        qk_norm_affine=bool(args.qk_norm_affine),
-        qk_norm_bias=bool(args.qk_norm_bias),
-        layerscale_value=float(args.layerscale_value),
-        rope_theta=float(args.rope_theta),
-        rope_prefix_tokens=int(args.rope_prefix_tokens),
-        use_gated_mlp=bool(args.use_gated_mlp),
-        hidden_act=str(args.hidden_act),
-        pooling=args.pooling,
-        pos_mode=args.pos_mode,
-        head_mode=args.head_mode,
-        head_hidden_dim=args.head_hidden_dim,
-        head_dropout=args.head_dropout,
-        init_mode=args.init_mode,
-        is_causal=bool(args.is_causal),
-    )
+    if args.model_source == "pointmae":
+        if use_normals:
+            raise ValueError("--use_normals is not supported with --model_source=pointmae")
+        if bool(args.use_ray_patch):
+            raise ValueError("--use_ray_patch is not supported with --model_source=pointmae")
+        model = PointMAEPatchClassifier(
+            num_classes=num_classes,
+            trans_dim=args.d_model,
+            depth=args.n_layers,
+            drop_path_rate=args.drop_path_rate,
+            num_heads=args.n_heads,
+            group_size=args.group_size,
+            num_groups=args.num_groups,
+            encoder_dims=args.d_model,
+            init_mode=args.init_mode,
+        )
+    else:
+        model = PatchTransformerClassifier(
+            num_classes=num_classes,
+            patch_embed=args.patch_embed,
+            num_groups=args.num_groups,
+            group_size=args.group_size,
+            use_normals=use_normals,
+            center_mode=args.center_mode,
+            serial_order=args.serial_order,
+            serial_bits=args.serial_bits,
+            serial_shuffle_within_patch=int(args.serial_shuffle_within_patch),
+            d_model=args.d_model,
+            n_heads=args.n_heads,
+            n_layers=args.n_layers,
+            mlp_ratio=args.mlp_ratio,
+            dropout=args.dropout,
+            drop_path_rate=args.drop_path_rate,
+            backbone_mode=args.backbone_mode,
+            qk_norm=bool(args.qk_norm),
+            qk_norm_affine=bool(args.qk_norm_affine),
+            qk_norm_bias=bool(args.qk_norm_bias),
+            layerscale_value=float(args.layerscale_value),
+            rope_theta=float(args.rope_theta),
+            rope_prefix_tokens=int(args.rope_prefix_tokens),
+            use_gated_mlp=bool(args.use_gated_mlp),
+            hidden_act=str(args.hidden_act),
+            pooling=args.pooling,
+            pos_mode=args.pos_mode,
+            use_ray_patch=bool(args.use_ray_patch),
+            ray_pool_mode=args.ray_pool_mode,
+            ray_fuse_mode=args.ray_fuse_mode,
+            ray_hidden_dim=args.ray_hidden_dim,
+            ray_miss_t=args.ray_miss_t,
+            ray_hit_threshold=args.ray_hit_threshold,
+            head_mode=args.head_mode,
+            head_hidden_dim=args.head_hidden_dim,
+            head_dropout=args.head_dropout,
+            init_mode=args.init_mode,
+            is_causal=bool(args.is_causal),
+        )
 
     if args.ckpt:
         ckpt = torch.load(args.ckpt, map_location="cpu")
@@ -585,27 +657,42 @@ def main() -> None:
     best_path = save_dir / "checkpoints" / "best.pt"
 
     if accelerator.is_main_process:
-        pos_inject_note = (
-            "per_layer_explicit" if args.backbone_mode == "vanilla" else "internal_rope_only"
-        )
-        print(
-            f"PatchCls: classes={num_classes} train={len(train_set)} val={len(val_set)} test={len(test_set)}\n"
-            f"  patch_embed={args.patch_embed} n_point={args.n_point} groups={args.num_groups} group_size={args.group_size} "
-            f"serial_order={args.serial_order} serial_bits={args.serial_bits} serial_shuffle={int(args.serial_shuffle_within_patch)} "
-            f"d_model={args.d_model} layers={args.n_layers} heads={args.n_heads} "
-            f"backbone_mode={args.backbone_mode} qk_norm={int(args.qk_norm)} qk_norm_affine={int(args.qk_norm_affine)} "
-            f"qk_norm_bias={int(args.qk_norm_bias)} layerscale_value={float(args.layerscale_value):g} "
-            f"rope_theta={float(args.rope_theta):g} rope_prefix_tokens={int(args.rope_prefix_tokens)} "
-            f"use_gated_mlp={int(args.use_gated_mlp)} hidden_act={str(args.hidden_act)} "
-            f"pooling={args.pooling} pos_mode={args.pos_mode} pos_inject={pos_inject_note} head_mode={args.head_mode} "
-            f"init_mode={args.init_mode} "
-            f"is_causal={bool(args.is_causal)}\n"
-            f"  world_size={world_size} batch_mode={args.batch_mode} batch_arg={args.batch} batch_effective={eff_batch}\n"
-            f"  data_format={args.data_format} input_root={args.cache_root if args.data_format == 'npz' else args.scan_h5_root}\n"
-            f"  val_split_mode={resolved_val_split_mode}\n"
-            f"  train_sample={args.pt_sample_mode_train} eval_sample={args.pt_sample_mode_eval} "
-            f"aug_train={aug_train} aug_preset={args.aug_preset} aug_eval={bool(args.aug_eval)} mc_test={args.mc_eval_k_test}"
-        )
+        if args.model_source == "pointmae":
+            print(
+                f"PatchCls: classes={num_classes} train={len(train_set)} val={len(val_set)} test={len(test_set)}\n"
+                f"  model_source=pointmae n_point={args.n_point} groups={args.num_groups} group_size={args.group_size} "
+                f"d_model={args.d_model} layers={args.n_layers} heads={args.n_heads} "
+                f"drop_path_rate={args.drop_path_rate} init_mode={args.init_mode}\n"
+                f"  world_size={world_size} batch_mode={args.batch_mode} batch_arg={args.batch} batch_effective={eff_batch}\n"
+                f"  data_format={args.data_format} input_root={args.cache_root if args.data_format == 'npz' else args.scan_h5_root}\n"
+                f"  val_split_mode={resolved_val_split_mode}\n"
+                f"  train_sample={args.pt_sample_mode_train} eval_sample={args.pt_sample_mode_eval} "
+                f"aug_train={aug_train} aug_preset={args.aug_preset} aug_eval={bool(args.aug_eval)} mc_test={args.mc_eval_k_test}"
+            )
+        else:
+            pos_inject_note = (
+                "per_layer_explicit" if args.backbone_mode == "vanilla" else "internal_rope_only"
+            )
+            print(
+                f"PatchCls: classes={num_classes} train={len(train_set)} val={len(val_set)} test={len(test_set)}\n"
+                f"  model_source=patchcls patch_embed={args.patch_embed} n_point={args.n_point} groups={args.num_groups} group_size={args.group_size} "
+                f"use_ray_patch={int(args.use_ray_patch)} n_ray={args.n_ray} ray_pool_mode={args.ray_pool_mode} ray_fuse_mode={args.ray_fuse_mode} "
+                f"ray_sample_train={args.ray_sample_mode_train} ray_sample_eval={args.ray_sample_mode_eval} "
+                f"serial_order={args.serial_order} serial_bits={args.serial_bits} serial_shuffle={int(args.serial_shuffle_within_patch)} "
+                f"d_model={args.d_model} layers={args.n_layers} heads={args.n_heads} "
+                f"backbone_mode={args.backbone_mode} qk_norm={int(args.qk_norm)} qk_norm_affine={int(args.qk_norm_affine)} "
+                f"qk_norm_bias={int(args.qk_norm_bias)} layerscale_value={float(args.layerscale_value):g} "
+                f"rope_theta={float(args.rope_theta):g} rope_prefix_tokens={int(args.rope_prefix_tokens)} "
+                f"use_gated_mlp={int(args.use_gated_mlp)} hidden_act={str(args.hidden_act)} "
+                f"pooling={args.pooling} pos_mode={args.pos_mode} pos_inject={pos_inject_note} head_mode={args.head_mode} "
+                f"init_mode={args.init_mode} "
+                f"is_causal={bool(args.is_causal)}\n"
+                f"  world_size={world_size} batch_mode={args.batch_mode} batch_arg={args.batch} batch_effective={eff_batch}\n"
+                f"  data_format={args.data_format} input_root={args.cache_root if args.data_format == 'npz' else args.scan_h5_root}\n"
+                f"  val_split_mode={resolved_val_split_mode}\n"
+                f"  train_sample={args.pt_sample_mode_train} eval_sample={args.pt_sample_mode_eval} "
+                f"aug_train={aug_train} aug_preset={args.aug_preset} aug_eval={bool(args.aug_eval)} mc_test={args.mc_eval_k_test}"
+            )
 
     for epoch in range(args.epochs):
         model.train()
@@ -615,8 +702,19 @@ def main() -> None:
             normal = batch.get("normal", None)
             if use_normals and normal is not None:
                 normal = normal.to(accelerator.device)
+            ray_o = batch.get("ray_o", None)
+            ray_d = batch.get("ray_d", None)
+            ray_t = batch.get("ray_t", None)
+            ray_hit = batch.get("ray_hit", None)
+            if bool(args.use_ray_patch):
+                if (ray_o is None) or (ray_d is None) or (ray_t is None) or (ray_hit is None):
+                    raise ValueError("use_ray_patch=True but train batch does not contain ray tensors")
+                ray_o = ray_o.to(accelerator.device)
+                ray_d = ray_d.to(accelerator.device)
+                ray_t = ray_t.to(accelerator.device)
+                ray_hit = ray_hit.to(accelerator.device)
 
-            logits = model(xyz, normal)
+            logits = model(xyz, normal, ray_o=ray_o, ray_d=ray_d, ray_t=ray_t, ray_hit=ray_hit)
             loss = F.cross_entropy(logits, label)
 
             accelerator.backward(loss)
@@ -634,7 +732,11 @@ def main() -> None:
             # Rank-0-only eval must run on the unwrapped module. Running forward on
             # DDP-wrapped model only on rank0 causes collective mismatch.
             val_metrics = evaluate_local(
-                accelerator.unwrap_model(model), val_loader, accelerator.device, use_normals=use_normals
+                accelerator.unwrap_model(model),
+                val_loader,
+                accelerator.device,
+                use_normals=use_normals,
+                use_ray_patch=bool(args.use_ray_patch),
             )
             lr_now = optimizer.param_groups[0]["lr"]
             print(
@@ -658,7 +760,11 @@ def main() -> None:
     test_metrics = None
     if accelerator.is_main_process:
         test_metrics = evaluate_local(
-            accelerator.unwrap_model(model), test_loader, accelerator.device, use_normals=use_normals
+            accelerator.unwrap_model(model),
+            test_loader,
+            accelerator.device,
+            use_normals=use_normals,
+            use_ray_patch=bool(args.use_ray_patch),
         )
     if accelerator.is_main_process:
         print(f"TEST acc={test_metrics['acc']:.4f} loss={test_metrics['loss']:.4f}")

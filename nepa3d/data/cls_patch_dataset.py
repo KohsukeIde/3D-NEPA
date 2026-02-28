@@ -58,6 +58,9 @@ class PatchClsPointDataset(Dataset):
         aug: bool = False,
         aug_cfg: Optional[PointAugConfig] = None,
         rng_seed: int = 0,
+        use_ray_patch: bool = False,
+        n_ray: int = 256,
+        ray_sample_mode: str = "random",  # random | first
         # test-time multi-crop (MC) evaluation
         mc_eval_k: int = 1,
         aug_eval: bool = False,
@@ -74,6 +77,10 @@ class PatchClsPointDataset(Dataset):
         self.aug = bool(aug)
         self.aug_cfg = aug_cfg or PointAugConfig()
         self.rng_seed = int(rng_seed)
+        self.use_ray_patch = bool(use_ray_patch)
+        self.n_ray = int(n_ray)
+        assert ray_sample_mode in {"random", "first"}
+        self.ray_sample_mode = str(ray_sample_mode)
         # Initialized lazily per-worker (important when num_workers>0).
         self._rng: Optional[np.random.RandomState] = None
         self.mc_eval_k = int(mc_eval_k)
@@ -97,6 +104,19 @@ class PatchClsPointDataset(Dataset):
             else:
                 rng = self._get_rng()
             idx = rng.choice(n_total, size=n, replace=False)
+        return idx.astype(np.int64, copy=False)
+
+    def _sample_ray_indices(self, n_total: int, *, sample_uid: int = 0) -> np.ndarray:
+        n = min(self.n_ray, int(n_total))
+        if self.ray_sample_mode == "first":
+            return np.arange(n, dtype=np.int64)
+
+        if (not self.aug) and self.deterministic_eval_sampling:
+            seed = (int(self.rng_seed) * 2246822519 + int(sample_uid) * 3266489917) & 0xFFFFFFFF
+            rng = np.random.RandomState(seed)
+        else:
+            rng = self._get_rng()
+        idx = rng.choice(n_total, size=n, replace=False)
         return idx.astype(np.int64, copy=False)
 
     def _get_rng(self) -> np.random.RandomState:
@@ -175,12 +195,36 @@ class PatchClsPointDataset(Dataset):
                 normals = pc_n[idx] if pc_n is not None else None
                 xyz, normals = self._maybe_augment(xyz, normals)
 
+            ray_o = None
+            ray_d = None
+            ray_t = None
+            ray_hit = None
+            if self.use_ray_patch:
+                required = ("ray_o_pool", "ray_d_pool", "ray_t_pool", "ray_hit_pool")
+                missing = [k for k in required if k not in npz]
+                if missing:
+                    raise KeyError(f"Missing ray keys in {path}: {missing}")
+                ray_o_full = npz["ray_o_pool"].astype(np.float32, copy=False)
+                ray_d_full = npz["ray_d_pool"].astype(np.float32, copy=False)
+                ray_t_full = npz["ray_t_pool"].astype(np.float32, copy=False)
+                ray_hit_full = npz["ray_hit_pool"].astype(np.float32, copy=False)
+                ridx = self._sample_ray_indices(ray_o_full.shape[0], sample_uid=(index * 7919 + 17))
+                ray_o = ray_o_full[ridx]
+                ray_d = ray_d_full[ridx]
+                ray_t = ray_t_full[ridx]
+                ray_hit = ray_hit_full[ridx]
+
         out = {
             "xyz": torch.from_numpy(xyz),
             "label": torch.tensor(label, dtype=torch.long),
         }
         if normals is not None:
             out["normal"] = torch.from_numpy(normals)
+        if ray_o is not None:
+            out["ray_o"] = torch.from_numpy(ray_o)
+            out["ray_d"] = torch.from_numpy(ray_d)
+            out["ray_t"] = torch.from_numpy(ray_t)
+            out["ray_hit"] = torch.from_numpy(ray_hit)
         return out
 
 

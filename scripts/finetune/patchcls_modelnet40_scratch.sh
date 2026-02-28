@@ -32,7 +32,7 @@ VAL_SEED="${VAL_SEED:-0}"
 SEED="${SEED:-0}"
 
 SAVE_DIR="${SAVE_DIR:-runs/patchcls}"
-VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-group_auto}"
+VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}"
 
 if [ ! -x "${PYTHON_BIN}" ]; then
   echo "[error] python not found: ${PYTHON_BIN}"

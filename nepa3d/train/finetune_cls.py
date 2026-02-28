@@ -216,14 +216,14 @@ def main():
     ap.add_argument(
         "--val_split_mode",
         type=str,
-        default="group_auto",
+        default="file",
         choices=["file", "group_auto", "group_scanobjectnn", "pointmae"],
         help=(
             "Validation split mode from TRAIN. "
-            "file: legacy file-level split; "
+            "file: stratified file-level split from official train (Point-MAE strict style); "
             "group_auto: group-aware split for ScanObjectNN caches only; "
             "group_scanobjectnn: always use ScanObjectNN group key; "
-            "pointmae: use official test split as validation (Point-MAE style)."
+            "pointmae: use official test split as validation (Point-MAE legacy test-as-val)."
         ),
     )
     ap.add_argument(
