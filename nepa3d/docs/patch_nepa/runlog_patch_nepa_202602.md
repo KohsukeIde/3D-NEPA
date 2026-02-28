@@ -495,3 +495,41 @@ Latest status update (2026-03-01 02:50 JST snapshot):
   - `logs/sanity/patchcls/patchnepa_rayqa_ft_from100011_queryonly_20260301_002508/obj_bg_nepa2d.out`
   - `logs/sanity/patchcls/patchnepa_rayqa_ft_from100011_queryonly_20260301_002508/obj_only_nepa2d.out`
   - `logs/sanity/patchcls/patchnepa_rayqa_ft_from100011_queryonly_20260301_002508/pb_t50_rs_nepa2d.out`
+
+## 15. Clarification: `100073/100074` vs split-x2 + new submissions (2026-03-01)
+
+Correction (important):
+
+- `100073/100074` are indeed **dual-mask Ray runs**.
+- They correspond to the **encdec=0 + dual_mask** side of split-x2.
+- They are **not** the full split-x2 comparison result by themselves, because the paired
+  `encdec_arch=1` run was not completed as a matched A/B pair when those FT jobs were created.
+
+Config snapshot of `100011` source pretrain used by `100073/100074`:
+
+- pretrain run tag:
+  - `patchnepa_rayqa_ddp16_rfpsbank_20260228_223103`
+- key settings:
+  - `qa_layout=split_sep`, `qa_tokens=1`, `encdec_arch=0`
+  - `dual_mask=(0.5, 0.1, w=32, type_aware=1)`
+  - `use_ray_patch=1`, `n_ray=1024`
+  - `pt_sample_mode=rfps_cached`, `pt_rfps_key=auto`
+  - `lr_scheduler=none` (fixed-LR recipe)
+
+New split-x2 resubmission (matched pair) submitted:
+
+- pretrain:
+  - `100118.qjcm` (`patchnepa_ryE16e`)
+    - `encdec_arch=1`, `split_sep`, `dual_mask off`
+    - `pt_sample_mode=rfps_cached`, `pt_rfps_key=pt_rfps_order_bank`
+  - `100119.qjcm` (`patchnepa_ryE16d`)
+    - `encdec_arch=0`, `split_sep`, `dual_mask on`
+    - `pt_sample_mode=rfps_cached`, `pt_rfps_key=pt_rfps_order_bank`
+  - common:
+    - `use_ray_patch=1`, `n_ray=1024`, `fps_knn 64x32`, `16 GPU`
+    - `lr_scheduler=cosine`, `warmup_ratio=0.025`
+
+- dependent FT jobs (auto-start after pretrain success):
+  - from `100118`: `100120` (`obj_bg`), `100121` (`obj_only`), `100122` (`pb_t50_rs`)
+  - from `100119`: `100123` (`obj_bg`), `100124` (`obj_only`), `100125` (`pb_t50_rs`)
+  - all are currently `H` (dependency hold) until corresponding pretrain completes.
