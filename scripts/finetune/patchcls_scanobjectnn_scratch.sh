@@ -67,13 +67,14 @@ SEED="${SEED:-0}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-1}"
 BATCH_MODE="${BATCH_MODE:-global}"  # global | per_proc
 MASTER_PORT="${MASTER_PORT:-29577}"
-POOLING="${POOLING:-cls_max}"  # mean | cls | cls_max
+POOLING="${POOLING:-cls_max}"  # mean | mean_q | cls | cls_max
 POS_MODE="${POS_MODE:-center_mlp}"  # learned | center_mlp
 HEAD_MODE="${HEAD_MODE:-pointmae_mlp}"  # auto | linear | pointmae_mlp
 HEAD_HIDDEN_DIM="${HEAD_HIDDEN_DIM:-256}"
 HEAD_DROPOUT="${HEAD_DROPOUT:-0.5}"
 INIT_MODE="${INIT_MODE:-default}"  # default | pointmae
 IS_CAUSAL="${IS_CAUSAL:-0}"  # 0 | 1
+PATCHNEPA_FT_MODE="${PATCHNEPA_FT_MODE:-qa_zeroa}"  # qa_zeroa | q_only
 AUG_PRESET="${AUG_PRESET:-pointmae}"  # none | default | strong | pointmae
 AUG_EVAL="${AUG_EVAL:-1}"             # 0 | 1 (policy default: 1)
 MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-10}" # policy default: 10
@@ -166,6 +167,7 @@ ARGS=(
   --head_dropout "${HEAD_DROPOUT}"
   --init_mode "${INIT_MODE}"
   --is_causal "${IS_CAUSAL}"
+  --patchnepa_ft_mode "${PATCHNEPA_FT_MODE}"
   --num_workers "${NUM_WORKERS}"
 )
 

@@ -703,16 +703,18 @@ class PatchTransformerNepaClassifier(nn.Module):
         self,
         num_classes: int,
         *,
-        pooling: str = "cls_max",  # mean | cls | cls_max
+        pooling: str = "cls_max",  # mean/mean_q | cls | cls_max
         head_mode: str = "pointmae_mlp",  # linear | pointmae_mlp
         head_hidden_dim: int = 256,
         head_dropout: float = 0.5,
         is_causal: bool = False,
+        ft_sequence_mode: str = "qa_zeroa",  # qa_zeroa | q_only
         **nepa_kwargs,
     ) -> None:
         super().__init__()
-        assert pooling in {"mean", "cls", "cls_max"}
+        assert pooling in {"mean", "mean_q", "cls", "cls_max"}
         assert head_mode in {"linear", "pointmae_mlp"}
+        assert ft_sequence_mode in {"qa_zeroa", "q_only"}
 
         self.core = PatchTransformerNepa(**nepa_kwargs)
         self.d_model = int(self.core.d_model)
@@ -721,6 +723,7 @@ class PatchTransformerNepaClassifier(nn.Module):
         self.head_hidden_dim = int(head_hidden_dim)
         self.head_dropout = float(head_dropout)
         self.is_causal = bool(is_causal)
+        self.ft_sequence_mode = str(ft_sequence_mode)
 
         if self.pooling == "cls_max":
             head_in_dim = 2 * self.d_model
@@ -775,7 +778,7 @@ class PatchTransformerNepaClassifier(nn.Module):
         q_sum = (h * q_mask.unsqueeze(-1).to(dtype=h.dtype)).sum(dim=1)
         q_mean = q_sum / q_count
 
-        if self.pooling == "mean":
+        if self.pooling in {"mean", "mean_q"}:
             return q_mean
 
         neg_inf = torch.finfo(h.dtype).min
@@ -785,6 +788,58 @@ class PatchTransformerNepaClassifier(nn.Module):
         valid = q_mask.any(dim=1, keepdim=True)
         q_max = torch.where(valid, q_max, cls_feat)
         return torch.cat([cls_feat, q_max], dim=-1)
+
+    def _build_q_only_sequence(
+        self,
+        xyz: torch.Tensor,
+        normals: Optional[torch.Tensor],
+        ray_o: Optional[torch.Tensor],
+        ray_d: Optional[torch.Tensor],
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        patch_out = self.core.patch_embed(xyz, normals if self.core.use_normals else None)
+        q_tok = patch_out.tokens
+        centers_xyz = patch_out.centers_xyz
+        B, P, D = q_tok.shape
+        dev = q_tok.device
+
+        parts: list[torch.Tensor] = [self.core.bos_token.expand(B, 1, D), q_tok]
+        types: list[torch.Tensor] = [
+            torch.full((B, 1), int(TYPE_BOS), device=dev, dtype=torch.long),
+            torch.full((B, P), int(TYPE_Q_POINT), device=dev, dtype=torch.long),
+        ]
+        centers_parts: list[torch.Tensor] = [
+            torch.zeros((B, 1, 3), device=dev, dtype=centers_xyz.dtype),
+            centers_xyz,
+        ]
+
+        if self.core.use_ray_patch:
+            if self.core.ray_patch_embed is None:
+                raise RuntimeError("use_ray_patch=True but ray_patch_embed is None")
+            if ray_o is None or ray_d is None:
+                raise ValueError("q_only mode with ray patch requires ray_o and ray_d")
+            ray_out = self.core.ray_patch_embed(
+                centers_xyz=centers_xyz,
+                ray_o=ray_o,
+                ray_d=ray_d,
+                ray_t=None,
+                ray_hit=None,
+                ray_n=None,
+                ray_unc=None,
+                ray_available=None,
+            )
+            q_ray_type = torch.where(
+                ray_out.has_ray,
+                torch.full((B, P), int(TYPE_Q_RAY), device=dev, dtype=torch.long),
+                torch.full((B, P), int(TYPE_MISSING_RAY), device=dev, dtype=torch.long),
+            )
+            parts.append(ray_out.q_tok)
+            types.append(q_ray_type)
+            centers_parts.append(centers_xyz)
+
+        parts.append(self.core.eos_token.expand(B, 1, D))
+        types.append(torch.full((B, 1), int(TYPE_EOS), device=dev, dtype=torch.long))
+        centers_parts.append(torch.zeros((B, 1, 3), device=dev, dtype=centers_xyz.dtype))
+        return torch.cat(parts, dim=1), torch.cat(types, dim=1), torch.cat(centers_parts, dim=1)
 
     def forward_features(
         self,
@@ -796,10 +851,41 @@ class PatchTransformerNepaClassifier(nn.Module):
         ray_hit: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         # Query-only classification protocol:
-        # - no point-distance supervision at finetune (pt_dist=0)
-        # - no ray-answer values (ray_t/ray_hit are intentionally ignored)
+        # - qa_zeroa: keep QA layout but feed zero-valued point answers
+        # - q_only: remove all A tokens at finetune and use only query sequence
+        # In both cases, ray answer values are intentionally ignored.
         _ = ray_t
         _ = ray_hit
+
+        if self.ft_sequence_mode == "q_only":
+            tokens, type_id, centers_seq = self._build_q_only_sequence(
+                xyz=xyz,
+                normals=normals,
+                ray_o=ray_o,
+                ray_d=ray_d,
+            )
+            z = self.core._add_embeddings(tokens, type_id, centers_seq)
+            if isinstance(self.core.backbone, EncoderDecoderTransformer):
+                # Encoder-only inference in q_only mode; keep EOS as a 1-token decoder stub.
+                enc = z[:, :-1, :]
+                dec = z[:, -1:, :]
+                enc_out, _ = self.core.backbone(enc, dec, enc_xyz=None)
+                h = enc_out
+                type_for_pool = type_id[:, :-1]
+            else:
+                h = self.core.backbone(
+                    z,
+                    is_causal=self.is_causal,
+                    type_id=type_id,
+                    dual_mask_near=0.0,
+                    dual_mask_far=0.0,
+                    dual_mask_window=0,
+                    dual_mask_type_aware=0,
+                )
+                type_for_pool = type_id
+            h = self.core.pred_head[0](h)
+            return self._pool_features(h, type_for_pool)
+
         pt_dist = torch.zeros((xyz.shape[0], xyz.shape[1], 1), dtype=xyz.dtype, device=xyz.device)
         out = self.core(
             pt_xyz=xyz,
@@ -815,7 +901,8 @@ class PatchTransformerNepaClassifier(nn.Module):
             dual_mask_window=0,
             dual_mask_type_aware=0,
         )
-        return self._pool_features(out.h, out.type_id)
+        h = self.core.pred_head[0](out.h)
+        return self._pool_features(h, out.type_id)
 
     def forward(
         self,

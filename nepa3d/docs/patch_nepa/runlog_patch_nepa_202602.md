@@ -771,3 +771,202 @@ Older pb_t50_rs FT jobs:
 
 - `100075`, `100091` ended with `Exit_status=265` (terminated); no final
   `TEST acc` recorded for those runs.
+
+## 20. Direct-FT diagnosis checklist (2026-03-01)
+
+Purpose:
+
+- isolate why direct PatchNEPA FT results vary (`100150` vs `100171`) even when
+  recipe/ckpt are nominally identical.
+
+### 20.1 Checkpoint adaptation/loading integrity (must pass first)
+
+What to inspect:
+
+- `nepa3d/train/finetune_patch_cls.py`
+  - `_adapt_patchnepa_pretrain_to_patchnepa_classifier`
+- FT logs:
+  - `logs/sanity/patchcls/patchnepaFT_from_ray_20260301_013921/obj_only_nepa2d.out`
+  - `logs/sanity/patchnepa_ft/patchnepa_refactor_repro1_20260301_021900/obj_only.out`
+
+Pass criteria:
+
+- `[ckpt-adapt] ... direct=0`
+- `[ckpt-adapt] ... mapped=src`
+- `Loaded ckpt: unexpected=0`
+- `missing` is classifier-only head parameters
+
+Current status:
+
+- PASS on both `100150` and `100171`:
+  - ray run: `mapped=247 direct=0 load=247 src=247 dst=263`, `missing=14 unexpected=0`
+  - repro run: same values.
+
+Interpretation:
+
+- current evidence does **not** support “broken key mapping / wrong tensor load”
+  as root cause.
+
+### 20.2 Finetune best-checkpoint selection path
+
+What to inspect:
+
+- `nepa3d/train/finetune_patch_cls.py`
+  - best checkpoint update condition (`val_acc` based save)
+  - final test evaluation (ensures best checkpoint is loaded for test)
+- FT logs:
+  - grep for `saved best ->` progression and final `TEST acc=...`
+
+Pass criteria:
+
+- monotonically updated best marker by `val_acc`
+- final test explicitly tied to the best checkpoint (not last epoch by accident)
+
+Reason:
+
+- `100150` and `100171` reached different trajectories while sharing almost
+  identical args/ckpt; this is the most likely path for outcome divergence.
+
+### 20.3 Eval variance under `file + TTA10`
+
+What to inspect:
+
+- `nepa3d/train/finetune_patch_cls.py`
+  - `evaluate_local` and vote aggregation (`mc_test`, `aug_eval`)
+  - seed handling (`_set_seed`, dataloader worker behavior)
+- job args:
+  - ensure `val_split_mode=file`, `aug_eval=1`, `mc_test=10`, `seed=0`
+- reproduce:
+  - rerun same ckpt/args at least 2 times (`obj_only`) and compare spread.
+
+Pass criteria:
+
+- repeated runs stay within expected noise band (target: <= ~1pt)
+- if spread is larger, treat direct-FT delta claims as unstable until fixed.
+
+### 20.4 Pretrain quality delta (ray/point-only, split/interleave, mask mode)
+
+What to inspect:
+
+- pretrain logs + resolved config header from:
+  - `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh`
+  - `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh`
+  - `nepa3d/train/pretrain_patch_nepa.py`
+- required fixed fields:
+  - `MIX_CONFIG` (one-pass parity)
+  - `PT_SAMPLE_MODE=rfps_cached`, `PT_RFPS_KEY=pt_rfps_order_bank`
+  - `qa_layout`, `encdec_arch`, `dual_mask*`
+  - topology/global batch (`16 GPU`, global batch `128`)
+
+Pass criteria:
+
+- no recipe drift across compared runs
+- no fallback sampling warnings
+- token sanity print (step 0) matches intended layout.
+
+Operational note:
+
+- Until 20.2 and 20.3 are closed, prioritize paired reruns over single-shot
+  conclusions when judging pretrain efficacy.
+
+## 21. Split-x2 completion rerun (encdec1 vs dualmask, 2026-03-01)
+
+User request:
+
+- complete matched A/B comparison for Ray split setting:
+  - A: `encdec_arch=1` (Q-bidir/A-causal path)
+  - B: `encdec_arch=0 + dual_mask on`
+- and run downstream FT for both branches.
+
+Submitted pretrain jobs (16 GPU, 4x4):
+
+- `100180.qjcm` (`patchnepa_ryE16e2`)
+  - run set: `patchnepa_ray_splitx2_encdec1_20260301_035212`
+  - key config:
+    - `qa_layout=split_sep`, `qa_tokens=1`, `encdec_arch=1`
+    - `dual_mask=(0.0,0.0,w=32,type_aware=0)`
+    - `use_ray_patch=1`, `n_ray=1024`
+    - `pt_sample_mode=rfps_cached`, `pt_rfps_key=pt_rfps_order_bank`
+    - `pt_xyz_key=pt_xyz_pool`, `pt_dist_key=pt_dist_pool`, `ablate_point_dist=0`
+    - global batch `128` (`batch=8`, `num_processes=16`)
+
+- `100181.qjcm` (`patchnepa_ryE16d2`)
+  - run set: `patchnepa_ray_splitx2_dualmask_20260301_035220`
+  - key config:
+    - `qa_layout=split_sep`, `qa_tokens=1`, `encdec_arch=0`
+    - `dual_mask=(0.5,0.1,w=32,type_aware=1)`
+    - all other knobs matched to `100180`.
+
+Startup sanity checks (rank0 logs):
+
+- both jobs show expected token layout at step0 (`Q_POINT=64`, `A_POINT=64`, `SEP=1`, Ray tokens present)
+- both jobs started normal step logs (`epoch0 step0/50...`).
+
+Dependent FT jobs submitted (hold until pretrain `afterok`):
+
+- from `100180`:
+  - `100182.qjcm` (`obj_bg`)
+  - `100184.qjcm` (`obj_only`)
+  - `100186.qjcm` (`pb_t50_rs`)
+  - run set: `patchnepaFT_from_splitx2_encdec1_20260301_035230`
+
+- from `100181`:
+  - `100183.qjcm` (`obj_bg`)
+  - `100185.qjcm` (`obj_only`)
+  - `100187.qjcm` (`pb_t50_rs`)
+  - run set: `patchnepaFT_from_splitx2_dualmask_20260301_035230`
+
+FT policy (both branches):
+
+- `MODEL_SOURCE=patchnepa`
+- strict eval: `val_split_mode=file`, `AUG_EVAL=1`, `MC_EVAL_K_TEST=10`
+- `USE_RAY_PATCH=1`, `N_RAY=1024`.
+
+## 20. FT mode split requeue (`baseline` vs `q_only`) + `mean_q` add-on (2026-03-01)
+
+User-requested action:
+
+- cancelled held FT jobs from previous chain:
+  - `100182`, `100183`, `100184`, `100185`, `100186`, `100187`
+- requeued with explicit finetune sequence mode separation:
+  - `baseline = patchnepa_ft_mode=qa_zeroa` (keep QA layout with zero-A inputs)
+  - `q_only = patchnepa_ft_mode=q_only` (remove A tokens at finetune)
+
+Code path updates applied before resubmit:
+
+- `nepa3d/models/patch_nepa.py`
+  - `PatchTransformerNepaClassifier` now supports `ft_sequence_mode` (`qa_zeroa|q_only`)
+  - added q-only sequence builder
+  - added pooling alias `mean_q`
+- `nepa3d/train/finetune_patch_cls.py`
+  - new CLI arg `--patchnepa_ft_mode`
+  - `--pooling` accepts `mean_q`
+- launcher env wiring:
+  - `scripts/finetune/patchcls_scanobjectnn_scratch.sh`
+  - `scripts/sanity/submit_patchnepa_finetune_variants_qf.sh`
+
+Requeued FT jobs (all strict eval: `val_split_mode=file`, `aug_eval=1`, `mc_test=10`):
+
+From pretrain `100180` (`encdec1 split_sep`):
+
+- baseline (`qa_zeroa`, `pooling=cls_max`):
+  - `100188` (`obj_bg`), `100189` (`obj_only`), `100190` (`pb_t50_rs`)
+- q_only (`q_only`, `pooling=cls_max`):
+  - `100191` (`obj_bg`), `100192` (`obj_only`), `100193` (`pb_t50_rs`)
+
+From pretrain `100181` (`dualmask split_sep`):
+
+- baseline (`qa_zeroa`, `pooling=cls_max`):
+  - `100194` (`obj_bg`), `100195` (`obj_only`), `100196` (`pb_t50_rs`)
+- q_only (`q_only`, `pooling=cls_max`):
+  - `100197` (`obj_bg`), `100198` (`obj_only`), `100199` (`pb_t50_rs`)
+- q_only + mean pooling probe (`q_only`, `pooling=mean_q`):
+  - `100200` (`obj_bg`), `100201` (`obj_only`), `100202` (`pb_t50_rs`)
+
+Submission logs:
+
+- `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_encdec1_baseline_20260301_040736`
+- `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_encdec1_qonly_20260301_040738`
+- `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_baseline_20260301_040740`
+- `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_qonly_20260301_040743`
+- `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_qonly_meanq_20260301_040745`

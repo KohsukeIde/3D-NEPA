@@ -155,7 +155,7 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--rope_prefix_tokens", type=int, default=1)
     p.add_argument("--use_gated_mlp", type=int, default=0, choices=[0, 1], help="Enable gated MLP path.")
     p.add_argument("--hidden_act", type=str, default="gelu", choices=["gelu", "silu"], help="MLP activation.")
-    p.add_argument("--pooling", type=str, default="cls_max", choices=["mean", "cls", "cls_max"])
+    p.add_argument("--pooling", type=str, default="cls_max", choices=["mean", "mean_q", "cls", "cls_max"])
     p.add_argument("--pos_mode", type=str, default="center_mlp", choices=["learned", "center_mlp"])
     p.add_argument("--use_ray_patch", type=int, default=0, choices=[0, 1])
     p.add_argument("--n_ray", type=int, default=256)
@@ -171,6 +171,7 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--head_dropout", type=float, default=0.5)
     p.add_argument("--init_mode", type=str, default="default", choices=["default", "pointmae"])
     p.add_argument("--is_causal", type=int, default=0)
+    p.add_argument("--patchnepa_ft_mode", type=str, default="qa_zeroa", choices=["qa_zeroa", "q_only"])
 
     # Optim
     p.add_argument("--epochs", type=int, default=300)
@@ -849,6 +850,7 @@ def main() -> None:
             head_hidden_dim=args.head_hidden_dim,
             head_dropout=args.head_dropout,
             is_causal=bool(args.is_causal),
+            ft_sequence_mode=str(args.patchnepa_ft_mode),
             **nepa_kwargs,
         )
     else:
@@ -1015,7 +1017,7 @@ def main() -> None:
                 f"PatchCls: classes={num_classes} train={len(train_set)} val={len(val_set)} test={len(test_set)}\n"
                 f"  model_source=patchnepa(direct) n_point={args.n_point} groups={args.num_groups} group_size={args.group_size} "
                 f"use_ray_patch={int(args.use_ray_patch)} n_ray={args.n_ray} "
-                f"pooling={args.pooling} head_mode={args.head_mode} "
+                f"pooling={args.pooling} patchnepa_ft_mode={args.patchnepa_ft_mode} head_mode={args.head_mode} "
                 f"backbone_mode={args.backbone_mode} "
                 f"ray_query_only=1 is_causal={bool(args.is_causal)}\n"
                 f"  world_size={world_size} batch_mode={args.batch_mode} batch_arg={args.batch} batch_effective={eff_batch}\n"
