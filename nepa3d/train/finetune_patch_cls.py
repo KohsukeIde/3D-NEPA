@@ -453,6 +453,7 @@ def evaluate_local(
     device: torch.device,
     use_normals: bool,
     use_ray_patch: bool,
+    model_source: str = "patchcls",
 ) -> Dict[str, float]:
     model.eval()
     correct = 0
@@ -474,10 +475,16 @@ def evaluate_local(
                 raise ValueError("use_ray_patch=True but batch does not contain ray_o/ray_d tensors")
             ray_o = ray_o.to(device)
             ray_d = ray_d.to(device)
-            if ray_t is not None:
-                ray_t = ray_t.to(device)
-            if ray_hit is not None:
-                ray_hit = ray_hit.to(device)
+            if model_source != "patchnepa":
+                if ray_t is not None:
+                    ray_t = ray_t.to(device)
+                if ray_hit is not None:
+                    ray_hit = ray_hit.to(device)
+            else:
+                # Query-only ray protocol for PatchNEPA classification:
+                # never pass answer-side ray signals.
+                ray_t = None
+                ray_hit = None
 
         # MC eval: xyz is (B,K,N,3)
         if xyz.dim() == 4:
@@ -491,8 +498,12 @@ def evaluate_local(
                 # Rays are sampled once per shape and shared across MC crops.
                 ray_o2 = ray_o.repeat_interleave(K, dim=0)
                 ray_d2 = ray_d.repeat_interleave(K, dim=0)
-                ray_t2 = ray_t.repeat_interleave(K, dim=0) if ray_t is not None else None
-                ray_hit2 = ray_hit.repeat_interleave(K, dim=0) if ray_hit is not None else None
+                if model_source != "patchnepa":
+                    ray_t2 = ray_t.repeat_interleave(K, dim=0) if ray_t is not None else None
+                    ray_hit2 = ray_hit.repeat_interleave(K, dim=0) if ray_hit is not None else None
+                else:
+                    ray_t2 = None
+                    ray_hit2 = None
             else:
                 ray_o2 = ray_d2 = ray_t2 = ray_hit2 = None
             logits = model(xyz2, normal2, ray_o=ray_o2, ray_d=ray_d2, ray_t=ray_t2, ray_hit=ray_hit2)
@@ -876,8 +887,30 @@ def main() -> None:
         missing, unexpected = model.load_state_dict(state_to_load, strict=False)
         if accelerator.is_main_process:
             print(f"Loaded ckpt: missing={len(missing)} unexpected={len(unexpected)}")
+            if args.model_source == "patchnepa":
+                bad_missing = [k for k in missing if not k.startswith("cls_head.")]
+                # PatchNEPA direct transfer should only miss cls_head in normal cases.
+                if bad_missing or unexpected:
+                    print(
+                        "[warn] patchnepa direct-load key mismatch: "
+                        f"bad_missing={len(bad_missing)} unexpected={len(unexpected)}"
+                    )
+                    if bad_missing:
+                        print(f"  bad_missing(sample): {bad_missing[:20]}")
+                    if unexpected:
+                        print(f"  unexpected(sample): {unexpected[:20]}")
 
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    if args.model_source == "patchnepa" and hasattr(model, "pred_head"):
+        # Prediction head is pretrain-only; keep it out of finetune optimization.
+        for p in model.pred_head.parameters():
+            p.requires_grad_(False)
+        if accelerator.is_main_process:
+            print("[finetune] patchnepa direct: pred_head frozen/excluded from optimizer")
+
+    opt_params = [p for p in model.parameters() if p.requires_grad]
+    if not opt_params:
+        raise RuntimeError("No trainable parameters found for optimizer.")
+    optimizer = optim.AdamW(opt_params, lr=args.lr, weight_decay=args.weight_decay)
 
     lr_scheduler = None
     if args.lr_scheduler == "cosine":
@@ -981,10 +1014,15 @@ def main() -> None:
                     raise ValueError("use_ray_patch=True but train batch does not contain ray_o/ray_d tensors")
                 ray_o = ray_o.to(accelerator.device)
                 ray_d = ray_d.to(accelerator.device)
-                if ray_t is not None:
-                    ray_t = ray_t.to(accelerator.device)
-                if ray_hit is not None:
-                    ray_hit = ray_hit.to(accelerator.device)
+                if args.model_source != "patchnepa":
+                    if ray_t is not None:
+                        ray_t = ray_t.to(accelerator.device)
+                    if ray_hit is not None:
+                        ray_hit = ray_hit.to(accelerator.device)
+                else:
+                    # Query-only ray protocol in PatchNEPA direct FT.
+                    ray_t = None
+                    ray_hit = None
 
             logits = model(xyz, normal, ray_o=ray_o, ray_d=ray_d, ray_t=ray_t, ray_hit=ray_hit)
             loss = F.cross_entropy(logits, label)
@@ -1009,6 +1047,7 @@ def main() -> None:
                 accelerator.device,
                 use_normals=use_normals,
                 use_ray_patch=bool(args.use_ray_patch),
+                model_source=str(args.model_source),
             )
             lr_now = optimizer.param_groups[0]["lr"]
             print(
@@ -1037,6 +1076,7 @@ def main() -> None:
             accelerator.device,
             use_normals=use_normals,
             use_ray_patch=bool(args.use_ray_patch),
+            model_source=str(args.model_source),
         )
     if accelerator.is_main_process:
         print(f"TEST acc={test_metrics['acc']:.4f} loss={test_metrics['loss']:.4f}")

@@ -73,6 +73,7 @@ HEAD_MODE="${HEAD_MODE:-pointmae_mlp}"  # auto | linear | pointmae_mlp
 HEAD_HIDDEN_DIM="${HEAD_HIDDEN_DIM:-256}"
 HEAD_DROPOUT="${HEAD_DROPOUT:-0.5}"
 INIT_MODE="${INIT_MODE:-default}"  # default | pointmae
+IS_CAUSAL="${IS_CAUSAL:-0}"  # 0 | 1
 AUG_PRESET="${AUG_PRESET:-pointmae}"  # none | default | strong | pointmae
 AUG_EVAL="${AUG_EVAL:-1}"             # 0 | 1 (policy default: 1)
 MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-10}" # policy default: 10
@@ -164,7 +165,7 @@ ARGS=(
   --head_hidden_dim "${HEAD_HIDDEN_DIM}"
   --head_dropout "${HEAD_DROPOUT}"
   --init_mode "${INIT_MODE}"
-  --is_causal 0
+  --is_causal "${IS_CAUSAL}"
   --num_workers "${NUM_WORKERS}"
 )
 

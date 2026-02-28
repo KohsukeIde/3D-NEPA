@@ -118,7 +118,11 @@ class PatchTransformerNepaClassifier(PatchTransformerNepa):
         ray_t: torch.Tensor | None = None,
         ray_hit: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        # Query-only classification protocol: no distance supervision at finetune.
+        # Query-only classification protocol:
+        # - no point-distance supervision at finetune (pt_dist=0)
+        # - no ray-answer values (ray_t/ray_hit are intentionally ignored)
+        _ = ray_t
+        _ = ray_hit
         pt_dist = torch.zeros((xyz.shape[0], xyz.shape[1], 1), dtype=xyz.dtype, device=xyz.device)
         out = super().forward(
             pt_xyz=xyz,
@@ -126,8 +130,8 @@ class PatchTransformerNepaClassifier(PatchTransformerNepa):
             pt_dist=pt_dist,
             ray_o=ray_o,
             ray_d=ray_d,
-            ray_t=ray_t,
-            ray_hit=ray_hit,
+            ray_t=None,
+            ray_hit=None,
             is_causal=self.is_causal,
             dual_mask_near=0.0,
             dual_mask_far=0.0,

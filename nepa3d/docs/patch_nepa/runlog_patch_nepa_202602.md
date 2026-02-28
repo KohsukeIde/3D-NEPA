@@ -677,3 +677,11 @@ Launcher naming cleanup:
   - `scripts/sanity/submit_patchnepa_finetune_variants_qf.sh`
 - Runtime model path is unchanged and explicit:
   - `MODEL_SOURCE=patchnepa` (direct PatchNEPA finetune path).
+
+Additional causal probe submission:
+
+- `100164.qjcm` (`pn_obj_bg`) submitted as a single-run A/B check
+  against the active Ray split run (`afterok:100146`):
+  - `MODEL_SOURCE=patchnepa`
+  - `VARIANT=obj_bg`
+  - `IS_CAUSAL=1` (all other strict-eval settings unchanged: `file + TTA10`)
