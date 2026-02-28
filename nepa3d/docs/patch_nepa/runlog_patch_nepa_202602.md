@@ -685,3 +685,89 @@ Additional causal probe submission:
   - `MODEL_SOURCE=patchnepa`
   - `VARIANT=obj_bg`
   - `IS_CAUSAL=1` (all other strict-eval settings unchanged: `file + TTA10`)
+
+## 19. Mode-wise Results Snapshot (2026-03-01, latest)
+
+This snapshot summarizes what has actually produced `TEST acc` so far, grouped
+by transfer/eval mode.
+
+### 19.1 Ray pretrain (`100146`) -> direct PatchNEPA FT (`MODEL_SOURCE=patchnepa`)
+
+Source pretrain:
+
+- job: `100146.qjcm` (`patchnepa_rayDF`)
+- status: `Exit_status=0`
+- mode:
+  - `USE_RAY_PATCH=1`, `N_RAY=1024`
+  - `qa_tokens=1`, `qa_layout=split_sep`, `encdec_arch=0`
+  - `dual_mask=(0.5,0.1,w=32,type_aware=1)`
+  - `pt_sample_mode=rfps_cached`, `pt_rfps_key=pt_rfps_order_bank`
+  - `16 GPU`, global batch `128`
+
+Dependent FT (strict eval: `val_split_mode=file`, `AUG_EVAL=1`, `MC_TEST=10`):
+
+| job | variant | mode | status | test_acc |
+|---|---|---|---|---:|
+| `100148` | `obj_bg` | direct PatchNEPA FT (`is_causal=0`) | done | `0.7797` |
+| `100150` | `obj_only` | direct PatchNEPA FT (`is_causal=0`) | done | `0.7952` |
+| `100152` | `pb_t50_rs` | direct PatchNEPA FT (`is_causal=0`) | running | pending |
+
+Logs:
+
+- `logs/sanity/patchcls/patchnepaFT_from_ray_20260301_013921/obj_bg_nepa2d.out`
+- `logs/sanity/patchcls/patchnepaFT_from_ray_20260301_013921/obj_only_nepa2d.out`
+- `logs/sanity/patchcls/patchnepaFT_from_ray_20260301_013921/pb_t50_rs_nepa2d.out`
+
+### 19.2 Point-only control pretrain (`100154`) -> direct PatchNEPA FT
+
+Dependent FT (strict eval: `file + TTA10`):
+
+| job | variant | mode | status | test_acc |
+|---|---|---|---|---:|
+| `100155` | `obj_bg` | direct PatchNEPA FT (`is_causal=0`) | done | `0.7590` |
+| `100156` | `obj_only` | direct PatchNEPA FT (`is_causal=0`) | done | `0.7797` |
+| `100157` | `pb_t50_rs` | direct PatchNEPA FT (`is_causal=0`) | done | `0.7380` |
+
+Logs:
+
+- `logs/sanity/patchcls/patchnepaFT_from_ptonly_fix_20260301_014058/obj_bg_nepa2d.out`
+- `logs/sanity/patchcls/patchnepaFT_from_ptonly_fix_20260301_014058/obj_only_nepa2d.out`
+- `logs/sanity/patchcls/patchnepaFT_from_ptonly_fix_20260301_014058/pb_t50_rs_nepa2d.out`
+
+### 19.3 Causal FT probe (same Ray pretrain, `is_causal=1`)
+
+| job | variant | mode | status | test_acc |
+|---|---|---|---|---:|
+| `100164` | `obj_bg` | direct PatchNEPA FT (`is_causal=1`) | done | `0.7487` |
+
+Log:
+
+- `logs/sanity/patchnepa_ft/patchnepaFT_from_ray_causal_probe_20260301_020406/obj_bg.out`
+
+### 19.4 Refactor reproducibility run (post class-split refactor)
+
+| job | variant | mode | status | test_acc |
+|---|---|---|---|---:|
+| `100171` | `obj_only` | direct PatchNEPA FT (`is_causal=0`) | done | `0.8072` |
+
+Log:
+
+- `logs/sanity/patchnepa_ft/patchnepa_refactor_repro1_20260301_021900/obj_only.out`
+
+### 19.5 Historical/aborted chains (for traceability)
+
+Ray pretrain split-x2 candidates:
+
+- `100118` (`encdec1 split_sep`) and `100119` (`dualmask split_sep`) ended with
+  `Exit_status=265` (`terminated by qch10156fh@qes03`) before completion.
+  - both are partial runs only (no final checkpoint claim for matched A/B).
+
+Dependent FT jobs:
+
+- `100120`~`100125` were submitted with `depend=afterok:100118/100119` and are
+  finalized in hold/substate path without execution (no `.out/.err` payload).
+
+Older pb_t50_rs FT jobs:
+
+- `100075`, `100091` ended with `Exit_status=265` (terminated); no final
+  `TEST acc` recorded for those runs.
