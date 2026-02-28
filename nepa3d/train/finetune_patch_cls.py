@@ -221,6 +221,80 @@ def _stratified_split_indices(labels: np.ndarray, val_ratio: float, seed: int) -
     return train_idx, val_idx
 
 
+def _adapt_legacy_querynepa_to_patchcls_nepa2d(
+    source_state: Dict[str, torch.Tensor],
+    target_state: Dict[str, torch.Tensor],
+) -> Tuple[Dict[str, torch.Tensor], Dict[str, int]]:
+    """Map legacy QueryNepa backbone weights to patchcls-nepa2d naming.
+
+    Supported source prefixes:
+    - `backbone.layers.{i}.*`
+    - `backbone.enc.layers.{i}.*`
+    """
+    out: Dict[str, torch.Tensor] = {}
+    direct = 0
+    mapped = 0
+
+    # Direct copy for any exact key/shape match.
+    for k, v in source_state.items():
+        tv = target_state.get(k, None)
+        if tv is not None and tuple(tv.shape) == tuple(v.shape):
+            out[k] = v
+            direct += 1
+
+    def _assign(dst_k: str, src_v: torch.Tensor) -> None:
+        nonlocal mapped
+        tv = target_state.get(dst_k, None)
+        if tv is not None and tuple(tv.shape) == tuple(src_v.shape):
+            out[dst_k] = src_v
+            mapped += 1
+
+    for src_prefix in ("backbone.layers", "backbone.enc.layers"):
+        for i in range(96):
+            src_base = f"{src_prefix}.{i}"
+            dst_base = f"backbone.blocks.{i}"
+            w_qkv_k = f"{src_base}.self_attn.in_proj_weight"
+            b_qkv_k = f"{src_base}.self_attn.in_proj_bias"
+            if w_qkv_k not in source_state:
+                continue
+
+            w_qkv = source_state[w_qkv_k]
+            b_qkv = source_state.get(b_qkv_k, None)
+
+            if w_qkv.ndim == 2 and w_qkv.shape[0] % 3 == 0:
+                wq, wk, wv = w_qkv.chunk(3, dim=0)
+                _assign(f"{dst_base}.attn.query.weight", wq)
+                _assign(f"{dst_base}.attn.key.weight", wk)
+                _assign(f"{dst_base}.attn.value.weight", wv)
+            if b_qkv is not None and b_qkv.ndim == 1 and b_qkv.shape[0] % 3 == 0:
+                bq, bk, bv = b_qkv.chunk(3, dim=0)
+                _assign(f"{dst_base}.attn.query.bias", bq)
+                _assign(f"{dst_base}.attn.key.bias", bk)
+                _assign(f"{dst_base}.attn.value.bias", bv)
+
+            _assign(f"{dst_base}.attn.proj.weight", source_state[f"{src_base}.self_attn.out_proj.weight"])
+            _assign(f"{dst_base}.attn.proj.bias", source_state[f"{src_base}.self_attn.out_proj.bias"])
+
+            _assign(f"{dst_base}.mlp.up_proj.weight", source_state[f"{src_base}.linear1.weight"])
+            _assign(f"{dst_base}.mlp.up_proj.bias", source_state[f"{src_base}.linear1.bias"])
+            _assign(f"{dst_base}.mlp.fc2.weight", source_state[f"{src_base}.linear2.weight"])
+            _assign(f"{dst_base}.mlp.fc2.bias", source_state[f"{src_base}.linear2.bias"])
+
+            _assign(f"{dst_base}.layernorm_before.weight", source_state[f"{src_base}.norm1.weight"])
+            _assign(f"{dst_base}.layernorm_before.bias", source_state[f"{src_base}.norm1.bias"])
+            _assign(f"{dst_base}.layernorm_after.weight", source_state[f"{src_base}.norm2.weight"])
+            _assign(f"{dst_base}.layernorm_after.bias", source_state[f"{src_base}.norm2.bias"])
+
+    stats = {
+        "direct": int(direct),
+        "mapped": int(mapped),
+        "total_to_load": int(len(out)),
+        "src_total": int(len(source_state)),
+        "dst_total": int(len(target_state)),
+    }
+    return out, stats
+
+
 def _resolve_scan_h5_files(scan_h5_root: str, scan_variant: str) -> Tuple[Path, Path]:
     root = Path(scan_h5_root)
     if not root.exists():
@@ -617,8 +691,19 @@ def main() -> None:
     if args.ckpt:
         ckpt = torch.load(args.ckpt, map_location="cpu")
         state = ckpt.get("model", ckpt)
+        state_to_load = state
+        if args.model_source == "patchcls" and args.backbone_mode == "nepa2d":
+            adapted, stats = _adapt_legacy_querynepa_to_patchcls_nepa2d(state, model.state_dict())
+            if stats["mapped"] > 0:
+                state_to_load = adapted
+                if accelerator.is_main_process:
+                    print(
+                        "[ckpt-adapt] legacy->patchcls-nepa2d "
+                        f"mapped={stats['mapped']} direct={stats['direct']} "
+                        f"load={stats['total_to_load']} src={stats['src_total']} dst={stats['dst_total']}"
+                    )
         # allow head mismatch
-        missing, unexpected = model.load_state_dict(state, strict=False)
+        missing, unexpected = model.load_state_dict(state_to_load, strict=False)
         if accelerator.is_main_process:
             print(f"Loaded ckpt: missing={len(missing)} unexpected={len(unexpected)}")
 

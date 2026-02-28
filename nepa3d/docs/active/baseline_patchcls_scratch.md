@@ -65,6 +65,10 @@ scripts/finetune/patchcls_modelnet40_scratch.sh \
 - まずは `--is_causal 0` (bidirectional) で **Transformer baseline の土俵** に乗る。
 - patch grouping backend は `PATCH_EMBED=fps_knn`（既定）と `PATCH_EMBED=serial` を切り替え可能。
 - serial の順序は `SERIAL_ORDER` で切り替え可能（`morton`, `morton_trans`, `z`, `z-trans`, `random`, `identity`）。
+- Point-MAE分類の標準は `64 patches x 32 points`（`N_POINT=1024, NUM_GROUPS=64, GROUP_SIZE=32`）。
+  ただし現行 serial 実装は「非重複 contiguous chunk」のため、
+  `N_POINT=1024` で `NUM_GROUPS=64` を維持するには `GROUP_SIZE=16` を使う運用になる。
+  `64x32` を serial で厳密再現するには、overlap window（例: `group_size=32, stride=16`）の実装追加が必要。
 - その後、NEPA の story に寄せて `--is_causal 1` (causal) の ablation を追加する。
 - `mc_eval_k_test` / `aug_eval` は必要なときだけ（Point-MAE Table の比較では通常 no-vote）。
 - Scan benchmark では variant-split cache (`obj_bg` / `obj_only` / `pb_t50_rs`) を使い、
