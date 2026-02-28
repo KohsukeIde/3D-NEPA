@@ -8,6 +8,19 @@ Track note:
 - Historical Query-NEPA/pre-Stage-2 run history stays in:
   - `nepa3d/docs/query_nepa/runlog_202602.md`
 
+## 0. Execution Rule Update (2026-02-28, mandatory)
+
+- Stage-2 pretrain mainline is fixed to 16 GPUs:
+  - `4 nodes x 4 GPU/node` (`rt_QF=4`, `NPROC_PER_NODE=4`)
+  - launch path:
+    - `scripts/pretrain/nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`
+  - submit path:
+    - `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh`
+- Invalid pattern (do not report as mainline):
+  - single-node launch with `ddp: num_processes=1` while expecting multi-GPU
+- Incident note:
+  - jobs `99999/100000` were submitted from single-node submit path and ran with `num_processes=1`; stopped and relaunched on true 16-GPU topology (`100010/100011`).
+
 ## 1. Bootstrap (2026-02-28)
 
 Stage-2 code integration completed:
@@ -174,3 +187,50 @@ Each Stage-2 run should explicitly confirm these are clean.
 - Query-NEPA precedent: historically caused invalid cross-run comparisons.
 - Patch-NEPA policy: run header must print full training recipe each job.
 - Required log check: `lr_scheduler`, `auto_resume`, `resume_optimizer`, sampling mode.
+
+## 8. PatchNEPA ptonly -> PatchCls Finetune (2026-02-28)
+
+Run set:
+
+- `logs/sanity/patchcls/patchcls_ft_from_patchnepa_ptonly_onepass_20260228_222007`
+- job ids:
+  - `100002.qjcm` (`obj_bg_nepa2d`) -> finished
+  - `100003.qjcm` (`obj_only_nepa2d`) -> finished
+  - `100004.qjcm` (`pb_t50_rs_nepa2d`) -> running
+
+Recipe snapshot (from logs):
+
+- `val_split_mode=file`
+- eval-time voting enabled:
+  - `aug_eval=True`
+  - `mc_test=10`
+- source ckpt: point-only PatchNEPA one-pass pretrain
+  - `runs/patchnepa_pointonly/patchnepa_pointonly_20260228_150907/ckpt_latest.pt`
+
+Current results:
+
+| job | variant | status | metric |
+|---|---|---|---:|
+| `100002` | `obj_bg` | done | `TEST acc=0.8003` |
+| `100003` | `obj_only` | done | `TEST acc=0.7986` |
+| `100004` | `pb_t50_rs` | running | last seen: `ep 120/300`, `best_val_acc=0.8854` |
+
+Source logs:
+
+- `logs/sanity/patchcls/patchcls_ft_from_patchnepa_ptonly_onepass_20260228_222007/obj_bg_nepa2d.out`
+- `logs/sanity/patchcls/patchcls_ft_from_patchnepa_ptonly_onepass_20260228_222007/obj_only_nepa2d.out`
+- `logs/sanity/patchcls/patchcls_ft_from_patchnepa_ptonly_onepass_20260228_222007/pb_t50_rs_nepa2d.out`
+
+Scratch comparison note:
+
+- The strict file-split scratch references are:
+  - `obj_bg`: `0.7831` (`patchcls_obj_bg_pmalign_splitfile_20260227_223435`)
+  - `obj_only`: `0.7849` (`patchcls_objonly_factor4_20260228_070858`, `pcf_b_file`)
+- Delta vs those file-split references:
+  - `obj_bg`: `+0.0172` (`0.8003 - 0.7831`)
+  - `obj_only`: `+0.0137` (`0.7986 - 0.7849`)
+
+Reference logs for file-split scratch values:
+
+- `logs/sanity/patchcls/patchcls_obj_bg_pmalign_splitfile_20260227_223435/obj_bg.out`
+- `logs/sanity/patchcls/patchcls_objonly_factor4_20260228_070858/pcf_b_file.out`

@@ -71,6 +71,11 @@ Reference audit/checklist:
   - `N_RAY=0`
   - `USE_RAY_PATCH=0`
   - ShapeNet pointcloud-only mix first
+- Stage-2 pretrain execution is fixed to 16 GPUs:
+  - topology: `4 nodes x 4 GPU/node` (`rt_QF=4`, `NPROC_PER_NODE=4`)
+  - launcher: `scripts/pretrain/nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`
+  - submit entry: `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh` (16-GPU strict)
+  - runs that do not print `num_processes=16` in logs are invalid for mainline reporting
 - Load policy for pretrain -> finetune:
   - `strict=False`
   - encoder-compatible config must be matched (`qk_norm*`, `layerscale`, `patch_embed`, grouping)

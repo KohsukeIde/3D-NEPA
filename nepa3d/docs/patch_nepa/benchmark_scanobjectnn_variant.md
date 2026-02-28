@@ -503,3 +503,44 @@ For each new table row, include:
 4. protocol (`sotafair` or `nepafull`)
 5. job ID
 6. `test_acc`
+
+## 7. PatchNEPA ptonly -> PatchCls finetune snapshot (2026-02-28)
+
+Run set:
+
+- `logs/sanity/patchcls/patchcls_ft_from_patchnepa_ptonly_onepass_20260228_222007`
+- jobs:
+  - `100002` (`obj_bg_nepa2d`) done
+  - `100003` (`obj_only_nepa2d`) done
+  - `100004` (`pb_t50_rs_nepa2d`) running
+
+Recipe note for this run set:
+
+- `val_split_mode=file`
+- eval uses voting:
+  - `aug_eval=True`
+  - `mc_test=10`
+
+Current results:
+
+| variant | PatchNEPA-ptonly -> PatchCls (`file + TTA`) |
+|---|---:|
+| `obj_bg` | 0.8003 |
+| `obj_only` | 0.7986 |
+| `pb_t50_rs` | running (`ep 120/300`, best val `0.8854`) |
+
+File-split scratch references (strict line):
+
+| variant | scratch ref (`file`) | delta |
+|---|---:|---:|
+| `obj_bg` | 0.7831 | +0.0172 |
+| `obj_only` | 0.7849 | +0.0137 |
+| `pb_t50_rs` | pending | pending |
+
+Source logs:
+
+- `logs/sanity/patchcls/patchcls_ft_from_patchnepa_ptonly_onepass_20260228_222007/obj_bg_nepa2d.out`
+- `logs/sanity/patchcls/patchcls_ft_from_patchnepa_ptonly_onepass_20260228_222007/obj_only_nepa2d.out`
+- `logs/sanity/patchcls/patchcls_ft_from_patchnepa_ptonly_onepass_20260228_222007/pb_t50_rs_nepa2d.out`
+- `logs/sanity/patchcls/patchcls_obj_bg_pmalign_splitfile_20260227_223435/obj_bg.out`
+- `logs/sanity/patchcls/patchcls_objonly_factor4_20260228_070858/pcf_b_file.out`

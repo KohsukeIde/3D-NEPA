@@ -48,6 +48,8 @@ Current Patch-NEPA point-only baseline recipe uses:
 - Do not merge Query-NEPA and Patch-NEPA run records into one active document.
 - Add new Stage-2 runs only to `runlog_patch_nepa_202602.md`.
 - Keep comparisons explicit as cross-line ablations in benchmark tables.
+- Stage-2 pretrain mainline must use 16 GPUs (`4 nodes x 4 GPU/node`) via
+  `nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`.
 
 ## 6. Implementation Ownership (Current Decision)
 
