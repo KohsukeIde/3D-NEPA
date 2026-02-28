@@ -303,3 +303,27 @@ Controlled comparison run submitted (same recipe, scheduler change only):
 Reference log:
 
 - `logs/patch_nepa_pretrain/patchnepa_pointonly_ddp16_encdec_split_cosine_20260301_000000/patchnepa_pointonly_ddp16_encdec_split_cosine_20260301_000000.mr0.log`
+
+Scheduler bug found from `100042` log inspection:
+
+- symptom:
+  - LR showed non-monotonic oscillation and rapid phase drift (for example
+    `1.20e-04 -> 2.86e-04 -> 2.37e-04 -> ... -> 2.24e-06 -> ... -> 2.98e-04`)
+  - loss rose from `~1e-2` to `~1e-1` range instead of converging.
+- root cause:
+  - scheduler was passed to `accelerator.prepare(...)`, which allows step-level
+    scheduler advancement with optimizer updates under Accelerate.
+  - code also called `scheduler.step()` at epoch end, causing schedule mismatch.
+- fix:
+  - `nepa3d/train/pretrain_patch_nepa.py`
+    - do **not** pass scheduler into `accelerator.prepare`
+    - keep explicit epoch-end `scheduler.step()` only
+    - clamp warmup/cosine scale (`warmup<=1.0`, `t in [0,1]`).
+
+Status after fix:
+
+- `100042` is treated as invalid for LR comparison.
+- replacement run submitted:
+  - `100045.qjcm` (`patchnepa_ptE16cf`)
+  - run set:
+    - `patchnepa_pointonly_ddp16_encdec_split_cosine_fixsched_20260301_001200`

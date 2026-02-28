@@ -184,8 +184,9 @@ def _scheduler_scale(epoch: int, args: argparse.Namespace) -> float:
         return 1.0
     warmup_epochs = _resolved_warmup_epochs(args)
     if epoch < warmup_epochs:
-        return float(epoch + 1) / float(max(1e-8, warmup_epochs))
+        return min(1.0, float(epoch + 1) / float(max(1e-8, warmup_epochs)))
     t = float(epoch - warmup_epochs) / float(max(1e-8, float(args.epochs) - warmup_epochs))
+    t = min(max(t, 0.0), 1.0)
     cosine = 0.5 * (1.0 + torch.cos(torch.tensor(torch.pi * t))).item()
     min_scale = float(args.min_lr) / float(args.lr)
     return min_scale + (1.0 - min_scale) * cosine
@@ -296,12 +297,13 @@ def main() -> None:
     )
 
     optimizer = optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
+    # Important: do not pass scheduler into accelerator.prepare().
+    # Accelerate can step wrapped schedulers with optimizer.step(), which would
+    # make this epoch-based schedule advance per-step and break LR behavior.
+    model, optimizer, train_loader = accelerator.prepare(model, optimizer, train_loader)
     scheduler = None
     if str(args.lr_scheduler) == "cosine":
         scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda ep: _scheduler_scale(ep, args))
-        model, optimizer, train_loader, scheduler = accelerator.prepare(model, optimizer, train_loader, scheduler)
-    else:
-        model, optimizer, train_loader = accelerator.prepare(model, optimizer, train_loader)
 
     warmup_epochs_resolved = _resolved_warmup_epochs(args)
     mprint(
