@@ -345,6 +345,40 @@ def _adapt_patchnepa_pretrain_to_patchcls(
     return out, stats
 
 
+def _adapt_patchnepa_pretrain_to_patchnepa_classifier(
+    source_state: Dict[str, torch.Tensor],
+    target_state: Dict[str, torch.Tensor],
+) -> Tuple[Dict[str, torch.Tensor], Dict[str, int]]:
+    """Map PatchNEPA pretrain keys to composition classifier (`core.*`)."""
+    out: Dict[str, torch.Tensor] = {}
+    direct = 0
+    mapped = 0
+
+    # direct key/shape matches first
+    for k, v in source_state.items():
+        tv = target_state.get(k, None)
+        if tv is not None and tuple(tv.shape) == tuple(v.shape):
+            out[k] = v
+            direct += 1
+
+    # pretrain key -> classifier core key
+    for k, v in source_state.items():
+        kk = f"core.{k}"
+        tv = target_state.get(kk, None)
+        if tv is not None and tuple(tv.shape) == tuple(v.shape):
+            out[kk] = v
+            mapped += 1
+
+    stats = {
+        "direct": int(direct),
+        "mapped": int(mapped),
+        "total_to_load": int(len(out)),
+        "src_total": int(len(source_state)),
+        "dst_total": int(len(target_state)),
+    }
+    return out, stats
+
+
 def _as_bool01(v: object, default: bool = False) -> bool:
     if v is None:
         return bool(default)
@@ -861,6 +895,19 @@ def main() -> None:
     if pretrain_state is not None:
         state = pretrain_state
         state_to_load = pretrain_state
+        if args.model_source == "patchnepa":
+            adapted_patchnepa_direct, patchnepa_direct_stats = _adapt_patchnepa_pretrain_to_patchnepa_classifier(
+                state,
+                model.state_dict(),
+            )
+            state_to_load = adapted_patchnepa_direct
+            if accelerator.is_main_process:
+                print(
+                    "[ckpt-adapt] patchnepa-pretrain->patchnepa-classifier "
+                    f"mapped={patchnepa_direct_stats['mapped']} direct={patchnepa_direct_stats['direct']} "
+                    f"load={patchnepa_direct_stats['total_to_load']} src={patchnepa_direct_stats['src_total']} "
+                    f"dst={patchnepa_direct_stats['dst_total']}"
+                )
         # Prefer PatchNEPA->PatchCls adaptation when the pretrain checkpoint uses
         # BOS token naming (PatchNEPA) and classifier expects CLS token.
         if args.model_source == "patchcls":
@@ -900,12 +947,18 @@ def main() -> None:
                     if unexpected:
                         print(f"  unexpected(sample): {unexpected[:20]}")
 
-    if args.model_source == "patchnepa" and hasattr(model, "pred_head"):
-        # Prediction head is pretrain-only; keep it out of finetune optimization.
-        for p in model.pred_head.parameters():
-            p.requires_grad_(False)
-        if accelerator.is_main_process:
-            print("[finetune] patchnepa direct: pred_head frozen/excluded from optimizer")
+    if args.model_source == "patchnepa":
+        pred_head = None
+        if hasattr(model, "core") and hasattr(model.core, "pred_head"):
+            pred_head = model.core.pred_head
+        elif hasattr(model, "pred_head"):
+            pred_head = model.pred_head
+        if pred_head is not None:
+            # Prediction head is pretrain-only; keep it out of finetune optimization.
+            for p in pred_head.parameters():
+                p.requires_grad_(False)
+            if accelerator.is_main_process:
+                print("[finetune] patchnepa direct: pred_head frozen/excluded from optimizer")
 
     opt_params = [p for p in model.parameters() if p.requires_grad]
     if not opt_params:

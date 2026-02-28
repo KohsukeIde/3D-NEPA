@@ -40,7 +40,8 @@ This document is the active source for the new pipeline:
   - task: next-embedding prediction on patch tokens
   - optional Option-A ray bind: ray -> nearest point patch center
 - Patch finetune model (Stage-2 mainline):
-  - `nepa3d/models/patch_nepa_classifier.py`
+  - `nepa3d/models/patch_nepa.py` (`PatchTransformerNepaClassifier`)
+  - compatibility import: `nepa3d/models/patch_nepa_classifier.py`
   - task: classification from PatchNEPA backbone without adapter conversion
 - Patch pretrain entry:
   - `nepa3d/train/pretrain_patch_nepa.py`
@@ -69,6 +70,15 @@ Current Stage-2 mainline run is:
 - patch sequence (`patch_embed=fps_knn`, `group_size=32`, `num_groups=64`)
 - ray enabled (`N_RAY=1024`, `USE_RAY_PATCH=1`)
 - NEPA next-embedding prediction on patch tokens
+
+## 2.3 Class-Split Refactor (2026-03-01)
+
+- PatchNEPA classes are now explicitly split by task:
+  - pretrain: `PatchTransformerNepa`
+  - classification: `PatchTransformerNepaClassifier` (separate class, composition via `self.core`)
+- Finetune load path uses key mapping:
+  - pretrain key `X` -> classifier key `core.X`
+  - expected unmatched keys at load are classification head only (`cls_head.*`)
 
 ## 2.2 Pretrain Baseline Parity (excluding split/dual-mask/QA)
 
