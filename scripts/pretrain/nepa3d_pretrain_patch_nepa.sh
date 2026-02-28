@@ -46,8 +46,12 @@ python -u -m nepa3d.train.pretrain_patch_nepa \
   --serial_bits "${SERIAL_BITS:-10}" \
   --serial_shuffle_within_patch "${SERIAL_SHUFFLE_WITHIN_PATCH:-0}" \
   --use_ray_patch "${USE_RAY_PATCH:-0}" \
-  --ray_pool_mode "${RAY_POOL_MODE:-mean}" \
+  --include_ray_unc "${INCLUDE_RAY_UNC:-0}" \
+  --ray_pool_mode "${RAY_POOL_MODE:-amax}" \
   --ray_fuse "${RAY_FUSE:-add}" \
+  --ray_assign_mode "${RAY_ASSIGN_MODE:-proxy_sphere}" \
+  --ray_use_origin "${RAY_USE_ORIGIN:-0}" \
+  --ray_proxy_radius_scale "${RAY_PROXY_RADIUS_SCALE:-1.05}" \
   --ray_miss_t "${RAY_MISS_T:-4.0}" \
   --ray_hit_threshold "${RAY_HIT_THRESHOLD:-0.5}" \
   --backbone_mode "${BACKBONE_MODE:-nepa2d}" \

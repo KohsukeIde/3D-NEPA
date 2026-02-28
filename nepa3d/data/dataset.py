@@ -568,7 +568,7 @@ class ModelNet40QueryDataset(Dataset):
                     "ray_available": np.asarray(int(ray_ok), dtype=np.int64),
                 }
 
-                feat, type_id = build_sequence(
+            feat, type_id = build_sequence(
                 xyz,
                 dist,
                 local_pools.get("ray_o_pool", None),
@@ -588,11 +588,11 @@ class ModelNet40QueryDataset(Dataset):
                 ray_order_mode=self.ray_order_mode,
                 ray_anchor_miss_t=self.ray_anchor_miss_t,
                 ray_view_tol=self.ray_view_tol,
-                    pt_sample_mode=self.pt_sample_mode,
-                    pt_fps_order=pt_fps_order,
-                    pt_rfps_order=pt_rfps_order,
-                    pt_rfps_m=self.pt_rfps_m,
-                    point_order_mode=self.point_order_mode,
+                pt_sample_mode=self.pt_sample_mode,
+                pt_fps_order=pt_fps_order,
+                pt_rfps_order=pt_rfps_order,
+                pt_rfps_m=self.pt_rfps_m,
+                point_order_mode=self.point_order_mode,
                 include_pt_grad=self.include_pt_grad,
                 pt_grad_mode=self.pt_grad_mode,
                 pt_grad_eps=self.pt_grad_eps,

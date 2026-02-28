@@ -90,11 +90,15 @@ def parse_args() -> argparse.Namespace:
 
     # Ray binding
     p.add_argument("--use_ray_patch", type=int, default=0)
+    p.add_argument("--include_ray_unc", type=int, default=0, choices=[0, 1])
     p.add_argument("--ray_hit_threshold", type=float, default=0.5)
     p.add_argument("--ray_miss_t", type=float, default=4.0)
     p.add_argument("--ray_pool_k_max", type=int, default=32)
-    p.add_argument("--ray_pool_mode", type=str, default="mean", choices=["mean", "max"])
+    p.add_argument("--ray_pool_mode", type=str, default="amax", choices=["mean", "max", "amax"])
     p.add_argument("--ray_fuse", type=str, default="add", choices=["add", "concat"])
+    p.add_argument("--ray_assign_mode", type=str, default="proxy_sphere", choices=["proxy_sphere", "x_anchor"])
+    p.add_argument("--ray_use_origin", type=int, default=0, choices=[0, 1])
+    p.add_argument("--ray_proxy_radius_scale", type=float, default=1.05)
 
     # Train
     p.add_argument("--epochs", type=int, default=50)
@@ -194,6 +198,7 @@ def main() -> None:
         pt_rfps_m=int(args.pt_rfps_m),
         point_order_mode=str(args.point_order_mode),
         include_pt_grad=bool(int(args.use_pt_grad)),
+        include_ray_unc=bool(int(args.include_ray_unc)),
         aug_rotate_z=bool(int(args.aug_rotate_z)),
         aug_scale_min=float(args.aug_scale_min),
         aug_scale_max=float(args.aug_scale_max),
@@ -250,6 +255,11 @@ def main() -> None:
         pos_mode=str(args.pos_mode),
         encdec_arch=bool(int(args.encdec_arch)),
         use_ray_patch=bool(args.use_ray_patch),
+        include_ray_unc=bool(int(args.include_ray_unc)),
+        ray_assign_mode=str(args.ray_assign_mode),
+        use_ray_origin=bool(int(args.ray_use_origin)),
+        ray_proxy_radius_scale=float(args.ray_proxy_radius_scale),
+        ray_pool_mode=("amax" if str(args.ray_pool_mode) == "max" else str(args.ray_pool_mode)),
     )
 
     optimizer = optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
@@ -267,6 +277,8 @@ def main() -> None:
         f"patch_embed={args.patch_embed} "
         f"group_size={int(args.group_size)} num_groups={int(args.num_groups)} "
         f"n_point={int(args.n_point)} n_ray={int(args.n_ray)} use_ray_patch={int(bool(args.use_ray_patch))} "
+        f"ray_assign={str(args.ray_assign_mode)} ray_pool={str(args.ray_pool_mode)} "
+        f"ray_use_origin={int(args.ray_use_origin)} include_ray_unc={int(args.include_ray_unc)} "
         f"pt_sample_mode={str(args.pt_sample_mode)} pt_fps_key={str(args.pt_fps_key)} pt_rfps_m={int(args.pt_rfps_m)} "
         f"pt_rfps_key={str(args.pt_rfps_key)} "
         f"point_order_mode={str(args.point_order_mode)} "
@@ -323,6 +335,8 @@ def main() -> None:
                     ray_d=batch.get("ray_d", None),
                     ray_t=batch.get("ray_t", None),
                     ray_hit=batch.get("ray_hit", None),
+                    ray_n=batch.get("ray_n", None),
+                    ray_unc=batch.get("ray_unc", None),
                     ray_available=batch.get("ray_available", None),
                     is_causal=True,
                     dual_mask_near=dm_near,
