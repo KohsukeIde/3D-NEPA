@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import warnings
 
 import h5py
 import numpy as np
@@ -86,6 +87,7 @@ class PatchClsPointDataset(Dataset):
         self.mc_eval_k = int(mc_eval_k)
         self.aug_eval = bool(aug_eval)
         self.deterministic_eval_sampling = bool(deterministic_eval_sampling)
+        self._warned_missing_fps_order = False
 
     def __len__(self) -> int:
         return len(self.npz_paths)
@@ -96,6 +98,12 @@ class PatchClsPointDataset(Dataset):
         if self.sample_mode == "fps" and "pc_fps_order" in npz:
             idx = npz["pc_fps_order"][:n]
         else:
+            if self.sample_mode == "fps" and (not self._warned_missing_fps_order):
+                warnings.warn(
+                    "PatchClsPointDataset: sample_mode='fps' but pc_fps_order is missing; "
+                    "falling back to random subset (results may differ from FPS eval protocol)."
+                )
+                self._warned_missing_fps_order = True
             # random subset
             if (not self.aug) and self.deterministic_eval_sampling:
                 # Make eval crop selection invariant to worker/process order.

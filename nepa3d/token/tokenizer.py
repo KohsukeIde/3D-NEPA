@@ -38,6 +38,7 @@ TYPE_SEP = 9
 TYPE_VOCAB_SIZE = TYPE_SEP + 1
 
 _WARNED_FPS_FALLBACK = False
+_WARNED_RFPS_CACHED_FALLBACK = False
 
 
 def _choice(n, k, rng=None):
@@ -161,10 +162,11 @@ def _sample_point_indices(
     rng: np.random.Generator,
     pt_sample_mode: str = "random",
     pt_fps_order: np.ndarray | None = None,
+    pt_rfps_order: np.ndarray | None = None,
     pt_rfps_m: int = 4096,
 ) -> np.ndarray:
     """Select point indices according to a sampling policy."""
-    global _WARNED_FPS_FALLBACK
+    global _WARNED_FPS_FALLBACK, _WARNED_RFPS_CACHED_FALLBACK
     n_pool = int(pt_xyz_pool.shape[0])
     n_point = int(n_point)
     if n_point <= 0:
@@ -235,6 +237,51 @@ def _sample_point_indices(
         m = min(int(pt_rfps_m), n_pool)
         return rfps_order(pt_xyz_pool, k=k, m=m, rng=rng).astype(np.int64, copy=False)
 
+    if mode == "rfps_cached":
+        order = None
+        if pt_rfps_order is not None:
+            bank = np.asarray(pt_rfps_order)
+            if bank.ndim == 1:
+                cand = bank.reshape(-1)
+                if cand.size > 0 and int(cand.min()) >= 0 and int(cand.max()) < n_pool:
+                    order = cand.astype(np.int64, copy=False)
+            elif bank.ndim == 2 and bank.size > 0:
+                # Preferred format: (n_bank, n_pool).
+                if bank.shape[0] > bank.shape[1]:
+                    bank = bank.T
+                n_bank = int(bank.shape[0])
+                if n_bank > 0:
+                    if hasattr(rng, "integers"):
+                        bid = int(rng.integers(0, n_bank))
+                    else:
+                        bid = int(rng.randint(0, n_bank))
+                    cand = np.asarray(bank[bid]).reshape(-1)
+                    if cand.size > 0 and int(cand.min()) >= 0 and int(cand.max()) < n_pool:
+                        order = cand.astype(np.int64, copy=False)
+
+        if order is None:
+            if not _WARNED_RFPS_CACHED_FALLBACK:
+                warnings.warn(
+                    "pt_sample_mode='rfps_cached' but no valid RFPS order bank was provided; "
+                    "falling back to on-the-fly rfps. Add a cached order bank "
+                    "(e.g., pc_rfps_order_bank / pt_rfps_order_bank) for speed."
+                )
+                _WARNED_RFPS_CACHED_FALLBACK = True
+            from nepa3d.utils.fps import rfps_order
+
+            m = min(int(pt_rfps_m), n_pool)
+            return rfps_order(pt_xyz_pool, k=k, m=m, rng=rng).astype(np.int64, copy=False)
+
+        k0 = min(k, int(order.shape[0]))
+        chosen = order[:k0].astype(np.int64, copy=False)
+        if k0 == k:
+            return chosen
+        used = np.zeros((n_pool,), dtype=bool)
+        used[chosen] = True
+        rest = np.flatnonzero(~used)
+        extra = rng.choice(rest, size=(k - k0), replace=False)
+        return np.concatenate([chosen, extra.astype(np.int64)], axis=0)
+
     return rng.choice(n_pool, size=k, replace=False).astype(np.int64, copy=False)
 
 
@@ -291,6 +338,7 @@ def _build_sequence_legacy(
     rng=None,
     pt_sample_mode="random",
     pt_fps_order=None,
+    pt_rfps_order=None,
     pt_rfps_m=4096,
     point_order_mode="morton",
     include_pt_grad=False,
@@ -319,6 +367,7 @@ def _build_sequence_legacy(
         rng=rng,
         pt_sample_mode=pt_sample_mode,
         pt_fps_order=pt_fps_order,
+        pt_rfps_order=pt_rfps_order,
         pt_rfps_m=pt_rfps_m,
     )
 
@@ -448,6 +497,7 @@ def _build_sequence_qa(
     ray_view_tol=1e-6,
     pt_sample_mode="random",
     pt_fps_order=None,
+    pt_rfps_order=None,
     pt_rfps_m=4096,
     point_order_mode="morton",
     include_pt_grad=False,
@@ -491,6 +541,7 @@ def _build_sequence_qa(
         rng=rng,
         pt_sample_mode=pt_sample_mode,
         pt_fps_order=pt_fps_order,
+        pt_rfps_order=pt_rfps_order,
         pt_rfps_m=pt_rfps_m,
     )
 
@@ -854,6 +905,7 @@ def build_sequence(
     ray_view_tol=1e-6,
     pt_sample_mode="random",
     pt_fps_order=None,
+    pt_rfps_order=None,
     pt_rfps_m=4096,
     point_order_mode="morton",
     include_pt_grad=False,
@@ -898,6 +950,7 @@ def build_sequence(
             ray_view_tol=ray_view_tol,
             pt_sample_mode=pt_sample_mode,
             pt_fps_order=pt_fps_order,
+            pt_rfps_order=pt_rfps_order,
             pt_rfps_m=pt_rfps_m,
             point_order_mode=point_order_mode,
             include_pt_grad=include_pt_grad,
@@ -925,6 +978,7 @@ def build_sequence(
         rng=rng,
         pt_sample_mode=pt_sample_mode,
         pt_fps_order=pt_fps_order,
+        pt_rfps_order=pt_rfps_order,
         pt_rfps_m=pt_rfps_m,
         point_order_mode=point_order_mode,
         include_pt_grad=include_pt_grad,

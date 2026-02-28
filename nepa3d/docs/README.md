@@ -10,6 +10,10 @@ Last updated: 2026-02-28
   - `nepa3d/docs/patch_nepa/patch_nepa_stage2_active.md`
 - Patch-NEPA Stage-2 runlog:
   - `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`
+- Patch-NEPA Query->Patch gap audit:
+  - `nepa3d/docs/patch_nepa/gap_audit_query_to_patch_active.md`
+- Query chronology audit for Patch porting:
+  - `nepa3d/docs/patch_nepa/query_nepa_chronology_audit_202602_active.md`
 
 - Protocol-correct ScanObjectNN benchmark (canonical): `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
 - Query-NEPA historical runlog (job-level): `nepa3d/docs/query_nepa/runlog_202602.md`

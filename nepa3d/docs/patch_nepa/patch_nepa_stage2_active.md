@@ -38,9 +38,32 @@ The following Query-NEPA controls are not active in current Patch-NEPA point-onl
 
 Current Stage-2 point-only run is:
 
-- patch sequence (`serial_order=morton`, `group_size=32`, `num_groups=32`)
+- patch sequence (`patch_embed=fps_knn`, `group_size=32`, `num_groups=64`)
 - `N_RAY=0`, `USE_RAY_PATCH=0`
 - NEPA next-embedding prediction on patch tokens
+
+## 2.2 Pretrain Baseline Parity (excluding split/dual-mask/QA)
+
+Current baseline policy for Patch-NEPA pretrain is:
+
+- keep Query-NEPA-equivalent training recipe where applicable:
+  - `LR=3e-4`
+  - `BATCH(per-proc)=16` and explicit global-batch logging
+  - `weight_decay=0.05`
+  - `lr_scheduler=none` (default)
+  - `auto_resume=1`
+  - `pt_sample_mode=rfps` (default, with `pt_rfps_m=4096`)
+- keep PatchCLS-compatible backbone defaults:
+  - `patch_embed=fps_knn`
+  - `group_size=32`, `num_groups=64`
+  - `qk_norm=1`, `qk_norm_affine=0`, `qk_norm_bias=0`
+  - `layerscale_value=1e-5`
+  - `rope_theta=100`
+- augmentation knobs are exposed with Query-NEPA semantics (`aug_*`) and default OFF.
+
+Reference audit/checklist:
+
+- `nepa3d/docs/patch_nepa/gap_audit_query_to_patch_active.md`
 
 ## 3. Runtime Policy
 
@@ -58,10 +81,29 @@ Current Stage-2 point-only run is:
 ## 4. Current Active Run Set
 
 - point-only pretrain submission:
-  - job: `99591.qjcm`
-  - run_set: `patchnepa_pointonly_20260228_143750`
-  - save: `runs/patchnepa_pointonly/patchnepa_pointonly_20260228_143750`
-  - log: `logs/patch_nepa_pretrain/patchnepa_pointonly_20260228_143750/run_pointonly_patchnepa_pointonly_20260228_143750.log`
+  - `99591.qjcm`: early point-only baseline (single-process launch path, legacy defaults)
+  - `99602.qjcm`: intermediate point-only run (4-GPU allocation, non-DDP launch; stopped)
+  - `99613.qjcm`: first DDP migration run (2 nodes x 4 GPUs = 8 GPUs total; stopped for parity fixes)
+    - run_set: `patchnepa_pointonly_ddp8_20260228_152058`
+    - save: `runs/patchnepa_pointonly/patchnepa_pointonly_ddp8_20260228_152058`
+    - pbs log: `logs/ddp_patch_nepa_pretrain/patchnepa_pointonly_ddp8_20260228_152058.pbs.log`
+    - node logs:
+      - `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_99613.qjcm_run_pointonly_patchnepa_pointonly_ddp8_20260228_152058/logs/qh454.patchnepa.log`
+      - `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_99613.qjcm_run_pointonly_patchnepa_pointonly_ddp8_20260228_152058/logs/qh455.patchnepa.log`
+  - `99634.qjcm`: active DDP run (2 nodes x 4 GPUs = 8 GPUs total; parity-fixed launcher defaults)
+    - run_set: `patchnepa_pointonly_ddp8_fix_20260228_153151`
+    - save: `runs/patchnepa_pointonly/patchnepa_pointonly_ddp8_fix_20260228_153151`
+    - pbs log: `logs/ddp_patch_nepa_pretrain/patchnepa_pointonly_ddp8_fix_20260228_153151.pbs.log`
+    - node logs:
+      - `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_99634.qjcm_run_pointonly_patchnepa_pointonly_ddp8_fix_20260228_153151/logs/qh138.patchnepa.log`
+      - `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_99634.qjcm_run_pointonly_patchnepa_pointonly_ddp8_fix_20260228_153151/logs/qh143.patchnepa.log`
+  - `99643.qjcm`: active DDP run (2 nodes x 4 GPUs = 8 GPUs total; `rfps` default enforced)
+    - run_set: `patchnepa_pointonly_ddp8_rfpsfix_20260228_154649`
+    - save: `runs/patchnepa_pointonly/patchnepa_pointonly_ddp8_rfpsfix_20260228_154649`
+    - pbs log: `logs/ddp_patch_nepa_pretrain/patchnepa_pointonly_ddp8_rfpsfix_20260228_154649.pbs.log`
+    - node logs:
+      - `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_99643.qjcm_run_pointonly_patchnepa_pointonly_ddp8_rfpsfix_20260228_154649/logs/qh138.patchnepa.log`
+      - `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_99643.qjcm_run_pointonly_patchnepa_pointonly_ddp8_rfpsfix_20260228_154649/logs/qh142.patchnepa.log`
 
 ## 5. Reporting Rule
 

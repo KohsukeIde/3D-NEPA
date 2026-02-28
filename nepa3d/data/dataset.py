@@ -190,6 +190,7 @@ class ModelNet40QueryDataset(Dataset):
         ablate_point_dist=False,
         pt_sample_mode="random",
         pt_fps_key="pt_fps_order",
+        pt_rfps_key="auto",
         pt_rfps_m=4096,
         point_order_mode="morton",
         # Augmentations
@@ -237,7 +238,9 @@ class ModelNet40QueryDataset(Dataset):
         self.ablate_point_dist = bool(ablate_point_dist)
         self.pt_sample_mode = str(pt_sample_mode)
         self.pt_fps_key = str(pt_fps_key)
+        self.pt_rfps_key = str(pt_rfps_key)
         self._warned_missing_fps_order = False
+        self._warned_missing_rfps_order = False
         self.pt_rfps_m = int(pt_rfps_m)
         self.point_order_mode = str(point_order_mode)
 
@@ -418,6 +421,8 @@ class ModelNet40QueryDataset(Dataset):
 
             pt_fps_order = None
             resolved_fps_key = None
+            pt_rfps_order = None
+            resolved_rfps_key = None
             if isinstance(local_pools, dict):
                 fps_key = self.pt_fps_key
                 if str(fps_key).lower() == "auto":
@@ -446,6 +451,36 @@ class ModelNet40QueryDataset(Dataset):
                     )
                     self._warned_missing_fps_order = True
 
+                rfps_key = self.pt_rfps_key
+                if str(rfps_key).lower() == "auto":
+                    candidates = [
+                        f"{self.pt_xyz_key}_rfps_order_bank",
+                        "pc_rfps_order_bank" if str(self.pt_xyz_key).startswith("pc_") else None,
+                        "pt_rfps_order_bank",
+                        f"{self.pt_xyz_key}_rfps_order",
+                        "pc_rfps_order" if str(self.pt_xyz_key).startswith("pc_") else None,
+                        "pt_rfps_order",
+                    ]
+                    rfps_key = None
+                    for ck in candidates:
+                        if ck is not None and ck in local_pools:
+                            rfps_key = ck
+                            break
+                resolved_rfps_key = rfps_key
+                if rfps_key is not None:
+                    pt_rfps_order = local_pools.get(rfps_key, None)
+                if (
+                    str(self.pt_sample_mode).lower() == "rfps_cached"
+                    and pt_rfps_order is None
+                    and not self._warned_missing_rfps_order
+                ):
+                    warnings.warn(
+                        f"pt_sample_mode='rfps_cached' but RFPS order key is missing "
+                        f"(pt_rfps_key={self.pt_rfps_key}, resolved={resolved_rfps_key}, path={path}). "
+                        "Falling back to on-the-fly rfps in tokenizer (slower)."
+                    )
+                    self._warned_missing_rfps_order = True
+
             if self.return_raw:
                 p_idx = _sample_point_indices(
                     pt_xyz_pool=np.asarray(xyz),
@@ -453,6 +488,7 @@ class ModelNet40QueryDataset(Dataset):
                     rng=rng,
                     pt_sample_mode=self.pt_sample_mode,
                     pt_fps_order=pt_fps_order,
+                    pt_rfps_order=pt_rfps_order,
                     pt_rfps_m=self.pt_rfps_m,
                 )
                 pt_xyz_s = np.asarray(xyz)[p_idx].astype(np.float32, copy=False)
@@ -532,7 +568,7 @@ class ModelNet40QueryDataset(Dataset):
                     "ray_available": np.asarray(int(ray_ok), dtype=np.int64),
                 }
 
-            feat, type_id = build_sequence(
+                feat, type_id = build_sequence(
                 xyz,
                 dist,
                 local_pools.get("ray_o_pool", None),
@@ -552,10 +588,11 @@ class ModelNet40QueryDataset(Dataset):
                 ray_order_mode=self.ray_order_mode,
                 ray_anchor_miss_t=self.ray_anchor_miss_t,
                 ray_view_tol=self.ray_view_tol,
-                pt_sample_mode=self.pt_sample_mode,
-                pt_fps_order=pt_fps_order,
-                pt_rfps_m=self.pt_rfps_m,
-                point_order_mode=self.point_order_mode,
+                    pt_sample_mode=self.pt_sample_mode,
+                    pt_fps_order=pt_fps_order,
+                    pt_rfps_order=pt_rfps_order,
+                    pt_rfps_m=self.pt_rfps_m,
+                    point_order_mode=self.point_order_mode,
                 include_pt_grad=self.include_pt_grad,
                 pt_grad_mode=self.pt_grad_mode,
                 pt_grad_eps=self.pt_grad_eps,

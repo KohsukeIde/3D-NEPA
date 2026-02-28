@@ -10,6 +10,8 @@ import torch.optim as optim
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 from torch.utils.data import DataLoader
+import numpy as np
+import random
 
 from nepa3d.data.mixed_pretrain import build_mixed_pretrain
 from nepa3d.models.patch_nepa import PatchTransformerNepa
@@ -22,6 +24,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--save_dir", type=str, default="runs_patch_nepa")
     p.add_argument("--run_name", type=str, default="debug")
     p.add_argument("--resume", type=str, default="")
+    p.add_argument("--auto_resume", type=int, default=1, choices=[0, 1])
+    p.add_argument("--resume_optimizer", type=int, default=1, choices=[0, 1])
     p.add_argument("--save_every", type=int, default=1)
 
     # Data
@@ -32,8 +36,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pt_xyz_key", type=str, default="pt_xyz_pool")
     p.add_argument("--pt_dist_key", type=str, default="pt_dist_pool")
     p.add_argument("--ablate_point_dist", type=int, default=0, choices=[0, 1])
-    p.add_argument("--pt_sample_mode", type=str, default="random", choices=["random", "fps", "rfps", "grid"])
+    p.add_argument("--pt_sample_mode", type=str, default="random", choices=["random", "fps", "rfps", "rfps_cached", "grid"])
     p.add_argument("--pt_fps_key", type=str, default="auto")
+    p.add_argument("--pt_rfps_key", type=str, default="auto")
     p.add_argument("--pt_rfps_m", type=int, default=4096)
     p.add_argument("--point_order_mode", type=str, default="morton", choices=["morton", "fps", "random"])
 
@@ -57,10 +62,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dropout", type=float, default=0.0)
     p.add_argument("--drop_path_rate", type=float, default=0.0)
     p.add_argument("--qk_norm", type=int, default=1)
-    p.add_argument("--qk_norm_affine", type=int, default=1)
-    p.add_argument("--qk_norm_bias", type=int, default=1)
-    p.add_argument("--layerscale_value", type=float, default=0.0)
-    p.add_argument("--rope_theta", type=float, default=10000.0)
+    p.add_argument("--qk_norm_affine", type=int, default=0)
+    p.add_argument("--qk_norm_bias", type=int, default=0)
+    p.add_argument("--layerscale_value", type=float, default=1e-5)
+    p.add_argument("--rope_theta", type=float, default=100.0)
     p.add_argument("--use_gated_mlp", type=int, default=0)
     p.add_argument("--hidden_act", type=str, default="gelu")
     p.add_argument("--backbone_mode", type=str, default="nepa2d", choices=["nepa2d", "vanilla"])
@@ -80,23 +85,40 @@ def parse_args() -> argparse.Namespace:
 
     # Train
     p.add_argument("--epochs", type=int, default=50)
-    p.add_argument("--batch_size", type=int, default=96)
-    p.add_argument("--lr", type=float, default=1e-4)
+    p.add_argument("--batch_size", type=int, default=16)
+    p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--weight_decay", type=float, default=0.05)
     p.add_argument("--warmup_epochs", type=int, default=0)
     p.add_argument("--min_lr", type=float, default=1e-6)
+    p.add_argument("--lr_scheduler", type=str, default="none", choices=["none", "cosine"])
     p.add_argument("--grad_accum", type=int, default=1)
-    p.add_argument("--max_grad_norm", type=float, default=1.0)
+    p.add_argument("--max_grad_norm", type=float, default=0.0)
+    # Data augmentation parity knobs (same semantics as Query-NEPA pretrain).
+    p.add_argument("--aug_rotate_z", type=int, default=0, choices=[0, 1])
+    p.add_argument("--aug_scale_min", type=float, default=1.0)
+    p.add_argument("--aug_scale_max", type=float, default=1.0)
+    p.add_argument("--aug_translate", type=float, default=0.0)
+    p.add_argument("--aug_jitter_sigma", type=float, default=0.0)
+    p.add_argument("--aug_jitter_clip", type=float, default=0.0)
+    p.add_argument("--aug_recompute_dist", type=int, default=0, choices=[0, 1])
     p.add_argument("--seed", type=int, default=0)
     return p.parse_args()
 
 
-def save_ckpt(save_path: Path, model: torch.nn.Module, optimizer: optim.Optimizer, epoch: int, args: argparse.Namespace) -> None:
+def save_ckpt(
+    save_path: Path,
+    model: torch.nn.Module,
+    optimizer: optim.Optimizer,
+    epoch: int,
+    step: int,
+    args: argparse.Namespace,
+) -> None:
     save_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
         "epoch": int(epoch),
+        "step": int(step),
         "args": vars(args),
     }
     torch.save(payload, str(save_path))
@@ -117,8 +139,25 @@ def main() -> None:
     args = parse_args()
     accelerator = Accelerator(gradient_accumulation_steps=int(args.grad_accum))
     set_seed(int(args.seed))
+    mprint = accelerator.print
 
     serial_bits = int(args.serial_bits) if "serial_bits" in vars(args) else int(args.morton_bits)
+    save_root = Path(args.save_dir) / args.run_name
+    if accelerator.is_main_process:
+        save_root.mkdir(parents=True, exist_ok=True)
+    accelerator.wait_for_everyone()
+
+    resume_path = str(args.resume).strip()
+    if (not resume_path) and bool(int(args.auto_resume)):
+        candidate = save_root / "ckpt_latest.pt"
+        if candidate.is_file():
+            resume_path = str(candidate)
+
+    def _worker_init_fn(worker_id: int):
+        # Keep numpy/python RNG streams diverged per worker for reproducibility.
+        base = (torch.initial_seed() + int(worker_id)) % (2**32)
+        np.random.seed(base)
+        random.seed(base)
 
     dataset, sampler, _info = build_mixed_pretrain(
         mix_config_path=args.mix_config_path,
@@ -132,8 +171,16 @@ def main() -> None:
         ablate_point_dist=bool(args.ablate_point_dist),
         pt_sample_mode=str(args.pt_sample_mode),
         pt_fps_key=str(args.pt_fps_key),
+        pt_rfps_key=str(args.pt_rfps_key),
         pt_rfps_m=int(args.pt_rfps_m),
         point_order_mode=str(args.point_order_mode),
+        aug_rotate_z=bool(int(args.aug_rotate_z)),
+        aug_scale_min=float(args.aug_scale_min),
+        aug_scale_max=float(args.aug_scale_max),
+        aug_translate=float(args.aug_translate),
+        aug_jitter_sigma=float(args.aug_jitter_sigma),
+        aug_jitter_clip=float(args.aug_jitter_clip),
+        aug_recompute_dist=bool(int(args.aug_recompute_dist)),
     )
     train_loader = DataLoader(
         dataset,
@@ -142,6 +189,7 @@ def main() -> None:
         num_workers=int(args.num_workers),
         pin_memory=True,
         drop_last=True,
+        worker_init_fn=_worker_init_fn,
     )
 
     model = PatchTransformerNepa(
@@ -180,22 +228,46 @@ def main() -> None:
     )
 
     optimizer = optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
-    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda ep: _scheduler_scale(ep, args))
-    model, optimizer, train_loader, scheduler = accelerator.prepare(model, optimizer, train_loader, scheduler)
+    scheduler = None
+    if str(args.lr_scheduler) == "cosine":
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda ep: _scheduler_scale(ep, args))
+        model, optimizer, train_loader, scheduler = accelerator.prepare(model, optimizer, train_loader, scheduler)
+    else:
+        model, optimizer, train_loader = accelerator.prepare(model, optimizer, train_loader)
+
+    mprint(
+        "[patch_nepa_pretrain] "
+        f"num_processes={accelerator.num_processes} "
+        f"mixed_precision={accelerator.mixed_precision} "
+        f"patch_embed={args.patch_embed} "
+        f"group_size={int(args.group_size)} num_groups={int(args.num_groups)} "
+        f"n_point={int(args.n_point)} n_ray={int(args.n_ray)} use_ray_patch={int(bool(args.use_ray_patch))} "
+        f"pt_sample_mode={str(args.pt_sample_mode)} pt_fps_key={str(args.pt_fps_key)} pt_rfps_m={int(args.pt_rfps_m)} "
+        f"pt_rfps_key={str(args.pt_rfps_key)} "
+        f"point_order_mode={str(args.point_order_mode)} "
+        f"batch_per_proc={int(args.batch_size)} grad_accum={int(args.grad_accum)} "
+        f"global_batch={int(args.batch_size) * int(accelerator.num_processes) * int(args.grad_accum)} "
+        f"lr={float(args.lr):.3e} scheduler={str(args.lr_scheduler)} "
+        f"qk_norm={int(args.qk_norm)} qk_norm_affine={int(args.qk_norm_affine)} qk_norm_bias={int(args.qk_norm_bias)} "
+        f"layerscale={float(args.layerscale_value):.2e} rope_theta={float(args.rope_theta):g} "
+        f"aug_rotate_z={int(args.aug_rotate_z)} aug_scale=[{float(args.aug_scale_min):.3f},{float(args.aug_scale_max):.3f}] "
+        f"aug_translate={float(args.aug_translate):.3f} aug_jitter_sigma={float(args.aug_jitter_sigma):.4f} "
+        f"aug_jitter_clip={float(args.aug_jitter_clip):.4f} aug_recompute_dist={int(args.aug_recompute_dist)}"
+    )
 
     start_epoch = 0
-    if args.resume:
-        ckpt = torch.load(args.resume, map_location="cpu")
+    global_step = 0
+    if resume_path:
+        ckpt = torch.load(resume_path, map_location="cpu")
         accelerator.unwrap_model(model).load_state_dict(ckpt.get("model", ckpt), strict=False)
-        if "optimizer" in ckpt:
+        if bool(int(args.resume_optimizer)) and ("optimizer" in ckpt):
             optimizer.load_state_dict(ckpt["optimizer"])
         start_epoch = int(ckpt.get("epoch", 0)) + 1
+        global_step = int(ckpt.get("step", start_epoch * max(1, len(train_loader))))
+        mprint(f"[resume] loaded={resume_path} start_epoch={start_epoch} step={global_step}")
+    else:
+        mprint("[resume] disabled (no checkpoint found/requested)")
 
-    save_root = Path(args.save_dir) / args.run_name
-    if accelerator.is_main_process:
-        save_root.mkdir(parents=True, exist_ok=True)
-
-    global_step = 0
     for epoch in range(start_epoch, int(args.epochs)):
         model.train()
         sampler_obj = getattr(train_loader, "sampler", None)
@@ -227,10 +299,25 @@ def main() -> None:
                 print(f"[epoch {epoch:03d} step {global_step:06d}] loss={loss.item():.8e} lr={lr:.2e}")
             global_step += 1
 
-        scheduler.step()
+        if scheduler is not None:
+            scheduler.step()
         if accelerator.is_main_process and ((epoch + 1) % int(args.save_every) == 0):
-            save_ckpt(save_root / f"ckpt_epoch_{epoch:04d}.pt", accelerator.unwrap_model(model), optimizer, epoch, args)
-            save_ckpt(save_root / "ckpt_latest.pt", accelerator.unwrap_model(model), optimizer, epoch, args)
+            save_ckpt(
+                save_root / f"ckpt_epoch_{epoch:04d}.pt",
+                accelerator.unwrap_model(model),
+                optimizer,
+                epoch,
+                global_step,
+                args,
+            )
+            save_ckpt(
+                save_root / "ckpt_latest.pt",
+                accelerator.unwrap_model(model),
+                optimizer,
+                epoch,
+                global_step,
+                args,
+            )
 
     if accelerator.is_main_process:
         print(f"Done. checkpoints: {save_root}")

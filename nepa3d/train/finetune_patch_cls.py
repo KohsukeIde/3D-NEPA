@@ -390,6 +390,15 @@ def main() -> None:
     add_args(parser)
     args = parser.parse_args()
 
+    # Guard against ineffective MC evaluation setup:
+    # fps sampling is deterministic; with aug_eval=0, K>1 repeats identical crops.
+    if int(args.mc_eval_k_test) > 1 and str(args.pt_sample_mode_eval) == "fps" and (not bool(args.aug_eval)):
+        raise ValueError(
+            "Invalid eval config: mc_eval_k_test>1 with pt_sample_mode_eval=fps and aug_eval=0. "
+            "This produces identical crops (no real voting). "
+            "Use aug_eval=1, or pt_sample_mode_eval=random, or set mc_eval_k_test=1."
+        )
+
     _set_seed(args.seed)
     accelerator = Accelerator()
 

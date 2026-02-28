@@ -13,6 +13,8 @@ This file separates documentation by model line to avoid mixing conclusions:
 
 - Plan: `nepa3d/docs/patch_nepa/patch_nepa_stage2_active.md`
 - Runlog: `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`
+- Gap audit: `nepa3d/docs/patch_nepa/gap_audit_query_to_patch_active.md`
+- Query chronology audit for porting: `nepa3d/docs/patch_nepa/query_nepa_chronology_audit_202602_active.md`
 - Benchmark table (shared output surface): `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
 
 ## 3. Legacy Line (Query-NEPA)
@@ -34,10 +36,11 @@ Query-NEPA settings that do not directly apply to current Patch-NEPA point-only 
 - `event_order_mode`
 - `ray_order_mode`
 
-Current Patch-NEPA point-only run (`99591.qjcm`) uses:
+Current Patch-NEPA point-only baseline recipe uses:
 
-- patch sequence (`serial morton`, `group_size=32`, `num_groups=32`)
+- patch sequence (`fps_knn`, `group_size=32`, `num_groups=64`)
 - no ray stream (`N_RAY=0`, `USE_RAY_PATCH=0`)
+- sample mode default (`pt_sample_mode=rfps`, `pt_rfps_m=4096`)
 - NEPA next-embedding objective on patch tokens
 
 ## 5. Migration Policy
