@@ -1060,3 +1060,100 @@ Note:
 - This does not change baseline (`qa_zeroa`) behavior.
 - q_only matrix should be rerun to validate that previous `Exit_status=1` jobs
   now finish and produce TEST metrics.
+
+## 23. q_only fix rerun submission (2026-03-01)
+
+Rerun trigger:
+- apply DDP stability fixes from Section 22
+  - multiplicative mask in `BoundRayPatchEmbed`
+  - `find_unused_parameters=True` for PatchNEPA `q_only` FT path
+
+Submitted rerun matrix (no dependency, immediate run):
+
+1) encdec1 q_only (`pooling=cls_max`)
+- run set: `patchnepaFT_rerun_encdec1_qonly_fix_20260301_133155`
+- jobs: `100257` (`obj_bg`), `100258` (`obj_only`), `100259` (`pb_t50_rs`)
+- ckpt: `runs/patchnepa_rayqa/patchnepa_ray_splitx2_encdec1_20260301_035212/ckpt_latest.pt`
+
+2) dualmask q_only (`pooling=cls_max`)
+- run set: `patchnepaFT_rerun_dualmask_qonly_fix_20260301_133157`
+- jobs: `100260` (`obj_bg`), `100261` (`obj_only`), `100262` (`pb_t50_rs`)
+- ckpt: `runs/patchnepa_rayqa/patchnepa_ray_splitx2_dualmask_20260301_035220/ckpt_latest.pt`
+
+3) dualmask q_only + mean pooling (`pooling=mean_q`)
+- run set: `patchnepaFT_rerun_dualmask_qonly_meanq_fix_20260301_133200`
+- jobs: `100263` (`obj_bg`), `100264` (`obj_only`), `100265` (`pb_t50_rs`)
+- ckpt: `runs/patchnepa_rayqa/patchnepa_ray_splitx2_dualmask_20260301_035220/ckpt_latest.pt`
+
+Status at submission snapshot:
+- `100257`-`100265` all `R`.
+
+## 24. q_only rerun (post-DDP-fix) partial results + low-accuracy diagnosis (2026-03-01)
+
+Current status:
+
+- `obj_bg` / `obj_only` completed for all three rerun branches.
+- `pb_t50_rs` jobs are still running:
+  - `100259` (encdec1 q_only cls_max)
+  - `100262` (dualmask q_only cls_max)
+  - `100265` (dualmask q_only mean_q)
+
+### 24.1 Completed metrics (so far)
+
+| pretrain branch | FT mode | pooling | obj_bg | obj_only |
+|---|---|---|---:|---:|
+| encdec1 (`100180`) | `qa_zeroa` | `cls_max` | `0.7797` | `0.7900` |
+| encdec1 (`100180`) | `q_only` | `cls_max` | `0.7797` | `0.7797` |
+| dualmask (`100181`) | `qa_zeroa` | `cls_max` | `0.7900` | `0.8193` |
+| dualmask (`100181`) | `q_only` | `cls_max` | `0.7573` | `0.7814` |
+| dualmask (`100181`) | `q_only` | `mean_q` | `0.7986` | `0.8090` |
+
+Source logs:
+
+- `logs/sanity/patchnepa_ft/patchnepaFT_rerun_encdec1_qonly_fix_20260301_133155/obj_bg.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_rerun_encdec1_qonly_fix_20260301_133155/obj_only.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_rerun_dualmask_qonly_fix_20260301_133157/obj_bg.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_rerun_dualmask_qonly_fix_20260301_133157/obj_only.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_rerun_dualmask_qonly_meanq_fix_20260301_133200/obj_bg.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_rerun_dualmask_qonly_meanq_fix_20260301_133200/obj_only.out`
+
+### 24.2 What is *not* the root cause
+
+Checkpoint transfer integrity is clean in all compared runs:
+
+- encdec1 baseline (`100188`): `[ckpt-adapt] ... mapped=393 direct=0 ...`, `missing=14 unexpected=0`
+- dualmask baseline (`100194`): `[ckpt-adapt] ... mapped=247 direct=0 ...`, `missing=14 unexpected=0`
+
+Interpretation:
+
+- no evidence of wrong-key direct load (`direct` is `0`)
+- no unexpected leftover tensors (`unexpected=0`)
+- current accuracy gap is not explained by broken state-dict mapping.
+
+### 24.3 Most likely contributors to low accuracy
+
+1. FT mode mismatch is real, but not a single-factor explanation.
+- `qa_zeroa` vs `q_only` changes results materially.
+- For dualmask branch:
+  - `q_only + cls_max` drops hard vs `qa_zeroa`
+  - `q_only + mean_q` recovers `obj_bg` and is closer on `obj_only`
+- This indicates pooling and token-selection policy matters, but does not fully close the gap to target.
+
+2. Ray supervision density is low at pretrain token level.
+- step-0 sanity in split-x2 pretrains shows many `TYPE_MISSING_RAY` tokens:
+  - encdec1: `Q_RAY=22`, `A_RAY=22`, `MISSING_RAY=84`
+  - dualmask: `Q_RAY=18`, `A_RAY=18`, `MISSING_RAY=92`
+- i.e., a large fraction of patch positions carry no real ray signal each sample.
+- This weakens effective ray-conditioning strength despite `USE_RAY_PATCH=1`.
+
+3. Pretrain optimization dynamics differ strongly by branch.
+- encdec1 run shows early loss escalation to O(1e-1~2e-1) after warmup.
+- dualmask run stays mostly in low O(1e-3~1e-2) range in the same early phase.
+- Downstream trend is consistent with this: dualmask branch outperforms encdec1 in current FT outcomes.
+
+### 24.4 Current hard conclusion (interim)
+
+- With completed runs only, PatchNEPA is still below strict Point-MAE reference band.
+- Main open item before final conclusion:
+  - wait for `pb_t50_rs` completion for `100259/100262/100265`,
+  - then lock best FT mode (`qa_zeroa` vs `q_only+mean_q`) per pretrain branch for next ablation stage.
