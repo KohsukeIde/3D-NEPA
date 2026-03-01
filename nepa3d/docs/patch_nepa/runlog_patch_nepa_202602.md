@@ -2932,3 +2932,212 @@ Comparison note:
   - `dualmask-indpatch` (`100757 -> 100759~100761`)
   - vs `encdec1-indpatch` (`100758 -> 100762~100764`)
   - both under identical FT recipe and global-batch policy.
+
+## 72. Missing-safe patch update (loss+K/V guard) and resubmission (`100765~100772`, 2026-03-02)
+
+User-requested pre-run update for missing-version was applied before the new submit chain.
+
+Applied safety updates:
+
+1. `nepa3d/models/causal_transformer.py`
+- added 3D attention-mask support in self-attention (`(B,T,T)` bool/additive masks)
+- added missing-token K/V blocking path when `dual_mask_type_aware=1`:
+  - keys with `TYPE_MISSING_RAY` are masked out
+  - missing-query self-diagonal is kept to avoid all-masked rows
+
+2. `nepa3d/train/pretrain_patch_nepa.py`
+- fail-fast guard added:
+  - if `use_ray_patch=1` and `ray_assign_mode=independent_fps_knn`, then
+    `dual_mask_type_aware` must be `1`; otherwise `ValueError`.
+
+Status of previous cmp chain:
+
+- `100757/100758` finished with `Exit_status=271` and are superseded.
+- dependent FT `100759~100764` finalized without execution payload (dependency path from superseded pretrain).
+
+Resubmitted safe chain:
+
+Pretrain:
+
+| job | run_set | branch | key settings | status |
+|---|---|---|---|---|
+| `100765.qjcm` | `patchnepa_ray_splitx2_dualmask_indpatch_safe_20260302_031834` | dualmask (`encdec_arch=0`) | `ray_assign=independent_fps_knn`, `dual_mask_type_aware=1`, global batch `128` | `R` |
+| `100766.qjcm` | `patchnepa_ray_splitx2_encdec1_indpatch_safe_20260302_031834` | encdec1 (`encdec_arch=1`) | `ray_assign=independent_fps_knn`, `dual_mask_type_aware=1`, global batch `128` | `R` |
+
+Startup sanity (both jobs):
+- `Q_RAY=32`, `A_RAY=32`, `MISSING_RAY=0` at step0 sample snapshot.
+
+Dependent FT (`afterok`):
+
+From `100765`:
+- `100767` (`obj_bg`)
+- `100768` (`obj_only`)
+- `100769` (`pb_t50_rs`)
+- run_set: `patchnepaFT_from_dualmask_indpatch_safe_20260302_031834`
+
+From `100766`:
+- `100770` (`obj_bg`)
+- `100771` (`obj_only`)
+- `100772` (`pb_t50_rs`)
+- run_set: `patchnepaFT_from_encdec1_indpatch_safe_20260302_031834`
+
+FT recipe (fixed for A/B parity):
+- `PATCHNEPA_FT_MODE=qa_zeroa`
+- `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp`
+- `PATCHNEPA_CLS_TOKEN_SOURCE=bos`, `PATCHNEPA_FREEZE_PATCH_EMBED=0`
+- `LLRD_START=1.0`, `LLRD_END=1.0`, `LLRD_SCHEDULER=static`, `LLRD_MODE=linear`
+- strict eval: `val_split_mode=file`, `AUG_EVAL=1`, `MC_TEST=10`
+
+Paths:
+- pretrain logs:
+  - `logs/patch_nepa_pretrain/patchnepa_ray_splitx2_dualmask_indpatch_safe_20260302_031834`
+  - `logs/patch_nepa_pretrain/patchnepa_ray_splitx2_encdec1_indpatch_safe_20260302_031834`
+- finetune logs:
+  - `logs/sanity/patchnepa_ft/patchnepaFT_from_dualmask_indpatch_safe_20260302_031834`
+  - `logs/sanity/patchnepa_ft/patchnepaFT_from_encdec1_indpatch_safe_20260302_031834`
+
+## 73. Strict FT A/B: pretrain vs scratch under identical PatchNEPA FT recipe (`obj_only`, 2026-03-02)
+
+Purpose:
+- isolate whether val->test gap behavior is due to pretrain itself or generic FT overfit by running strict A/B with only init-source changed.
+
+A/B contract (fixed identical FT settings):
+- variant: `obj_only`
+- model path: `model_source=patchnepa(direct)`
+- `PATCHNEPA_FT_MODE=qa_zeroa`
+- `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp`
+- `PATCHNEPA_CLS_TOKEN_SOURCE=last_q`
+- `PATCHNEPA_FREEZE_PATCH_EMBED=0`
+- `LLRD_START=1.0`, `LLRD_END=1.0`, `LLRD_SCHEDULER=static`, `LLRD_MODE=linear`
+- strict eval unchanged: `val_split_mode=file`, `AUG_EVAL=1`, `MC_TEST=10`
+
+Submitted jobs:
+
+| arm | run_set | init source | job | status |
+|---|---|---|---|---|
+| pretrain-init | `patchnepaFT_ab_objonly_pre_20260302_035338` | `runs/patchnepa_rayqa/patchnepa_ray_splitx2_dualmask_20260301_035220/ckpt_latest.pt` | `100773.qjcm` | `R` |
+| scratch-init | `patchnepaFT_ab_objonly_scratch_20260302_035345` | no ckpt (`patchnepa scratch init`) | `100774.qjcm` | `R` |
+
+Logs:
+- `logs/sanity/patchnepa_ft/patchnepaFT_ab_objonly_pre_20260302_035338/obj_only.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_ab_objonly_scratch_20260302_035345/obj_only.out`
+
+Code update enabling this strict A/B:
+- `nepa3d/train/finetune_patch_cls.py`
+  - `model_source=patchnepa` now allows `--ckpt` omitted (scratch init) for strict A/B only.
+- `scripts/sanity/submit_patchnepa_finetune_variants_qf.sh`
+  - added opt-in gate for empty ckpt submission: `PATCHNEPA_ALLOW_SCRATCH=1`.
+
+## 74. W&B default enable (2026-03-02)
+
+Policy update:
+
+- from this point, both Stage-2 pretrain and finetune launchers enable W&B by default.
+- logging is best-effort:
+  - if `wandb` package/import/init fails, training continues with local logs.
+
+Applied paths:
+
+- pretrain trainer:
+  - `nepa3d/train/pretrain_patch_nepa.py`
+  - added args: `--use_wandb`, `--wandb_project`, `--wandb_entity`, `--wandb_run_name`,
+    `--wandb_group`, `--wandb_tags`, `--wandb_mode`, `--wandb_log_every`
+  - logs: step loss/lr, dual-mask ramp, copy-diagnostic metrics, epoch-end lr.
+- finetune trainer:
+  - `nepa3d/train/finetune_patch_cls.py`
+  - added args: `--use_wandb`, `--wandb_project`, `--wandb_entity`, `--wandb_run_name`,
+    `--wandb_group`, `--wandb_tags`, `--wandb_mode`
+  - logs: epoch train/val metrics, best val tracking, final test metrics.
+
+Launcher defaults:
+
+- pretrain:
+  - `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh`
+  - `scripts/pretrain/nepa3d_pretrain_patch_nepa.sh`
+  - `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh`
+  - default env: `USE_WANDB=1`, `WANDB_PROJECT=patchnepa-pretrain`.
+- finetune:
+  - `scripts/finetune/patchcls_scanobjectnn_scratch.sh`
+  - `scripts/finetune/patchnepa_scanobjectnn_finetune.sh`
+  - `scripts/sanity/submit_patchnepa_finetune_variants_qf.sh`
+  - default env: `USE_WANDB=1`, `WANDB_PROJECT=patchnepa-finetune`.
+
+Runtime override examples:
+
+- disable W&B for a run: `USE_WANDB=0`
+- offline mode: `WANDB_MODE=offline`
+- set entity/project/group/run:
+  - `WANDB_ENTITY=<entity>`
+  - `WANDB_PROJECT=<project>`
+  - `WANDB_GROUP=<group>`
+  - `WANDB_RUN_NAME=<run_name>`
+
+## 75. Quick context-limitation probe (`local_only` vs `far_only`) on pretrain ckpt (2026-03-02)
+
+Purpose:
+
+- verify whether current objective is only "prev-copy trivial" vs requiring broader context.
+- fast check using existing pretrain ckpt without launching a new job.
+
+Probe setup:
+
+- ckpt:
+  - `runs/patchnepa_rayqa/patchnepa_ray_splitx2_dualmask_indpatch_safe_20260302_031834/ckpt_latest.pt`
+- batches:
+  - `24` mini-batches from mixed-pretrain train stream (no aug).
+- evaluated masks (all with `is_causal=1`, `window=32`):
+  - `full_unmasked`: `near=0, far=0`
+  - `local_only`: `near=0, far=1` (drop far history)
+  - `far_only`: `near=1, far=0` (drop near history)
+- metrics:
+  - `nepa_loss`, `cos_tgt`, `cos_prev`, `gap=cos_tgt-cos_prev`, `copy_win`.
+
+Results:
+
+| type_aware | condition | loss | cos_tgt | cos_prev | gap | copy_win |
+|---|---|---:|---:|---:|---:|---:|
+| `1` | full_unmasked | 0.00142 | 0.99858 | 0.41996 | 0.57862 | 0.00000 |
+| `1` | local_only | 0.00141 | 0.99859 | 0.42051 | 0.57808 | 0.00000 |
+| `1` | far_only | 0.00148 | 0.99852 | 0.42085 | 0.57767 | 0.00000 |
+| `0` | full_unmasked | 0.00381 | 0.99619 | 0.42364 | 0.57255 | 0.00000 |
+| `0` | local_only | 0.15380 | 0.84620 | 0.49573 | 0.35046 | 0.00014 |
+| `0` | far_only | 0.14520 | 0.85480 | 0.47989 | 0.37491 | 0.00395 |
+
+Interpretation (strictly from this probe):
+
+- `copy trivial` (prev-copy win) is still rejected: `copy_win` stays ~0 across settings.
+- with `dual_mask_type_aware=1`, local/far restriction barely changes metrics because masking applies mainly to Q/Q edges; this probe is not strong enough to answer receptive-field needs under that mode.
+- with `dual_mask_type_aware=0`, both local-only/far-only severely degrade vs unmasked, indicating non-trivial context dependence when masking is allowed to affect answer-side history.
+
+Actionable note:
+
+- to answer "local-only is enough?" for mainline (`type_aware=1`), add a targeted probe that directly limits Q->A / A->A visible context (not only Q/Q).
+
+## 76. FT augmentation parity note vs Point-MAE (2026-03-02)
+
+Clarification:
+
+- current FT path is **Point-MAE-aligned**, but **not an exact implementation match**.
+- mismatch is in scaling behavior:
+  - current PatchNEPA FT aug path uses a **single scalar scale** (`s`) for xyz
+  - Point-MAE `PointcloudScaleAndTranslate` uses **per-axis scale** (`sx, sy, sz`)
+
+Code evidence:
+
+- PatchNEPA FT aug preset (`pointmae`):
+  - `nepa3d/train/finetune_patch_cls.py`
+  - `nepa3d/data/cls_patch_dataset.py` -> `_apply_point_aug(...)`
+  - `nepa3d/data/dataset.py` (`scale = uniform(...)` scalar; `dist *= scale`)
+- Point-MAE transform:
+  - `Point-MAE/datasets/data_transforms.py`
+  - `PointcloudScaleAndTranslate` samples `size=[3]` scale.
+
+Policy implication:
+
+- describe current FT as "Point-MAE-like" or "Point-MAE-aligned", not strict-equal.
+- for strict parity claims against Point-MAE, scale implementation should be matched first.
+
+Required follow-up:
+
+- update FT augmentation to support Point-MAE-equivalent anisotropic scale (x/y/z independent),
+  then rerun strict comparison branch under matched FT defaults.

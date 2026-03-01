@@ -9,6 +9,10 @@ ROOT_DIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 cd "${ROOT_DIR}" || exit 1
 
 export MODEL_SOURCE="${MODEL_SOURCE:-patchnepa}"
+export USE_WANDB="${USE_WANDB:-1}"
+export WANDB_PROJECT="${WANDB_PROJECT:-patchnepa-finetune}"
+export WANDB_GROUP="${WANDB_GROUP:-patchnepa-ft}"
+export WANDB_TAGS="${WANDB_TAGS:-patchnepa,finetune,direct}"
 
 # Keep strict evaluation defaults unless explicitly overridden.
 export VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}"

@@ -16,7 +16,7 @@ import argparse
 import json
 import os
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import torch
@@ -50,6 +50,13 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--ckpt_use_ema", type=int, default=0, choices=[0, 1], help="Load model_ema from pretrain ckpt when available.")
     p.add_argument("--save_dir", type=str, default="runs/patchcls", help="Directory to save outputs.")
     p.add_argument("--run_name", type=str, default="", help="Optional run name subfolder.")
+    p.add_argument("--use_wandb", type=int, default=0, choices=[0, 1])
+    p.add_argument("--wandb_project", type=str, default="patchnepa-finetune")
+    p.add_argument("--wandb_entity", type=str, default="")
+    p.add_argument("--wandb_run_name", type=str, default="")
+    p.add_argument("--wandb_group", type=str, default="")
+    p.add_argument("--wandb_tags", type=str, default="")
+    p.add_argument("--wandb_mode", type=str, default="online", choices=["online", "offline", "disabled"])
 
     # Dataset
     p.add_argument("--cache_root", type=str, default="", help="Cache root (preprocessed npz tree).")
@@ -243,6 +250,45 @@ def _set_seed(seed: int) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+
+def _init_wandb(args: argparse.Namespace, save_dir: Path, accelerator: Accelerator) -> Any:
+    if int(args.use_wandb) != 1:
+        return None
+    if not accelerator.is_main_process:
+        return None
+    try:
+        import wandb  # type: ignore
+    except Exception as e:
+        print(f"[wandb] disabled: import failed ({e})")
+        return None
+
+    tags = [t.strip() for t in str(args.wandb_tags).split(",") if t.strip()]
+    run_name = str(args.wandb_run_name).strip() or str(args.run_name) or save_dir.name
+    group = str(args.wandb_group).strip() or None
+    entity = str(args.wandb_entity).strip() or None
+    mode = str(args.wandb_mode).strip()
+
+    cfg = dict(vars(args))
+    cfg["save_dir_resolved"] = str(save_dir)
+    try:
+        run = wandb.init(
+            project=str(args.wandb_project),
+            entity=entity,
+            name=run_name,
+            group=group,
+            tags=tags if tags else None,
+            mode=mode,
+            config=cfg,
+        )
+        print(
+            f"[wandb] enabled project={args.wandb_project} run={run_name} "
+            f"group={group or '-'} mode={mode}"
+        )
+        return run
+    except Exception as e:
+        print(f"[wandb] disabled: init failed ({e})")
+        return None
 
 
 def _stratified_split_indices(labels: np.ndarray, val_ratio: float, seed: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -745,6 +791,7 @@ def main() -> None:
         with open(save_dir / "args.json", "w") as f:
             json.dump(vars(args), f, indent=2)
     accelerator.wait_for_everyone()
+    wandb_run = _init_wandb(args, save_dir, accelerator)
 
     if args.data_format == "npz":
         if not args.cache_root:
@@ -1011,8 +1058,8 @@ def main() -> None:
             init_mode=args.init_mode,
         )
     elif args.model_source == "patchnepa":
-        if pretrain_state is None:
-            raise ValueError("--model_source=patchnepa requires --ckpt (PatchNEPA pretrain checkpoint).")
+        # Allow strict A/B with identical FT recipe by supporting patchnepa scratch init
+        # when --ckpt is omitted.
         nepa_kwargs = _patchnepa_kwargs_from_ckpt(pretrain_args, args)
         head_mode = args.head_mode if args.head_mode != "auto" else ("pointmae_mlp" if args.pooling == "cls_max" else "linear")
         model = PatchTransformerNepaClassifier(
@@ -1066,6 +1113,9 @@ def main() -> None:
             init_mode=args.init_mode,
             is_causal=bool(args.is_causal),
         )
+    if args.model_source == "patchnepa" and pretrain_state is None:
+        if accelerator.is_main_process:
+            print("[ckpt] source=scratch ckpt_use_ema=0 (no --ckpt provided)")
 
     if pretrain_state is not None:
         state = pretrain_state
@@ -1259,71 +1309,96 @@ def main() -> None:
                 f"aug_train={aug_train} aug_preset={args.aug_preset} aug_eval={bool(args.aug_eval)} mc_test={args.mc_eval_k_test}"
             )
 
-    for epoch in range(args.epochs):
-        model.train()
-        for batch in train_loader:
-            xyz = batch["xyz"].to(accelerator.device)
-            label = batch["label"].to(accelerator.device)
-            normal = batch.get("normal", None)
-            if use_normals and normal is not None:
-                normal = normal.to(accelerator.device)
-            ray_o = batch.get("ray_o", None)
-            ray_d = batch.get("ray_d", None)
-            ray_t = batch.get("ray_t", None)
-            ray_hit = batch.get("ray_hit", None)
-            if bool(args.use_ray_patch):
-                if (ray_o is None) or (ray_d is None):
-                    raise ValueError("use_ray_patch=True but train batch does not contain ray_o/ray_d tensors")
-                ray_o = ray_o.to(accelerator.device)
-                ray_d = ray_d.to(accelerator.device)
-                if args.model_source != "patchnepa":
-                    if ray_t is not None:
-                        ray_t = ray_t.to(accelerator.device)
-                    if ray_hit is not None:
-                        ray_hit = ray_hit.to(accelerator.device)
-                else:
-                    # Query-only ray protocol in PatchNEPA direct FT.
-                    ray_t = None
-                    ray_hit = None
+    try:
+        for epoch in range(args.epochs):
+            model.train()
+            train_loss_sum = 0.0
+            train_loss_count = 0
+            for batch in train_loader:
+                xyz = batch["xyz"].to(accelerator.device)
+                label = batch["label"].to(accelerator.device)
+                normal = batch.get("normal", None)
+                if use_normals and normal is not None:
+                    normal = normal.to(accelerator.device)
+                ray_o = batch.get("ray_o", None)
+                ray_d = batch.get("ray_d", None)
+                ray_t = batch.get("ray_t", None)
+                ray_hit = batch.get("ray_hit", None)
+                if bool(args.use_ray_patch):
+                    if (ray_o is None) or (ray_d is None):
+                        raise ValueError("use_ray_patch=True but train batch does not contain ray_o/ray_d tensors")
+                    ray_o = ray_o.to(accelerator.device)
+                    ray_d = ray_d.to(accelerator.device)
+                    if args.model_source != "patchnepa":
+                        if ray_t is not None:
+                            ray_t = ray_t.to(accelerator.device)
+                        if ray_hit is not None:
+                            ray_hit = ray_hit.to(accelerator.device)
+                    else:
+                        # Query-only ray protocol in PatchNEPA direct FT.
+                        ray_t = None
+                        ray_hit = None
 
-            logits = model(xyz, normal, ray_o=ray_o, ray_d=ray_d, ray_t=ray_t, ray_hit=ray_hit)
-            loss = F.cross_entropy(logits, label)
+                logits = model(xyz, normal, ray_o=ray_o, ray_d=ray_d, ray_t=ray_t, ray_hit=ray_hit)
+                loss = F.cross_entropy(logits, label)
 
-            accelerator.backward(loss)
-            if args.grad_clip and args.grad_clip > 0:
-                accelerator.clip_grad_norm_(model.parameters(), args.grad_clip)
-            optimizer.step()
-            optimizer.zero_grad(set_to_none=True)
-            if lr_scheduler is not None and scheduler_step_per_batch:
+                accelerator.backward(loss)
+                if args.grad_clip and args.grad_clip > 0:
+                    accelerator.clip_grad_norm_(model.parameters(), args.grad_clip)
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+                if lr_scheduler is not None and scheduler_step_per_batch:
+                    lr_scheduler.step()
+
+                loss_mean = accelerator.reduce(loss.detach(), reduction="mean")
+                if accelerator.is_main_process:
+                    train_loss_sum += float(loss_mean.item())
+                    train_loss_count += 1
+
+            if lr_scheduler is not None and (not scheduler_step_per_batch):
                 lr_scheduler.step()
 
-        if lr_scheduler is not None and (not scheduler_step_per_batch):
-            lr_scheduler.step()
+            # val (main process only, full dataset)
+            accelerator.wait_for_everyone()
+            if accelerator.is_main_process:
+                # Rank-0-only eval must run on the unwrapped module. Running forward on
+                # DDP-wrapped model only on rank0 causes collective mismatch.
+                val_metrics = evaluate_local(
+                    accelerator.unwrap_model(model),
+                    val_loader,
+                    accelerator.device,
+                    use_normals=use_normals,
+                    use_ray_patch=bool(args.use_ray_patch),
+                    model_source=str(args.model_source),
+                )
+                lr_now = optimizer.param_groups[0]["lr"]
+                train_loss_avg = float(train_loss_sum / max(1, train_loss_count))
+                print(
+                    f"[ep {epoch+1:03d}/{args.epochs}] lr={lr_now:.2e} "
+                    f"train_loss={train_loss_avg:.4f} "
+                    f"val_acc={val_metrics['acc']:.4f} val_loss={val_metrics['loss']:.4f}"
+                )
 
-        # val (main process only, full dataset)
-        accelerator.wait_for_everyone()
-        if accelerator.is_main_process:
-            # Rank-0-only eval must run on the unwrapped module. Running forward on
-            # DDP-wrapped model only on rank0 causes collective mismatch.
-            val_metrics = evaluate_local(
-                accelerator.unwrap_model(model),
-                val_loader,
-                accelerator.device,
-                use_normals=use_normals,
-                use_ray_patch=bool(args.use_ray_patch),
-                model_source=str(args.model_source),
-            )
-            lr_now = optimizer.param_groups[0]["lr"]
-            print(
-                f"[ep {epoch+1:03d}/{args.epochs}] lr={lr_now:.2e} "
-                f"val_acc={val_metrics['acc']:.4f} val_loss={val_metrics['loss']:.4f}"
-            )
+                if wandb_run is not None:
+                    wandb_run.log(
+                        {
+                            "train/epoch": float(epoch + 1),
+                            "train/lr": float(lr_now),
+                            "train/loss": float(train_loss_avg),
+                            "val/acc": float(val_metrics["acc"]),
+                            "val/loss": float(val_metrics["loss"]),
+                            "val/best_acc": float(max(best_val, val_metrics["acc"])),
+                        },
+                        step=int(epoch + 1),
+                    )
 
-            if val_metrics["acc"] > best_val:
-                best_val = val_metrics["acc"]
-                torch.save({"model": accelerator.unwrap_model(model).state_dict(), "args": vars(args)}, best_path)
-                print(f"  saved best -> {best_path} (val_acc={best_val:.4f})")
-        accelerator.wait_for_everyone()
+                if val_metrics["acc"] > best_val:
+                    best_val = val_metrics["acc"]
+                    torch.save({"model": accelerator.unwrap_model(model).state_dict(), "args": vars(args)}, best_path)
+                    print(f"  saved best -> {best_path} (val_acc={best_val:.4f})")
+            accelerator.wait_for_everyone()
+    finally:
+        pass
 
     # Load best on all processes for a consistent final test.
     accelerator.wait_for_everyone()
@@ -1344,6 +1419,9 @@ def main() -> None:
         )
     if accelerator.is_main_process:
         print(f"TEST acc={test_metrics['acc']:.4f} loss={test_metrics['loss']:.4f}")
+        if wandb_run is not None:
+            wandb_run.log({"test/acc": float(test_metrics["acc"]), "test/loss": float(test_metrics["loss"])}, step=int(args.epochs + 1))
+            wandb_run.finish()
         with open(save_dir / "test_metrics.json", "w") as f:
             json.dump(test_metrics, f, indent=2)
     accelerator.wait_for_everyone()

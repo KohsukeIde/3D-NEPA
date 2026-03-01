@@ -73,10 +73,18 @@ ALLOW_SCAN_UNISCALE_V2="${ALLOW_SCAN_UNISCALE_V2:-0}"
 SAVE_DIR="${SAVE_DIR:-runs/sanity/patchnepa_ft}"
 CKPT="${CKPT:-}"
 CKPT_USE_EMA="${CKPT_USE_EMA:-0}"
+USE_WANDB="${USE_WANDB:-1}"
+WANDB_PROJECT="${WANDB_PROJECT:-patchnepa-finetune}"
+WANDB_ENTITY="${WANDB_ENTITY:-}"
+WANDB_GROUP="${WANDB_GROUP:-patchnepa-ft}"
+WANDB_TAGS="${WANDB_TAGS:-patchnepa,finetune,direct}"
+WANDB_MODE="${WANDB_MODE:-online}"
+WANDB_API_KEY="${WANDB_API_KEY:-}"
+WANDB_BASE_URL="${WANDB_BASE_URL:-https://api.wandb.ai}"
 
-if [[ -z "${CKPT}" ]]; then
-  echo "[error] CKPT is required for patchnepa finetune submission"
-  exit 2
+if [[ -z "${CKPT}" ]] && [[ "${PATCHNEPA_ALLOW_SCRATCH:-0}" != "1" ]]; then
+echo "[error] CKPT is required for patchnepa finetune submission (set PATCHNEPA_ALLOW_SCRATCH=1 to run patchnepa scratch A/B)"
+exit 2
 fi
 
 cache_root_for_variant() {
@@ -117,6 +125,15 @@ for variant in "${_variants[@]}"; do
     "SAVE_DIR=${SAVE_DIR}"
     "CKPT=${CKPT}"
     "CKPT_USE_EMA=${CKPT_USE_EMA}"
+    "USE_WANDB=${USE_WANDB}"
+    "WANDB_PROJECT=${WANDB_PROJECT}"
+    "WANDB_ENTITY=${WANDB_ENTITY}"
+    "WANDB_RUN_NAME=${run_name}"
+    "WANDB_GROUP=${WANDB_GROUP}"
+    "WANDB_TAGS=${WANDB_TAGS},${variant}"
+    "WANDB_MODE=${WANDB_MODE}"
+    "WANDB_API_KEY=${WANDB_API_KEY}"
+    "WANDB_BASE_URL=${WANDB_BASE_URL}"
     "EPOCHS=${EPOCHS}"
     "BATCH=${BATCH}"
     "BATCH_MODE=${BATCH_MODE}"

@@ -7,6 +7,7 @@ import re
 import copy
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.optim as optim
@@ -43,6 +44,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--auto_resume", type=int, default=1, choices=[0, 1])
     p.add_argument("--resume_optimizer", type=int, default=1, choices=[0, 1])
     p.add_argument("--save_every", type=int, default=1)
+    p.add_argument("--use_wandb", type=int, default=0, choices=[0, 1])
+    p.add_argument("--wandb_project", type=str, default="patchnepa-pretrain")
+    p.add_argument("--wandb_entity", type=str, default="")
+    p.add_argument("--wandb_run_name", type=str, default="")
+    p.add_argument("--wandb_group", type=str, default="")
+    p.add_argument("--wandb_tags", type=str, default="")
+    p.add_argument("--wandb_mode", type=str, default="online", choices=["online", "offline", "disabled"])
+    p.add_argument("--wandb_log_every", type=int, default=50)
 
     # Data
     p.add_argument("--mix_config_path", type=str, required=True)
@@ -330,8 +339,56 @@ def _compute_copy_diag(
 def _fmt_diag(x: float) -> str:
     return "nan" if (x != x) else f"{x:.4f}"
 
+
+def _init_wandb(args: argparse.Namespace, accelerator: Accelerator) -> Any:
+    if int(args.use_wandb) != 1:
+        return None
+    if not accelerator.is_main_process:
+        return None
+    try:
+        import wandb  # type: ignore
+    except Exception as e:
+        accelerator.print(f"[wandb] disabled: import failed ({e})")
+        return None
+
+    tags = [t.strip() for t in str(args.wandb_tags).split(",") if t.strip()]
+    run_name = str(args.wandb_run_name).strip() or str(args.run_name)
+    group = str(args.wandb_group).strip() or None
+    entity = str(args.wandb_entity).strip() or None
+    mode = str(args.wandb_mode).strip()
+
+    cfg = dict(vars(args))
+    cfg["save_root"] = str(Path(args.save_dir) / args.run_name)
+    try:
+        run = wandb.init(
+            project=str(args.wandb_project),
+            entity=entity,
+            name=run_name,
+            group=group,
+            tags=tags if tags else None,
+            mode=mode,
+            config=cfg,
+        )
+        accelerator.print(
+            f"[wandb] enabled project={args.wandb_project} run={run_name} "
+            f"group={group or '-'} mode={mode}"
+        )
+        return run
+    except Exception as e:
+        accelerator.print(f"[wandb] disabled: init failed ({e})")
+        return None
+
+
 def main() -> None:
     args = parse_args()
+    if bool(int(args.use_ray_patch)) and str(args.ray_assign_mode) == "independent_fps_knn":
+        # Missing-ray handling in fixed-length independent ray patching relies on
+        # type-aware masking to keep missing tokens out of effective K/V context.
+        if int(args.dual_mask_type_aware) != 1:
+            raise ValueError(
+                "independent_fps_knn requires dual_mask_type_aware=1 "
+                "(missing-ray safe mode)."
+            )
     accelerator = Accelerator(gradient_accumulation_steps=int(args.grad_accum))
     set_seed(int(args.seed))
     mprint = accelerator.print
@@ -454,6 +511,8 @@ def main() -> None:
     skip_k_list = _parse_skip_k_list(args)
     diag_enabled = bool(int(args.diag_copy))
     diag_every = max(1, int(args.diag_every))
+    wandb_log_every = max(1, int(args.wandb_log_every))
+    wandb_run = _init_wandb(args, accelerator)
     mprint(
         "[patch_nepa_pretrain] "
         f"num_processes={accelerator.num_processes} "
@@ -508,117 +567,147 @@ def main() -> None:
     warmup_steps = max(1, int(float(args.dual_mask_warmup_frac) * float(total_steps)))
     printed_token_sanity = False
 
-    for epoch in range(start_epoch, int(args.epochs)):
-        model.train()
-        sampler_obj = getattr(train_loader, "sampler", None)
-        if sampler_obj is not None and hasattr(sampler_obj, "set_epoch"):
-            sampler_obj.set_epoch(epoch)
+    try:
+        for epoch in range(start_epoch, int(args.epochs)):
+            model.train()
+            sampler_obj = getattr(train_loader, "sampler", None)
+            if sampler_obj is not None and hasattr(sampler_obj, "set_epoch"):
+                sampler_obj.set_epoch(epoch)
 
-        for batch in train_loader:
-            with accelerator.accumulate(model):
-                ramp = 1.0
-                if warmup_steps > 0:
-                    ramp = min(float(global_step) / float(warmup_steps), 1.0)
-                dm_near = float(args.dual_mask_near) * ramp
-                dm_far = float(args.dual_mask_far) * ramp
+            for batch in train_loader:
+                with accelerator.accumulate(model):
+                    ramp = 1.0
+                    if warmup_steps > 0:
+                        ramp = min(float(global_step) / float(warmup_steps), 1.0)
+                    dm_near = float(args.dual_mask_near) * ramp
+                    dm_far = float(args.dual_mask_far) * ramp
 
-                out = model(
-                    pt_xyz=batch["pt_xyz"],
-                    pt_n=None,
-                    pt_dist=batch.get("pt_dist", None),
-                    pt_grad=batch.get("pt_grad", None),
-                    ray_o=batch.get("ray_o", None),
-                    ray_d=batch.get("ray_d", None),
-                    ray_t=batch.get("ray_t", None),
-                    ray_hit=batch.get("ray_hit", None),
-                    ray_n=batch.get("ray_n", None),
-                    ray_unc=batch.get("ray_unc", None),
-                    ray_available=batch.get("ray_available", None),
-                    is_causal=True,
-                    dual_mask_near=dm_near,
-                    dual_mask_far=dm_far,
-                    dual_mask_window=int(args.dual_mask_window),
-                    dual_mask_type_aware=int(args.dual_mask_type_aware),
-                )
-                if (not printed_token_sanity) and (global_step == 0) and accelerator.is_main_process:
-                    c = Counter(out.type_id[0].detach().cpu().tolist())
-                    sanity_items = [
-                        ("BOS", TYPE_BOS),
-                        ("EOS", TYPE_EOS),
-                        ("POINT", TYPE_POINT),
-                        ("RAY", TYPE_RAY),
-                        ("Q_POINT", TYPE_Q_POINT),
-                        ("A_POINT", TYPE_A_POINT),
-                        ("Q_RAY", TYPE_Q_RAY),
-                        ("A_RAY", TYPE_A_RAY),
-                        ("SEP", TYPE_SEP),
-                        ("MISSING_RAY", TYPE_MISSING_RAY),
+                    out = model(
+                        pt_xyz=batch["pt_xyz"],
+                        pt_n=None,
+                        pt_dist=batch.get("pt_dist", None),
+                        pt_grad=batch.get("pt_grad", None),
+                        ray_o=batch.get("ray_o", None),
+                        ray_d=batch.get("ray_d", None),
+                        ray_t=batch.get("ray_t", None),
+                        ray_hit=batch.get("ray_hit", None),
+                        ray_n=batch.get("ray_n", None),
+                        ray_unc=batch.get("ray_unc", None),
+                        ray_available=batch.get("ray_available", None),
+                        is_causal=True,
+                        dual_mask_near=dm_near,
+                        dual_mask_far=dm_far,
+                        dual_mask_window=int(args.dual_mask_window),
+                        dual_mask_type_aware=int(args.dual_mask_type_aware),
+                    )
+                    if (not printed_token_sanity) and (global_step == 0) and accelerator.is_main_process:
+                        c = Counter(out.type_id[0].detach().cpu().tolist())
+                        sanity_items = [
+                            ("BOS", TYPE_BOS),
+                            ("EOS", TYPE_EOS),
+                            ("POINT", TYPE_POINT),
+                            ("RAY", TYPE_RAY),
+                            ("Q_POINT", TYPE_Q_POINT),
+                            ("A_POINT", TYPE_A_POINT),
+                            ("Q_RAY", TYPE_Q_RAY),
+                            ("A_RAY", TYPE_A_RAY),
+                            ("SEP", TYPE_SEP),
+                            ("MISSING_RAY", TYPE_MISSING_RAY),
+                        ]
+                        print("\n" + "=" * 56)
+                        print("[Sanity Check] step=0 token counts (sample 0)")
+                        for name, tid in sanity_items:
+                            print(f"  {name:12s} ({int(tid):2d}): {int(c.get(int(tid), 0))}")
+                        print("=" * 56 + "\n")
+                        printed_token_sanity = True
+                    loss_terms = [
+                        PatchTransformerNepa.nepa_loss(out.z, out.z_hat, out.type_id, skip_k=int(k))
+                        for k in skip_k_list
                     ]
-                    print("\n" + "=" * 56)
-                    print("[Sanity Check] step=0 token counts (sample 0)")
-                    for name, tid in sanity_items:
-                        print(f"  {name:12s} ({int(tid):2d}): {int(c.get(int(tid), 0))}")
-                    print("=" * 56 + "\n")
-                    printed_token_sanity = True
-                loss_terms = [
-                    PatchTransformerNepa.nepa_loss(out.z, out.z_hat, out.type_id, skip_k=int(k))
-                    for k in skip_k_list
-                ]
-                loss = torch.stack(loss_terms).mean()
-                accelerator.backward(loss)
-                if float(args.max_grad_norm) > 0:
-                    accelerator.clip_grad_norm_(model.parameters(), float(args.max_grad_norm))
-                optimizer.step()
-                if bool(int(args.use_ema)) and ema_model is not None:
-                    _update_ema(ema_model, model_raw, float(args.ema_decay))
-                optimizer.zero_grad(set_to_none=True)
+                    loss = torch.stack(loss_terms).mean()
+                    accelerator.backward(loss)
+                    if float(args.max_grad_norm) > 0:
+                        accelerator.clip_grad_norm_(model.parameters(), float(args.max_grad_norm))
+                    optimizer.step()
+                    if bool(int(args.use_ema)) and ema_model is not None:
+                        _update_ema(ema_model, model_raw, float(args.ema_decay))
+                    optimizer.zero_grad(set_to_none=True)
 
-            if accelerator.is_main_process and (global_step % 50 == 0):
-                lr = optimizer.param_groups[0]["lr"]
-                diag_msg = ""
-                if diag_enabled and (global_step % diag_every == 0):
-                    k_diag = int(args.diag_k) if int(args.diag_k) > 0 else int(skip_k_list[0])
-                    with torch.no_grad():
-                        diag = _compute_copy_diag(out.z, out.z_hat, out.type_id, k_diag)
-                    if diag is not None:
-                        diag_msg = (
-                            f" kdiag={int(diag['k'])}"
-                            f" cos_tgt={_fmt_diag(float(diag['cos_tgt']))}"
-                            f" cos_prev={_fmt_diag(float(diag['cos_prev']))}"
-                            f" gap={_fmt_diag(float(diag['gap']))}"
-                            f" copy_win={_fmt_diag(float(diag['copy_win']))}"
-                        )
-                print(
-                    f"[epoch {epoch:03d} step {global_step:06d}] "
-                    f"loss={loss.item():.8e} lr={lr:.2e} "
-                    f"dm=({dm_near:.2f},{dm_far:.2f},ramp={ramp:.2f})"
-                    f"{diag_msg}"
-                )
-            global_step += 1
+                if accelerator.is_main_process and (global_step % 50 == 0):
+                    lr = optimizer.param_groups[0]["lr"]
+                    diag_msg = ""
+                    diag = None
+                    if diag_enabled and (global_step % diag_every == 0):
+                        k_diag = int(args.diag_k) if int(args.diag_k) > 0 else int(skip_k_list[0])
+                        with torch.no_grad():
+                            diag = _compute_copy_diag(out.z, out.z_hat, out.type_id, k_diag)
+                        if diag is not None:
+                            diag_msg = (
+                                f" kdiag={int(diag['k'])}"
+                                f" cos_tgt={_fmt_diag(float(diag['cos_tgt']))}"
+                                f" cos_prev={_fmt_diag(float(diag['cos_prev']))}"
+                                f" gap={_fmt_diag(float(diag['gap']))}"
+                                f" copy_win={_fmt_diag(float(diag['copy_win']))}"
+                            )
+                    print(
+                        f"[epoch {epoch:03d} step {global_step:06d}] "
+                        f"loss={loss.item():.8e} lr={lr:.2e} "
+                        f"dm=({dm_near:.2f},{dm_far:.2f},ramp={ramp:.2f})"
+                        f"{diag_msg}"
+                    )
+                    if wandb_run is not None and (global_step % wandb_log_every == 0):
+                        wb = {
+                            "train/loss": float(loss.item()),
+                            "train/lr": float(lr),
+                            "train/epoch": float(epoch),
+                            "train/global_step": float(global_step),
+                            "train/dm_near": float(dm_near),
+                            "train/dm_far": float(dm_far),
+                            "train/dm_ramp": float(ramp),
+                        }
+                        if diag is not None:
+                            wb["diag/cos_tgt"] = float(diag["cos_tgt"])
+                            wb["diag/cos_prev"] = float(diag["cos_prev"])
+                            wb["diag/gap"] = float(diag["gap"])
+                            wb["diag/copy_win"] = float(diag["copy_win"])
+                        wandb_run.log(wb, step=int(global_step))
+                global_step += 1
 
-        if scheduler is not None:
-            scheduler.step()
-        if accelerator.is_main_process and ((epoch + 1) % int(args.save_every) == 0):
-            save_ckpt(
-                save_root / f"ckpt_epoch_{epoch:04d}.pt",
-                model_raw,
-                ema_model,
-                optimizer,
-                scheduler,
-                epoch,
-                global_step,
-                args,
-            )
-            save_ckpt(
-                save_root / "ckpt_latest.pt",
-                model_raw,
-                ema_model,
-                optimizer,
-                scheduler,
-                epoch,
-                global_step,
-                args,
-            )
+            if scheduler is not None:
+                scheduler.step()
+            if accelerator.is_main_process:
+                if wandb_run is not None:
+                    wandb_run.log(
+                        {
+                            "train/epoch_end": float(epoch + 1),
+                            "train/lr_epoch_end": float(optimizer.param_groups[0]["lr"]),
+                        },
+                        step=int(global_step),
+                    )
+                if ((epoch + 1) % int(args.save_every)) == 0:
+                    save_ckpt(
+                        save_root / f"ckpt_epoch_{epoch:04d}.pt",
+                        model_raw,
+                        ema_model,
+                        optimizer,
+                        scheduler,
+                        epoch,
+                        global_step,
+                        args,
+                    )
+                    save_ckpt(
+                        save_root / "ckpt_latest.pt",
+                        model_raw,
+                        ema_model,
+                        optimizer,
+                        scheduler,
+                        epoch,
+                        global_step,
+                        args,
+                    )
+    finally:
+        if accelerator.is_main_process and (wandb_run is not None):
+            wandb_run.finish()
 
     if accelerator.is_main_process:
         print(f"Done. checkpoints: {save_root}")

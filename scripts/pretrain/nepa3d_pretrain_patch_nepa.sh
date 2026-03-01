@@ -15,6 +15,15 @@ LOG_ROOT="${LOG_ROOT:-${ROOT_DIR}/logs/patch_nepa_pretrain/${RUN_NAME}}"
 LOG_PATH="${LOG_ROOT}/${RUN_NAME}.log"
 mkdir -p "${LOG_ROOT}"
 
+USE_WANDB="${USE_WANDB:-1}"
+WANDB_PROJECT="${WANDB_PROJECT:-patchnepa-pretrain}"
+WANDB_ENTITY="${WANDB_ENTITY:-}"
+WANDB_RUN_NAME="${WANDB_RUN_NAME:-${RUN_NAME}}"
+WANDB_GROUP="${WANDB_GROUP:-patchnepa-pretrain}"
+WANDB_TAGS="${WANDB_TAGS:-stage2,patchnepa,pretrain}"
+WANDB_MODE="${WANDB_MODE:-online}"
+WANDB_LOG_EVERY="${WANDB_LOG_EVERY:-50}"
+
 WARMUP_EPOCHS="${WARMUP_EPOCHS:-}"
 WARMUP_RATIO="${WARMUP_RATIO:-0.025}"
 STAGE2_STRICT_LR_POLICY="${STAGE2_STRICT_LR_POLICY:-1}"
@@ -52,6 +61,7 @@ echo "save_dir=${SAVE_DIR}" | tee -a "${LOG_PATH}"
 echo "qa_tokens=${QA_TOKENS:-1} qa_layout=${QA_LAYOUT:-split_sep} encdec_arch=${ENCDEC_ARCH:-0} dual_mask=(${DUAL_MASK_NEAR:-0.0},${DUAL_MASK_FAR:-0.0},w=${DUAL_MASK_WINDOW:-32}) use_ray_patch=${USE_RAY_PATCH:-1} n_ray=${N_RAY:-1024} ray_num_groups=${RAY_NUM_GROUPS:-32} ray_group_size=${RAY_GROUP_SIZE:-32}" | tee -a "${LOG_PATH}"
 echo "optimizer: lr_scheduler=${LR_SCHEDULER:-cosine} warmup_epochs=${WARMUP_EPOCHS} warmup_ratio=${WARMUP_RATIO} min_lr=${MIN_LR:-1e-6} weight_decay=${WEIGHT_DECAY:-0.05}" | tee -a "${LOG_PATH}"
 echo "run_name=${RUN_NAME}" | tee -a "${LOG_PATH}"
+echo "wandb: use=${USE_WANDB} project=${WANDB_PROJECT} entity=${WANDB_ENTITY:-none} run=${WANDB_RUN_NAME} group=${WANDB_GROUP} mode=${WANDB_MODE} log_every=${WANDB_LOG_EVERY}" | tee -a "${LOG_PATH}"
 
 python -u -m nepa3d.train.pretrain_patch_nepa \
   --mix_config_path "${MIX_CFG}" \
@@ -134,6 +144,14 @@ python -u -m nepa3d.train.pretrain_patch_nepa \
   --dual_mask_type_aware "${DUAL_MASK_TYPE_AWARE:-0}" \
   --dual_mask_warmup_frac "${DUAL_MASK_WARMUP_FRAC:-0.05}" \
   --seed "${SEED:-0}" \
+  --use_wandb "${USE_WANDB}" \
+  --wandb_project "${WANDB_PROJECT}" \
+  --wandb_entity "${WANDB_ENTITY}" \
+  --wandb_run_name "${WANDB_RUN_NAME}" \
+  --wandb_group "${WANDB_GROUP}" \
+  --wandb_tags "${WANDB_TAGS}" \
+  --wandb_mode "${WANDB_MODE}" \
+  --wandb_log_every "${WANDB_LOG_EVERY}" \
   2>&1 | tee -a "${LOG_PATH}"
 
 echo "[done] log=${LOG_PATH}"

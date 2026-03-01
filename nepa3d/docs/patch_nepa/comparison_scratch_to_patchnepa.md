@@ -350,3 +350,14 @@ Operational rule:
 - `scripts/finetune/patchcls_scanobjectnn_scratch.sh`
 - `logs/sanity/patchnepa_ft/patchnepa_ft_variants_20260301_223043/obj_bg.out`
 - `logs/sanity/patchnepa_ft/obj_bg.out`
+
+## 15. FT Augmentation Parity Note (Point-MAE)
+
+- Current PatchNEPA FT `aug_preset=pointmae` is **Point-MAE-aligned but not strict-identical**.
+- Difference:
+  - PatchNEPA: isotropic scalar scale (`s`) in `_apply_point_aug`.
+  - Point-MAE: anisotropic per-axis scale (`sx, sy, sz`) in `PointcloudScaleAndTranslate`.
+- Interpretation rule:
+  - Until this is matched, call the setting "Point-MAE-like" (not strict parity).
+- Required fix for strict comparison:
+  - implement per-axis scale in PatchNEPA FT augmentation path and rerun parity-targeted FT jobs.
