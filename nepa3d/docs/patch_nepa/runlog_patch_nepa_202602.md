@@ -3200,3 +3200,70 @@ Action direction:
 - treat `pb_t50_rs` as primary stress metric for objective/aug/task redesign decisions.
 - avoid single-run conclusion from best-val only; lock claims on repeated TEST metrics under fixed recipe.
 - prioritize ablations that increase "hardness" of transferable signals (instead of only increasing model/data scale).
+
+## 79. Missing-ray A/B setting delta vs best-line gap (2026-03-02)
+
+Question:
+- "setting delta は何か？"
+- "missing-ray 改善があるのに、なぜ current-best をまだ超えないのか？"
+
+### 79.1 Strict missing-ray A/B (same FT recipe)
+
+Pair used for strict A/B:
+- independent side: `100699 -> 100742` (`obj_only=0.7762`)
+- bind side: `100741 -> 100750` (`obj_only=0.7367`)
+- delta: `+0.0395` (independent better)
+
+Pretrain delta (A/Bで変えた主因):
+- `ray_assign_mode` only:
+  - independent: `independent_fps_knn`
+  - bind: `proxy_sphere`
+- token-level effect at step0:
+  - independent: `Q_RAY=32`, `A_RAY=32`, `MISSING_RAY=0`
+  - bind: `Q_RAY=21`, `A_RAY=21`, `MISSING_RAY=86`
+
+FT parity check for this A/B:
+- same FT recipe (`qa_zeroa`, `pooling=cls`, `head=linear`, `freeze_patch_embed=1`, `LLRD off/static`, `file+TTA10`)
+- hence this pair supports: reducing missing-ray helped under that FT setting.
+
+### 79.2 Why still below current-best (`obj_only=0.8193`)
+
+Current best reference line:
+- `100181 -> 100195` family (`splitx2_dualmask_baseline`), `obj_only=0.8193`
+
+Critical config differences vs strict A/B line (`100699/100741 -> 100742/100750`):
+
+1) FT head/pooling family differs (major)
+- current-best line:
+  - `pooling=cls_max`, `head_mode=pointmae_mlp`
+- strict A/B line:
+  - `pooling=cls`, `head_mode=linear`, `freeze_patch_embed=1`
+
+2) Pretrain sampling/augmentation family differs (major)
+- current-best pretrain (`100181`):
+  - `pt_sample_mode=rfps_cached`, `aug off (scale=1, translate=0)`
+- strict A/B pretrains (`100699/100741`):
+  - `pt_sample_mode=fps`, `aug on (scale=[0.667,1.5], translate=0.2)`
+
+3) Objective-side control differs
+- strict A/B branch logs include `skip_k=[1]` path in pretrain header.
+- current-best line was from earlier splitx2 baseline family without that surfaced control in header.
+
+Interpretation:
+- "missing-ray reduction" is a valid positive factor (A/B proves this),
+  but it is not the only moving part.
+- gap to `0.8193` is dominated by recipe-family differences (especially FT readout/head and pretrain sampling+aug regime),
+  so current evidence does not support "missing-ray alone should beat best".
+
+### 79.3 Latest in-progress split comparison status
+
+From safe indpatch chain (`100765/100766` source):
+- completed:
+  - dualmask: `obj_bg=0.8021` (`100767`), `obj_only=0.7900` (`100768`)
+  - encdec1: `obj_bg=0.7969` (`100770` log), `obj_only=0.8038` (`100771`)
+- running/pending at snapshot:
+  - `pb_t50_rs`: `100769` (dualmask), `100772` (encdec1)
+
+Operational note:
+- decide final branch ranking after both `pb_t50_rs` complete,
+  then compare against current-best line with the same metric triplet (`obj_bg/obj_only/pb_t50_rs`).

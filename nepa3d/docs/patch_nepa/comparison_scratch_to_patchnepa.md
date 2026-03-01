@@ -376,3 +376,32 @@ Operational rule:
 - Reporting rule:
   - prioritize `pb_t50_rs` when judging objective/aug changes,
   - and avoid using best-val alone for acceptance of a recipe.
+
+## 17. Missing-Ray A/B: What changed and why best is still higher
+
+### 17.1 Strict A/B result (same FT recipe)
+
+- independent (`MISSING_RAY=0`): `obj_only=0.7762`
+- bind (`MISSING_RAY=86`): `obj_only=0.7367`
+- effect: `+0.0395` for independent
+
+Interpretation:
+- under fixed FT recipe, lowering missing-ray clearly helps.
+
+### 17.2 Why this does not automatically beat current-best `0.8193`
+
+The current-best line is from a different recipe family.
+Main deltas vs strict A/B line:
+
+- FT readout:
+  - best-line: `cls_max + pointmae_mlp`
+  - strict A/B line: `cls + linear` (plus patch_embed freeze)
+- pretrain regime:
+  - best-line: `rfps_cached`, aug off
+  - strict A/B line: `fps`, aug on (`scale=[0.667,1.5], translate=0.2`)
+- objective controls:
+  - strict A/B branch includes `skip_k=[1]` in pretrain header.
+
+Practical conclusion:
+- missing-ray is a positive factor, but not the dominant limiter at current gap scale.
+- best comparison claims should be made only inside the same recipe family.
