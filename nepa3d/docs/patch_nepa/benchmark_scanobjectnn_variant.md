@@ -1,6 +1,6 @@
 # ScanObjectNN Variant Benchmark (Active Canonical)
 
-Last updated: 2026-03-01
+Last updated: 2026-03-02
 
 ## 1. Scope
 
@@ -67,16 +67,22 @@ Operational note:
 
 Status:
 
-- already completed (`Exit_status=0`): `97974`, `97977`, `97978`
-- source logs: `logs/sanity/pointmae/*.log`
+- historical as-launched jobs completed (`Exit_status=0`): `97974`, `97977`, `97978`
+- corrected ckswap verification jobs completed (`Exit_status=0`): `100752`, `100753`
 - important: this block is **pretrained-checkpoint inference sanity** (`--test --ckpts ...`),
   not `scratch` training baseline.
 
-| variant | test_acc | log |
-|---|---:|---|
-| `pb_t50_rs` | 84.5940 | `logs/sanity/pointmae/pointmae_pb_t50_rs_sanity_20260226_183416.log` |
-| `obj_bg` | 73.3219 | `logs/sanity/pointmae/pointmae_obj_bg_sanity_20260226_183443.log` |
-| `obj_only` | 81.7556 | `logs/sanity/pointmae/pointmae_obj_only_sanity_20260226_183443.log` |
+| variant | README target | historical as-launched (`scan_*.pth`) | corrected variant-aligned sanity | evidence |
+|---|---:|---:|---:|---|
+| `pb_t50_rs` | 85.18 | 84.5940 | 84.5940 | `logs/sanity/pointmae/pointmae_pb_t50_rs_sanity_20260226_183416.log` |
+| `obj_bg` | 90.02 | 73.3219 | 90.1893 | old: `logs/sanity/pointmae/pointmae_h5_parity_v3nonorm_fix_20260227_060439/pm_obj_bg_official_pointmae_h5_parity_v3nonorm_fix_20260227_060439.out`, ckswap: `logs/sanity/pointmae/pointmae_ckswap_objbg_from_objonly_20260302_0135.out` |
+| `obj_only` | 88.29 | 81.7556 | 87.9518 | old: `logs/sanity/pointmae/pointmae_h5_parity_v3nonorm_fix_20260227_060439/pm_obj_only_official_pointmae_h5_parity_v3nonorm_fix_20260227_060439.out`, ckswap: `logs/sanity/pointmae/pointmae_ckswap_objonly_from_objbg_20260302_0135.out` |
+
+Checkpoint-metadata sanity from old logs (as-launched run):
+
+- `scan_objbg.pth` loaded as `ckpts @ 166 epoch (acc=88.2960)`
+- `scan_objonly.pth` loaded as `ckpts @ 250 epoch (acc=90.0172)`
+- implication: `obj_bg` / `obj_only` ckpt label mapping was effectively swapped in the historical as-launched sanity.
 
 Reference:
 
@@ -93,7 +99,7 @@ Cache-input follow-up (`USE_NEPA_CACHE=1`) completed:
 - bridge script:
   - `scripts/sanity/build_scanobjectnn_h5_from_nepa_cache.py`
 
-| variant | Point-MAE official H5 sanity | Point-MAE cache-derived H5 sanity | delta |
+| variant | Point-MAE official H5 sanity (as-launched ckpt mapping) | Point-MAE cache-derived H5 sanity (as-launched ckpt mapping) | delta |
 |---|---:|---:|---:|
 | `pb_t50_rs` | 84.5940 | 76.8910 | -7.7030 |
 | `obj_bg` | 73.3219 | 61.4458 | -11.8761 |
@@ -164,7 +170,7 @@ Reference targets (reported in Point-MAE table, supervised scratch `Transformer 
 Note:
 
 - This is the scratch baseline row in the table (not the `Point-MAE` SSL row).
-- `Point-MAE` row itself is SSL-pretrained and higher (`90.02 / 88.29 / 85.10`).
+- `Point-MAE` row itself is SSL-pretrained and higher (`90.02 / 88.29 / 85.18` in README).
 - this block is `patchcls` scratch baseline (`patchify + transformer`, bidirectional, `is_causal=0`),
   not Point-MAE codepath.
 
@@ -326,7 +332,7 @@ Build/eval jobs:
 
 Result:
 
-| variant | official H5 sanity | cache-derived H5 sanity (`v3_nonorm`) | delta |
+| variant | official H5 sanity (as-launched ckpt mapping) | cache-derived H5 sanity (`v3_nonorm`, as-launched ckpt mapping) | delta |
 |---|---:|---:|---:|
 | `pb_t50_rs` | 84.5940 | 84.5940 | +0.0000 |
 | `obj_bg` | 73.3219 | 73.3219 | +0.0000 |
@@ -335,7 +341,7 @@ Result:
 Interpretation:
 
 - observed gap in the earlier cache-derived run (`v2`) was dominated by cache preprocessing domain shift (normalized vs non-normalized), not by split/label mismatch.
-- with non-normalized cache + dynamic bbox sampling, Point-MAE sanity matches official H5 exactly for all three variants.
+- with non-normalized cache + dynamic bbox sampling, Point-MAE sanity matches official H5 exactly under the same as-launched ckpt mapping for all three variants.
 
 Implementation note:
 

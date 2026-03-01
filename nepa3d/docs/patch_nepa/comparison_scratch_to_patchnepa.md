@@ -1,6 +1,6 @@
 # Scratch -> PatchNEPA Comparison Matrix
 
-Last updated: 2026-03-01
+Last updated: 2026-03-02
 
 ## 1. Recommended Axes
 
@@ -30,7 +30,8 @@ All rows below are protocol-valid (`val_split_mode=file`, `aug_eval=1`, `mc_test
 
 | line | recipe / source | obj_bg | obj_only | pb_t50_rs | macro_mean | note |
 |---|---|---:|---:|---:|---:|---|
-| external reference | Point-MAE SSL target row | 0.9002 | 0.8829 | 0.8510 | 0.8780 | benchmark target (`benchmark_scanobjectnn_variant.md`) |
+| external reference | Point-MAE SSL target row (README) | 0.9002 | 0.8829 | 0.8518 | 0.8783 | benchmark target (`benchmark_scanobjectnn_variant.md`) |
+| external sanity | Point-MAE official finetuned ckpt (`--test`, variant-aligned) | 0.9019 | 0.8795 | 0.8459 | 0.8758 | `obj_bg/obj_only` は ckswap 検証 (`100752/100753`) |
 | strong scratch ref | Point-MAE strict retry5 scratch | 0.8296 | 0.8399 | 0.8012 | 0.8236 | jobs `99275/99277/99279` + tests `99276/99278/99280` |
 | scratch baseline | PatchCls PM-aligned scratch | 0.7831 | 0.8176 | 0.7609 | 0.7872 | run set `patchcls_scan3_scratch_pmalign_20260227_202814` |
 | PatchNEPA (ray, E100) | split-x2 dualmask baseline direct FT | 0.7900 | 0.8193 | 0.7519 | 0.7871 | `100194/100195/100196` |
@@ -64,26 +65,50 @@ All rows below are protocol-valid (`val_split_mode=file`, `aug_eval=1`, `mc_test
 
 ## 6. FPS-Comparison Branch Status (Pretrain Sanity)
 
-This branch is for causal diagnosis of patch sampling / ray grouping; it is **not** yet a finished leaderboard row because the independent branch (`100699`) is still active and bind+aug+dualmask (`100643`) ended invalid.
+This branch is for causal diagnosis of patch sampling / ray grouping; pretrains are complete (`100699`, `100741`) and strict missing-ray A/B for `obj_only` is now available (`100742` vs `100750`).
 
 | branch | job | setting delta | status | usable for final comparison |
 |---|---|---|---|---|
 | fps baseline (no aug) | `100563` | `pt_sample_mode=fps`, bind ray | completed | yes (pretrain-side) |
 | random baseline (no aug) | `100564` | `pt_sample_mode=random`, bind ray | completed | yes (pretrain-side) |
 | fps + aug (dualmask off) | `100642` | PM-like aug only | terminated by user (`Exit_status=265`) | no |
-| fps + aug + dualmask | `100643` | PM-like aug + dualmask | finished (`Exit_status=97`) | no (launcher marker missing / invalid) |
-| independent ray patch + aug + dualmask | `100699` | `ray_assign_mode=independent_fps_knn`, `ray_num_groups=32` | running | pending |
+| fps + aug + dualmask (old) | `100643` | PM-like aug + dualmask | finished (`Exit_status=97`) | no (launcher marker missing / invalid) |
+| fps + aug + dualmask (fixed rerun, bind) | `100741` | `ray_assign_mode=proxy_sphere`, `ray_num_groups=32` | completed (`Exit_status=0`) | yes (matched FT: `100750=0.7367`) |
+| independent ray patch + aug + dualmask | `100699` | `ray_assign_mode=independent_fps_knn`, `ray_num_groups=32` | completed (`Exit_status=0`) | yes (matched FT: `100742=0.7762`) |
 
 Step-0 token sanity (sample-0):
 
-- bind baseline (`100643` log): `Q_RAY=21`, `A_RAY=21`, `MISSING_RAY=86`
+- bind rerun (`100741` log): `Q_RAY=21`, `A_RAY=21`, `MISSING_RAY=86`
 - independent patch (`100699` log): `Q_RAY=32`, `A_RAY=32`, `MISSING_RAY=0`
 - reduction: `MISSING_RAY 86 -> 0` (`-100%`)
+
+Strict missing-ray A/B (same FT recipe: `qa_zeroa + cls + linear + llrd off`):
+
+- independent branch: `100699 -> 100742` (`obj_only=0.7762`)
+- bind branch: `100741 -> 100750` (`obj_only=0.7367`)
+- delta (`independent - bind`) = `+0.0395`
+
+Comparison caveat:
+
+- the above A/B is strict only for this one FT recipe and `obj_only`.
+- commonly cited bind score `0.8193` is from `100181` family (`rfps_cached + no aug` and different FT readout), so it must not be mixed into this A/B.
 
 Note on the augmentation question:
 
 - there is no evidence that augmentation itself is broken.
 - the only ended aug-only run (`100642`) was user-terminated; it is excluded from validity.
+
+### 6.1 Newly Completed FT Jobs (2026-03-02)
+
+| job | runset | variant | test_acc | note |
+|---|---|---|---:|---|
+| `100747` | `patchnepaFT_from_ptonlyema_rerun_llrdoff_pmhead_20260302_004316` | `obj_bg` | `0.7711` | point-only + EMA rerun, PM-head defaults |
+| `100748` | `patchnepaFT_from_ptonlyema_rerun_llrdoff_pmhead_20260302_004316` | `obj_only` | `0.7659` | point-only + EMA rerun, PM-head defaults |
+| `100750` | `patchnepaFT_bindfix_llrdoff_default_20260302_005751` | `obj_only` | `0.7367` | strict bind-side counterpart of `100742` |
+
+Pending:
+
+- `100749` (`pb_t50_rs`, runset `patchnepaFT_from_ptonlyema_rerun_llrdoff_pmhead_20260302_004316`) is still running; no final `TEST acc` yet.
 
 ## 7. q_only Completed Results (Direct PatchNEPA FT)
 
@@ -104,7 +129,7 @@ Note on the augmentation question:
 
 ## 8. Full Completed Direct-FT Ledger (Raw)
 
-- completed rows: `59`
+- completed rows: `62`
 - this is the full raw ledger for direct PatchNEPA FT outputs; mainline-valid subset remains in Section 2/3
 
 | variant | test_acc | ft_mode | pooling | cls_token | is_causal | runset | log |

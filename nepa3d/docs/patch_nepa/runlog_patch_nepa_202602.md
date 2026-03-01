@@ -1,6 +1,6 @@
 # Patch-NEPA Runlog (2026-02)
 
-Last updated: 2026-03-01
+Last updated: 2026-03-02
 
 Track note:
 
@@ -2537,7 +2537,7 @@ Context linkage (invalid branch + replacement):
 | job | role | status |
 |---|---|---|
 | `100643` | bind+aug+dualmask old branch | invalid (`Exit_status=97`) |
-| `100741` | fixed-launch replacement of `100643` | running |
+| `100741` | fixed-launch replacement of `100643` | completed (`Exit_status=0`) |
 | `100699` | independent-ray pretrain (`MISSING_RAY=0`) | completed (`Exit_status=0`) |
 | `100742` | FT from `100699` | completed (`TEST acc=0.7762`) |
 
@@ -2559,7 +2559,7 @@ Resubmission performed:
 
 | job | role | run_set | key config | status |
 |---|---|---|---|---|
-| `100743` | pretrain | `patchnepa_ptonly_ema_e100_fpscmp_rerun_20260302_003621` | point-only (`USE_RAY_PATCH=0`, `N_RAY=0`), EMA on (`0.9999`), E100, batch-per-proc=8 (global 128), `pt_sample_mode=fps` | running |
+| `100743` | pretrain | `patchnepa_ptonly_ema_e100_fpscmp_rerun_20260302_003621` | point-only (`USE_RAY_PATCH=0`, `N_RAY=0`), EMA on (`0.9999`), E100, batch-per-proc=8 (global 128), `pt_sample_mode=fps` | completed (`Exit_status=0`) |
 | `100744` | FT `obj_bg` | `patchnepaFT_from_ptonlyema_rerun_llrdoff_20260302_003621` | `depend=afterok:100743`, `LLRD_START=1.0`, `LLRD_END=1.0`, `LLRD_SCHEDULER=static`, `LLRD_MODE=linear` | hold |
 | `100745` | FT `obj_only` | `patchnepaFT_from_ptonlyema_rerun_llrdoff_20260302_003621` | same as above | hold |
 | `100746` | FT `pb_t50_rs` | `patchnepaFT_from_ptonlyema_rerun_llrdoff_20260302_003621` | same as above | hold |
@@ -2599,9 +2599,121 @@ Replaced with policy-aligned dependent jobs:
 
 | job | variant | dependency | effective FT readout defaults | status |
 |---|---|---|---|---|
-| `100747` | `obj_bg` | `afterok:100743` | `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp` | hold |
-| `100748` | `obj_only` | `afterok:100743` | `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp` | hold |
-| `100749` | `pb_t50_rs` | `afterok:100743` | `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp` | hold |
+| `100747` | `obj_bg` | `afterok:100743` | `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp` | completed (`TEST acc=0.7711`) |
+| `100748` | `obj_only` | `afterok:100743` | `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp` | completed (`TEST acc=0.7659`) |
+| `100749` | `pb_t50_rs` | `afterok:100743` | `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp` | running |
 
 New FT run set:
 - `patchnepaFT_from_ptonlyema_rerun_llrdoff_pmhead_20260302_004316`
+
+## 63. Missing-ray comparison status update (`100699` vs `100741`) (2026-03-02)
+
+Pretrain completion update:
+
+| job | branch | key setting | status |
+|---|---|---|---|
+| `100699` | independent ray patch | `ray_assign_mode=independent_fps_knn`, `pt_sample_mode=fps`, `aug on` | `Exit_status=0` |
+| `100741` | bind ray replacement of invalid `100643` | `ray_assign_mode=proxy_sphere`, `pt_sample_mode=fps`, `aug on` | `Exit_status=0` |
+
+Step-0 token sanity (rank0 sample-0):
+- `100699`: `Q_RAY=32`, `A_RAY=32`, `MISSING_RAY=0`
+- `100741`: `Q_RAY=21`, `A_RAY=21`, `MISSING_RAY=86`
+
+Important comparability note:
+- The frequently cited pair `0.8193` (`100181` family) vs `0.7762` (`100699 -> 100742`) is **not** a strict missing-ray A/B.
+- `100181` family differs in pretrain recipe (`proxy_sphere + rfps_cached + no aug`) and FT readout defaults (`cls_max + pointmae_mlp`) from `100742` (`llrd-off static + cls + linear`).
+- Therefore, current evidence is sufficient to say "`MISSING_RAY=0` alone did not trivially improve score under the `100699->100742` recipe", but **not** sufficient to conclude "missing-ray has no effect" in a strict single-factor sense.
+
+Strict A/B requirement for final claim:
+- run FT from `100741` with the **same** FT recipe used in `100742` (same pooling/head/LLRD/scheduler/eval),
+- then compare `100741->FT` vs `100699->100742`.
+
+## 64. Strict missing-ray A/B FT launch (`100741` side) (2026-03-02)
+
+Action:
+- submitted bind-side FT with the **same FT recipe** as `100742`, changing only source ckpt from independent (`100699`) to bind (`100741`).
+
+Submission:
+
+| job | run_set | variant | source ckpt | status |
+|---|---|---|---|---|
+| `100750.qjcm` | `patchnepaFT_bindfix_llrdoff_default_20260302_005751` | `obj_only` | `runs/patchnepa_rayqa/patchnepa_ray_fpscmp_fps_augpm_dm_fixlaunch_20260301_233109/ckpt_latest.pt` | completed (`TEST acc=0.7367`) |
+
+FT recipe parity check vs `100742`:
+- same: `MODEL_SOURCE=patchnepa`, `PATCHNEPA_FT_MODE=qa_zeroa`, `POOLING=cls`, `HEAD_MODE=linear`,
+  `PATCHNEPA_CLS_TOKEN_SOURCE=last_q`, `PATCHNEPA_FREEZE_PATCH_EMBED=1`,
+  `LLRD_START=1.0`, `LLRD_END=1.0`, `LLRD_SCHEDULER=static`, `LLRD_MODE=linear`,
+  `EPOCHS=300`, `BATCH=64(global)`, `VAL_SPLIT_MODE=file`, `AUG_EVAL=1`, `MC_EVAL_K_TEST=10`.
+- only difference: `CKPT` path (`100699` source in `100742` vs `100741` source in `100750`).
+
+Expected output path:
+- `logs/sanity/patchnepa_ft/patchnepaFT_bindfix_llrdoff_default_20260302_005751/obj_only.out`
+
+## 65. Point-MAE official ckpt mapping sanity (`obj_bg`/`obj_only`) (2026-03-02)
+
+Question addressed:
+
+- why local Point-MAE `--test --ckpts scan_*.pth` numbers were far below README values,
+  and whether this affects PatchNEPA interpretation.
+
+Historical as-launched sanity (already recorded):
+
+- `obj_bg + scan_objbg.pth` -> `73.3219`
+- `obj_only + scan_objonly.pth` -> `81.7556`
+- logs:
+  - `logs/sanity/pointmae/pointmae_h5_parity_v3nonorm_fix_20260227_060439/pm_obj_bg_official_pointmae_h5_parity_v3nonorm_fix_20260227_060439.out`
+  - `logs/sanity/pointmae/pointmae_h5_parity_v3nonorm_fix_20260227_060439/pm_obj_only_official_pointmae_h5_parity_v3nonorm_fix_20260227_060439.out`
+
+Metadata evidence from those same logs:
+
+- `scan_objbg.pth` loaded metric: `acc=88.2960` (`ckpts @ 166 epoch`)
+- `scan_objonly.pth` loaded metric: `acc=90.0172` (`ckpts @ 250 epoch`)
+
+Interpretation:
+
+- `obj_bg` and `obj_only` checkpoint labels are effectively swapped for the historical as-launched sanity path.
+
+Correction run (ckswap) submitted and completed:
+
+| job | variant config | ckpt | result |
+|---|---|---|---:|
+| `100752.qjcm` | `obj_bg` | `scan_objonly.pth` | `TEST acc=90.1893` |
+| `100753.qjcm` | `obj_only` | `scan_objbg.pth` | `TEST acc=87.9518` |
+
+Logs:
+
+- `logs/sanity/pointmae/pointmae_ckswap_objbg_from_objonly_20260302_0135.out`
+- `logs/sanity/pointmae/pointmae_ckswap_objonly_from_objbg_20260302_0135.out`
+
+Impact boundary for PatchNEPA discussion:
+
+- PatchNEPA intra-run A/B conclusions are unchanged (same code/data pipeline within PatchNEPA).
+- External gap-to-Point-MAE references for `obj_bg`/`obj_only` must use the variant-aligned sanity values above (or README targets), not the historical as-launched `73.3219/81.7556` pair.
+
+
+## 66. New completion snapshot + summary (2026-03-02)
+
+Confirmed completions since the previous append:
+
+| job | run_set | variant | status | test_acc |
+|---|---|---|---|---:|
+| `100747` | `patchnepaFT_from_ptonlyema_rerun_llrdoff_pmhead_20260302_004316` | `obj_bg` | `Exit_status=0` | `0.7711` |
+| `100748` | `patchnepaFT_from_ptonlyema_rerun_llrdoff_pmhead_20260302_004316` | `obj_only` | `Exit_status=0` | `0.7659` |
+| `100750` | `patchnepaFT_bindfix_llrdoff_default_20260302_005751` | `obj_only` | `Exit_status=0` | `0.7367` |
+
+Still running:
+
+| job | run_set | variant | state |
+|---|---|---|---|
+| `100749` | `patchnepaFT_from_ptonlyema_rerun_llrdoff_pmhead_20260302_004316` | `pb_t50_rs` | `R` |
+
+Strict missing-ray A/B summary (same FT recipe):
+
+- independent (`100699 -> 100742`): `obj_only=0.7762`
+- bind (`100741 -> 100750`): `obj_only=0.7367`
+- delta (`independent - bind`) = `+0.0395`
+
+Interpretation (current evidence):
+
+- under this matched recipe, reducing `MISSING_RAY` (`86 -> 0`) improved `obj_only`.
+- this does not override other recipe families (for example `100181` line with different pretrain/FT settings).
