@@ -61,3 +61,4 @@ test_acc	variant	ft_mode	pooling	cls_token	is_causal	model_source	runset	log
 0.6799	obj_bg	qa_zeroa	cls	last_q	False	patchnepa(direct)	patchnepa_ft_variants_20260301_223043	logs/sanity/patchnepa_ft/patchnepa_ft_variants_20260301_223043/obj_bg.out
 0.7074	obj_only	qa_zeroa	cls	last_q	False	patchnepa(direct)	patchnepa_ft_variants_20260301_223043	logs/sanity/patchnepa_ft/patchnepa_ft_variants_20260301_223043/obj_only.out
 0.7762	obj_only	qa_zeroa	cls	last_q	False	patchnepa(direct)	patchnepaFT_indpatch_llrdoff_default_20260302_0015	logs/sanity/patchnepa_ft/patchnepaFT_indpatch_llrdoff_default_20260302_0015/obj_only.out
+0.6072	pb_t50_rs	qa_zeroa	cls	last_q	False	patchnepa(direct)	patchnepa_ft_variants_20260301_223043	logs/sanity/patchnepa_ft/patchnepa_ft_variants_20260301_223043/pb_t50_rs.out

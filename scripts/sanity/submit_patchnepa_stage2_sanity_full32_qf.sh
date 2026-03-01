@@ -124,8 +124,8 @@ submit_case() {
     WALLTIME="${FT_WALLTIME}" \
     QSUB_DEPEND="afterok:${pt_jid}" \
     MODEL_SOURCE=patchnepa \
-    POOLING=cls \
-    HEAD_MODE=linear \
+    POOLING=cls_max \
+    HEAD_MODE=pointmae_mlp \
     PATCHNEPA_CLS_TOKEN_SOURCE=last_q \
     PATCHNEPA_FREEZE_PATCH_EMBED=1 \
     LLRD_START=0.35 \

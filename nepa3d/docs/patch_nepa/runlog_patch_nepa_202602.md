@@ -2506,7 +2506,7 @@ Checked jobs:
 | `100700` | pretrain (`point-only + EMA E100`) | `Exit_status=0` | completed |
 | `100701` | FT from `100700` (`obj_bg`) | `Exit_status=0` | `TEST acc=0.6799` |
 | `100702` | FT from `100700` (`obj_only`) | `Exit_status=0` | `TEST acc=0.7074` |
-| `100703` | FT from `100700` (`pb_t50_rs`) | running | pending |
+| `100703` | FT from `100700` (`pb_t50_rs`) | `Exit_status=0` | `TEST acc=0.6072` |
 | `100741` | pretrain replacement for invalid `100643` | running | pending |
 
 Notes:
@@ -2546,3 +2546,62 @@ Note:
 - `LLRDなし` in this run means **layer-wise LR decay is disabled** (`llrd_start=end=1.0`, `llrd_scheduler=static`).
 - The base epoch schedule is still active (warmup + cosine), which is why per-epoch LR values still change in the log.
 - Verification log header: `logs/sanity/patchnepa_ft/patchnepaFT_indpatch_llrdoff_default_20260302_0015/obj_only.out` (`llrd=(1.00->1.00) llrd_scheduler=static llrd_mode=linear`).
+
+
+## 60. Point-only + EMA rerun under fixed FT defaults (2026-03-02)
+
+Reason:
+- previous point-only+EMA branch (`100700` -> `100701/100702/100703`) used old FT LLRD settings
+  (`llrd=(0.35->1.00)`, `llrd_scheduler=llrd_cosine_warmup`) and is not suitable for
+  strict comparison against current LLRD-off default policy.
+
+Resubmission performed:
+
+| job | role | run_set | key config | status |
+|---|---|---|---|---|
+| `100743` | pretrain | `patchnepa_ptonly_ema_e100_fpscmp_rerun_20260302_003621` | point-only (`USE_RAY_PATCH=0`, `N_RAY=0`), EMA on (`0.9999`), E100, batch-per-proc=8 (global 128), `pt_sample_mode=fps` | running |
+| `100744` | FT `obj_bg` | `patchnepaFT_from_ptonlyema_rerun_llrdoff_20260302_003621` | `depend=afterok:100743`, `LLRD_START=1.0`, `LLRD_END=1.0`, `LLRD_SCHEDULER=static`, `LLRD_MODE=linear` | hold |
+| `100745` | FT `obj_only` | `patchnepaFT_from_ptonlyema_rerun_llrdoff_20260302_003621` | same as above | hold |
+| `100746` | FT `pb_t50_rs` | `patchnepaFT_from_ptonlyema_rerun_llrdoff_20260302_003621` | same as above | hold |
+
+Checkpoint path contract for dependent FT:
+- `runs/patchnepa_pointonly/patchnepa_ptonly_ema_e100_fpscmp_rerun_20260302_003621/ckpt_latest.pt`
+
+## 61. FT default policy update (Point-MAE-fair head/pooling) (2026-03-02)
+
+Decision:
+- PatchNEPA FT defaults are aligned to avoid weaker readout than Point-MAE.
+
+Applied default changes:
+- `POOLING=cls_max`
+- `HEAD_MODE=pointmae_mlp`
+
+Updated scripts:
+- `scripts/finetune/patchnepa_scanobjectnn_finetune.sh`
+- `scripts/sanity/submit_patchnepa_finetune_variants_qf.sh`
+
+Also updated (hardcoded sanity launchers):
+- `scripts/sanity/submit_patchnepa_stage2_sanity_ablation_qf.sh`
+- `scripts/sanity/submit_patchnepa_stage2_sanity_full32_qf.sh`
+
+Note:
+- Existing completed runs with `pooling=cls` / `head_mode=linear` remain valid as historical results,
+  but they should not be used as strict-comparable baselines against new default-policy runs.
+
+
+## 62. FT policy enforcement for active point-only rerun chain (2026-03-02)
+
+Adjustment after default update:
+- previously queued dependent FT jobs from Section 60 (`100744`/`100745`/`100746`) were cancelled,
+  because they were created before the head/pooling default switch and used `POOLING=cls`, `HEAD_MODE=linear`.
+
+Replaced with policy-aligned dependent jobs:
+
+| job | variant | dependency | effective FT readout defaults | status |
+|---|---|---|---|---|
+| `100747` | `obj_bg` | `afterok:100743` | `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp` | hold |
+| `100748` | `obj_only` | `afterok:100743` | `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp` | hold |
+| `100749` | `pb_t50_rs` | `afterok:100743` | `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp` | hold |
+
+New FT run set:
+- `patchnepaFT_from_ptonlyema_rerun_llrdoff_pmhead_20260302_004316`
