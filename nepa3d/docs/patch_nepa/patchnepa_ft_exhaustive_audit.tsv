@@ -90,4 +90,4 @@ patchnepaFT_splitx2_encdec1_baseline_20260301_040736	pb_t50_rs	completed	0.7502	
 patchnepaFT_splitx2_encdec1_qonly_20260301_040738	pb_t50_rs	no_test_acc	-	q_only	cls_max	-	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepaFT_splitx2_encdec1_qonly_20260301_040738/pb_t50_rs.out
 patchnepa_ft	pb_t50_rs	completed	0.7720	qa_zeroa	cls_max	bos	False	patchnepa(direct)	logs/sanity/patchnepa_ft/pb_t50_rs.out
 patchnepa_ft_variants_20260301_223043	pb_t50_rs	no_test_acc	-	qa_zeroa	cls	last_q	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepa_ft_variants_20260301_223043/pb_t50_rs.out
-patchnepaFT_indpatch_llrdoff_default_20260302_0015	obj_only	no_test_acc	-	qa_zeroa	cls	last_q	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepaFT_indpatch_llrdoff_default_20260302_0015/obj_only.out
+patchnepaFT_indpatch_llrdoff_default_20260302_0015	obj_only	completed	0.7762	qa_zeroa	cls	last_q	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepaFT_indpatch_llrdoff_default_20260302_0015/obj_only.out

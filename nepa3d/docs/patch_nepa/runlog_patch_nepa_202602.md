@@ -2530,7 +2530,7 @@ Submission:
 
 | job | run_set | source ckpt | variant | purpose | status |
 |---|---|---|---|---|---|
-| `100742` | `patchnepaFT_indpatch_llrdoff_default_20260302_0015` | `runs/patchnepa_rayqa/patchnepa_ray_fpscmp_indpatch_dm_augpm_20260301_222542/ckpt_latest.pt` | `obj_only` | LLRD-off baseline FT probe | running |
+| `100742` | `patchnepaFT_indpatch_llrdoff_default_20260302_0015` | `runs/patchnepa_rayqa/patchnepa_ray_fpscmp_indpatch_dm_augpm_20260301_222542/ckpt_latest.pt` | `obj_only` | LLRD-off baseline FT probe | completed (`TEST acc=0.7762`) |
 
 Context linkage (invalid branch + replacement):
 
@@ -2539,7 +2539,10 @@ Context linkage (invalid branch + replacement):
 | `100643` | bind+aug+dualmask old branch | invalid (`Exit_status=97`) |
 | `100741` | fixed-launch replacement of `100643` | running |
 | `100699` | independent-ray pretrain (`MISSING_RAY=0`) | completed (`Exit_status=0`) |
-| `100742` | FT from `100699` | running |
+| `100742` | FT from `100699` | completed (`TEST acc=0.7762`) |
 
 Note:
 - This explicitly answers the gap: independent-ray (`MISSING_RAY=0`) branch now has downstream FT in queue (`100742`).
+- `LLRDなし` in this run means **layer-wise LR decay is disabled** (`llrd_start=end=1.0`, `llrd_scheduler=static`).
+- The base epoch schedule is still active (warmup + cosine), which is why per-epoch LR values still change in the log.
+- Verification log header: `logs/sanity/patchnepa_ft/patchnepaFT_indpatch_llrdoff_default_20260302_0015/obj_only.out` (`llrd=(1.00->1.00) llrd_scheduler=static llrd_mode=linear`).
