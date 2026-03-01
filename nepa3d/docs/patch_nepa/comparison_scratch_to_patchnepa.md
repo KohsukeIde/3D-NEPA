@@ -405,3 +405,41 @@ Main deltas vs strict A/B line:
 Practical conclusion:
 - missing-ray is a positive factor, but not the dominant limiter at current gap scale.
 - best comparison claims should be made only inside the same recipe family.
+
+## 18. New result append (`100765`~`100774`, 2026-03-02)
+
+### 18.1 Safe indpatch chain FT updates
+
+Completed (`TEST acc` confirmed):
+
+| source pretrain | variant | test_acc | log |
+|---|---|---:|---|
+| dualmask indpatch-safe (`100765`) | `obj_bg` (`100767`) | `0.8021` | `logs/sanity/patchnepa_ft/patchnepaFT_from_dualmask_indpatch_safe_20260302_031834/obj_bg.out` |
+| dualmask indpatch-safe (`100765`) | `obj_only` (`100768`) | `0.7900` | `logs/sanity/patchnepa_ft/patchnepaFT_from_dualmask_indpatch_safe_20260302_031834/obj_only.out` |
+| encdec1 indpatch-safe (`100766`) | `obj_bg` (`100770`) | `0.7969` | `logs/sanity/patchnepa_ft/patchnepaFT_from_encdec1_indpatch_safe_20260302_031834/obj_bg.out` |
+| encdec1 indpatch-safe (`100766`) | `obj_only` (`100771`) | `0.8038` | `logs/sanity/patchnepa_ft/patchnepaFT_from_encdec1_indpatch_safe_20260302_031834/obj_only.out` |
+
+Still running:
+- `100769` (`dualmask`, `pb_t50_rs`), latest observed `ep 246/300`
+- `100772` (`encdec1`, `pb_t50_rs`), latest observed `ep 104/300`
+
+### 18.2 Strict FT A/B (`pretrain-init` vs `scratch-init`) update
+
+| arm | job | best_val | test_acc | log |
+|---|---|---:|---:|---|
+| pretrain-init | `100773` | `0.8610` | `0.8021` | `logs/sanity/patchnepa_ft/patchnepaFT_ab_objonly_pre_20260302_035338/obj_only.out` |
+| scratch-init | `100774` | `0.8475` | `0.8055` | `logs/sanity/patchnepa_ft/patchnepaFT_ab_objonly_scratch_20260302_035345/obj_only.out` |
+
+Current read:
+- with this fixed FT recipe, scratch-init is slightly higher on TEST (`+0.0034`), so this pair does not show a clear pretrain-init gain.
+
+### 18.3 TSV index refresh
+
+Updated files:
+- `nepa3d/docs/patch_nepa/patchnepa_ft_completed_results.tsv`
+- `nepa3d/docs/patch_nepa/patchnepa_ft_exhaustive_audit.tsv`
+
+Current counts after refresh:
+- completed rows: `73`
+- exhaustive rows: `113`
+- exhaustive status split: `completed=73`, `no_test_acc=40`

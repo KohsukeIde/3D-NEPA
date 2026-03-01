@@ -3267,3 +3267,61 @@ From safe indpatch chain (`100765/100766` source):
 Operational note:
 - decide final branch ranking after both `pb_t50_rs` complete,
   then compare against current-best line with the same metric triplet (`obj_bg/obj_only/pb_t50_rs`).
+
+## 80. Completion update (`100765`~`100774`, 2026-03-02)
+
+Status at check time:
+
+- active jobs in `qstat`: `100769.qjcm`, `100772.qjcm` (both `pb_t50_rs` FT).
+
+Pretrain completion (safe indpatch chain):
+
+- `100765.qjcm` (`patchnepa_ryDMs`) -> `job_state=F`, `Exit_status=0`
+  - log: `logs/patch_nepa_pretrain/patchnepa_ray_splitx2_dualmask_indpatch_safe_20260302_031834/run_ray_splitx2_dualmask_indpatch_safe.mr0.log`
+  - checkpoint:
+    - `runs/patchnepa_rayqa/patchnepa_ray_splitx2_dualmask_indpatch_safe_20260302_031834/ckpt_latest.pt`
+- `100766.qjcm` (`patchnepa_ryEMs`) -> `job_state=F`, `Exit_status=0`
+  - log: `logs/patch_nepa_pretrain/patchnepa_ray_splitx2_encdec1_indpatch_safe_20260302_031834/run_ray_splitx2_encdec1_indpatch_safe.mr0.log`
+  - checkpoint:
+    - `runs/patchnepa_rayqa/patchnepa_ray_splitx2_encdec1_indpatch_safe_20260302_031834/ckpt_latest.pt`
+
+Step-0 token sanity (both pretrains):
+
+- `Q_RAY=32`, `A_RAY=32`, `MISSING_RAY=0`
+
+FT completion from safe indpatch chain:
+
+| job | branch | variant | status | test_acc |
+|---|---|---|---|---:|
+| `100767` | dualmask (`100765` source) | `obj_bg` | `Exit_status=0` | `0.8021` |
+| `100768` | dualmask (`100765` source) | `obj_only` | `Exit_status=0` | `0.7900` |
+| `100770` | encdec1 (`100766` source) | `obj_bg` | `Exit_status=0` | `0.7969` |
+| `100771` | encdec1 (`100766` source) | `obj_only` | `Exit_status=0` | `0.8038` |
+
+Current running FT jobs (no final `TEST acc` yet):
+
+- `100769` (`dualmask`, `pb_t50_rs`)
+  - latest tail: `ep 246/300`, best logged `val_acc=0.9092`
+  - log:
+    - `logs/sanity/patchnepa_ft/patchnepaFT_from_dualmask_indpatch_safe_20260302_031834/pb_t50_rs.out`
+- `100772` (`encdec1`, `pb_t50_rs`)
+  - latest tail: `ep 104/300`, best logged `val_acc=0.8739`
+  - log:
+    - `logs/sanity/patchnepa_ft/patchnepaFT_from_encdec1_indpatch_safe_20260302_031834/pb_t50_rs.out`
+
+Strict FT A/B (`pretrain-init vs scratch-init`) completion:
+
+| job | arm | status | best_val | test_acc |
+|---|---|---|---:|---:|
+| `100773` | pretrain-init | `Exit_status=0` | `0.8610` | `0.8021` |
+| `100774` | scratch-init | `Exit_status=0` | `0.8475` | `0.8055` |
+
+Logs:
+
+- `logs/sanity/patchnepa_ft/patchnepaFT_ab_objonly_pre_20260302_035338/obj_only.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_ab_objonly_scratch_20260302_035345/obj_only.out`
+
+Interim interpretation:
+
+- under the current fixed FT recipe, `obj_only` shows no clear pretrain-init advantage over scratch-init (`0.8021` vs `0.8055`, delta `-0.0034` for pretrain-init).
+- final branch conclusion remains pending until `pb_t50_rs` (`100769/100772`) finishes.
