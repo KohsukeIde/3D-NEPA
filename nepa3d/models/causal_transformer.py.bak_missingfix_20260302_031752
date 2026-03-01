@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..token.tokenizer import TYPE_MISSING_RAY, TYPE_POINT, TYPE_Q_POINT, TYPE_Q_RAY, TYPE_RAY
+from ..token.tokenizer import TYPE_POINT, TYPE_Q_POINT, TYPE_Q_RAY, TYPE_RAY
 
 
 def _drop_path(x: torch.Tensor, drop_prob: float, training: bool) -> torch.Tensor:
@@ -182,19 +182,9 @@ class _NepaSelfAttention(nn.Module):
         scores = torch.matmul(q, k.transpose(-1, -2)) * self.scaling
         if attn_mask is not None:
             if attn_mask.dtype == torch.bool:
-                if attn_mask.dim() == 2:
-                    scores = scores.masked_fill(attn_mask[None, None, :, :], torch.finfo(scores.dtype).min)
-                elif attn_mask.dim() == 3:
-                    scores = scores.masked_fill(attn_mask[:, None, :, :], torch.finfo(scores.dtype).min)
-                else:
-                    raise ValueError(f"attn_mask(bool) must be 2D/3D, got {tuple(attn_mask.shape)}")
+                scores = scores.masked_fill(attn_mask[None, None, :, :], torch.finfo(scores.dtype).min)
             else:
-                if attn_mask.dim() == 2:
-                    scores = scores + attn_mask[None, None, :, :]
-                elif attn_mask.dim() == 3:
-                    scores = scores + attn_mask[:, None, :, :]
-                else:
-                    raise ValueError(f"attn_mask(additive) must be 2D/3D, got {tuple(attn_mask.shape)}")
+                scores = scores + attn_mask[None, None, :, :]
 
         probs = torch.softmax(scores.float(), dim=-1).to(dtype=q.dtype)
         if self.attn_dropout > 0.0 and self.training:
@@ -469,29 +459,6 @@ class CausalTransformer(nn.Module):
                 u = torch.rand((t, t), device=x.device, generator=gen)
                 extra = eligible & (u < prob)
                 attn_mask = attn_mask | extra
-
-        # Missing-ray tokens should not be used as K/V for non-missing queries.
-        # We keep at least self-attention for missing query rows to avoid all-masked rows.
-        if bool(dual_mask_type_aware) and type_id is not None:
-            tid = type_id
-            if tid.dim() == 1:
-                tid = tid.unsqueeze(0)
-            if tid.dim() != 2 or tid.shape[1] != t:
-                raise ValueError(f"type_id must be (B,T) with T={t}, got {tuple(tid.shape)}")
-
-            is_missing = tid == int(TYPE_MISSING_RAY)  # (B,T)
-            if bool(is_missing.any()):
-                miss_kv = is_missing[:, None, :].expand(-1, t, -1).clone()  # (B,T,T)
-                eye = torch.eye(t, device=x.device, dtype=torch.bool).unsqueeze(0)  # (1,T,T)
-                self_keep = is_missing.unsqueeze(-1) & eye
-                miss_kv = miss_kv & (~self_keep)
-
-                if attn_mask is None:
-                    attn_mask = miss_kv
-                elif attn_mask.dim() == 2:
-                    attn_mask = attn_mask.unsqueeze(0).expand(tid.shape[0], -1, -1) | miss_kv
-                else:
-                    attn_mask = attn_mask | miss_kv
 
         if self.backbone_impl == "legacy":
             for li, layer in enumerate(self.layers):
