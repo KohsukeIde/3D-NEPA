@@ -1781,3 +1781,223 @@ Submitted jobs (policy-compliant: `global_batch=128`, `QA_SEP_TOKEN=1`):
 Comparator pair now:
 - single-k: `100443` (`k=4`, dual-mask off by policy)
 - multi-k: `100451` (`k in {1,2,4}`, dual-mask off by policy)
+
+## 41. Completion check: recent Stage-2 jobs all finished (2026-03-01)
+
+Queue snapshot:
+- `qstat` returned empty (no running/holding jobs at check time).
+
+Recent pretrain/FT chain outcomes:
+
+1) E300 dualmask split_sep chain
+- pretrain: `100424.qjcm` (`patchnepa_ryE300`) -> `Exit_status=0`, ckpt exists
+- FT from `100424`:
+  - `100425` (`obj_only`): `TEST acc=0.7866`
+  - `100426` (`obj_bg`): `TEST acc=0.8072`
+  - `100427` (`pb_t50_rs`): `TEST acc=0.7720`
+
+2) B768 probe / E300 / EMA pair
+- `100430` pretrain -> `100431` FT(obj_only): `0.7315`
+- `100432` pretrain -> `100433` FT(obj_only): `0.7315`
+- `100434` pretrain (EMA enabled) ->
+  - `100435` FT from raw ckpt(obj_only): `0.7401`
+  - `100436` FT from ema ckpt(obj_only): `0.7969`
+
+3) Old policy-drift runs (excluded)
+- `100437` (`skip-k`, old global-batch drift): `Exit_status=271` (excluded)
+- `100438` dependent FT: no valid output (`out_missing`)
+- `100439` old interleave probe (`QA_SEP_TOKEN=0` era): excluded
+- `100440` dependent FT: no valid output (`out_missing`)
+
+4) Policy-compliant replacements (`global_batch=128`, `QA_SEP_TOKEN=1`)
+- single-k (`k=4`):
+  - pretrain `100443` -> `Exit_status=0`, ckpt exists
+  - FT `100444` (`obj_only`): `TEST acc=0.7160`
+- interleave fix sanity:
+  - pretrain `100445` -> `Exit_status=0`, ckpt exists
+  - FT `100446` (`obj_only`): `TEST acc=0.7642`
+- multi-k (`k={1,2,4}`):
+  - pretrain `100451` -> `Exit_status=0`, ckpt exists
+  - FT `100452` (`obj_only`): `TEST acc=0.7108`
+
+Notes:
+- `100420/100422` are failed FT jobs (`Exit_status=1`, no `TEST acc`) and remain invalid.
+- `100421` is the old interleave pretrain artifact (`ckpt_latest.pt` absent) and remains invalid for comparison.
+
+## 42. Log-backed insights for latest completed runs (2026-03-01)
+
+This section summarizes *why* recent runs behaved as observed, based on actual pretrain/FT logs.
+
+### 42.1 E300 split_sep + dual-mask (mainline-like) remains strongest
+
+Run pair:
+- pretrain: `100424` (`split_sep`, `dual_mask on`, type-aware on, E300)
+- FT: `100425/100426/100427`
+
+Observed:
+- pretrain tail loss is very low and stable (`~7.22e-4` mean over last 10 rank0 logs).
+  - source: `logs/patch_nepa_pretrain/patchnepa_ray_splitx2_dualmask_E300_20260301_170800/run_patchnepa_ray_splitx2_dualmask_E300_20260301_170800.mr0.log`
+- FT results are the current best set in this latest batch:
+  - `obj_only=0.7866` (`100425`)
+  - `obj_bg=0.8072` (`100426`)
+  - `pb_t50_rs=0.7720` (`100427`)
+
+Insight:
+- Long-horizon pretrain (E300) with the established split+dual-mask recipe still gives the most reliable transfer among tested variants.
+
+### 42.2 B768 scaling did not improve transfer under current recipe
+
+Run pairs:
+- `100430 -> 100431` (B768 probe)
+- `100432 -> 100433` (B768 + E300)
+
+Observed:
+- FT stayed low (`obj_only=0.7315` for both).
+- Pretrain logs showed non-trivial noise/spikes (e.g., `100432` had a large spike `~9.27e-2`) and no transfer gain despite larger model.
+
+Insight:
+- Under current optimization/data recipe, scaling to B-size did not translate into better downstream accuracy; optimization stability/recipe mismatch is likely dominating capacity.
+
+### 42.3 EMA helped substantially on same pretrain run
+
+Run pair:
+- source pretrain with EMA enabled: `100434`
+- FT from raw: `100435` (`obj_only=0.7401`)
+- FT from ema: `100436` (`obj_only=0.7969`)
+
+Observed:
+- same upstream run, only checkpoint source differs (raw vs ema), with `+0.0568` absolute gain for EMA.
+
+Insight:
+- EMA is a high-impact stabilizer in this setup and should be treated as near-default for this branch.
+
+### 42.4 Policy-compliant skip-k / interleave / multi-k comparison (global_batch=128)
+
+Runs:
+- single-k: `100443 -> 100444` (`k=4`, dual-mask off by policy)
+- interleave fix sanity: `100445 -> 100446` (`interleave`, `sep=1`, dual-mask off)
+- multi-k: `100451 -> 100452` (`k in {1,2,4}`, dual-mask off)
+
+Observed FT (`obj_only`):
+- single-k: `0.7160`
+- interleave: `0.7642`
+- multi-k: `0.7108`
+
+Pretrain-tail behavior:
+- single-k (`100443`): low loss tail (`~1.23e-3` mean last10)
+- multi-k (`100451`): high loss scale tail (`~1.67e-1` mean last10)
+
+Insight:
+- Current multi-k formulation is likely too hard/unbalanced without weighting/curriculum (large objective scale, weak transfer).
+- single-k (k=4) converged numerically but still transferred poorly, suggesting low pretrain loss alone is not sufficient as a proxy for class-transfer quality in this setting.
+- interleave (with corrected `sep=1`) is valid now, but under the short sanity protocol it is still below the E300 split+dual-mask line.
+
+### 42.5 val/test gap warning (especially on pb_t50_rs)
+
+Observed in `100427` (`pb_t50_rs`):
+- best `val_acc` reached `0.9330`
+- but `TEST acc=0.7720`
+
+Insight:
+- There is a large validation-to-test gap on this variant. Any recipe changes should be judged primarily by test and repeated runs, not best-val alone.
+
+### 42.6 Invalid artifacts kept excluded
+
+- `100420`, `100422`: `Exit_status=1`, no test result.
+- `100421`: old interleave artifact (`QA_SEP_TOKEN=0` era), no valid `ckpt_latest.pt`.
+- `100437/100439` families remain excluded from strict comparison due earlier policy drift.
+
+## 43. Correction: B768 (100/300) pretrain validity (2026-03-01)
+
+Important correction after full log inspection:
+- `100430` (B768, `EPOCHS=100`) and `100432` (B768, `EPOCHS=300`) both contain distributed launcher failures.
+- Although `qstat -xf` shows `Exit_status=0`, node logs include `ChildFailedError` and `pbsdsh ... exit status 1`.
+
+Evidence:
+- `logs/patch_nepa_pretrain/patchnepa_ray_splitx2_dualmask_B768_probe_20260301_165314/run_ray_splitx2_dualmask_B768_probe.mr0.log`
+  - `torch.distributed.elastic.multiprocessing.errors.ChildFailedError`
+- `logs/patch_nepa_pretrain/patchnepa_ray_splitx2_dualmask_B768_probe_20260301_165314/run_ray_splitx2_dualmask_B768_probe.pbs.log`
+  - `pbsdsh: task ... exit status 1`
+- `logs/patch_nepa_pretrain/patchnepa_ray_splitx2_dualmask_B768_E300_20260301_165452/run_ray_splitx2_dualmask_B768_E300.mr0.log`
+  - `torch.distributed.elastic.multiprocessing.errors.ChildFailedError`
+- `logs/patch_nepa_pretrain/patchnepa_ray_splitx2_dualmask_B768_E300_20260301_165452/run_ray_splitx2_dualmask_B768_E300.pbs.log`
+  - `pbsdsh: task ... exit status 1`
+
+Implication:
+- The FT results from these partial checkpoints (`100431`, `100433`, both `TEST acc=0.7315`) are not strict-valid for final B768 100-vs-300 conclusions.
+- Keep them as diagnostic-only until a clean B768 rerun (no ChildFailedError, explicit `Done. checkpoints` line) is completed.
+
+## 44. B768 failure root-cause fix + strict rerun submission (2026-03-01)
+
+Reason for rerun:
+- `100430/100432` were partial-invalid not by model logic mismatch, but by distributed runtime failure.
+- Root signals from per-node logs:
+  - NCCL watchdog timeout on `ALLREDUCE`
+  - `CUDA error: Invalid access of peer GPU memory over nvlink`
+  - `CUDA error: uncorrectable ECC error encountered`
+- Therefore previous B768 FT numbers were diagnostic-only and not strict-valid for 100-vs-300 comparison.
+
+Stability fixes applied to launch path:
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`
+  - added optional ECC preflight (`ENABLE_ECC_PREFLIGHT=1`) using
+    `nvidia-smi --query-gpu=ecc.errors.uncorrected.volatile.total`
+  - added optional NCCL stable mode (`NCCL_STABLE_MODE=1`) that sets:
+    - `NCCL_P2P_DISABLE=1`
+    - `NCCL_NET_GDR_LEVEL=0`
+    - `TORCH_NCCL_ENABLE_MONITORING=1`
+    - `TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=1200`
+  - node-entry log now prints effective NCCL stability flags.
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh`
+  - added same stable-mode env handling and startup log line:
+    - `nccl: stable_mode=...`
+- `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh`
+  - forwards NCCL/ECC knobs via `qsub -v`:
+    - `NCCL_STABLE_MODE`, `ENABLE_ECC_PREFLIGHT`,
+      `NCCL_P2P_DISABLE`, `NCCL_NET_GDR_LEVEL`,
+      `TORCH_NCCL_ENABLE_MONITORING`, `TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC`
+
+Reruns submitted (same B768 recipe, strict policy-compliant):
+
+1. B768 E100 retry
+- pretrain: `100547.qjcm` (`patchnepa_ryB768r2`)
+- run_set:
+  - `patchnepa_ray_splitx2_dualmask_B768_probe_retry_20260301_230000`
+- config highlights:
+  - `D_MODEL=768`, `N_LAYERS=12`, `N_HEADS=12`
+  - `qa_layout=split_sep`, `encdec_arch=0`
+  - `dual_mask=(0.5,0.1,w=32,type_aware=1)`
+  - `use_ray_patch=1`, `n_ray=1024`
+  - `pt_sample_mode=rfps_cached`, `pt_rfps_key=pt_rfps_order_bank`
+  - `global_batch=128` (`BATCH=8`, `16GPU`)
+  - `NCCL_STABLE_MODE=1`, `ENABLE_ECC_PREFLIGHT=1`
+- dependent FT:
+  - `100548.qjcm` (`obj_only`, `afterok:100547`)
+  - run_set: `patchnepaFT_objonly_fromB768_probe_retry_20260301_230010`
+
+2. B768 E300 retry
+- pretrain: `100549.qjcm` (`patchnepa_ryB8E3r2`)
+- run_set:
+  - `patchnepa_ray_splitx2_dualmask_B768_E300_retry_20260301_230020`
+- config highlights: same as above, `EPOCHS=300`
+- dependent FT:
+  - `100550.qjcm` (`obj_only`, `afterok:100549`)
+  - run_set: `patchnepaFT_objonly_fromB768_E300_retry_20260301_230030`
+
+Status at submission check:
+- running: `100547`, `100549`
+- holding (dependency): `100548`, `100550`
+
+## 45. Pointcloud distance fairness guard (2026-03-01)
+
+Update:
+- `nepa3d/backends/pointcloud_backend.py` now enforces fail-fast for pointcloud distance pools:
+  - `pointcloud` / `pointcloud_noray` require `pt_dist_pc_pool`.
+  - if missing, backend raises `KeyError` immediately.
+
+Rationale:
+- avoids silent fallback to legacy `pt_dist_pool` (which may be mesh-derived in old caches),
+  preventing fairness leakage in point-only claims.
+
+Compatibility:
+- `pointcloud_meshray` keeps legacy fallback behavior (`pt_dist_pool`) for explicit ablation/repro paths.
+- current `shapenet_cache_v0` already includes `pt_dist_pc_pool` (checked), so mainline pointcloud pretrain is unaffected.

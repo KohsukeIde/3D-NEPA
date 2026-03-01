@@ -31,6 +31,8 @@ export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
 export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
 export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
 export TORCH_NCCL_ASYNC_ERROR_HANDLING="${TORCH_NCCL_ASYNC_ERROR_HANDLING:-1}"
+export NCCL_STABLE_MODE="${NCCL_STABLE_MODE:-0}"
+export ENABLE_ECC_PREFLIGHT="${ENABLE_ECC_PREFLIGHT:-1}"
 
 cd "${WORKDIR}"
 if [[ -f "${VENV_ACTIVATE}" ]]; then
@@ -88,10 +90,16 @@ NUM_MACHINES="${NUM_MACHINES}"
 CUDA_MODULE="${CUDA_MODULE}"
 VENV_ACTIVATE="${VENV_ACTIVATE}"
 PREFERRED_IFNAME="${PREFERRED_IFNAME}"
+NCCL_STABLE_MODE="${NCCL_STABLE_MODE}"
+ENABLE_ECC_PREFLIGHT="${ENABLE_ECC_PREFLIGHT}"
+NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-}"
+NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:-}"
+TORCH_NCCL_ENABLE_MONITORING="${TORCH_NCCL_ENABLE_MONITORING:-}"
+TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC="${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-}"
 EOF
 
 NODE_ENTRY="${RUN_DIR}/node_entry.sh"
-cat > "${NODE_ENTRY}" <<'SH'
+cat > "${NODE_ENTRY}" <<'SH2'
 #!/bin/bash
 set -euo pipefail
 source "$(dirname "$0")/env.conf"
@@ -135,6 +143,33 @@ fi
 export NCCL_IB_HCA="${NCCL_IB_HCA:-mlx5_0,mlx5_1}"
 export TORCH_NCCL_ASYNC_ERROR_HANDLING="${TORCH_NCCL_ASYNC_ERROR_HANDLING:-1}"
 
+if [[ "${ENABLE_ECC_PREFLIGHT:-1}" == "1" ]] && command -v nvidia-smi >/dev/null 2>&1; then
+  ecc_vals="$(nvidia-smi --query-gpu=ecc.errors.uncorrected.volatile.total --format=csv,noheader,nounits 2>/dev/null || true)"
+  if [[ -n "${ecc_vals}" ]]; then
+    bad_gpu=0
+    while IFS= read -r v; do
+      v="$(echo "${v}" | xargs)"
+      if [[ "${v}" =~ ^[0-9]+$ ]] && [[ "${v}" -gt 0 ]]; then
+        bad_gpu=1
+        break
+      fi
+    done <<< "${ecc_vals}"
+    if [[ "${bad_gpu}" == "1" ]]; then
+      echo "ERROR: ECC preflight failed on ${host}. volatile uncorrectable ECC counts are non-zero."
+      nvidia-smi -L || true
+      echo "${ecc_vals}"
+      exit 86
+    fi
+  fi
+fi
+
+if [[ "${NCCL_STABLE_MODE:-0}" == "1" ]]; then
+  export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
+  export NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:-0}"
+  export TORCH_NCCL_ENABLE_MONITORING="${TORCH_NCCL_ENABLE_MONITORING:-1}"
+  export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC="${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-1200}"
+fi
+
 echo "=== PATCH-NEPA NODE ENTRY ==="
 echo "host=${host}"
 echo "NODE_RANK=${NODE_RANK}"
@@ -142,6 +177,11 @@ echo "NUM_MACHINES=${NUM_MACHINES}"
 echo "NUM_PROCESSES=${NUM_PROCESSES}"
 echo "MASTER_ADDR=${MASTER_ADDR}"
 echo "MASTER_PORT=${MASTER_PORT}"
+echo "NCCL_STABLE_MODE=${NCCL_STABLE_MODE:-0}"
+echo "NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-unset}"
+echo "NCCL_NET_GDR_LEVEL=${NCCL_NET_GDR_LEVEL:-unset}"
+echo "TORCH_NCCL_ENABLE_MONITORING=${TORCH_NCCL_ENABLE_MONITORING:-unset}"
+echo "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-unset}"
 echo "python=$(which python)"
 python -V || true
 
@@ -152,7 +192,7 @@ exec env \
   MAIN_PROCESS_IP="${MASTER_ADDR}" \
   MAIN_PROCESS_PORT="${MASTER_PORT}" \
   bash "${WORKDIR}/scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh"
-SH
+SH2
 chmod +x "${NODE_ENTRY}"
 
 echo "=== LAUNCH via pbsdsh ==="
@@ -162,4 +202,3 @@ pbsdsh -c "${NNODES}" -- bash "${NODE_ENTRY}"
 echo "=== DONE ==="
 echo "Per-node logs:"
 ls -lh "${RUN_DIR}/logs" | sed -n '1,200p'
-

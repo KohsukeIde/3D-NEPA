@@ -90,6 +90,11 @@ DUAL_MASK_TYPE_AWARE="${DUAL_MASK_TYPE_AWARE:-0}"
 DUAL_MASK_WARMUP_FRAC="${DUAL_MASK_WARMUP_FRAC:-0.05}"
 STAGE2_REQUIRE_RAY="${STAGE2_REQUIRE_RAY:-1}"
 STAGE2_REQUIRE_GLOBAL_BATCH128="${STAGE2_REQUIRE_GLOBAL_BATCH128:-1}"
+NCCL_STABLE_MODE="${NCCL_STABLE_MODE:-0}"
+NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-}"
+NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:-}"
+TORCH_NCCL_ENABLE_MONITORING="${TORCH_NCCL_ENABLE_MONITORING:-}"
+TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC="${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-}"
 
 WARMUP_EPOCHS="${WARMUP_EPOCHS:-}"
 WARMUP_RATIO="${WARMUP_RATIO:-0.025}"
@@ -154,6 +159,13 @@ if command -v module >/dev/null 2>&1; then
   module load "${CUDA_MODULE}" 2>/dev/null || true
 fi
 
+if [[ "${NCCL_STABLE_MODE}" == "1" ]]; then
+  export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
+  export NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:-0}"
+  export TORCH_NCCL_ENABLE_MONITORING="${TORCH_NCCL_ENABLE_MONITORING:-1}"
+  export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC="${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-1200}"
+fi
+
 if [[ "${STAGE2_REQUIRE_RAY}" == "1" ]]; then
   if [[ "${USE_RAY_PATCH}" != "1" ]]; then
     echo "ERROR: Stage-2 mainline requires USE_RAY_PATCH=1 (got ${USE_RAY_PATCH})" | tee "${LOG_PATH}"
@@ -202,6 +214,7 @@ echo "pt_xyz_key=${PT_XYZ_KEY} pt_dist_key=${PT_DIST_KEY} ablate_point_dist=${AB
 echo "qa: tokens=${QA_TOKENS} layout=${QA_LAYOUT} sep=${QA_SEP_TOKEN} fuse=${QA_FUSE} encdec_arch=${ENCDEC_ARCH} use_pt_dist=${USE_PT_DIST} use_pt_grad=${USE_PT_GRAD} nepa_skip_k=${NEPA_SKIP_K} nepa_multi_k=${NEPA_MULTI_K:-none}" | tee -a "${LOG_PATH}"
 echo "dual_mask: near=${DUAL_MASK_NEAR} far=${DUAL_MASK_FAR} window=${DUAL_MASK_WINDOW} type_aware=${DUAL_MASK_TYPE_AWARE} warmup_frac=${DUAL_MASK_WARMUP_FRAC}" | tee -a "${LOG_PATH}"
 echo "epochs=${EPOCHS} batch=${BATCH} lr=${LR}" | tee -a "${LOG_PATH}"
+echo "nccl: stable_mode=${NCCL_STABLE_MODE} p2p_disable=${NCCL_P2P_DISABLE:-unset} net_gdr_level=${NCCL_NET_GDR_LEVEL:-unset} monitor=${TORCH_NCCL_ENABLE_MONITORING:-unset} heartbeat=${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-unset}" | tee -a "${LOG_PATH}"
 echo "ema: use_ema=${USE_EMA} ema_decay=${EMA_DECAY}" | tee -a "${LOG_PATH}"
 echo "backbone_mode=${BACKBONE_MODE} qk_norm=${QK_NORM} qk_norm_affine=${QK_NORM_AFFINE} qk_norm_bias=${QK_NORM_BIAS} layerscale=${LAYERSCALE_VALUE} rope_theta=${ROPE_THETA}" | tee -a "${LOG_PATH}"
 echo "optimizer: weight_decay=${WEIGHT_DECAY} max_grad_norm=${MAX_GRAD_NORM} lr_scheduler=${LR_SCHEDULER} warmup_epochs=${WARMUP_EPOCHS} warmup_ratio=${WARMUP_RATIO} min_lr=${MIN_LR}" | tee -a "${LOG_PATH}"
