@@ -47,6 +47,7 @@ from nepa3d.models.pointmae_patch_classifier import PointMAEPatchClassifier
 def add_args(p: argparse.ArgumentParser) -> None:
     # IO
     p.add_argument("--ckpt", type=str, default="", help="Optional init checkpoint (can be empty for scratch).")
+    p.add_argument("--ckpt_use_ema", type=int, default=0, choices=[0, 1], help="Load model_ema from pretrain ckpt when available.")
     p.add_argument("--save_dir", type=str, default="runs/patchcls", help="Directory to save outputs.")
     p.add_argument("--run_name", type=str, default="", help="Optional run name subfolder.")
 
@@ -172,6 +173,20 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--init_mode", type=str, default="default", choices=["default", "pointmae"])
     p.add_argument("--is_causal", type=int, default=0)
     p.add_argument("--patchnepa_ft_mode", type=str, default="qa_zeroa", choices=["qa_zeroa", "q_only"])
+    p.add_argument(
+        "--patchnepa_cls_token_source",
+        type=str,
+        default="last_q",
+        choices=["bos", "last_q", "eos"],
+        help="Classification anchor token source for PatchNEPA direct FT.",
+    )
+    p.add_argument(
+        "--patchnepa_freeze_patch_embed",
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help="Freeze patch embedding during PatchNEPA direct FT.",
+    )
 
     # Optim
     p.add_argument("--epochs", type=int, default=300)
@@ -191,9 +206,22 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--lr", type=float, default=5e-4)
     p.add_argument("--weight_decay", type=float, default=0.05)
     p.add_argument("--lr_scheduler", type=str, default="cosine", choices=["none", "cosine"])
+    p.add_argument(
+        "--llrd_scheduler",
+        type=str,
+        default="static",
+        choices=["static", "llrd_cosine", "llrd_cosine_warmup"],
+        help=(
+            "LLRD scheduling mode for model_source=patchnepa. "
+            "'static' keeps per-layer LR fixed (current behavior). "
+            "'llrd_cosine*' uses step-wise LayerLambdaLR (2D-NEPA style)."
+        ),
+    )
     p.add_argument("--warmup_epochs", type=float, default=10.0)
     p.add_argument("--warmup_start_factor", type=float, default=0.1)
     p.add_argument("--grad_clip", type=float, default=10.0)
+    p.add_argument("--llrd_start", type=float, default=0.35, help="Layer-wise LR decay start scale (PatchNEPA).")
+    p.add_argument("--llrd_end", type=float, default=1.0, help="Layer-wise LR decay end scale (PatchNEPA).")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument(
         "--allow_scan_uniscale_v2",
@@ -452,6 +480,126 @@ def _patchnepa_kwargs_from_ckpt(ckpt_args: Dict[str, object], args: argparse.Nam
     # FT-time override for ray usage is allowed.
     kw["use_ray_patch"] = bool(args.use_ray_patch)
     return kw
+
+
+
+def _patchnepa_backbone_depth_info(model: nn.Module) -> Tuple[int, int]:
+    core = getattr(model, "core", None)
+    bb = getattr(core, "backbone", None)
+    if bb is None:
+        return 0, 1
+    n_enc = len(getattr(bb, "encoder_layers", []))
+    n_dec = len(getattr(bb, "decoder_layers", []))
+    n_blocks = len(getattr(bb, "blocks", []))
+    n_layers = len(getattr(bb, "layers", []))
+    depth = max(int(n_blocks), int(n_layers), int(n_enc + n_dec), 1)
+    return int(n_enc), int(depth)
+
+
+def _patchnepa_param_depth(name: str, *, n_enc: int, backbone_depth: int) -> int:
+    # Embedding/front-end parameters are depth 0.
+    if name.startswith("cls_head."):
+        return int(backbone_depth + 1)
+    if name.startswith("core.backbone.blocks."):
+        try:
+            return int(name.split(".")[3]) + 1
+        except Exception:
+            return int(backbone_depth)
+    if name.startswith("core.backbone.layers."):
+        try:
+            return int(name.split(".")[3]) + 1
+        except Exception:
+            return int(backbone_depth)
+    if name.startswith("core.backbone.encoder_layers."):
+        try:
+            return int(name.split(".")[3]) + 1
+        except Exception:
+            return int(backbone_depth)
+    if name.startswith("core.backbone.decoder_layers."):
+        try:
+            return int(n_enc) + int(name.split(".")[3]) + 1
+        except Exception:
+            return int(backbone_depth)
+    if (
+        name.startswith("core.backbone.final_ln")
+        or name.startswith("core.backbone.enc_ln")
+        or name.startswith("core.backbone.dec_ln")
+    ):
+        return int(backbone_depth)
+    return 0
+
+
+def _is_no_decay_param(name: str, p: torch.Tensor) -> bool:
+    lname = name.lower()
+    if name.endswith(".bias") or p.ndim <= 1:
+        return True
+    if ("norm" in lname) or ("bn" in lname) or ("emb" in lname):
+        return True
+    return False
+
+
+def _build_optimizer(
+    model: nn.Module,
+    args: argparse.Namespace,
+) -> Tuple[optim.Optimizer, Dict[str, float]]:
+    named_params = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
+    if not named_params:
+        raise RuntimeError("No trainable parameters found for optimizer.")
+
+    # Keep non-PatchNEPA behavior simple.
+    if str(args.model_source) != "patchnepa":
+        optimizer = optim.AdamW([p for _, p in named_params], lr=args.lr, weight_decay=args.weight_decay)
+        stats = {"n_groups": 1.0, "lr_min": float(args.lr), "lr_max": float(args.lr)}
+        return optimizer, stats
+
+    llrd_start = float(args.llrd_start)
+    llrd_end = float(args.llrd_end)
+    if llrd_start <= 0.0 or llrd_end <= 0.0:
+        llrd_start, llrd_end = 1.0, 1.0
+    if llrd_end < llrd_start:
+        llrd_start, llrd_end = llrd_end, llrd_start
+
+    n_enc, backbone_depth = _patchnepa_backbone_depth_info(model)
+    max_depth = int(backbone_depth + 1)
+    groups: Dict[Tuple[float, float], Dict[str, object]] = {}
+    llrd_sched_mode = str(getattr(args, "llrd_scheduler", "static"))
+    use_dynamic_llrd = llrd_sched_mode in {"llrd_cosine", "llrd_cosine_warmup"}
+
+    for name, p in named_params:
+        depth = _patchnepa_param_depth(name, n_enc=n_enc, backbone_depth=backbone_depth)
+        depth = max(0, min(int(depth), max_depth))
+        if use_dynamic_llrd:
+            llrd_scale = float(max_depth - depth)
+            scale = 1.0
+        else:
+            llrd_scale = 0.0
+            scale = float(llrd_start + (llrd_end - llrd_start) * (float(depth) / float(max_depth)))
+        wd = 0.0 if _is_no_decay_param(name, p) else float(args.weight_decay)
+        key = (round(scale, 8), wd) if not use_dynamic_llrd else (round(llrd_scale, 8), wd)
+        g = groups.get(key)
+        if g is None:
+            g = {"params": [], "weight_decay": wd}
+            if use_dynamic_llrd:
+                g["lr"] = float(args.lr)
+                g["llrd"] = float(llrd_start)
+                g["llrd_scale"] = float(llrd_scale)
+            else:
+                g["lr"] = float(args.lr) * scale
+            groups[key] = g
+        if use_dynamic_llrd:
+            g["llrd"] = float(llrd_start)
+            g["llrd_scale"] = float(llrd_scale)
+        g["params"].append(p)
+
+    param_groups = list(groups.values())
+    optimizer = optim.AdamW(param_groups, lr=args.lr, weight_decay=args.weight_decay)
+    lrs = [float(g["lr"]) for g in param_groups]
+    stats = {
+        "n_groups": float(len(param_groups)),
+        "lr_min": float(min(lrs) if lrs else float(args.lr)),
+        "lr_max": float(max(lrs) if lrs else float(args.lr)),
+    }
+    return optimizer, stats
 
 
 def _resolve_scan_h5_files(scan_h5_root: str, scan_variant: str) -> Tuple[Path, Path]:
@@ -819,9 +967,20 @@ def main() -> None:
     pretrain_args: Dict[str, object] = {}
     if args.ckpt:
         ckpt_obj = torch.load(args.ckpt, map_location="cpu")
-        pretrain_state = ckpt_obj.get("model", ckpt_obj)
-        if isinstance(ckpt_obj.get("args", None), dict):
-            pretrain_args = ckpt_obj["args"]  # type: ignore[index]
+        state_source = "model"
+        if isinstance(ckpt_obj, dict):
+            use_ema = bool(int(args.ckpt_use_ema))
+            if use_ema and isinstance(ckpt_obj.get("model_ema", None), dict):
+                pretrain_state = ckpt_obj["model_ema"]
+                state_source = "model_ema"
+            else:
+                pretrain_state = ckpt_obj.get("model", ckpt_obj)
+            if isinstance(ckpt_obj.get("args", None), dict):
+                pretrain_args = ckpt_obj["args"]  # type: ignore[index]
+        else:
+            pretrain_state = ckpt_obj
+        if accelerator.is_main_process:
+            print(f"[ckpt] source={state_source} ckpt_use_ema={int(args.ckpt_use_ema)}")
 
     # Model
     if args.model_source == "pointmae":
@@ -853,6 +1012,7 @@ def main() -> None:
             head_dropout=args.head_dropout,
             is_causal=bool(args.is_causal),
             ft_sequence_mode=str(args.patchnepa_ft_mode),
+            cls_token_source=str(args.patchnepa_cls_token_source),
             **nepa_kwargs,
         )
     else:
@@ -964,35 +1124,64 @@ def main() -> None:
             if accelerator.is_main_process:
                 print("[finetune] patchnepa direct: pred_head frozen/excluded from optimizer")
 
-    opt_params = [p for p in model.parameters() if p.requires_grad]
-    if not opt_params:
-        raise RuntimeError("No trainable parameters found for optimizer.")
-    optimizer = optim.AdamW(opt_params, lr=args.lr, weight_decay=args.weight_decay)
+        if int(args.patchnepa_freeze_patch_embed) == 1 and hasattr(model, "core") and hasattr(model.core, "patch_embed"):
+            for p in model.core.patch_embed.parameters():
+                p.requires_grad_(False)
+            if accelerator.is_main_process:
+                print("[finetune] patchnepa direct: patch_embed frozen")
+
+    optimizer, opt_stats = _build_optimizer(model, args)
 
     lr_scheduler = None
+    scheduler_step_per_batch = False
     if args.lr_scheduler == "cosine":
-        # warmup+cosine in epoch units
-        warmup_epochs = max(0.0, float(args.warmup_epochs))
-        if warmup_epochs > 0:
-            schedulers = [
-                optim.lr_scheduler.LinearLR(
-                    optimizer,
-                    start_factor=float(args.warmup_start_factor),
-                    total_iters=int(round(warmup_epochs)),
-                ),
-                optim.lr_scheduler.CosineAnnealingLR(
-                    optimizer,
-                    T_max=max(1, args.epochs - int(round(warmup_epochs))),
-                    eta_min=0.0,
-                ),
-            ]
-            lr_scheduler = optim.lr_scheduler.SequentialLR(
-                optimizer,
-                schedulers=schedulers,
-                milestones=[int(round(warmup_epochs))],
-            )
+        llrd_sched_mode = str(args.llrd_scheduler)
+        if str(args.model_source) == "patchnepa" and llrd_sched_mode in {"llrd_cosine", "llrd_cosine_warmup"}:
+            # 2D-NEPA style step-wise LLRD scheduler.
+            from schedulers import get_llrd_cosine_schedule, get_llrd_cosine_schedule_with_warmup
+
+            steps_per_epoch = max(1, len(train_loader))
+            num_training_steps = max(1, int(args.epochs) * int(steps_per_epoch))
+            num_warmup_steps = int(round(float(args.warmup_epochs) * float(steps_per_epoch)))
+            num_warmup_steps = max(0, min(num_warmup_steps, num_training_steps - 1))
+
+            if llrd_sched_mode == "llrd_cosine":
+                lr_scheduler = get_llrd_cosine_schedule(
+                    optimizer=optimizer,
+                    num_warmup_steps=num_warmup_steps,
+                    num_training_steps=num_training_steps,
+                    llrd_end=float(args.llrd_end),
+                )
+            else:
+                lr_scheduler = get_llrd_cosine_schedule_with_warmup(
+                    optimizer=optimizer,
+                    num_warmup_steps=num_warmup_steps,
+                    num_training_steps=num_training_steps,
+                )
+            scheduler_step_per_batch = True
         else:
-            lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, args.epochs), eta_min=0.0)
+            # warmup+cosine in epoch units (legacy static mode).
+            warmup_epochs = max(0.0, float(args.warmup_epochs))
+            if warmup_epochs > 0:
+                schedulers = [
+                    optim.lr_scheduler.LinearLR(
+                        optimizer,
+                        start_factor=float(args.warmup_start_factor),
+                        total_iters=int(round(warmup_epochs)),
+                    ),
+                    optim.lr_scheduler.CosineAnnealingLR(
+                        optimizer,
+                        T_max=max(1, args.epochs - int(round(warmup_epochs))),
+                        eta_min=0.0,
+                    ),
+                ]
+                lr_scheduler = optim.lr_scheduler.SequentialLR(
+                    optimizer,
+                    schedulers=schedulers,
+                    milestones=[int(round(warmup_epochs))],
+                )
+            else:
+                lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, args.epochs), eta_min=0.0)
 
     # Only train loader is distributed. Val/test are evaluated on main process only
     # to keep single-GPU and DDP metrics strictly comparable.
@@ -1019,8 +1208,11 @@ def main() -> None:
                 f"PatchCls: classes={num_classes} train={len(train_set)} val={len(val_set)} test={len(test_set)}\n"
                 f"  model_source=patchnepa(direct) n_point={args.n_point} groups={args.num_groups} group_size={args.group_size} "
                 f"use_ray_patch={int(args.use_ray_patch)} n_ray={args.n_ray} "
-                f"pooling={args.pooling} patchnepa_ft_mode={args.patchnepa_ft_mode} head_mode={args.head_mode} "
-                f"backbone_mode={args.backbone_mode} "
+                f"pooling={args.pooling} patchnepa_ft_mode={args.patchnepa_ft_mode} cls_token={args.patchnepa_cls_token_source} "
+                f"head_mode={args.head_mode} backbone_mode={args.backbone_mode} "
+                f"freeze_patch_embed={int(args.patchnepa_freeze_patch_embed)} llrd=({float(args.llrd_start):.2f}->{float(args.llrd_end):.2f}) "
+                f"llrd_scheduler={args.llrd_scheduler} "
+                f"lr_groups={int(opt_stats.get('n_groups', 1))} lr_range=[{opt_stats.get('lr_min', args.lr):.2e},{opt_stats.get('lr_max', args.lr):.2e}] "
                 f"ray_query_only=1 is_causal={bool(args.is_causal)} ddp_find_unused={ddp_find_unused}\n"
                 f"  world_size={world_size} batch_mode={args.batch_mode} batch_arg={args.batch} batch_effective={eff_batch}\n"
                 f"  data_format={args.data_format} input_root={args.cache_root if args.data_format == 'npz' else args.scan_h5_root}\n"
@@ -1089,8 +1281,10 @@ def main() -> None:
                 accelerator.clip_grad_norm_(model.parameters(), args.grad_clip)
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
+            if lr_scheduler is not None and scheduler_step_per_batch:
+                lr_scheduler.step()
 
-        if lr_scheduler is not None:
+        if lr_scheduler is not None and (not scheduler_step_per_batch):
             lr_scheduler.step()
 
         # val (main process only, full dataset)

@@ -20,11 +20,13 @@ LOG_ROOT="${LOG_ROOT:-${WORKDIR}/logs/patch_nepa_pretrain}"
 
 N_POINT="${N_POINT:-1024}"
 N_RAY="${N_RAY:-1024}"
-BATCH="${BATCH:-16}"
+BATCH="${BATCH:-8}"
 EPOCHS="${EPOCHS:-100}"
 NUM_WORKERS="${NUM_WORKERS:-8}"
 LR="${LR:-3e-4}"
 SEED="${SEED:-0}"
+USE_EMA="${USE_EMA:-0}"
+EMA_DECAY="${EMA_DECAY:-0.9999}"
 
 PATCH_EMBED="${PATCH_EMBED:-fps_knn}"
 GROUP_SIZE="${GROUP_SIZE:-32}"
@@ -74,6 +76,9 @@ USE_PT_DIST="${USE_PT_DIST:-1}"
 USE_PT_GRAD="${USE_PT_GRAD:-0}"
 ANSWER_MLP_LAYERS="${ANSWER_MLP_LAYERS:-2}"
 ANSWER_POOL="${ANSWER_POOL:-max}"
+NEPA_SKIP_K="${NEPA_SKIP_K:-1}"
+NEPA_MULTI_K="${NEPA_MULTI_K:-}"
+SKIPK_DISABLE_DUAL_MASK="${SKIPK_DISABLE_DUAL_MASK:-1}"
 NEPA2D_POS="${NEPA2D_POS:-1}"
 TYPE_SPECIFIC_POS="${TYPE_SPECIFIC_POS:-0}"
 TYPE_POS_MAX_LEN="${TYPE_POS_MAX_LEN:-4096}"
@@ -84,6 +89,7 @@ DUAL_MASK_WINDOW="${DUAL_MASK_WINDOW:-32}"
 DUAL_MASK_TYPE_AWARE="${DUAL_MASK_TYPE_AWARE:-0}"
 DUAL_MASK_WARMUP_FRAC="${DUAL_MASK_WARMUP_FRAC:-0.05}"
 STAGE2_REQUIRE_RAY="${STAGE2_REQUIRE_RAY:-1}"
+STAGE2_REQUIRE_GLOBAL_BATCH128="${STAGE2_REQUIRE_GLOBAL_BATCH128:-1}"
 
 WARMUP_EPOCHS="${WARMUP_EPOCHS:-}"
 WARMUP_RATIO="${WARMUP_RATIO:-0.025}"
@@ -158,6 +164,29 @@ if [[ "${STAGE2_REQUIRE_RAY}" == "1" ]]; then
     exit 2
   fi
 fi
+if [[ "${QA_SEP_TOKEN}" != "1" ]]; then
+  echo "ERROR: Stage-2 policy requires QA_SEP_TOKEN=1 (got ${QA_SEP_TOKEN})" | tee "${LOG_PATH}"
+  exit 2
+fi
+
+if [[ "${STAGE2_REQUIRE_GLOBAL_BATCH128}" == "1" ]]; then
+  EFFECTIVE_GLOBAL_BATCH=$((BATCH * NUM_PROCESSES * GRAD_ACCUM))
+  if [[ "${EFFECTIVE_GLOBAL_BATCH}" -ne 128 ]]; then
+    echo "ERROR: Stage-2 policy requires effective_global_batch=128 (got ${EFFECTIVE_GLOBAL_BATCH})" | tee "${LOG_PATH}"
+    echo "       (batch=${BATCH}, num_processes=${NUM_PROCESSES}, grad_accum=${GRAD_ACCUM})" | tee -a "${LOG_PATH}"
+    exit 2
+  fi
+fi
+
+
+if [[ "${SKIPK_DISABLE_DUAL_MASK}" == "1" ]]; then
+  if [[ "${NEPA_MULTI_K}" != "" || "${NEPA_SKIP_K}" != "1" ]]; then
+    DUAL_MASK_NEAR="0.0"
+    DUAL_MASK_FAR="0.0"
+    DUAL_MASK_TYPE_AWARE="0"
+    echo "[policy] skip-k active -> dual_mask forced off" | tee "${LOG_PATH}"
+  fi
+fi
 
 echo "=== PATCH-NEPA PRETRAIN (RAY DEFAULT) ===" | tee "${LOG_PATH}"
 echo "date=$(date -Is)" | tee -a "${LOG_PATH}"
@@ -170,9 +199,10 @@ echo "save_dir=${SAVE_DIR}" | tee -a "${LOG_PATH}"
 echo "n_point=${N_POINT} n_ray=${N_RAY} use_ray_patch=${USE_RAY_PATCH} ray_assign=${RAY_ASSIGN_MODE} ray_pool=${RAY_POOL_MODE} include_ray_unc=${INCLUDE_RAY_UNC}" | tee -a "${LOG_PATH}"
 echo "patch_embed=${PATCH_EMBED} group_size=${GROUP_SIZE} num_groups=${NUM_GROUPS} serial_order=${SERIAL_ORDER}" | tee -a "${LOG_PATH}"
 echo "pt_xyz_key=${PT_XYZ_KEY} pt_dist_key=${PT_DIST_KEY} ablate_point_dist=${ABLATE_POINT_DIST} pt_sample_mode=${PT_SAMPLE_MODE} pt_fps_key=${PT_FPS_KEY} pt_rfps_key=${PT_RFPS_KEY} pt_rfps_m=${PT_RFPS_M} point_order_mode=${POINT_ORDER_MODE}" | tee -a "${LOG_PATH}"
-echo "qa: tokens=${QA_TOKENS} layout=${QA_LAYOUT} sep=${QA_SEP_TOKEN} fuse=${QA_FUSE} encdec_arch=${ENCDEC_ARCH} use_pt_dist=${USE_PT_DIST} use_pt_grad=${USE_PT_GRAD}" | tee -a "${LOG_PATH}"
+echo "qa: tokens=${QA_TOKENS} layout=${QA_LAYOUT} sep=${QA_SEP_TOKEN} fuse=${QA_FUSE} encdec_arch=${ENCDEC_ARCH} use_pt_dist=${USE_PT_DIST} use_pt_grad=${USE_PT_GRAD} nepa_skip_k=${NEPA_SKIP_K} nepa_multi_k=${NEPA_MULTI_K:-none}" | tee -a "${LOG_PATH}"
 echo "dual_mask: near=${DUAL_MASK_NEAR} far=${DUAL_MASK_FAR} window=${DUAL_MASK_WINDOW} type_aware=${DUAL_MASK_TYPE_AWARE} warmup_frac=${DUAL_MASK_WARMUP_FRAC}" | tee -a "${LOG_PATH}"
 echo "epochs=${EPOCHS} batch=${BATCH} lr=${LR}" | tee -a "${LOG_PATH}"
+echo "ema: use_ema=${USE_EMA} ema_decay=${EMA_DECAY}" | tee -a "${LOG_PATH}"
 echo "backbone_mode=${BACKBONE_MODE} qk_norm=${QK_NORM} qk_norm_affine=${QK_NORM_AFFINE} qk_norm_bias=${QK_NORM_BIAS} layerscale=${LAYERSCALE_VALUE} rope_theta=${ROPE_THETA}" | tee -a "${LOG_PATH}"
 echo "optimizer: weight_decay=${WEIGHT_DECAY} max_grad_norm=${MAX_GRAD_NORM} lr_scheduler=${LR_SCHEDULER} warmup_epochs=${WARMUP_EPOCHS} warmup_ratio=${WARMUP_RATIO} min_lr=${MIN_LR}" | tee -a "${LOG_PATH}"
 echo "resume: auto_resume=${AUTO_RESUME} resume_optimizer=${RESUME_OPTIMIZER} resume=${RESUME}" | tee -a "${LOG_PATH}"
@@ -208,6 +238,8 @@ TRAIN_ARGS=(
   --use_pt_grad "${USE_PT_GRAD}"
   --answer_mlp_layers "${ANSWER_MLP_LAYERS}"
   --answer_pool "${ANSWER_POOL}"
+  --nepa_skip_k "${NEPA_SKIP_K}"
+  --nepa_multi_k "${NEPA_MULTI_K}"
   --nepa2d_pos "${NEPA2D_POS}"
   --type_specific_pos "${TYPE_SPECIFIC_POS}"
   --type_pos_max_len "${TYPE_POS_MAX_LEN}"
@@ -264,6 +296,8 @@ TRAIN_ARGS=(
   --dual_mask_warmup_frac "${DUAL_MASK_WARMUP_FRAC}"
   --lr "${LR}"
   --seed "${SEED}"
+  --use_ema "${USE_EMA}"
+  --ema_decay "${EMA_DECAY}"
 )
 
 LAUNCH_MIXED_PRECISION="${MIXED_PRECISION}"

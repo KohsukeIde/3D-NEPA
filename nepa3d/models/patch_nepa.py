@@ -626,6 +626,9 @@ class PatchTransformerNepa(nn.Module):
                     ray_has=ray_has,
                 )
 
+        # Keep sep_token connected in all layouts (including interleave without SEP)
+        # to avoid DDP unused-parameter errors.
+        tokens = tokens + (self.sep_token.sum() * 0.0)
         z = self._add_embeddings(tokens, type_id, centers_seq)
 
         if isinstance(self.backbone, EncoderDecoderTransformer):
@@ -666,16 +669,22 @@ class PatchTransformerNepa(nn.Module):
         z: torch.Tensor,
         z_hat: torch.Tensor,
         type_id: Optional[torch.Tensor] = None,
+        *,
+        skip_k: int = 1,
     ) -> torch.Tensor:
-        if z.size(1) < 2:
-            return z.new_zeros(())
-        pred = z_hat[:, :-1, :]
-        tgt = z[:, 1:, :].detach()
+        k = int(skip_k)
+        if k < 1:
+            raise ValueError(f"skip_k must be >=1, got {skip_k}")
+        if z.size(1) <= k:
+            return z_hat.sum() * 0.0
+
+        pred = z_hat[:, :-k, :]
+        tgt = z[:, k:, :].detach()
 
         if type_id is None:
             mask = torch.ones(pred.shape[:2], device=z.device, dtype=torch.bool)
         else:
-            tgt_ty = type_id[:, 1:]
+            tgt_ty = type_id[:, k:]
             has_answer = bool((tgt_ty == int(TYPE_A_POINT)).any() or (tgt_ty == int(TYPE_A_RAY)).any())
             if has_answer:
                 mask = (tgt_ty == int(TYPE_A_POINT)) | (tgt_ty == int(TYPE_A_RAY))
@@ -687,7 +696,7 @@ class PatchTransformerNepa(nn.Module):
                     & (tgt_ty != int(TYPE_MISSING_RAY))
                 )
         if not bool(mask.any()):
-            return pred.new_zeros(())
+            return pred.sum() * 0.0
         loss = 1.0 - F.cosine_similarity(pred, tgt, dim=-1)
         return loss[mask].mean()
 
@@ -704,6 +713,7 @@ class PatchTransformerNepaClassifier(nn.Module):
         num_classes: int,
         *,
         pooling: str = "cls_max",  # mean/mean_q | cls | cls_max
+        cls_token_source: str = "last_q",  # bos | last_q | eos
         head_mode: str = "pointmae_mlp",  # linear | pointmae_mlp
         head_hidden_dim: int = 256,
         head_dropout: float = 0.5,
@@ -713,12 +723,14 @@ class PatchTransformerNepaClassifier(nn.Module):
     ) -> None:
         super().__init__()
         assert pooling in {"mean", "mean_q", "cls", "cls_max"}
+        assert cls_token_source in {"bos", "last_q", "eos"}
         assert head_mode in {"linear", "pointmae_mlp"}
         assert ft_sequence_mode in {"qa_zeroa", "q_only"}
 
         self.core = PatchTransformerNepa(**nepa_kwargs)
         self.d_model = int(self.core.d_model)
         self.pooling = str(pooling)
+        self.cls_token_source = str(cls_token_source)
         self.head_mode = str(head_mode)
         self.head_hidden_dim = int(head_hidden_dim)
         self.head_dropout = float(head_dropout)
@@ -745,6 +757,28 @@ class PatchTransformerNepaClassifier(nn.Module):
                 nn.Linear(self.head_hidden_dim, int(num_classes)),
             )
 
+    def _select_cls_feat(self, h: torch.Tensor, type_id: torch.Tensor) -> torch.Tensor:
+        b, t, _ = h.shape
+        dev = h.device
+        src = self.cls_token_source
+        if src == "bos":
+            return h[:, 0, :]
+
+        if src == "eos":
+            eos_mask = type_id == int(TYPE_EOS)
+            has_eos = eos_mask.any(dim=1)
+            eos_idx = eos_mask.to(dtype=torch.float32).argmax(dim=1)
+            eos_idx = torch.where(has_eos, eos_idx, torch.full_like(eos_idx, t - 1))
+            return h[torch.arange(b, device=dev), eos_idx]
+
+        # last_q: last valid query-like token in sequence.
+        q_mask = self._query_token_mask(type_id)
+        has_q = q_mask.any(dim=1)
+        rev_idx = q_mask.flip(dims=[1]).to(dtype=torch.float32).argmax(dim=1)
+        last_q_idx = (t - 1) - rev_idx
+        last_q_idx = torch.where(has_q, last_q_idx, torch.zeros_like(last_q_idx))
+        return h[torch.arange(b, device=dev), last_q_idx]
+
     @staticmethod
     def _query_token_mask(type_id: torch.Tensor) -> torch.Tensor:
         # Primary query-token mask for both qa_tokens=1 and qa_tokens=0 cases.
@@ -767,8 +801,7 @@ class PatchTransformerNepaClassifier(nn.Module):
         return torch.where(has_any, mask, fallback)
 
     def _pool_features(self, h: torch.Tensor, type_id: torch.Tensor) -> torch.Tensor:
-        # BOS is always sequence index 0 in PatchNEPA builders.
-        cls_feat = h[:, 0, :]
+        cls_feat = self._select_cls_feat(h, type_id)
         q_mask = self._query_token_mask(type_id)
 
         if self.pooling == "cls":

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import re
+import copy
 from collections import Counter
 from pathlib import Path
 
@@ -100,6 +102,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--use_pt_grad", type=int, default=0, choices=[0, 1])
     p.add_argument("--answer_mlp_layers", type=int, default=2)
     p.add_argument("--answer_pool", type=str, default="max", choices=["max", "mean"])
+    p.add_argument("--nepa_skip_k", type=int, default=1)
+    p.add_argument("--nepa_multi_k", type=str, default="")
 
     # Ray binding
     p.add_argument("--use_ray_patch", type=int, default=0)
@@ -144,12 +148,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dual_mask_type_aware", type=int, default=0, choices=[0, 1])
     p.add_argument("--dual_mask_warmup_frac", type=float, default=0.05)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--use_ema", type=int, default=0, choices=[0, 1])
+    p.add_argument("--ema_decay", type=float, default=0.9999)
     return p.parse_args()
 
 
 def save_ckpt(
     save_path: Path,
     model: torch.nn.Module,
+    ema_model: torch.nn.Module | None,
     optimizer: optim.Optimizer,
     scheduler: optim.lr_scheduler._LRScheduler | None,
     epoch: int,
@@ -164,9 +171,38 @@ def save_ckpt(
         "step": int(step),
         "args": vars(args),
     }
+    if ema_model is not None:
+        payload["model_ema"] = ema_model.state_dict()
     if scheduler is not None:
         payload["scheduler"] = scheduler.state_dict()
     torch.save(payload, str(save_path))
+
+
+def _init_ema_model(model: torch.nn.Module) -> torch.nn.Module:
+    ema_model = copy.deepcopy(model)
+    ema_model.eval()
+    ema_model = ema_model.float()
+    for p in ema_model.parameters():
+        p.requires_grad_(False)
+    return ema_model
+
+
+@torch.no_grad()
+def _update_ema(ema_model: torch.nn.Module, model: torch.nn.Module, decay: float) -> None:
+    if ema_model is None:
+        return
+    decay = float(min(max(decay, 0.0), 1.0))
+    one_minus = 1.0 - decay
+    msd = model.state_dict()
+    for k, v_ema in ema_model.state_dict().items():
+        v = msd.get(k, None)
+        if v is None:
+            continue
+        v_det = v.detach()
+        if torch.is_floating_point(v_ema):
+            v_ema.mul_(decay).add_(v_det.to(device=v_ema.device, dtype=v_ema.dtype), alpha=one_minus)
+        else:
+            v_ema.copy_(v_det.to(device=v_ema.device))
 
 
 def _resolved_warmup_epochs(args: argparse.Namespace) -> float:
@@ -190,6 +226,30 @@ def _scheduler_scale(epoch: int, args: argparse.Namespace) -> float:
     cosine = 0.5 * (1.0 + torch.cos(torch.tensor(torch.pi * t))).item()
     min_scale = float(args.min_lr) / float(args.lr)
     return min_scale + (1.0 - min_scale) * cosine
+
+
+def _parse_skip_k_list(args: argparse.Namespace) -> list[int]:
+    raw_multi = str(getattr(args, "nepa_multi_k", "")).strip()
+    ks: list[int] = []
+    if raw_multi:
+        for tok in re.split(r"[\s,;:+|]+", raw_multi):
+            tok = tok.strip()
+            if not tok:
+                continue
+            k = int(tok)
+            if k < 1:
+                raise ValueError(f"all nepa_multi_k values must be >=1, got {k}")
+            ks.append(k)
+    else:
+        k = int(getattr(args, "nepa_skip_k", 1))
+        if k < 1:
+            raise ValueError(f"nepa_skip_k must be >=1, got {k}")
+        ks.append(k)
+
+    ks = sorted(set(int(k) for k in ks))
+    if not ks:
+        ks = [1]
+    return ks
 
 
 def main() -> None:
@@ -305,7 +365,13 @@ def main() -> None:
     if str(args.lr_scheduler) == "cosine":
         scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda ep: _scheduler_scale(ep, args))
 
+    model_raw = accelerator.unwrap_model(model)
+    ema_model: torch.nn.Module | None = None
+    if bool(int(args.use_ema)):
+        ema_model = _init_ema_model(model_raw)
+
     warmup_epochs_resolved = _resolved_warmup_epochs(args)
+    skip_k_list = _parse_skip_k_list(args)
     mprint(
         "[patch_nepa_pretrain] "
         f"num_processes={accelerator.num_processes} "
@@ -319,12 +385,13 @@ def main() -> None:
         f"pt_rfps_key={str(args.pt_rfps_key)} "
         f"point_order_mode={str(args.point_order_mode)} "
         f"qa_tokens={int(args.qa_tokens)} qa_layout={str(args.qa_layout)} qa_sep={int(args.qa_sep_token)} "
-        f"qa_fuse={str(args.qa_fuse)} use_pt_dist={int(args.use_pt_dist)} use_pt_grad={int(args.use_pt_grad)} "
+        f"qa_fuse={str(args.qa_fuse)} use_pt_dist={int(args.use_pt_dist)} use_pt_grad={int(args.use_pt_grad)} skip_k={skip_k_list} "
         f"type_specific_pos={int(args.type_specific_pos)} "
         f"dual_mask=({float(args.dual_mask_near):.2f},{float(args.dual_mask_far):.2f},w={int(args.dual_mask_window)},type_aware={int(args.dual_mask_type_aware)}) "
         f"batch_per_proc={int(args.batch_size)} grad_accum={int(args.grad_accum)} "
         f"global_batch={int(args.batch_size) * int(accelerator.num_processes) * int(args.grad_accum)} "
         f"lr={float(args.lr):.3e} scheduler={str(args.lr_scheduler)} "
+        f"use_ema={int(args.use_ema)} ema_decay={float(args.ema_decay):.6f} "
         f"warmup_epochs={warmup_epochs_resolved:.3f} warmup_ratio={float(args.warmup_ratio):.4f} "
         f"qk_norm={int(args.qk_norm)} qk_norm_affine={int(args.qk_norm_affine)} qk_norm_bias={int(args.qk_norm_bias)} "
         f"layerscale={float(args.layerscale_value):.2e} rope_theta={float(args.rope_theta):g} "
@@ -337,7 +404,13 @@ def main() -> None:
     global_step = 0
     if resume_path:
         ckpt = torch.load(resume_path, map_location="cpu")
-        accelerator.unwrap_model(model).load_state_dict(ckpt.get("model", ckpt), strict=False)
+        model_raw.load_state_dict(ckpt.get("model", ckpt), strict=False)
+        if bool(int(args.use_ema)) and ema_model is not None and isinstance(ckpt, dict):
+            ema_state = ckpt.get("model_ema", None)
+            if isinstance(ema_state, dict):
+                ema_model.load_state_dict(ema_state, strict=False)
+            else:
+                ema_model.load_state_dict(model_raw.state_dict(), strict=False)
         if bool(int(args.resume_optimizer)) and ("optimizer" in ckpt):
             optimizer.load_state_dict(ckpt["optimizer"])
         if bool(int(args.resume_optimizer)) and (scheduler is not None) and ("scheduler" in ckpt):
@@ -404,11 +477,17 @@ def main() -> None:
                         print(f"  {name:12s} ({int(tid):2d}): {int(c.get(int(tid), 0))}")
                     print("=" * 56 + "\n")
                     printed_token_sanity = True
-                loss = PatchTransformerNepa.nepa_loss(out.z, out.z_hat, out.type_id)
+                loss_terms = [
+                    PatchTransformerNepa.nepa_loss(out.z, out.z_hat, out.type_id, skip_k=int(k))
+                    for k in skip_k_list
+                ]
+                loss = torch.stack(loss_terms).mean()
                 accelerator.backward(loss)
                 if float(args.max_grad_norm) > 0:
                     accelerator.clip_grad_norm_(model.parameters(), float(args.max_grad_norm))
                 optimizer.step()
+                if bool(int(args.use_ema)) and ema_model is not None:
+                    _update_ema(ema_model, model_raw, float(args.ema_decay))
                 optimizer.zero_grad(set_to_none=True)
 
             if accelerator.is_main_process and (global_step % 50 == 0):
@@ -425,7 +504,8 @@ def main() -> None:
         if accelerator.is_main_process and ((epoch + 1) % int(args.save_every) == 0):
             save_ckpt(
                 save_root / f"ckpt_epoch_{epoch:04d}.pt",
-                accelerator.unwrap_model(model),
+                model_raw,
+                ema_model,
                 optimizer,
                 scheduler,
                 epoch,
@@ -434,7 +514,8 @@ def main() -> None:
             )
             save_ckpt(
                 save_root / "ckpt_latest.pt",
-                accelerator.unwrap_model(model),
+                model_raw,
+                ema_model,
                 optimizer,
                 scheduler,
                 epoch,

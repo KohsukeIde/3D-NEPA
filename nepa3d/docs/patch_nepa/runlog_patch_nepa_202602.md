@@ -1157,3 +1157,627 @@ Interpretation:
 - Main open item before final conclusion:
   - wait for `pb_t50_rs` completion for `100259/100262/100265`,
   - then lock best FT mode (`qa_zeroa` vs `q_only+mean_q`) per pretrain branch for next ablation stage.
+
+## 25. PatchNEPA FT recipe alignment trial (last_q + LLRD + patch_embed freeze) (2026-03-01)
+
+Purpose:
+- apply the three high-priority FT-side changes together on direct PatchNEPA finetune:
+  1) classification anchor token: `last_q`
+  2) layer-wise LR decay: `llrd_start=0.35`, `llrd_end=1.0`
+  3) freeze patch embedding: `patchnepa_freeze_patch_embed=1`
+
+Code/script changes applied:
+- `nepa3d/models/patch_nepa.py`
+  - `PatchTransformerNepaClassifier`: added `cls_token_source={bos,last_q,eos}` (default `last_q`)
+- `nepa3d/train/finetune_patch_cls.py`
+  - added args: `patchnepa_cls_token_source`, `patchnepa_freeze_patch_embed`, `llrd_start`, `llrd_end`
+  - implemented PatchNEPA-only optimizer param-group build with depth-wise LR scaling (LLRD)
+  - patch_embed freeze gate for direct PatchNEPA FT
+- `scripts/finetune/patchcls_scanobjectnn_scratch.sh`
+  - pass-through env/args for the new PatchNEPA FT controls
+- `scripts/finetune/patchnepa_scanobjectnn_finetune.sh`
+  - defaulted PatchNEPA direct-FT to `POOLING=cls`, `HEAD_MODE=linear`, `PATCHNEPA_CLS_TOKEN_SOURCE=last_q`,
+    `PATCHNEPA_FREEZE_PATCH_EMBED=1`, `LLRD_START=0.35`, `LLRD_END=1.0`
+- `scripts/sanity/submit_patchnepa_finetune_variants_qf.sh`
+  - aligned submit defaults to PatchNEPA recipe (`POOLING=cls`, `HEAD_MODE=linear`) and wired new env vars
+
+Submission strategy:
+- scoped first to `obj_only` only (fast signal before full 3-variant rollout)
+
+Submitted jobs:
+1. encdec1 source pretrain (`100180` ckpt)
+- job: `100314.qjcm`
+- run_set: `patchnepaFT_objonly_encdec1_lastq_llrd_20260301_154822`
+- variant: `obj_only`
+- ckpt: `runs/patchnepa_rayqa/patchnepa_ray_splitx2_encdec1_20260301_035212/ckpt_latest.pt`
+
+2. dualmask source pretrain (`100181` ckpt)
+- job: `100315.qjcm`
+- run_set: `patchnepaFT_objonly_dualmask_lastq_llrd_20260301_154828`
+- variant: `obj_only`
+- ckpt: `runs/patchnepa_rayqa/patchnepa_ray_splitx2_dualmask_20260301_035220/ckpt_latest.pt`
+
+Result policy for this trial:
+- if either run improves over prior `obj_only` direct-FT baseline, expand same recipe to `obj_bg` and `pb_t50_rs`
+- if both are flat/down, keep recipe fixed and isolate one factor at a time (token source vs freeze vs LLRD)
+
+## 26. q_only rerun completion (`100259/100262/100265`) (2026-03-01)
+
+Completion status:
+- `100259.qjcm` (`encdec1 q_only cls_max`) -> `Exit_status=0`
+- `100262.qjcm` (`dualmask q_only cls_max`) -> `Exit_status=0`
+- `100265.qjcm` (`dualmask q_only mean_q`) -> `Exit_status=0`
+
+`pb_t50_rs` TEST results:
+- encdec1 `q_only + cls_max` (`100259`): `TEST acc=0.7533`
+- dualmask `q_only + cls_max` (`100262`): `TEST acc=0.7512`
+- dualmask `q_only + mean_q` (`100265`): `TEST acc=0.7488`
+
+Source logs:
+- `logs/sanity/patchnepa_ft/patchnepaFT_rerun_encdec1_qonly_fix_20260301_133155/pb_t50_rs.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_rerun_dualmask_qonly_fix_20260301_133157/pb_t50_rs.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_rerun_dualmask_qonly_meanq_fix_20260301_133200/pb_t50_rs.out`
+
+Mean-q note (dualmask branch):
+- `obj_bg`: `0.7986`
+- `obj_only`: `0.8090`
+- `pb_t50_rs`: `0.7488`
+- In this completed rerun, `mean_q` improved over `cls_max` on `obj_bg/obj_only` but not on `pb_t50_rs`.
+
+## 27. FT recipe alignment trial results (`100314/100315`) (2026-03-01)
+
+Jobs:
+- `100314.qjcm` (encdec1 source ckpt) -> `Exit_status=0`
+- `100315.qjcm` (dualmask source ckpt) -> `Exit_status=0`
+
+Recipe (both):
+- `model_source=patchnepa(direct)`
+- `pooling=cls`, `patchnepa_ft_mode=qa_zeroa`
+- `cls_token=last_q`
+- `head_mode=linear`
+- `patchnepa_freeze_patch_embed=1`
+- `llrd=(0.35->1.00)`
+
+Result (`obj_only`):
+- `100314` (encdec1): `TEST acc=0.7711`
+- `100315` (dualmask): `TEST acc=0.7676`
+
+Source logs:
+- `logs/sanity/patchnepa_ft/patchnepaFT_objonly_encdec1_lastq_llrd_20260301_154822/obj_only.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_objonly_dualmask_lastq_llrd_20260301_154828/obj_only.out`
+
+Observation:
+- In this first aligned-trial (`obj_only` only), both runs underperform prior best direct-FT obj_only numbers.
+- Next step should isolate factors one-by-one (keep `last_q`, then toggle `freeze_patch_embed`, then toggle `LLRD`).
+
+## 28. FT scheduler parity update (2D-style LLRD cosine warmup) (2026-03-01)
+
+Implemented:
+- 3D PatchNEPA finetune now supports 2D-style LLRD schedulers in addition to legacy static LLRD.
+  - new arg: `--llrd_scheduler {static,llrd_cosine,llrd_cosine_warmup}`
+  - file: `nepa3d/train/finetune_patch_cls.py`
+- For `model_source=patchnepa` and `llrd_scheduler=llrd_cosine*`:
+  - optimizer groups carry `llrd` and `llrd_scale`
+  - step-wise scheduler is used (`schedulers.get_llrd_cosine_schedule*`)
+  - warmup is converted from epoch units to step units (`warmup_epochs * steps_per_epoch`)
+- Legacy behavior kept:
+  - `llrd_scheduler=static` keeps per-layer LR fixed and applies epoch-wise warmup+cosine.
+
+Launcher defaults updated:
+- `scripts/finetune/patchcls_scanobjectnn_scratch.sh`
+  - pass-through env `LLRD_SCHEDULER` (default `static`)
+- `scripts/finetune/patchnepa_scanobjectnn_finetune.sh`
+  - default `LLRD_SCHEDULER=llrd_cosine_warmup`
+- `scripts/sanity/submit_patchnepa_finetune_variants_qf.sh`
+  - default `LLRD_SCHEDULER=llrd_cosine_warmup`
+  - forwards `PATCHNEPA_CLS_TOKEN_SOURCE`, `PATCHNEPA_FREEZE_PATCH_EMBED`, `LLRD_START/END`, `LLRD_SCHEDULER`
+
+Risk note:
+- Values can look different from legacy runs because scheduler stepping changes from epoch-wise to step-wise.
+- This is expected; compare only within matched scheduler mode.
+
+Planned ablation axes (direct PatchNEPA FT):
+1. `llrd_scheduler`: `static` vs `llrd_cosine_warmup`
+2. `patchnepa_cls_token_source`: `last_q` vs `bos` (optional `eos`)
+3. `patchnepa_freeze_patch_embed`: `1` vs `0`
+
+## 29. obj_only one-factor ablation launch (`llrd` / `cls_token` / `freeze`) (2026-03-01)
+
+Purpose:
+- quantify contribution of each FT-side factor on the same source ckpt.
+
+Common setup:
+- source ckpt:
+  - `runs/patchnepa_rayqa/patchnepa_ray_splitx2_dualmask_20260301_035220/ckpt_latest.pt`
+- variant: `obj_only`
+- direct PatchNEPA FT (`model_source=patchnepa`)
+- strict eval: `val_split_mode=file`, `aug_eval=1`, `mc_test=10`
+
+Submitted jobs:
+1. baseline (new parity recipe)
+- job: `100322.qjcm`
+- run_set: `patchnepaFT_ablate_objonly_base_llrdcw_lastq_freeze1_20260301_170200`
+- overrides:
+  - `LLRD_SCHEDULER=llrd_cosine_warmup`
+  - `PATCHNEPA_CLS_TOKEN_SOURCE=last_q`
+  - `PATCHNEPA_FREEZE_PATCH_EMBED=1`
+
+2. LLRD scheduler ablation (legacy static)
+- job: `100324.qjcm`
+- run_set: `patchnepaFT_ablate_objonly_static_lastq_freeze1_20260301_170205`
+- overrides:
+  - `LLRD_SCHEDULER=static`
+  - `PATCHNEPA_CLS_TOKEN_SOURCE=last_q`
+  - `PATCHNEPA_FREEZE_PATCH_EMBED=1`
+
+3. cls token ablation (`bos`)
+- job: `100321.qjcm`
+- run_set: `patchnepaFT_ablate_objonly_llrdcw_bos_freeze1_20260301_170210`
+- overrides:
+  - `LLRD_SCHEDULER=llrd_cosine_warmup`
+  - `PATCHNEPA_CLS_TOKEN_SOURCE=bos`
+  - `PATCHNEPA_FREEZE_PATCH_EMBED=1`
+
+4. freeze ablation (`patch_embed` unfrozen)
+- job: `100323.qjcm`
+- run_set: `patchnepaFT_ablate_objonly_llrdcw_lastq_freeze0_20260301_170215`
+- overrides:
+  - `LLRD_SCHEDULER=llrd_cosine_warmup`
+  - `PATCHNEPA_CLS_TOKEN_SOURCE=last_q`
+  - `PATCHNEPA_FREEZE_PATCH_EMBED=0`
+
+Status at submit-time:
+- `100321/100322/100323/100324` all entered `R` state.
+
+Reference note (historical):
+- in prior `q_only` branch, `mean_q` was strongest on `obj_only` (0.8090),
+  but not uniformly best on all variants (`pb_t50_rs` was lower than `cls_max`).
+
+## 30. Stage-2 sanity ablation launch (short pretrain -> short FT) (2026-03-01)
+
+Question:
+- can current result table isolate which QueryNEPA controls are effective in PatchNEPA?
+
+Answer:
+- not fully. Existing results are still partially confounded (layout/mask/type-pos/ray differ across runs).
+- to resolve this, a one-factor-at-a-time sanity matrix was launched.
+
+Protocol (lightweight):
+- pretrain: short run (`epochs=12`, 16GPU)
+- finetune: short direct PatchNEPA FT (`obj_only`, `epochs=120`)
+- fixed FT recipe across all cases:
+  - `model_source=patchnepa`, `pooling=cls`, `head_mode=linear`
+  - `cls_token=last_q`, `freeze_patch_embed=1`
+  - `llrd=(0.35->1.0)`, `llrd_scheduler=llrd_cosine_warmup`
+
+Matrix (baseline + 5 controls):
+1. baseline
+- `split_sep`, `dual_mask on`, `type_aware=1`, `type_specific_pos=0`, `use_ray_patch=1`
+- pretrain: `100347`, FT(dep): `100348`
+
+2. layout ablation
+- `interleave` (others baseline)
+- pretrain: `100349`, FT(dep): `100350`
+
+3. dual_mask ablation
+- `dual_mask off` (`near=0, far=0, type_aware=0`)
+- pretrain: `100351`, FT(dep): `100352`
+
+4. dual_mask_type_aware ablation
+- `type_aware=0` (near/far keep baseline)
+- pretrain: `100353`, FT(dep): `100354`
+
+5. type_specific_pos ablation
+- `type_specific_pos=1` (others baseline)
+- pretrain: `100355`, FT(dep): `100356`
+
+6. ray usage ablation
+- `use_ray_patch=0`, `n_ray=0` (others baseline)
+- pretrain: `100357`, FT(dep): `100358`
+
+Queue state at launch:
+- pretrain `100347/100349/100351/100353/100355/100357`: `R`
+- dependent FT `100348/100350/100352/100354/100356/100358`: `H` (afterok dependency)
+
+Tracking file:
+- `logs/sanity/patchnepa_stage2_sanity/patchnepa_stage2_sanity_20260301_162213/submitted_jobs.tsv`
+
+## 31. Full-factorial Stage-2 sanity matrix (32 conditions) launched (2026-03-01)
+
+User decision:
+- run full 2^5 matrix (32 conditions), including the logically redundant branch
+  (`dual_mask=off` with `type_aware=1`) to verify "effectively no-op" empirically.
+
+Action:
+- previous 6-case sanity set (`100347`~`100358`) was cancelled to avoid resource duplication.
+- new full-factorial launcher added:
+  - `scripts/sanity/submit_patchnepa_stage2_sanity_full32_qf.sh`
+
+Factors (binary):
+1. `layout`: `split_sep` / `interleave`
+2. `dual_mask`: on/off (`near=0.5, far=0.1` vs `0,0`)
+3. `dual_mask_type_aware`: 1/0
+4. `type_specific_pos`: 1/0
+5. `use_ray_patch`: 1/0 (`n_ray=1024` vs `0`)
+
+Protocol:
+- pretrain: short (`epochs=12`, 16GPU), one-pass mix
+- finetune: short direct PatchNEPA FT (`obj_only`, `epochs=120`), `afterok` dependency
+- fixed FT controls across all 32 conditions:
+  - `pooling=cls`, `head_mode=linear`, `cls_token=last_q`
+  - `freeze_patch_embed=1`
+  - `llrd=(0.35->1.0)`, `llrd_scheduler=llrd_cosine_warmup`
+
+Run root:
+- `patchnepa_stage2_sanity32_20260301_162811`
+
+Submitted jobs:
+- pretrain: `100359` ~ `100421` (odd IDs)
+- dependent FT: `100360` ~ `100422` (even IDs)
+- queue snapshot at launch:
+  - all pretrain jobs: `R`
+  - all dependent FT jobs: `H` (`afterok`)
+
+Tracking tables:
+- master TSV:
+  - `logs/sanity/patchnepa_stage2_sanity/patchnepa_stage2_sanity32_20260301_162811/submitted_jobs.tsv`
+- per-case submit logs:
+  - `logs/sanity/patchnepa_stage2_sanity/patchnepa_stage2_sanity32_20260301_162811/*.pretrain.submit.log`
+  - `logs/sanity/patchnepa_stage2_sanity/patchnepa_stage2_sanity32_20260301_162811/*.ft.submit.log`
+
+## 32. Current best combo snapshot + E300 rerun launch (2026-03-01)
+
+Current best (direct PatchNEPA FT, from completed runs):
+- metric: `obj_only TEST acc=0.8193`
+- log:
+  - `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_baseline_20260301_040740/obj_only.out`
+- FT recipe snapshot (from log header):
+  - `model_source=patchnepa(direct)`
+  - `pooling=cls_max`
+  - `patchnepa_ft_mode=qa_zeroa`
+  - `head_mode=pointmae_mlp`
+  - `is_causal=0`
+  - `use_ray_patch=1`, `n_ray=1024`
+- source ckpt used by that FT:
+  - `runs/patchnepa_rayqa/patchnepa_ray_splitx2_dualmask_20260301_035220/ckpt_latest.pt`
+
+Note:
+- absolute top over all historical logs includes non-mainline adapter path (`patchcls`) and is excluded from direct PatchNEPA mainline claim.
+
+Requested rerun:
+- run same split+dualmask ray pretrain recipe with `pretrain epochs=300`, then FT (`obj_only`, 300 epochs).
+
+Submitted:
+1. pretrain E300
+- `100424.qjcm`
+- run_set: `patchnepa_ray_splitx2_dualmask_E300_20260301_170800`
+- key config:
+  - `qa_layout=split_sep`, `encdec_arch=0`
+  - `dual_mask=(0.5,0.1,type_aware=1)`
+  - `use_ray_patch=1`, `n_ray=1024`
+  - `pt_sample_mode=rfps_cached`, `pt_rfps_key=pt_rfps_order_bank`
+  - `epochs=300`
+
+2. dependent FT (obj_only)
+- `100425.qjcm` (`afterok:100424`)
+- run_set: `patchnepaFT_objonly_fromE300_dualmask_splitsep_20260301_170815`
+- explicit FT controls (old-best approximation):
+  - `pooling=cls_max`
+  - `head_mode=pointmae_mlp`
+  - `patchnepa_ft_mode=qa_zeroa`
+  - `patchnepa_cls_token_source=bos`
+  - `patchnepa_freeze_patch_embed=0`
+  - `llrd_scheduler=static`, `llrd_start=1.0`, `llrd_end=1.0`
+
+Additional dependent FT submissions (same controls as `100425`):
+- `100426.qjcm` (`afterok:100424`) `variant=obj_bg`
+- `100427.qjcm` (`afterok:100424`) `variant=pb_t50_rs`
+- run_set:
+  - `patchnepaFT_bgpb_fromE300_dualmask_splitsep_20260301_163523`
+
+## 33. B-width direct PatchNEPA probe launch (2026-03-01)
+
+Goal:
+- keep direct PatchNEPA path and run a single B-width probe:
+  - `d_model=768`, `n_layers=12`, `n_heads=12`
+- verify if width expansion improves transfer before broader rollout.
+
+Submitted:
+1. pretrain (Ray split+dualmask, B-width)
+- `100430.qjcm` (`patchnepa_ryB768`)
+- run_set: `patchnepa_ray_splitx2_dualmask_B768_probe_20260301_165314`
+- key config:
+  - `D_MODEL=768`, `N_LAYERS=12`, `N_HEADS=12`, `MLP_RATIO=4.0`
+  - `qa_layout=split_sep`, `encdec_arch=0`
+  - `dual_mask=(0.5,0.1,w=32,type_aware=1)`
+  - `use_ray_patch=1`, `n_ray=1024`
+  - `pt_sample_mode=rfps_cached`, `pt_rfps_key=pt_rfps_order_bank`
+
+2. dependent FT (obj_only, direct PatchNEPA)
+- `100431.qjcm` (`afterok:100430`)
+- run_set: `patchnepaFT_objonly_fromB768_probe_20260301_165321`
+- FT controls (aligned to current best direct recipe):
+  - `pooling=cls_max`, `head_mode=pointmae_mlp`
+  - `patchnepa_ft_mode=qa_zeroa`, `cls_token_source=bos`
+  - `patchnepa_freeze_patch_embed=0`
+  - `llrd_scheduler=static`, `llrd_start=1.0`, `llrd_end=1.0`
+  - `val_split_mode=file`, `aug_eval=1`, `mc_test=10`
+
+Implementation note:
+- `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh` now forwards
+  `D_MODEL/N_LAYERS/N_HEADS/MLP_RATIO` through `qsub -v`, so width/depth overrides
+  are reliably propagated to multinode jobs.
+
+## 34. B-width E300 launch (direct PatchNEPA, 2026-03-01)
+
+Rationale:
+- model width can materially change transfer quality in Stage-2; do not block on prior E300 result.
+- launch B-width (`768/12/12`) at full pretrain horizon (`300 epochs`) as a direct comparand.
+
+Submitted:
+1. pretrain (Ray split+dualmask, B-width, E300)
+- `100432.qjcm` (`patchnepa_ryB8E300`)
+- run_set: `patchnepa_ray_splitx2_dualmask_B768_E300_20260301_165452`
+- key config:
+  - `D_MODEL=768`, `N_LAYERS=12`, `N_HEADS=12`, `MLP_RATIO=4.0`
+  - `EPOCHS=300`
+  - `qa_layout=split_sep`, `encdec_arch=0`
+  - `dual_mask=(0.5,0.1,w=32,type_aware=1)`
+  - `use_ray_patch=1`, `n_ray=1024`
+  - `pt_sample_mode=rfps_cached`, `pt_rfps_key=pt_rfps_order_bank`
+
+2. dependent FT (obj_only, direct PatchNEPA)
+- `100433.qjcm` (`afterok:100432`)
+- run_set: `patchnepaFT_objonly_fromB768_E300_20260301_165504`
+- FT controls (kept consistent with current best direct baseline):
+  - `pooling=cls_max`, `head_mode=pointmae_mlp`
+  - `patchnepa_ft_mode=qa_zeroa`, `cls_token_source=bos`
+  - `patchnepa_freeze_patch_embed=0`
+  - `llrd_scheduler=static`, `llrd_start=1.0`, `llrd_end=1.0`
+  - `val_split_mode=file`, `aug_eval=1`, `mc_test=10`
+
+Operational note:
+- `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh` now forwards
+  `D_MODEL/N_LAYERS/N_HEADS/MLP_RATIO` through `qsub -v` to avoid silent fallback
+  to default `384/12/6` in multinode jobs.
+
+## 35. EMA implementation + raw vs ema A/B launch (2026-03-01)
+
+Implementation (2D-NEPA style adaptation):
+- pretrain now supports EMA model tracking and checkpoint save/load:
+  - `nepa3d/train/pretrain_patch_nepa.py`
+  - args: `--use_ema`, `--ema_decay`
+  - checkpoint payload includes `model_ema` when enabled
+- launcher plumbing added:
+  - `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh`
+  - `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh`
+  - envs: `USE_EMA`, `EMA_DECAY`
+- finetune now supports selecting EMA weights from pretrain ckpt:
+  - `nepa3d/train/finetune_patch_cls.py`
+  - arg: `--ckpt_use_ema` (0: `model`, 1: `model_ema`)
+- finetune launcher plumbing:
+  - `scripts/finetune/patchcls_scanobjectnn_scratch.sh`
+  - `scripts/sanity/submit_patchnepa_finetune_variants_qf.sh`
+  - env: `CKPT_USE_EMA`
+
+A/B protocol (same pretrain settings, same FT recipe; only ckpt source differs):
+- source pretrain recipe aligned to existing B-width probe (`768/12/12`, split+dualmask+ray, 100 epochs)
+
+Submitted:
+1. pretrain with EMA enabled
+- `100434.qjcm` (`patchnepa_ryB8EMA`)
+- run_set: `patchnepa_ray_splitx2_dualmask_B768_EMA100_20260301_170241`
+- key delta vs baseline probe:
+  - `USE_EMA=1`, `EMA_DECAY=0.9999`
+
+2. dependent FT from same ckpt (raw path)
+- `100435.qjcm` (`afterok:100434`)
+- run_set: `patchnepaFT_objonly_fromEMA100_raw_20260301_170323`
+- `CKPT_USE_EMA=0`
+
+3. dependent FT from same ckpt (ema path)
+- `100436.qjcm` (`afterok:100434`)
+- run_set: `patchnepaFT_objonly_fromEMA100_ema_20260301_170323`
+- `CKPT_USE_EMA=1`
+
+FT controls kept identical between 100435 and 100436:
+- `model_source=patchnepa`
+- `pooling=cls_max`, `head_mode=pointmae_mlp`
+- `patchnepa_ft_mode=qa_zeroa`, `cls_token_source=bos`
+- `patchnepa_freeze_patch_embed=0`
+- `llrd_scheduler=static`, `llrd_start=1.0`, `llrd_end=1.0`
+- strict eval: `val_split_mode=file`, `aug_eval=1`, `mc_test=10`
+
+## 36. Stage-2 sanity32 results snapshot (for factor discussion) (2026-03-01)
+
+Target question:
+- whether QueryNEPA controls reproduce in PatchNEPA:
+  - `split_sep vs interleave`
+  - `dual_mask on/off`
+  - `dual_mask_type_aware on/off`
+  - `type_specific_pos on/off`
+  - `use_ray_patch on/off`
+
+Case code mapping (`patchnepa_stage2_sanity32_20260301_162811`):
+- `lS/lI`: `layout=split_sep/interleave`
+- `d1/d0`: `dual_mask on/off`
+- `ta1/ta0`: `dual_mask_type_aware on/off`
+- `tp1/tp0`: `type_specific_pos on/off`
+- `r1/r0`: `use_ray_patch on/off`
+
+### 36.1 Completed FT results (valid: split branch)
+
+All `lS_*` FT jobs (`100360`~`100390`, even IDs) finished with `Exit_status=0`.
+`obj_only TEST acc`:
+
+| FT job | case | TEST acc |
+|---|---|---:|
+| `100360` | `lS_d1_ta1_tp0_r1` | `0.5095` |
+| `100362` | `lS_d1_ta1_tp0_r0` | `0.4699` |
+| `100364` | `lS_d1_ta1_tp1_r1` | `0.3941` |
+| `100366` | `lS_d1_ta1_tp1_r0` | `0.5594` |
+| `100368` | `lS_d1_ta0_tp0_r1` | `0.3993` |
+| `100370` | `lS_d1_ta0_tp0_r0` | `0.5938` |
+| `100372` | `lS_d1_ta0_tp1_r1` | `0.4355` |
+| `100374` | `lS_d1_ta0_tp1_r0` | `0.3838` |
+| `100376` | `lS_d0_ta1_tp0_r1` | `0.3769` |
+| `100378` | `lS_d0_ta1_tp0_r0` | `0.5525` |
+| `100380` | `lS_d0_ta1_tp1_r1` | `0.4406` |
+| `100382` | `lS_d0_ta1_tp1_r0` | `0.5594` |
+| `100384` | `lS_d0_ta0_tp0_r1` | `0.3769` |
+| `100386` | `lS_d0_ta0_tp0_r0` | `0.5525` |
+| `100388` | `lS_d0_ta0_tp1_r1` | `0.4406` |
+| `100390` | `lS_d0_ta0_tp1_r0` | `0.5594` |
+
+### 36.2 Interleave branch status (invalid for comparison)
+
+`lI_*` FT jobs (`100392`~`100422`, even IDs) are all `Exit_status=1` with no `TEST acc`.
+Direct cause from FT logs:
+- missing ckpt at expected path:
+  - `runs/patchnepa_rayqa/patchnepa_stage2_sanity32_20260301_162811_lI_.../ckpt_latest.pt`
+
+Root cause in corresponding `lI_*` pretrain logs:
+- DDP reduction error (`Expected to have finished reduction... parameters that were not used`)
+- therefore pretrain failed before checkpoint write, while outer job state still ended as `F/0`.
+
+Representative logs:
+- pretrain fail example:
+  - `logs/patch_nepa_pretrain/patchnepa_stage2_sanity32_20260301_162811_lI_d1_ta1_tp0_r1/run_patchnepa_stage2_sanity32_20260301_162811_lI_d1_ta1_tp0_r1.mr0.log`
+- dependent FT fail example:
+  - `logs/sanity/patchnepa_ft/patchnepa_stage2_sanity32_20260301_162811_ft_lI_d1_ta1_tp0_r1/obj_only.err`
+
+### 36.3 Factor-wise provisional effect (split-only subset)
+
+Since `interleave` is currently invalid, the following are **split-only provisional deltas**.
+
+Paired delta (`1 - 0`) over matched conditions (8 pairs each):
+- `dual_mask`: `-0.0142`
+- `dual_mask_type_aware`: `+0.0151`
+- `type_specific_pos`: `-0.0073`
+- `use_ray_patch`: `-0.1072`
+
+Interpretation at this stage:
+- only `split_sep` branch is analyzable right now.
+- strongest observed effect in this short-protocol subset is negative shift from `ray on`.
+- no claim on `split_sep vs interleave` yet, because `interleave` branch is currently invalid due to pretrain failure.
+
+Required next step for the originally intended QueryNEPA-style discussion:
+- rerun `lI_*` branch after DDP unused-parameter issue is fixed in pretrain path, then compare `split_sep vs interleave` on the same short protocol.
+
+## 37. Interleave pretrain DDP fix + skip-k launch (2026-03-01)
+
+Interleave failure reason (root cause):
+- `qa_layout=interleave` with `qa_sep_token=0` does not consume `sep_token` in forward path.
+- DDP (find_unused_parameters=off) reported unused parameter index `2` (matched `sep_token`) and aborted pretrain.
+- downstream FT then failed with missing checkpoint (`ckpt_latest.pt` absent).
+
+Fix applied:
+- file: `nepa3d/models/patch_nepa.py`
+- change: always connect `sep_token` to graph with a no-op before embedding add:
+  - `tokens = tokens + (self.sep_token.sum() * 0.0)`
+- effect: avoids layout-dependent unused-parameter reduction failure while keeping numerics unchanged.
+
+Additional launch controls for skip-k:
+- files:
+  - `nepa3d/train/pretrain_patch_nepa.py`
+  - `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh`
+  - `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh`
+- added args/env:
+  - `nepa_skip_k`, `nepa_multi_k`
+  - policy switch: `SKIPK_DISABLE_DUAL_MASK=1` (if skip-k active, force dual-mask off)
+
+Submitted jobs:
+1. skip-k mainline probe (k=4, dual-mask off by policy)
+- pretrain: `100437.qjcm` (`patchnepa_rySK4`)
+- run_set: `patchnepa_ray_skipk4_20260301_173024`
+- dependent FT (`obj_only`): `100438.qjcm` (`afterok:100437`)
+- FT run_set: `patchnepaFT_objonly_from_skipk4_20260301_173024`
+
+2. interleave fix verification run (short sanity)
+- pretrain: `100439.qjcm` (`pnpa_lI_fix`)
+- run_set: `patchnepa_stage2_interleave_fix_20260301_173036`
+- config: `qa_layout=interleave`, `qa_sep_token=0`, ray on, short pretrain (`epochs=12`)
+- dependent FT (`obj_only`): `100440.qjcm` (`afterok:100439`)
+- FT run_set: `patchnepaFT_objonly_interleave_fix_20260301_173036`
+
+Current status at submit snapshot:
+- running: `100437`, `100439`
+- hold (dependency): `100438`, `100440`
+
+## 38. Policy correction: global_batch=128 fixed + SEP policy lock (2026-03-01)
+
+User correction applied:
+- Stage-2 pretrain must keep `effective_global_batch=128` fixed for comparability.
+- `QA_SEP_TOKEN=0` is treated as invalid policy drift; Stage-2 now enforces `QA_SEP_TOKEN=1`.
+
+Code/script updates:
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh`
+  - default `BATCH=8` (16 GPU => global 128)
+  - strict checks:
+    - reject `QA_SEP_TOKEN!=1`
+    - reject `effective_global_batch!=128` when `STAGE2_REQUIRE_GLOBAL_BATCH128=1`
+- `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh`
+  - default `BATCH=8`
+  - strict checks:
+    - reject `QA_SEP_TOKEN!=1`
+    - reject `BATCH*NPROC_PER_NODE*RT_QF != 128` when `STAGE2_REQUIRE_GLOBAL_BATCH128=1`
+- `scripts/sanity/submit_patchnepa_stage2_sanity_ablation_qf.sh`
+  - interleave case changed to `QA_SEP_TOKEN=1`
+
+Job handling:
+- previous probes (`100437`, `100439`) are excluded from strict comparison due policy drift (`global_batch=256` / `QA_SEP_TOKEN=0` in interleave probe).
+- replacement submissions (policy-compliant):
+  - pretrain skip-k: `100443.qjcm` (`patchnepa_rySK4g`), `BATCH=8`
+  - dependent FT: `100444.qjcm` (`obj_only`, `afterok:100443`)
+  - pretrain interleave sanity: `100445.qjcm` (`pnpa_lI_fixg`), `QA_LAYOUT=interleave`, `QA_SEP_TOKEN=1`, `BATCH=8`
+  - dependent FT: `100446.qjcm` (`obj_only`, `afterok:100445`)
+
+## 39. Unlogged finished jobs found by audit (2026-03-01)
+
+Audit scope:
+- recent range check around Stage-2 sanity32 and skip-k/interleave probes.
+
+Found finished jobs that were not explicitly listed before:
+1. `100421.qjcm` (`pnpa32_lI_d0_ta0_tp1_r0`)
+- status: `F`, `Exit_status=0`, walltime `00:00:39`
+- effective config included `QA_LAYOUT=interleave`, `QA_SEP_TOKEN=0`.
+- log shows DDP unused-parameter crash (`Parameter indices ...: 2`, i.e. `sep_token` path not used).
+- result validity: **invalid pretrain** (no usable checkpoint for strict comparison).
+
+2. `100420.qjcm` (`pn_obj_only`) [dependent on `100419`]
+- status: `F`, `Exit_status=1`, walltime `00:00:16`
+- output log only contains launcher header; no train/eval loop, no `TEST acc`.
+- result validity: **invalid FT**.
+
+3. `100422.qjcm` (`pn_obj_only`) [dependent on `100421`]
+- status: `F`, `Exit_status=1`, walltime `00:00:16`
+- output log only contains launcher header; no train/eval loop, no `TEST acc`.
+- result validity: **invalid FT**.
+
+Conclusion:
+- no additional valid `TEST acc` records were discovered from these unlogged finished jobs.
+- they are failure artifacts from the old `interleave + QA_SEP_TOKEN=0` branch and are excluded from analysis.
+
+## 40. Multi-k comparison run added (2026-03-01)
+
+Request:
+- add `multi-k` as direct comparison target against current `single-k (k=4)` run.
+
+Technical note:
+- `qsub -v` cannot pass comma-containing env values safely in this launcher path.
+- parser was updated to accept multiple separators for `nepa_multi_k`:
+  - file: `nepa3d/train/pretrain_patch_nepa.py`
+  - `_parse_skip_k_list` now splits by regex `[\s,;:+|]+`
+- submission uses `NEPA_MULTI_K=1+2+4` (equivalent to `{1,2,4}`).
+
+Submitted jobs (policy-compliant: `global_batch=128`, `QA_SEP_TOKEN=1`):
+- pretrain: `100451.qjcm` (`patchnepa_ryMK124`)
+  - run_set: `patchnepa_ray_multik124_gb128_20260301_174748`
+  - key: `NEPA_SKIP_K=1`, `NEPA_MULTI_K=1+2+4`, `SKIPK_DISABLE_DUAL_MASK=1`
+  - `BATCH=8`, `16GPU` => `global_batch=128`
+- dependent FT (`obj_only`): `100452.qjcm` (`afterok:100451`)
+  - run_set: `patchnepaFT_objonly_from_multik124_gb128_20260301_174748`
+
+Comparator pair now:
+- single-k: `100443` (`k=4`, dual-mask off by policy)
+- multi-k: `100451` (`k in {1,2,4}`, dual-mask off by policy)

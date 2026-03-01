@@ -15,5 +15,14 @@ export VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}"
 export AUG_EVAL="${AUG_EVAL:-1}"
 export MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-10}"
 
+# NEPA-paper aligned PatchNEPA direct-FT defaults.
+export POOLING="${POOLING:-cls}"
+export HEAD_MODE="${HEAD_MODE:-linear}"
+export PATCHNEPA_CLS_TOKEN_SOURCE="${PATCHNEPA_CLS_TOKEN_SOURCE:-last_q}"
+export PATCHNEPA_FREEZE_PATCH_EMBED="${PATCHNEPA_FREEZE_PATCH_EMBED:-1}"
+export LLRD_START="${LLRD_START:-0.35}"
+export LLRD_END="${LLRD_END:-1.0}"
+export LLRD_SCHEDULER="${LLRD_SCHEDULER:-llrd_cosine_warmup}"
+
 exec "${ROOT_DIR}/scripts/finetune/patchcls_scanobjectnn_scratch.sh"
 

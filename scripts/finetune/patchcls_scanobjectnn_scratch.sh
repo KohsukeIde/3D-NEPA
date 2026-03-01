@@ -25,6 +25,7 @@ ALLOW_SCAN_UNISCALE_V2="${ALLOW_SCAN_UNISCALE_V2:-0}"
 # Training hyperparams (Point-MAE-ish defaults)
 RUN_NAME="${RUN_NAME:-patchcls_scan_scratch}"
 CKPT="${CKPT:-}"
+CKPT_USE_EMA="${CKPT_USE_EMA:-0}"
 EPOCHS="${EPOCHS:-300}"
 BATCH="${BATCH:-64}"
 LR="${LR:-5e-4}"
@@ -75,6 +76,11 @@ HEAD_DROPOUT="${HEAD_DROPOUT:-0.5}"
 INIT_MODE="${INIT_MODE:-default}"  # default | pointmae
 IS_CAUSAL="${IS_CAUSAL:-0}"  # 0 | 1
 PATCHNEPA_FT_MODE="${PATCHNEPA_FT_MODE:-qa_zeroa}"  # qa_zeroa | q_only
+PATCHNEPA_CLS_TOKEN_SOURCE="${PATCHNEPA_CLS_TOKEN_SOURCE:-last_q}"  # bos | last_q | eos
+PATCHNEPA_FREEZE_PATCH_EMBED="${PATCHNEPA_FREEZE_PATCH_EMBED:-1}"   # 0 | 1
+LLRD_START="${LLRD_START:-0.35}"
+LLRD_END="${LLRD_END:-1.0}"
+LLRD_SCHEDULER="${LLRD_SCHEDULER:-static}"  # static | llrd_cosine | llrd_cosine_warmup
 AUG_PRESET="${AUG_PRESET:-pointmae}"  # none | default | strong | pointmae
 AUG_EVAL="${AUG_EVAL:-1}"             # 0 | 1 (policy default: 1)
 MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-10}" # policy default: 10
@@ -117,6 +123,7 @@ ARGS=(
   --run_name "${RUN_NAME}"
   --save_dir "${SAVE_DIR}"
   --ckpt "${CKPT}"
+  --ckpt_use_ema "${CKPT_USE_EMA}"
   --epochs "${EPOCHS}"
   --batch "${BATCH}"
   --batch_mode "${BATCH_MODE}"
@@ -168,6 +175,11 @@ ARGS=(
   --init_mode "${INIT_MODE}"
   --is_causal "${IS_CAUSAL}"
   --patchnepa_ft_mode "${PATCHNEPA_FT_MODE}"
+  --patchnepa_cls_token_source "${PATCHNEPA_CLS_TOKEN_SOURCE}"
+  --patchnepa_freeze_patch_embed "${PATCHNEPA_FREEZE_PATCH_EMBED}"
+  --llrd_start "${LLRD_START}"
+  --llrd_end "${LLRD_END}"
+  --llrd_scheduler "${LLRD_SCHEDULER}"
   --num_workers "${NUM_WORKERS}"
 )
 
