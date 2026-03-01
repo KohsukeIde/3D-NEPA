@@ -49,6 +49,18 @@ All rows below are protocol-valid (`val_split_mode=file`, `aug_eval=1`, `mc_test
 | masking style (E100) | encdec1 baseline (`100188/189/190`) | dualmask baseline (`100194/195/196`) | +0.0103 | +0.0293 | +0.0017 | +0.0138 | dualmask wins in this matched E100 pair |
 | pretrain length (ray dualmask) | E100 (`100194/195/196`) | E300 (`100426/425/427`) | +0.0172 | -0.0327 | +0.0201 | +0.0015 | longer pretrain helped `obj_bg/pb_t50_rs`, hurt `obj_only` |
 
+### 3.1 Serialization (`serial` / `serial_ztrans`) delta summary
+
+These are `PatchCls scratch`-side comparisons for `pb_t50_rs` only (not direct PatchNEPA FT).
+
+| factor | A | B | delta_pb_t50_rs | interpretation |
+|---|---|---|---:|---|
+| serialization vs fps_knn (main scratch baseline) | `pb_t50_rs` scratch fps_knn (`0.7609`, `patchcls_scan3_scratch_pmalign_20260227_202814`) | `pb_t50_rs_serial` (`0.6541`, `patchcls_pb_t50_rs_serial_fix1_20260228_052424`) | `-0.1068` | large drop vs main scratch baseline |
+| serialization(ztrans) vs fps_knn (main scratch baseline) | `pb_t50_rs` scratch fps_knn (`0.7609`) | `pb_t50_rs_serial_ztrans` (`0.6489`, `patchcls_pb_t50_rs_serial_ztrans_20260228_053913`) | `-0.1120` | slightly worse than serial(morton) |
+| serialization vs fair-fps16 (same runset control) | `pc_pb_t50_fair_fps16` (`0.6662`, `patchcls_pb_t50_rs_fair_g64s16_file_20260228_064306`) | `pc_pb_t50_fair_ser_m` (`0.6541`) | `-0.0121` | drop remains under fair g64s16 control |
+| serialization(ztrans) vs fair-fps16 (same runset control) | `pc_pb_t50_fair_fps16` (`0.6662`) | `pc_pb_t50_fair_ser_zt` (`0.6489`) | `-0.0173` | ztrans also below fair-fps16 |
+
+
 ## 4. Validity Rules for This Table
 
 - Include only runs with:

@@ -27,6 +27,9 @@ LR="${LR:-3e-4}"
 SEED="${SEED:-0}"
 USE_EMA="${USE_EMA:-0}"
 EMA_DECAY="${EMA_DECAY:-0.9999}"
+DIAG_COPY="${DIAG_COPY:-1}"
+DIAG_EVERY="${DIAG_EVERY:-100}"
+DIAG_K="${DIAG_K:-1}"
 
 PATCH_EMBED="${PATCH_EMBED:-fps_knn}"
 GROUP_SIZE="${GROUP_SIZE:-32}"
@@ -224,6 +227,7 @@ echo "dual_mask: near=${DUAL_MASK_NEAR} far=${DUAL_MASK_FAR} window=${DUAL_MASK_
 echo "epochs=${EPOCHS} batch=${BATCH} lr=${LR}" | tee -a "${LOG_PATH}"
 echo "nccl: stable_mode=${NCCL_STABLE_MODE} p2p_disable=${NCCL_P2P_DISABLE:-unset} net_gdr_level=${NCCL_NET_GDR_LEVEL:-unset} monitor=${TORCH_NCCL_ENABLE_MONITORING:-unset} heartbeat=${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-unset}" | tee -a "${LOG_PATH}"
 echo "ema: use_ema=${USE_EMA} ema_decay=${EMA_DECAY}" | tee -a "${LOG_PATH}"
+echo "diag: copy=${DIAG_COPY} every=${DIAG_EVERY} k=${DIAG_K}" | tee -a "${LOG_PATH}"
 echo "backbone_mode=${BACKBONE_MODE} qk_norm=${QK_NORM} qk_norm_affine=${QK_NORM_AFFINE} qk_norm_bias=${QK_NORM_BIAS} layerscale=${LAYERSCALE_VALUE} rope_theta=${ROPE_THETA}" | tee -a "${LOG_PATH}"
 echo "optimizer: weight_decay=${WEIGHT_DECAY} max_grad_norm=${MAX_GRAD_NORM} lr_scheduler=${LR_SCHEDULER} warmup_epochs=${WARMUP_EPOCHS} warmup_ratio=${WARMUP_RATIO} min_lr=${MIN_LR}" | tee -a "${LOG_PATH}"
 echo "resume: auto_resume=${AUTO_RESUME} resume_optimizer=${RESUME_OPTIMIZER} resume=${RESUME}" | tee -a "${LOG_PATH}"
@@ -321,6 +325,9 @@ TRAIN_ARGS=(
   --seed "${SEED}"
   --use_ema "${USE_EMA}"
   --ema_decay "${EMA_DECAY}"
+  --diag_copy "${DIAG_COPY}"
+  --diag_every "${DIAG_EVERY}"
+  --diag_k "${DIAG_K}"
 )
 
 LAUNCH_MIXED_PRECISION="${MIXED_PRECISION}"

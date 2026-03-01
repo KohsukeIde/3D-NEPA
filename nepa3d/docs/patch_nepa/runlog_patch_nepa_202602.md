@@ -2717,3 +2717,218 @@ Interpretation (current evidence):
 
 - under this matched recipe, reducing `MISSING_RAY` (`86 -> 0`) improved `obj_only`.
 - this does not override other recipe families (for example `100181` line with different pretrain/FT settings).
+
+## 67. Copy-risk diagnostic logging (`cos_tgt` vs `cos_prev`) + probe submit (2026-03-02)
+
+Purpose:
+
+- add a lightweight training-time diagnostic to detect copy-like behavior:
+  - `cos_tgt = cos(z_hat[t], z[t+k])` (true target alignment)
+  - `cos_prev = cos(z_hat[t], z[t])` (identity/copy tendency)
+  - `gap = cos_tgt - cos_prev`
+  - `copy_win = fraction(cos_prev >= cos_tgt)`
+- all metrics are computed under the same NEPA target mask (answer-priority + `TYPE_MISSING_RAY` excluded).
+
+Code change:
+
+- `nepa3d/train/pretrain_patch_nepa.py`
+  - added args: `--diag_copy`, `--diag_every`, `--diag_k`
+  - added masked diagnostic computation and periodic log print in the main training loop.
+
+Quick verification probe submitted:
+
+- pretrain job: `100755.qjcm` (`patchnepa_dcopy`)
+- run set: `patchnepa_diagcopy_probe_20260302_022115`
+- run tag: `run_ray_diagcopy_probe`
+- config intent:
+  - `ray + split_sep + dualmask` (`near=0.5, far=0.1, type_aware=1`)
+  - short run (`epochs=2`) for instrumentation sanity check only.
+- logs:
+  - PBS: `logs/patch_nepa_pretrain/patchnepa_diagcopy_probe_20260302_022115/run_ray_diagcopy_probe.pbs.log`
+  - train (mr0): `logs/patch_nepa_pretrain/patchnepa_diagcopy_probe_20260302_022115/run_ray_diagcopy_probe.mr0.log`
+
+Interpretation rule (for this probe):
+
+- concerning sign: `gap <= 0` and/or `copy_win` stays high.
+- healthy sign: `gap > 0` with moderate/low `copy_win`.
+
+## 68. Completion update (`100749`) + full-step `gap/copy_win` trend (`100755`) (2026-03-02)
+
+### 68.1 FT completion update (previously running)
+
+Section 66 had `100749` as running. Final status is now confirmed:
+
+| job | run_set | variant | status | test_acc |
+|---|---|---|---|---:|
+| `100749` | `patchnepaFT_from_ptonlyema_rerun_llrdoff_pmhead_20260302_004316` | `pb_t50_rs` | `Exit_status=0` | `0.7207` |
+
+Source log:
+- `logs/sanity/patchnepa_ft/patchnepaFT_from_ptonlyema_rerun_llrdoff_pmhead_20260302_004316/pb_t50_rs.out`
+
+### 68.2 Diagcopy probe completion and all-step summary
+
+Probe job:
+- `100755.qjcm` (`patchnepa_dcopy`) finished with `Exit_status=0`.
+- `epochs=2`, `diag_every=50`, so diagnostic points are sampled at steps `0..1450` (30 points).
+
+Full-step extract (step/gap/copy_win) is saved to:
+- `nepa3d/docs/patch_nepa/diagcopy_probe_100755_gap_copywin.tsv`
+
+Aggregate summary over all 30 points:
+
+- `gap`:
+  - mean: `0.0818`
+  - min/max: `0.0008` / `0.1184`
+  - first -> last: `0.0008 -> 0.0703` (delta `+0.0695`)
+- `copy_win`:
+  - mean: `0.3550`
+  - min/max: `0.3048` / `0.4518`
+  - first -> last: `0.4518 -> 0.3512` (delta `-0.1006`)
+
+Early vs late windows:
+- early (`step 0..700`, n=15): `gap=0.0778`, `copy_win=0.3678`
+- late (`step 750..1450`, n=15): `gap=0.0858`, `copy_win=0.3422`
+
+Interpretation for this probe run:
+- `gap` stays positive at all logged points and is slightly higher in late phase.
+- `copy_win` decreases from early to late, consistent with weaker copy tendency over training.
+
+## 69. Priority-1 long-run health proof submit (`point-only + EMA + E300 + diag`) (2026-03-02)
+
+User request:
+- run long pretrain with continuous `gap/copy_win` monitoring (reviewer-priority #1).
+
+Launcher pass-through fix (required before submission):
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh`
+  - added env defaults and train args wiring:
+    - `DIAG_COPY` (default `1`)
+    - `DIAG_EVERY` (default `100`)
+    - `DIAG_K` (default `1`)
+  - startup header now prints `diag: copy=..., every=..., k=...`.
+- `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh`
+  - added the same `DIAG_*` vars in submit defaults.
+  - forwarded `DIAG_*` through `qsub -v`.
+
+Long-run submission:
+
+| job | run_set | run_tag | status |
+|---|---|---|---|
+| `100756.qjcm` | `patchnepa_ptonly_ema_e300_diagcopy_20260302_024614` | `run_ptonly_ema_e300_diagcopy` | `R` |
+
+Effective pretrain recipe:
+- point-only:
+  - `MIX_CONFIG=nepa3d/configs/pretrain_mixed_shapenet_pointcloud_only_onepass.yaml`
+  - `USE_RAY_PATCH=0`, `N_RAY=0`, `STAGE2_REQUIRE_RAY=0`
+- optimization/topology:
+  - `EPOCHS=300`, `USE_EMA=1`, `EMA_DECAY=0.9999`
+  - `BATCH=8`, `RT_QF=4`, `NPROC_PER_NODE=4` -> global batch `128`
+- sequence/objective:
+  - `QA_LAYOUT=split_sep`, `QA_SEP_TOKEN=1`, `QA_TOKENS=1`, `ENCDEC_ARCH=0`
+  - `DUAL_MASK_NEAR=0.5`, `DUAL_MASK_FAR=0.1`, `DUAL_MASK_TYPE_AWARE=1`, `DUAL_MASK_WINDOW=32`
+- point sampling:
+  - `PT_SAMPLE_MODE=fps`, `PT_FPS_KEY=pt_fps_order`, `PT_RFPS_KEY=pt_rfps_order_bank`
+- diagnostics:
+  - `DIAG_COPY=1`, `DIAG_EVERY=100`, `DIAG_K=1`
+
+Paths:
+- pretrain logs:
+  - `logs/patch_nepa_pretrain/patchnepa_ptonly_ema_e300_diagcopy_20260302_024614`
+- checkpoint root:
+  - `runs/patchnepa_pointonly/patchnepa_ptonly_ema_e300_diagcopy_20260302_024614`
+
+Planned post-run extraction:
+- full-step `gap/copy_win` time series export to a docs TSV
+- early/mid/late aggregate summary and final interpretation in this runlog.
+
+## 70. Checkpoint-level copy-baseline diagnostic (`cos(pred,target)` vs `cos(prev,target)`) (2026-03-02)
+
+User-requested verification:
+- evaluate pretrained checkpoints directly and test whether prediction is distinguishable from a trivial copy baseline.
+- criterion:
+  - copy-like concern if `cos(pred,target) ≈ cos(prev,target)`
+  - healthy if `cos(pred,target) >> cos(prev,target)`.
+
+Implementation added:
+- `scripts/sanity/diag_ckpt_copy_probe.py`
+  - loads a pretrain ckpt (`model` or `model_ema`)
+  - rebuilds the corresponding PatchNEPA model from ckpt args
+  - runs mixed-pretrain batches and reports:
+    - `cos(pred,target)`
+    - `cos(prev,target)`
+    - `cos(pred,prev)`
+    - `lift = cos(pred,target) - cos(prev,target)`
+    - `win_rate = P(cos(pred,target) > cos(prev,target))`
+
+Runs executed (`k=1`, `max_batches=20`):
+
+| ckpt | state | tokens | cos(pred,target) | cos(prev,target) | lift | win_rate |
+|---|---|---:|---:|---:|---:|---:|
+| `runs/patchnepa_pointonly/patchnepa_ptonly_ema_e100_fpscmp_rerun_20260302_003621/ckpt_latest.pt` | `model_ema` | 10240 | 0.982379 | 0.383854 | 0.598525 | 1.000000 |
+| `runs/patchnepa_rayqa/patchnepa_ray_fpscmp_fps_augpm_dm_fixlaunch_20260301_233109/ckpt_latest.pt` | `model` | 11654 | 0.997960 | 0.360807 | 0.637154 | 1.000000 |
+| `runs/patchnepa_rayqa/patchnepa_ray_fpscmp_indpatch_dm_augpm_20260301_222542/ckpt_latest.pt` | `model` | 12512 | 0.997974 | 0.395841 | 0.602133 | 1.000000 |
+
+Output logs:
+- `logs/sanity/patchnepa_ft/diag_ckpt_copy_probe_ptonlyema_e100_20260302_0252.out`
+- `logs/sanity/patchnepa_ft/diag_ckpt_copy_probe_bindfix_ema_e100_20260302_0255.out`
+- `logs/sanity/patchnepa_ft/diag_ckpt_copy_probe_indpatch_ema_e100_20260302_0255.out`
+
+Interpretation:
+- for the tested checkpoints, `cos(pred,target)` is far above `cos(prev,target)` with large positive lift (`~0.60`) and `win_rate=1.0`.
+- this does **not** support a simple "prediction is just previous-token copy" explanation.
+- therefore, current evidence points to other bottlenecks (transfer recipe / objective-task mismatch / modality-use strategy), not trivial copy collapse.
+
+## 71. Strict A/B submit for missing-token handling at best-known setting (+ split comparison) (2026-03-02)
+
+User request:
+- compare missing-token handling under the strongest direct PatchNEPA FT family (`splitx2 dualmask baseline` line with `obj_only=0.8193`).
+- also check split (`encdec1`) counterpart under the same missing-token treatment.
+
+Submission strategy:
+- keep pretrain recipe aligned to splitx2 baseline family and change only ray patch assignment to:
+  - `RAY_ASSIGN_MODE=independent_fps_knn` (missing-aware path; target is `MISSING_RAY=0` in ray-bearing samples).
+- run both branches:
+  - dualmask (`encdec_arch=0`, dualmask on),
+  - split (`encdec_arch=1`, dualmask off).
+- dependent FT is fixed to baseline-style settings:
+  - `PATCHNEPA_FT_MODE=qa_zeroa`
+  - `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp`
+  - `PATCHNEPA_CLS_TOKEN_SOURCE=bos`, `PATCHNEPA_FREEZE_PATCH_EMBED=0`
+  - `LLRD_START=1.0`, `LLRD_END=1.0`, `LLRD_SCHEDULER=static`, `LLRD_MODE=linear`
+  - strict eval unchanged (`file + TTA10`).
+
+Submitted pretrains:
+
+| job | run_set | branch | key delta | status |
+|---|---|---|---|---|
+| `100757.qjcm` | `patchnepa_ray_splitx2_dualmask_indpatch_cmp_20260302_031129` | dualmask (`encdec_arch=0`) | `RAY_ASSIGN_MODE=independent_fps_knn` | `R` |
+| `100758.qjcm` | `patchnepa_ray_splitx2_encdec1_indpatch_cmp_20260302_031129` | split (`encdec_arch=1`) | `RAY_ASSIGN_MODE=independent_fps_knn` | `R` |
+
+Submitted dependent FT jobs:
+
+From `100757`:
+- `100759.qjcm` (`obj_bg`)
+- `100760.qjcm` (`obj_only`)
+- `100761.qjcm` (`pb_t50_rs`)
+- run set:
+  - `patchnepaFT_from_dualmask_indpatch_cmp_20260302_031129`
+
+From `100758`:
+- `100762.qjcm` (`obj_bg`)
+- `100763.qjcm` (`obj_only`)
+- `100764.qjcm` (`pb_t50_rs`)
+- run set:
+  - `patchnepaFT_from_encdec1_indpatch_cmp_20260302_031129`
+
+Submit logs/paths:
+- pretrain:
+  - `logs/patch_nepa_pretrain/patchnepa_ray_splitx2_dualmask_indpatch_cmp_20260302_031129`
+  - `logs/patch_nepa_pretrain/patchnepa_ray_splitx2_encdec1_indpatch_cmp_20260302_031129`
+- finetune:
+  - `logs/sanity/patchnepa_ft/patchnepaFT_from_dualmask_indpatch_cmp_20260302_031129`
+  - `logs/sanity/patchnepa_ft/patchnepaFT_from_encdec1_indpatch_cmp_20260302_031129`
+
+Comparison note:
+- yes, split comparison is now possible by design:
+  - `dualmask-indpatch` (`100757 -> 100759~100761`)
+  - vs `encdec1-indpatch` (`100758 -> 100762~100764`)
+  - both under identical FT recipe and global-batch policy.

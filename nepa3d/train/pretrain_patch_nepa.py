@@ -13,6 +13,7 @@ import torch.optim as optim
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 import numpy as np
 import random
 
@@ -156,6 +157,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--use_ema", type=int, default=0, choices=[0, 1])
     p.add_argument("--ema_decay", type=float, default=0.9999)
+    p.add_argument("--diag_copy", type=int, default=1, choices=[0, 1])
+    p.add_argument("--diag_every", type=int, default=50)
+    p.add_argument("--diag_k", type=int, default=1, help="diagnostic k shift; <=0 uses first skip_k")
     return p.parse_args()
 
 
@@ -257,6 +261,74 @@ def _parse_skip_k_list(args: argparse.Namespace) -> list[int]:
         ks = [1]
     return ks
 
+
+def _nepa_target_mask(type_id: torch.Tensor | None, k: int) -> torch.Tensor | None:
+    if type_id is None:
+        return None
+    tgt_ty = type_id[:, k:]
+    has_answer = bool((tgt_ty == int(TYPE_A_POINT)).any() or (tgt_ty == int(TYPE_A_RAY)).any())
+    if has_answer:
+        return (
+            ((tgt_ty == int(TYPE_A_POINT)) | (tgt_ty == int(TYPE_A_RAY)))
+            & (tgt_ty != int(TYPE_MISSING_RAY))
+        )
+    return (
+        (tgt_ty != int(TYPE_BOS))
+        & (tgt_ty != int(TYPE_SEP))
+        & (tgt_ty != int(TYPE_EOS))
+        & (tgt_ty != int(TYPE_MISSING_RAY))
+    )
+
+
+def _masked_mean(values: torch.Tensor, mask: torch.Tensor | None) -> float:
+    if mask is None:
+        return float(values.mean().item())
+    if not bool(mask.any()):
+        return float("nan")
+    return float(values[mask].mean().item())
+
+
+def _compute_copy_diag(
+    z: torch.Tensor,
+    z_hat: torch.Tensor,
+    type_id: torch.Tensor | None,
+    k: int,
+) -> dict[str, float] | None:
+    k = max(1, int(k))
+    if z.size(1) <= k or z_hat.size(1) <= k:
+        return None
+
+    pred = z_hat[:, :-k, :].detach()
+    tgt = z[:, k:, :].detach()
+    prev = z[:, :-k, :].detach()
+
+    mask = _nepa_target_mask(type_id, k)
+    cos_tgt = F.cosine_similarity(pred, tgt, dim=-1)
+    cos_prev = F.cosine_similarity(pred, prev, dim=-1)
+
+    cos_tgt_m = _masked_mean(cos_tgt, mask)
+    cos_prev_m = _masked_mean(cos_prev, mask)
+
+    if mask is None:
+        cmp = cos_prev >= cos_tgt
+    else:
+        if not bool(mask.any()):
+            cmp = None
+        else:
+            cmp = (cos_prev >= cos_tgt)[mask]
+    copy_win = float(cmp.float().mean().item()) if cmp is not None else float("nan")
+
+    return {
+        "k": float(k),
+        "cos_tgt": cos_tgt_m,
+        "cos_prev": cos_prev_m,
+        "gap": float(cos_tgt_m - cos_prev_m),
+        "copy_win": copy_win,
+    }
+
+
+def _fmt_diag(x: float) -> str:
+    return "nan" if (x != x) else f"{x:.4f}"
 
 def main() -> None:
     args = parse_args()
@@ -380,6 +452,8 @@ def main() -> None:
 
     warmup_epochs_resolved = _resolved_warmup_epochs(args)
     skip_k_list = _parse_skip_k_list(args)
+    diag_enabled = bool(int(args.diag_copy))
+    diag_every = max(1, int(args.diag_every))
     mprint(
         "[patch_nepa_pretrain] "
         f"num_processes={accelerator.num_processes} "
@@ -405,7 +479,8 @@ def main() -> None:
         f"layerscale={float(args.layerscale_value):.2e} rope_theta={float(args.rope_theta):g} "
         f"aug_rotate_z={int(args.aug_rotate_z)} aug_scale=[{float(args.aug_scale_min):.3f},{float(args.aug_scale_max):.3f}] "
         f"aug_translate={float(args.aug_translate):.3f} aug_jitter_sigma={float(args.aug_jitter_sigma):.4f} "
-        f"aug_jitter_clip={float(args.aug_jitter_clip):.4f} aug_recompute_dist={int(args.aug_recompute_dist)}"
+        f"aug_jitter_clip={float(args.aug_jitter_clip):.4f} aug_recompute_dist={int(args.aug_recompute_dist)} "
+        f"diag_copy={int(args.diag_copy)} diag_every={int(args.diag_every)} diag_k={int(args.diag_k)}"
     )
 
     start_epoch = 0
@@ -500,10 +575,24 @@ def main() -> None:
 
             if accelerator.is_main_process and (global_step % 50 == 0):
                 lr = optimizer.param_groups[0]["lr"]
+                diag_msg = ""
+                if diag_enabled and (global_step % diag_every == 0):
+                    k_diag = int(args.diag_k) if int(args.diag_k) > 0 else int(skip_k_list[0])
+                    with torch.no_grad():
+                        diag = _compute_copy_diag(out.z, out.z_hat, out.type_id, k_diag)
+                    if diag is not None:
+                        diag_msg = (
+                            f" kdiag={int(diag['k'])}"
+                            f" cos_tgt={_fmt_diag(float(diag['cos_tgt']))}"
+                            f" cos_prev={_fmt_diag(float(diag['cos_prev']))}"
+                            f" gap={_fmt_diag(float(diag['gap']))}"
+                            f" copy_win={_fmt_diag(float(diag['copy_win']))}"
+                        )
                 print(
                     f"[epoch {epoch:03d} step {global_step:06d}] "
                     f"loss={loss.item():.8e} lr={lr:.2e} "
                     f"dm=({dm_near:.2f},{dm_far:.2f},ramp={ramp:.2f})"
+                    f"{diag_msg}"
                 )
             global_step += 1
 
