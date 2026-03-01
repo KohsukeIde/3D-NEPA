@@ -191,15 +191,18 @@ class BoundRayPatchEmbed(nn.Module):
         if ray_available is not None:
             has_ray = has_ray & ray_available.to(device=device).bool().view(B, 1)
 
+        # IMPORTANT (DDP stability): use multiplicative masking instead of torch.where.
+        # When a full mini-batch has no valid rays on a rank, torch.where(all_false, x, 0)
+        # can disconnect x-side parameters from the graph and trigger "unused parameter"
+        # reduction errors. Multiplication keeps the graph connected while zeroing outputs.
+        mask = has_ray[..., None].to(dtype=out_q.dtype)
         if self.pool == "amax":
-            out_q = torch.where(has_ray[..., None], out_q, torch.zeros_like(out_q))
-            out_a = torch.where(has_ray[..., None], out_a, torch.zeros_like(out_a))
+            out_q = out_q * mask
+            out_a = out_a * mask
         else:
             denom = torch.clamp(counts, min=1).to(out_q.dtype).unsqueeze(-1)
-            out_q = out_q / denom
-            out_a = out_a / denom
-            out_q = torch.where(has_ray[..., None], out_q, torch.zeros_like(out_q))
-            out_a = torch.where(has_ray[..., None], out_a, torch.zeros_like(out_a))
+            out_q = (out_q / denom) * mask
+            out_a = (out_a / denom) * mask
 
         return BoundRayPatchOutput(q_tok=out_q, a_tok=out_a, has_ray=has_ray)
 

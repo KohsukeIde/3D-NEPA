@@ -970,3 +970,93 @@ Submission logs:
 - `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_baseline_20260301_040740`
 - `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_qonly_20260301_040743`
 - `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_qonly_meanq_20260301_040745`
+
+## 21. Split-x2 rerun results (`100180`-`100202`) (2026-03-01)
+
+Status check target range:
+
+- pretrain: `100180` (`encdec1`), `100181` (`dualmask`)
+- FT baseline/q_only matrix: `100188`-`100202`
+
+### 21.1 Pretrain completion
+
+Both split-x2 pretrains completed successfully (`Exit_status=0`).
+
+- `100180.qjcm` (`patchnepa_ryE16e2`, `encdec_arch=1`)
+  - done: `epoch 099 step 073650`
+  - log: `logs/patch_nepa_pretrain/patchnepa_ray_splitx2_encdec1_20260301_035212/run_ray_splitx2_encdec1.mr0.log`
+  - ckpt dir: `runs/patchnepa_rayqa/patchnepa_ray_splitx2_encdec1_20260301_035212`
+- `100181.qjcm` (`patchnepa_ryE16d2`, `encdec_arch=0 + dual_mask`)
+  - done: `epoch 099 step 073650`
+  - log: `logs/patch_nepa_pretrain/patchnepa_ray_splitx2_dualmask_20260301_035220/run_ray_splitx2_dualmask.mr0.log`
+  - ckpt dir: `runs/patchnepa_rayqa/patchnepa_ray_splitx2_dualmask_20260301_035220`
+
+### 21.2 FT results (baseline = `patchnepa_ft_mode=qa_zeroa`)
+
+All baseline jobs completed (`Exit_status=0`) and produced TEST metrics.
+
+From `100180` (encdec1):
+
+- `100188` (`obj_bg`): `TEST acc=0.7797`
+- `100189` (`obj_only`): `TEST acc=0.7900`
+- `100190` (`pb_t50_rs`): `TEST acc=0.7502`
+- run set: `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_encdec1_baseline_20260301_040736`
+
+From `100181` (dualmask):
+
+- `100194` (`obj_bg`): `TEST acc=0.7900`
+- `100195` (`obj_only`): `TEST acc=0.8193`
+- `100196` (`pb_t50_rs`): `TEST acc=0.7519`
+- run set: `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_baseline_20260301_040740`
+
+### 21.3 FT results (q_only / q_only+mean_q)
+
+All q_only branches failed with the same DDP error (`Exit_status=1`):
+
+- `100191`-`100193` (`encdec1`, `q_only`, `cls_max`)
+- `100197`-`100199` (`dualmask`, `q_only`, `cls_max`)
+- `100200`-`100202` (`dualmask`, `q_only`, `mean_q`)
+
+Error signature (all three run sets):
+
+- `RuntimeError: Expected to have finished reduction in the prior iteration ...`
+- cause: unused parameters under DDP when `q_only` bypasses part of the module graph
+  (`find_unused_parameters=False` path).
+
+Error logs:
+
+- `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_encdec1_qonly_20260301_040738/*.err`
+- `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_qonly_20260301_040743/*.err`
+- `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_qonly_meanq_20260301_040745/*.err`
+
+### 21.4 Legacy held jobs (cancelled/replaced)
+
+- `100182`-`100187` were cancelled/replaced by the explicit mode matrix above.
+
+## 22. DDP stability hardening from external audit (2026-03-01)
+
+Applied fixes after audit feedback:
+
+1. Pretrain ray-binding graph stability (`BoundRayPatchEmbed`)
+- file: `nepa3d/models/bound_ray_patch_embed.py`
+- change:
+  - replaced post-pool `torch.where(has_ray, out, 0)` with multiplicative masking
+    (`out = out * mask`) for both `amax` and `mean` pooling branches.
+- reason:
+  - avoids potential per-rank graph disconnection when `has_ray` is all-false,
+    which can trigger DDP "unused parameter" reduction errors.
+
+2. Finetune `q_only` DDP compatibility
+- file: `nepa3d/train/finetune_patch_cls.py`
+- change:
+  - `Accelerator` now uses `DistributedDataParallelKwargs`.
+  - for `model_source=patchnepa` + `patchnepa_ft_mode=q_only`,
+    set `find_unused_parameters=True`.
+- reason:
+  - `q_only` intentionally bypasses parts of the PatchNEPA graph,
+    so strict DDP reduction without unused-parameter detection can fail.
+
+Note:
+- This does not change baseline (`qa_zeroa`) behavior.
+- q_only matrix should be rerun to validate that previous `Exit_status=1` jobs
+  now finish and produce TEST metrics.

@@ -22,7 +22,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-from accelerate import Accelerator
+from accelerate import Accelerator, DistributedDataParallelKwargs
 from torch import optim
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -572,7 +572,9 @@ def main() -> None:
         )
 
     _set_seed(args.seed)
-    accelerator = Accelerator()
+    ddp_find_unused = bool(args.model_source == "patchnepa" and str(args.patchnepa_ft_mode) == "q_only")
+    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=ddp_find_unused)
+    accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
 
     # Resolve save path
     save_dir = Path(args.save_dir)
@@ -1019,7 +1021,7 @@ def main() -> None:
                 f"use_ray_patch={int(args.use_ray_patch)} n_ray={args.n_ray} "
                 f"pooling={args.pooling} patchnepa_ft_mode={args.patchnepa_ft_mode} head_mode={args.head_mode} "
                 f"backbone_mode={args.backbone_mode} "
-                f"ray_query_only=1 is_causal={bool(args.is_causal)}\n"
+                f"ray_query_only=1 is_causal={bool(args.is_causal)} ddp_find_unused={ddp_find_unused}\n"
                 f"  world_size={world_size} batch_mode={args.batch_mode} batch_arg={args.batch} batch_effective={eff_batch}\n"
                 f"  data_format={args.data_format} input_root={args.cache_root if args.data_format == 'npz' else args.scan_h5_root}\n"
                 f"  val_split_mode={resolved_val_split_mode}\n"
