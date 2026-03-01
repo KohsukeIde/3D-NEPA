@@ -110,6 +110,13 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--aug_dropout_ratio", type=float, default=0.0)
     p.add_argument("--aug_dropout_prob", type=float, default=0.0)
     p.add_argument(
+        "--pointmae_exact_aug",
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help="Use Point-MAE exact ScaleAndTranslate (per-axis scale) when aug_preset=pointmae.",
+    )
+    p.add_argument(
         "--aug_eval",
         type=int,
         default=1,
@@ -875,6 +882,7 @@ def main() -> None:
             rot_deg=0.0,
             dropout_ratio=0.0,
             dropout_prob=0.0,
+            pointmae_exact=bool(args.pointmae_exact_aug),
         )
         aug_train = True
     else:
@@ -937,7 +945,7 @@ def main() -> None:
             n_point=args.n_point,
             sample_mode=args.pt_sample_mode_eval,
             use_normals=use_normals,
-            aug=False,
+            aug=bool(args.aug_eval),
             aug_cfg=aug_cfg,
             rng_seed=args.seed + 456,
             use_ray_patch=bool(args.use_ray_patch),
@@ -977,7 +985,7 @@ def main() -> None:
             te_labels,
             n_point=args.n_point,
             sample_mode=args.pt_sample_mode_eval,
-            aug=False,
+            aug=bool(args.aug_eval),
             aug_cfg=aug_cfg,
             rng_seed=args.seed + 456,
             mc_eval_k=max(1, args.mc_eval_k_test),

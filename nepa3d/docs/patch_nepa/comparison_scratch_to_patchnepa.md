@@ -359,5 +359,20 @@ Operational rule:
   - Point-MAE: anisotropic per-axis scale (`sx, sy, sz`) in `PointcloudScaleAndTranslate`.
 - Interpretation rule:
   - Until this is matched, call the setting "Point-MAE-like" (not strict parity).
-- Required fix for strict comparison:
-  - implement per-axis scale in PatchNEPA FT augmentation path and rerun parity-targeted FT jobs.
+- Status (2026-03-02): implemented in PatchNEPA FT augmentation path (per-axis scale enabled for `aug_preset=pointmae`).
+- Backward-compatibility switch:
+  - `--pointmae_exact_aug 0` restores legacy isotropic-scalar scale behavior for ablation.
+
+## 16. Insight: Why `pb_t50_rs` gap is the key warning
+
+- In matched direct-FT baseline (`splitx2_dualmask_baseline_20260301_040740`):
+  - `obj_bg`: gap `0.0620`
+  - `obj_only`: gap `0.0731`
+  - `pb_t50_rs`: gap `0.1626` (largest)
+- This pattern recurs across completed runs: largest val->test gaps are repeatedly `pb_t50_rs`.
+- Interpretation:
+  - likely not "lack of raw information" only;
+  - more consistent with shortcut-fit / split-specific fit that does not transfer to test on the hardest variant.
+- Reporting rule:
+  - prioritize `pb_t50_rs` when judging objective/aug changes,
+  - and avoid using best-val alone for acceptance of a recipe.

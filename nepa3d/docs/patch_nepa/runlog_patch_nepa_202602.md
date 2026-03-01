@@ -3141,3 +3141,62 @@ Required follow-up:
 
 - update FT augmentation to support Point-MAE-equivalent anisotropic scale (x/y/z independent),
   then rerun strict comparison branch under matched FT defaults.
+
+## 77. FT Point-MAE augmentation parity fix implemented (2026-03-02)
+
+Decision:
+
+- close the known FT augmentation gap: PatchNEPA FT `aug_preset=pointmae` now matches
+  Point-MAE `PointcloudScaleAndTranslate` scale semantics.
+
+What was different before:
+
+- legacy PatchNEPA FT used isotropic scalar scale (`xyz *= s`).
+- Point-MAE uses anisotropic per-axis scale (`xyz *= [sx, sy, sz]`).
+
+Code changes:
+
+- `nepa3d/data/cls_patch_dataset.py`
+  - `PointAugConfig` extended with `pointmae_exact` flag.
+  - added `_apply_pointmae_scale_translate(...)`:
+    - per-axis scale + per-axis translation (Point-MAE equivalent)
+    - normal-vector update under anisotropic scale (`inv(S)^T` + renorm)
+  - `PatchClsPointDataset._maybe_augment` / `PatchClsArrayDataset._maybe_augment`
+    now use this exact path when `pointmae_exact=1`.
+- `nepa3d/train/finetune_patch_cls.py`
+  - added arg: `--pointmae_exact_aug {0,1}` (default `1`)
+  - `aug_preset=pointmae` now sets `pointmae_exact=bool(pointmae_exact_aug)`.
+  - test dataset now sets `aug=bool(args.aug_eval)` so TTA transform is actually applied during eval votes.
+
+Operational policy from now:
+
+- strict Point-MAE parity FT comparisons should keep:
+  - `aug_preset=pointmae`
+  - `pointmae_exact_aug=1` (default)
+- legacy isotropic-scalar behavior is allowed only for controlled ablation:
+  - `pointmae_exact_aug=0`.
+
+## 78. Val/Test gap insight (pb_t50_rs dominance) (2026-03-02)
+
+Question:
+- Is the largest val->test gap concentrated on `pb_t50_rs`, and does that imply current task design is too easy/shortcut-prone?
+
+Log-backed observation:
+- In strict-matched direct FT (`splitx2_dualmask_baseline_20260301_040740`), gap by variant is:
+  - `obj_bg`: `best_val=0.8520`, `test=0.7900`, `gap=0.0620`
+  - `obj_only`: `best_val=0.8924`, `test=0.8193`, `gap=0.0731`
+  - `pb_t50_rs`: `best_val=0.9145`, `test=0.7519`, `gap=0.1626` (largest)
+- Cross-run scan over completed direct FT logs shows top gap rows are repeatedly `pb_t50_rs` (`~0.15-0.16` band).
+
+Interpretation (current evidence boundary):
+- Yes, largest gap is consistently concentrated on `pb_t50_rs`.
+- "`pb_t50_rs` has more information" alone is not sufficient to explain the behavior:
+  - this variant also has much larger train/val cardinality (`train=10282`, `val=1134` in logs),
+    which can raise validation fit,
+  - but the persistent large drop at test indicates a robustness/generalization issue, not pure capacity shortage.
+- Practical reading: current recipe can still exploit easier-in-split cues and is not yet forcing sufficiently hard transfer-relevant invariances on the hardest variant.
+
+Action direction:
+- treat `pb_t50_rs` as primary stress metric for objective/aug/task redesign decisions.
+- avoid single-run conclusion from best-val only; lock claims on repeated TEST metrics under fixed recipe.
+- prioritize ablations that increase "hardness" of transferable signals (instead of only increasing model/data scale).

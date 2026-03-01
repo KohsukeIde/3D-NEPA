@@ -44,6 +44,40 @@ class PointAugConfig:
     rot_deg: float = 180.0
     dropout_ratio: float = 0.0
     dropout_prob: float = 0.0
+    # When True, apply Point-MAE exact Scale+Translate (axis-wise scale).
+    # This path intentionally ignores rotation/jitter/dropout knobs.
+    pointmae_exact: bool = False
+
+
+def _apply_pointmae_scale_translate(
+    xyz: np.ndarray,
+    *,
+    rng,
+    scale_min: float,
+    scale_max: float,
+    translate: float,
+    normals: Optional[np.ndarray] = None,
+) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    """Point-MAE equivalent transform: per-axis scale + per-axis translate.
+
+    Matches Point-MAE `PointcloudScaleAndTranslate` behavior:
+      - xyz <- xyz * [sx, sy, sz] + [tx, ty, tz]
+      - sx/sy/sz sampled independently from [scale_min, scale_max]
+      - tx/ty/tz sampled independently from [-translate, translate]
+    """
+    xyz = xyz.astype(np.float32, copy=False)
+    scales = rng.uniform(low=float(scale_min), high=float(scale_max), size=(1, 3)).astype(xyz.dtype, copy=False)
+    shifts = rng.uniform(low=-float(translate), high=float(translate), size=(1, 3)).astype(xyz.dtype, copy=False)
+    xyz_out = xyz * scales + shifts
+
+    normals_out = normals
+    if normals is not None:
+        # Under anisotropic scaling, normals should be transformed by inv(S)^T.
+        inv_scales = 1.0 / np.clip(scales, 1e-8, None)
+        normals_out = normals.astype(np.float32, copy=False) * inv_scales
+        nrm = np.linalg.norm(normals_out, axis=-1, keepdims=True)
+        normals_out = normals_out / np.clip(nrm, 1e-8, None)
+    return xyz_out, normals_out
 
 
 class PatchClsPointDataset(Dataset):
@@ -143,6 +177,16 @@ class PatchClsPointDataset(Dataset):
         rng = self._get_rng()
         if float(self.aug_cfg.prob) < 1.0 and float(rng.uniform(0.0, 1.0)) >= float(self.aug_cfg.prob):
             return xyz, normals
+
+        if bool(self.aug_cfg.pointmae_exact):
+            return _apply_pointmae_scale_translate(
+                xyz,
+                rng=rng,
+                scale_min=float(self.aug_cfg.scale_min),
+                scale_max=float(self.aug_cfg.scale_max),
+                translate=float(self.aug_cfg.shift_std),
+                normals=normals,
+            )
 
         # We reuse the same augmentation implementation as token-based datasets.
         # `_apply_point_aug` expects (pt_xyz, pt_dist, pools). We don't use dist here.
@@ -325,6 +369,17 @@ class PatchClsArrayDataset(Dataset):
         rng = self._get_rng()
         if float(self.aug_cfg.prob) < 1.0 and float(rng.uniform(0.0, 1.0)) >= float(self.aug_cfg.prob):
             return xyz
+
+        if bool(self.aug_cfg.pointmae_exact):
+            xyz2, _ = _apply_pointmae_scale_translate(
+                xyz,
+                rng=rng,
+                scale_min=float(self.aug_cfg.scale_min),
+                scale_max=float(self.aug_cfg.scale_max),
+                translate=float(self.aug_cfg.shift_std),
+                normals=None,
+            )
+            return xyz2
 
         pt_xyz = xyz.astype(np.float32, copy=False)
         pt_dist = np.zeros((pt_xyz.shape[0], 1), dtype=np.float32)
