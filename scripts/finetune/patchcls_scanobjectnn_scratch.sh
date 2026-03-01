@@ -78,9 +78,10 @@ IS_CAUSAL="${IS_CAUSAL:-0}"  # 0 | 1
 PATCHNEPA_FT_MODE="${PATCHNEPA_FT_MODE:-qa_zeroa}"  # qa_zeroa | q_only
 PATCHNEPA_CLS_TOKEN_SOURCE="${PATCHNEPA_CLS_TOKEN_SOURCE:-last_q}"  # bos | last_q | eos
 PATCHNEPA_FREEZE_PATCH_EMBED="${PATCHNEPA_FREEZE_PATCH_EMBED:-1}"   # 0 | 1
-LLRD_START="${LLRD_START:-0.35}"
+LLRD_START="${LLRD_START:-1.0}"
 LLRD_END="${LLRD_END:-1.0}"
 LLRD_SCHEDULER="${LLRD_SCHEDULER:-static}"  # static | llrd_cosine | llrd_cosine_warmup
+LLRD_MODE="${LLRD_MODE:-linear}"          # linear | exp
 AUG_PRESET="${AUG_PRESET:-pointmae}"  # none | default | strong | pointmae
 AUG_EVAL="${AUG_EVAL:-1}"             # 0 | 1 (policy default: 1)
 MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-10}" # policy default: 10
@@ -180,6 +181,7 @@ ARGS=(
   --llrd_start "${LLRD_START}"
   --llrd_end "${LLRD_END}"
   --llrd_scheduler "${LLRD_SCHEDULER}"
+  --llrd_mode "${LLRD_MODE}"
   --num_workers "${NUM_WORKERS}"
 )
 

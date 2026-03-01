@@ -10,7 +10,7 @@ patchnepaFT_splitx2_dualmask_qonly_meanq_20260301_040745	obj_bg	no_test_acc	-	q_
 patchnepaFT_splitx2_encdec1_baseline_20260301_040736	obj_bg	completed	0.7797	qa_zeroa	cls_max	-	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepaFT_splitx2_encdec1_baseline_20260301_040736/obj_bg.out
 patchnepaFT_splitx2_encdec1_qonly_20260301_040738	obj_bg	no_test_acc	-	q_only	cls_max	-	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepaFT_splitx2_encdec1_qonly_20260301_040738/obj_bg.out
 patchnepa_ft	obj_bg	completed	0.8072	qa_zeroa	cls_max	bos	False	patchnepa(direct)	logs/sanity/patchnepa_ft/obj_bg.out
-patchnepa_ft_variants_20260301_223043	obj_bg	no_test_acc	-	qa_zeroa	cls	last_q	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepa_ft_variants_20260301_223043/obj_bg.out
+patchnepa_ft_variants_20260301_223043	obj_bg	completed	0.6799	qa_zeroa	cls	last_q	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepa_ft_variants_20260301_223043/obj_bg.out
 patchnepaFT_ablate_objonly_base_llrdcw_lastq_freeze1_20260301_170200	obj_only	completed	0.7298	qa_zeroa	cls	last_q	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepaFT_ablate_objonly_base_llrdcw_lastq_freeze1_20260301_170200/obj_only.out
 patchnepaFT_ablate_objonly_llrdcw_bos_freeze1_20260301_170210	obj_only	completed	0.7298	qa_zeroa	cls	bos	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepaFT_ablate_objonly_llrdcw_bos_freeze1_20260301_170210/obj_only.out
 patchnepaFT_ablate_objonly_llrdcw_lastq_freeze0_20260301_170215	obj_only	completed	0.7108	qa_zeroa	cls	last_q	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepaFT_ablate_objonly_llrdcw_lastq_freeze0_20260301_170215/obj_only.out
@@ -38,7 +38,7 @@ patchnepaFT_splitx2_dualmask_qonly_20260301_040743	obj_only	no_test_acc	-	q_only
 patchnepaFT_splitx2_dualmask_qonly_meanq_20260301_040745	obj_only	no_test_acc	-	q_only	mean_q	-	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_qonly_meanq_20260301_040745/obj_only.out
 patchnepaFT_splitx2_encdec1_baseline_20260301_040736	obj_only	completed	0.7900	qa_zeroa	cls_max	-	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepaFT_splitx2_encdec1_baseline_20260301_040736/obj_only.out
 patchnepaFT_splitx2_encdec1_qonly_20260301_040738	obj_only	no_test_acc	-	q_only	cls_max	-	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepaFT_splitx2_encdec1_qonly_20260301_040738/obj_only.out
-patchnepa_ft_variants_20260301_223043	obj_only	no_test_acc	-	qa_zeroa	cls	last_q	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepa_ft_variants_20260301_223043/obj_only.out
+patchnepa_ft_variants_20260301_223043	obj_only	completed	0.7074	qa_zeroa	cls	last_q	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepa_ft_variants_20260301_223043/obj_only.out
 patchnepa_refactor_repro1_20260301_021900	obj_only	completed	0.8072	-	cls_max	-	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepa_refactor_repro1_20260301_021900/obj_only.out
 patchnepa_sanity6_20260301_224515_ft_rayind_fps_off_E12	obj_only	completed	0.6454	qa_zeroa	cls	last_q	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepa_sanity6_20260301_224515_ft_rayind_fps_off_E12/obj_only.out
 patchnepa_sanity6_20260301_224515_ft_rayind_fps_on_E12	obj_only	completed	0.5318	qa_zeroa	cls	last_q	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepa_sanity6_20260301_224515_ft_rayind_fps_on_E12/obj_only.out
@@ -90,3 +90,4 @@ patchnepaFT_splitx2_encdec1_baseline_20260301_040736	pb_t50_rs	completed	0.7502	
 patchnepaFT_splitx2_encdec1_qonly_20260301_040738	pb_t50_rs	no_test_acc	-	q_only	cls_max	-	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepaFT_splitx2_encdec1_qonly_20260301_040738/pb_t50_rs.out
 patchnepa_ft	pb_t50_rs	completed	0.7720	qa_zeroa	cls_max	bos	False	patchnepa(direct)	logs/sanity/patchnepa_ft/pb_t50_rs.out
 patchnepa_ft_variants_20260301_223043	pb_t50_rs	no_test_acc	-	qa_zeroa	cls	last_q	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepa_ft_variants_20260301_223043/pb_t50_rs.out
+patchnepaFT_indpatch_llrdoff_default_20260302_0015	obj_only	no_test_acc	-	qa_zeroa	cls	last_q	False	patchnepa(direct)	logs/sanity/patchnepa_ft/patchnepaFT_indpatch_llrdoff_default_20260302_0015/obj_only.out

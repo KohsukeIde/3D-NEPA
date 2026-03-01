@@ -261,3 +261,55 @@ Explicit check for requested settings:
 | rfps_cached, aug on | `100714` | `100715` | `0.6317` |
 
 Current best in this short-screen branch: `random + aug off (0.6833)`.
+
+## 14. Cross-Line Scale Comparison (2D-NEPA / Point-MAE / PatchNEPA)
+
+Purpose:
+- make FT/pretrain scale differences explicit before interpreting accuracy deltas.
+
+### 14.1 Pretrain recipe scale
+
+| line | script / config | epochs | effective batch | LR | scheduler / warmup | WD | EMA | key defaults |
+|---|---|---:|---:|---:|---|---:|---|---|
+| 2D-NEPA-B | `scripts/pretrain/nepa_b.sh` | 1600 | 4096 | `3e-4 * 4096/256 = 4.8e-3` | cosine, warmup_ratio=0.025 | 0.05 | (run script has EMA support in `run_nepa.py`) | image pipeline |
+| 2D-NEPA-L | `scripts/pretrain/nepa_l.sh` | 1600 | 4096 | `4.8e-3` | cosine, warmup_ratio=0.025 | 0.05 | (same as above) | image pipeline |
+| Point-MAE | `Point-MAE/cfgs/pretrain.yaml` | 300 | 128 | 1.0e-3 | CosLR, warmup 10 epochs | 0.05 | no | `mask_ratio=0.6`, `num_group=64`, `group_size=32` |
+| PatchNEPA mainline | `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh` | 100 (default) | 128 (policy fixed) | 3.0e-4 | cosine, warmup_ratio=0.025 | 0.05 | optional (`USE_EMA`) | ray on (`N_RAY=1024`), split+sep, rfps_cached |
+
+### 14.2 Fine-tune recipe scale
+
+| line | script / config | epochs | effective batch | LR | scheduler / warmup | LLRD | freeze embed | notes |
+|---|---|---:|---:|---:|---|---|---|---|
+| 2D-NEPA-B | `scripts/finetune/nepa_b_sft.sh` | 100 | 1024 | `1.5e-3 * 1024/256 = 6.0e-3` | cosine + `llrd_cosine_warmup`, warmup_ratio=0.20 | `0.65` | yes (`freeze_embed=True`) | EMA=0.9999 |
+| 2D-NEPA-L | `scripts/finetune/nepa_l_sft.sh` | 100 | 1024 | `1.0e-3 * 1024/256 = 4.0e-3` | cosine + `llrd_cosine_warmup`, warmup_ratio=0.30 | `0.75` | yes | EMA=0.9999 |
+| Point-MAE (ScanObjectNN) | `Point-MAE/cfgs/finetune_scan_*.yaml` | 300 | 32 | 5.0e-4 | CosLR, warmup 10 epochs | no | no explicit freeze | train transform=`PointcloudScaleAndTranslate` |
+| PatchNEPA direct FT | `scripts/finetune/patchnepa_scanobjectnn_finetune.sh` + `scripts/finetune/patchcls_scanobjectnn_scratch.sh` | 300 | 64 (global mode default) | 5.0e-4 | cosine, warmup 10 epochs (`llrd_cosine_warmup` default in direct path) | `0.35 -> 1.0` | yes (`patchnepa_freeze_patch_embed=1`) | `pooling=cls`, `cls_token=last_q`, `head=linear` defaults |
+
+### 14.3 LLRD interpretation (important)
+
+Conclusion:
+- `LLRD=0.65/0.75` itself is not a known failure pattern.
+- 2D-NEPA uses these values in working recipes; this alone is not evidence of regression.
+
+Current higher-priority issue in some PatchNEPA FT runs:
+- observed effective LR collapse to `1e-11 ~ 1e-10` in logs (for example `patchnepa_ft_variants_20260301_223043`), while normal runs are `~1e-4` scale.
+- this mismatch is large enough to dominate performance differences, independent of choosing `0.35->1.0` vs `0.65/0.75`.
+
+Operational rule:
+- treat LR-scale-broken runs as non-comparable until scheduler/group scaling is fixed.
+
+### 14.4 Sources
+
+- `scripts/pretrain/nepa_b.sh`
+- `scripts/pretrain/nepa_l.sh`
+- `scripts/finetune/nepa_b_sft.sh`
+- `scripts/finetune/nepa_l_sft.sh`
+- `Point-MAE/cfgs/pretrain.yaml`
+- `Point-MAE/cfgs/finetune_scan_objonly.yaml`
+- `Point-MAE/cfgs/finetune_scan_objbg.yaml`
+- `Point-MAE/cfgs/finetune_scan_hardest.yaml`
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh`
+- `scripts/finetune/patchnepa_scanobjectnn_finetune.sh`
+- `scripts/finetune/patchcls_scanobjectnn_scratch.sh`
+- `logs/sanity/patchnepa_ft/patchnepa_ft_variants_20260301_223043/obj_bg.out`
+- `logs/sanity/patchnepa_ft/obj_bg.out`

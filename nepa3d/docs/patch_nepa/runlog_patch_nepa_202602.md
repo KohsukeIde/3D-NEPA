@@ -2495,3 +2495,51 @@ Candidate E300 settings to evaluate after hold is lifted:
 
 Note:
 - Current phase is "result waiting" only; no additional submissions until this hold is explicitly cleared.
+
+## 58. Additional completion check (2026-03-01)
+
+Checked jobs:
+
+| job | role | status | result |
+|---|---|---|---|
+| `100699` | pretrain (`ray_indpatch + aug + dualmask`) | `Exit_status=0` | completed, checkpoint written |
+| `100700` | pretrain (`point-only + EMA E100`) | `Exit_status=0` | completed |
+| `100701` | FT from `100700` (`obj_bg`) | `Exit_status=0` | `TEST acc=0.6799` |
+| `100702` | FT from `100700` (`obj_only`) | `Exit_status=0` | `TEST acc=0.7074` |
+| `100703` | FT from `100700` (`pb_t50_rs`) | running | pending |
+| `100741` | pretrain replacement for invalid `100643` | running | pending |
+
+Notes:
+- `100699` log ended with `Done. checkpoints ...` and done marker emitted.
+- NCCL `destroy_process_group` warning observed in old run logs is now addressed in training script for future runs.
+
+## 59. LLRD-off default probe + independent-ray FT launch (2026-03-02)
+
+Requested action:
+
+- run one immediate FT probe with current defaults, but with LLRD effectively off.
+
+Code/config default state used for this probe:
+
+- `LLRD_START=1.0`
+- `LLRD_END=1.0`
+- `LLRD_SCHEDULER=static`
+- `LLRD_MODE=linear` (default mode; no effect when start=end=1.0 and static scheduler)
+
+Submission:
+
+| job | run_set | source ckpt | variant | purpose | status |
+|---|---|---|---|---|---|
+| `100742` | `patchnepaFT_indpatch_llrdoff_default_20260302_0015` | `runs/patchnepa_rayqa/patchnepa_ray_fpscmp_indpatch_dm_augpm_20260301_222542/ckpt_latest.pt` | `obj_only` | LLRD-off baseline FT probe | running |
+
+Context linkage (invalid branch + replacement):
+
+| job | role | status |
+|---|---|---|
+| `100643` | bind+aug+dualmask old branch | invalid (`Exit_status=97`) |
+| `100741` | fixed-launch replacement of `100643` | running |
+| `100699` | independent-ray pretrain (`MISSING_RAY=0`) | completed (`Exit_status=0`) |
+| `100742` | FT from `100699` | running |
+
+Note:
+- This explicitly answers the gap: independent-ray (`MISSING_RAY=0`) branch now has downstream FT in queue (`100742`).

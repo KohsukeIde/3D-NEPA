@@ -217,10 +217,17 @@ def add_args(p: argparse.ArgumentParser) -> None:
             "'llrd_cosine*' uses step-wise LayerLambdaLR (2D-NEPA style)."
         ),
     )
+    p.add_argument(
+        "--llrd_mode",
+        type=str,
+        default="linear",
+        choices=["linear", "exp"],
+        help="Layer-wise scale mode when llrd_scheduler=llrd_cosine*: linear(shallow->deep) or exp(legacy llrd**depth).",
+    )
     p.add_argument("--warmup_epochs", type=float, default=10.0)
     p.add_argument("--warmup_start_factor", type=float, default=0.1)
     p.add_argument("--grad_clip", type=float, default=10.0)
-    p.add_argument("--llrd_start", type=float, default=0.35, help="Layer-wise LR decay start scale (PatchNEPA).")
+    p.add_argument("--llrd_start", type=float, default=1.0, help="Layer-wise LR decay start scale (PatchNEPA).")
     p.add_argument("--llrd_end", type=float, default=1.0, help="Layer-wise LR decay end scale (PatchNEPA).")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument(
@@ -583,12 +590,16 @@ def _build_optimizer(
                 g["lr"] = float(args.lr)
                 g["llrd"] = float(llrd_start)
                 g["llrd_scale"] = float(llrd_scale)
+                g["llrd_mode"] = str(getattr(args, "llrd_mode", "linear"))
+                g["llrd_scale_max"] = float(max_depth)
             else:
                 g["lr"] = float(args.lr) * scale
             groups[key] = g
         if use_dynamic_llrd:
             g["llrd"] = float(llrd_start)
             g["llrd_scale"] = float(llrd_scale)
+            g["llrd_mode"] = str(getattr(args, "llrd_mode", "linear"))
+            g["llrd_scale_max"] = float(max_depth)
         g["params"].append(p)
 
     param_groups = list(groups.values())
@@ -1151,12 +1162,14 @@ def main() -> None:
                     num_warmup_steps=num_warmup_steps,
                     num_training_steps=num_training_steps,
                     llrd_end=float(args.llrd_end),
+                    llrd_mode=str(args.llrd_mode),
                 )
             else:
                 lr_scheduler = get_llrd_cosine_schedule_with_warmup(
                     optimizer=optimizer,
                     num_warmup_steps=num_warmup_steps,
                     num_training_steps=num_training_steps,
+                    llrd_mode=str(args.llrd_mode),
                 )
             scheduler_step_per_batch = True
         else:
@@ -1211,7 +1224,7 @@ def main() -> None:
                 f"pooling={args.pooling} patchnepa_ft_mode={args.patchnepa_ft_mode} cls_token={args.patchnepa_cls_token_source} "
                 f"head_mode={args.head_mode} backbone_mode={args.backbone_mode} "
                 f"freeze_patch_embed={int(args.patchnepa_freeze_patch_embed)} llrd=({float(args.llrd_start):.2f}->{float(args.llrd_end):.2f}) "
-                f"llrd_scheduler={args.llrd_scheduler} "
+                f"llrd_scheduler={args.llrd_scheduler} llrd_mode={args.llrd_mode} "
                 f"lr_groups={int(opt_stats.get('n_groups', 1))} lr_range=[{opt_stats.get('lr_min', args.lr):.2e},{opt_stats.get('lr_max', args.lr):.2e}] "
                 f"ray_query_only=1 is_causal={bool(args.is_causal)} ddp_find_unused={ddp_find_unused}\n"
                 f"  world_size={world_size} batch_mode={args.batch_mode} batch_arg={args.batch} batch_effective={eff_batch}\n"
