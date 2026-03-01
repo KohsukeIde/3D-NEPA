@@ -149,9 +149,11 @@ class PatchTransformerNepa(nn.Module):
         include_ray_normal: bool = True,
         include_ray_unc: bool = False,
         use_ray_origin: bool = False,
-        ray_assign_mode: str = "proxy_sphere",  # proxy_sphere|x_anchor
+        ray_assign_mode: str = "proxy_sphere",  # proxy_sphere|x_anchor|independent_fps_knn
         ray_proxy_radius_scale: float = 1.05,
         ray_pool_mode: str = "amax",  # amax|mean
+        ray_num_groups: int = 32,
+        ray_group_size: int = 32,
     ) -> None:
         super().__init__()
 
@@ -231,6 +233,8 @@ class PatchTransformerNepa(nn.Module):
                 assign_mode=str(ray_assign_mode),
                 proxy_radius_scale=float(ray_proxy_radius_scale),
                 pool=str(ray_pool_mode),
+                ray_num_groups=int(ray_num_groups),
+                ray_group_size=int(ray_group_size),
             )
         else:
             self.ray_patch_embed = None
@@ -344,6 +348,7 @@ class PatchTransformerNepa(nn.Module):
         q_ray_tok: Optional[torch.Tensor] = None,
         a_ray_tok: Optional[torch.Tensor] = None,
         ray_has: Optional[torch.Tensor] = None,
+        ray_centers_xyz: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         B, P, D = q_tok.shape
         if self.qa_fuse == "add":
@@ -368,6 +373,9 @@ class PatchTransformerNepa(nn.Module):
         if q_ray_tok is not None or a_ray_tok is not None:
             if q_ray_tok is None or a_ray_tok is None:
                 raise ValueError("q_ray_tok and a_ray_tok must both be provided for qa_tokens=0")
+            _, Pr, _ = q_ray_tok.shape
+            if a_ray_tok.shape[:2] != (B, Pr):
+                raise ValueError("q_ray_tok/a_ray_tok shape mismatch")
             if self.qa_fuse == "add":
                 ray_tok = q_ray_tok + a_ray_tok
             elif self.qa_fuse == "concat":
@@ -377,16 +385,20 @@ class PatchTransformerNepa(nn.Module):
             else:
                 raise ValueError(f"unknown qa_fuse={self.qa_fuse}")
             if ray_has is None:
-                ray_has = torch.ones((B, P), device=q_tok.device, dtype=torch.bool)
+                ray_has = torch.ones((B, Pr), device=q_tok.device, dtype=torch.bool)
+            if ray_has.shape != (B, Pr):
+                raise ValueError("ray_has shape mismatch with ray tokens")
+            if ray_centers_xyz is None:
+                ray_centers_xyz = torch.zeros((B, Pr, 3), device=q_tok.device, dtype=centers_xyz.dtype)
             parts.append(ray_tok)
             types.append(
                 torch.where(
                     ray_has,
-                    torch.full((B, P), int(TYPE_RAY), device=q_tok.device, dtype=torch.long),
-                    torch.full((B, P), int(TYPE_MISSING_RAY), device=q_tok.device, dtype=torch.long),
+                    torch.full((B, Pr), int(TYPE_RAY), device=q_tok.device, dtype=torch.long),
+                    torch.full((B, Pr), int(TYPE_MISSING_RAY), device=q_tok.device, dtype=torch.long),
                 )
             )
-            centers_parts.append(centers_xyz)
+            centers_parts.append(ray_centers_xyz)
 
         parts.append(self.eos_token.expand(B, 1, D))
         types.append(torch.full((B, 1), int(TYPE_EOS), device=q_tok.device, dtype=torch.long))
@@ -405,6 +417,7 @@ class PatchTransformerNepa(nn.Module):
         q_ray_tok: Optional[torch.Tensor] = None,
         a_ray_tok: Optional[torch.Tensor] = None,
         ray_has: Optional[torch.Tensor] = None,
+        ray_centers_xyz: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         B, P, D = q_tok.shape
         qa = torch.stack([q_tok, a_tok], dim=2).reshape(B, 2 * P, D)
@@ -428,22 +441,29 @@ class PatchTransformerNepa(nn.Module):
         if q_ray_tok is not None or a_ray_tok is not None:
             if q_ray_tok is None or a_ray_tok is None:
                 raise ValueError("q_ray_tok and a_ray_tok must both be provided for interleave ray mode")
-            ray_qa = torch.stack([q_ray_tok, a_ray_tok], dim=2).reshape(B, 2 * P, D)
+            _, Pr, _ = q_ray_tok.shape
+            if a_ray_tok.shape[:2] != (B, Pr):
+                raise ValueError("q_ray_tok/a_ray_tok shape mismatch")
+            ray_qa = torch.stack([q_ray_tok, a_ray_tok], dim=2).reshape(B, 2 * Pr, D)
             if ray_has is None:
-                ray_has = torch.ones((B, P), device=q_tok.device, dtype=torch.bool)
+                ray_has = torch.ones((B, Pr), device=q_tok.device, dtype=torch.bool)
+            if ray_has.shape != (B, Pr):
+                raise ValueError("ray_has shape mismatch with ray tokens")
+            if ray_centers_xyz is None:
+                ray_centers_xyz = torch.zeros((B, Pr, 3), device=q_tok.device, dtype=centers_xyz.dtype)
             q_type = torch.where(
                 ray_has,
-                torch.full((B, P), int(TYPE_Q_RAY), device=q_tok.device, dtype=torch.long),
-                torch.full((B, P), int(TYPE_MISSING_RAY), device=q_tok.device, dtype=torch.long),
+                torch.full((B, Pr), int(TYPE_Q_RAY), device=q_tok.device, dtype=torch.long),
+                torch.full((B, Pr), int(TYPE_MISSING_RAY), device=q_tok.device, dtype=torch.long),
             )
             a_type = torch.where(
                 ray_has,
-                torch.full((B, P), int(TYPE_A_RAY), device=q_tok.device, dtype=torch.long),
-                torch.full((B, P), int(TYPE_MISSING_RAY), device=q_tok.device, dtype=torch.long),
+                torch.full((B, Pr), int(TYPE_A_RAY), device=q_tok.device, dtype=torch.long),
+                torch.full((B, Pr), int(TYPE_MISSING_RAY), device=q_tok.device, dtype=torch.long),
             )
             parts.append(ray_qa)
-            types.append(torch.stack([q_type, a_type], dim=2).reshape(B, 2 * P))
-            centers_parts.append(centers_xyz.repeat_interleave(2, dim=1))
+            types.append(torch.stack([q_type, a_type], dim=2).reshape(B, 2 * Pr))
+            centers_parts.append(ray_centers_xyz.repeat_interleave(2, dim=1))
 
         parts.append(self.eos_token.expand(B, 1, D))
         types.append(torch.full((B, 1), int(TYPE_EOS), device=q_tok.device, dtype=torch.long))
@@ -462,6 +482,7 @@ class PatchTransformerNepa(nn.Module):
         q_ray_tok: Optional[torch.Tensor] = None,
         a_ray_tok: Optional[torch.Tensor] = None,
         ray_has: Optional[torch.Tensor] = None,
+        ray_centers_xyz: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         B, P, D = q_tok.shape
         parts: list[torch.Tensor] = [self.bos_token.expand(B, 1, D), q_tok]
@@ -478,16 +499,23 @@ class PatchTransformerNepa(nn.Module):
             raise ValueError("q_ray_tok and a_ray_tok must be both set or both None for split layout")
 
         if q_ray_tok is not None:
+            _, Pr, _ = q_ray_tok.shape
+            if a_ray_tok is None or a_ray_tok.shape[:2] != (B, Pr):
+                raise ValueError("q_ray_tok/a_ray_tok shape mismatch")
             if ray_has is None:
-                ray_has = torch.ones((B, P), device=q_tok.device, dtype=torch.bool)
+                ray_has = torch.ones((B, Pr), device=q_tok.device, dtype=torch.bool)
+            if ray_has.shape != (B, Pr):
+                raise ValueError("ray_has shape mismatch with ray tokens")
+            if ray_centers_xyz is None:
+                ray_centers_xyz = torch.zeros((B, Pr, 3), device=q_tok.device, dtype=centers_xyz.dtype)
             q_types = torch.where(
                 ray_has,
-                torch.full((B, P), int(TYPE_Q_RAY), device=q_tok.device, dtype=torch.long),
-                torch.full((B, P), int(TYPE_MISSING_RAY), device=q_tok.device, dtype=torch.long),
+                torch.full((B, Pr), int(TYPE_Q_RAY), device=q_tok.device, dtype=torch.long),
+                torch.full((B, Pr), int(TYPE_MISSING_RAY), device=q_tok.device, dtype=torch.long),
             )
             parts.append(q_ray_tok)
             types.append(q_types)
-            centers_parts.append(centers_xyz)
+            centers_parts.append(ray_centers_xyz)
 
         if self.qa_sep_token:
             parts.append(self.sep_token.expand(B, 1, D))
@@ -499,16 +527,21 @@ class PatchTransformerNepa(nn.Module):
         centers_parts.append(centers_xyz)
 
         if a_ray_tok is not None:
+            _, Pr, _ = a_ray_tok.shape
             if ray_has is None:
-                ray_has = torch.ones((B, P), device=q_tok.device, dtype=torch.bool)
+                ray_has = torch.ones((B, Pr), device=q_tok.device, dtype=torch.bool)
+            if ray_has.shape != (B, Pr):
+                raise ValueError("ray_has shape mismatch with ray tokens")
+            if ray_centers_xyz is None:
+                ray_centers_xyz = torch.zeros((B, Pr, 3), device=q_tok.device, dtype=centers_xyz.dtype)
             a_types = torch.where(
                 ray_has,
-                torch.full((B, P), int(TYPE_A_RAY), device=q_tok.device, dtype=torch.long),
-                torch.full((B, P), int(TYPE_MISSING_RAY), device=q_tok.device, dtype=torch.long),
+                torch.full((B, Pr), int(TYPE_A_RAY), device=q_tok.device, dtype=torch.long),
+                torch.full((B, Pr), int(TYPE_MISSING_RAY), device=q_tok.device, dtype=torch.long),
             )
             parts.append(a_ray_tok)
             types.append(a_types)
-            centers_parts.append(centers_xyz)
+            centers_parts.append(ray_centers_xyz)
 
         parts.append(self.eos_token.expand(B, 1, D))
         types.append(torch.full((B, 1), int(TYPE_EOS), device=q_tok.device, dtype=torch.long))
@@ -578,6 +611,7 @@ class PatchTransformerNepa(nn.Module):
         q_ray_tok: Optional[torch.Tensor] = None
         a_ray_tok: Optional[torch.Tensor] = None
         ray_has: Optional[torch.Tensor] = None
+        ray_centers_xyz: Optional[torch.Tensor] = None
         if self.use_ray_patch:
             if self.ray_patch_embed is None:
                 raise RuntimeError("use_ray_patch=True but ray_patch_embed is None")
@@ -596,6 +630,7 @@ class PatchTransformerNepa(nn.Module):
             q_ray_tok = ray_out.q_tok
             a_ray_tok = ray_out.a_tok
             ray_has = ray_out.has_ray
+            ray_centers_xyz = ray_out.centers_xyz
 
         if self.qa_tokens == 0:
             tokens, type_id, centers_seq = self._build_seq_qa0(
@@ -605,6 +640,7 @@ class PatchTransformerNepa(nn.Module):
                 q_ray_tok=q_ray_tok,
                 a_ray_tok=a_ray_tok,
                 ray_has=ray_has,
+                ray_centers_xyz=ray_centers_xyz,
             )
         else:
             if self.qa_layout == "interleave":
@@ -615,6 +651,7 @@ class PatchTransformerNepa(nn.Module):
                     q_ray_tok=q_ray_tok,
                     a_ray_tok=a_ray_tok,
                     ray_has=ray_has,
+                    ray_centers_xyz=ray_centers_xyz,
                 )
             else:
                 tokens, type_id, centers_seq = self._build_seq_qa1_split(
@@ -624,6 +661,7 @@ class PatchTransformerNepa(nn.Module):
                     q_ray_tok=q_ray_tok,
                     a_ray_tok=a_ray_tok,
                     ray_has=ray_has,
+                    ray_centers_xyz=ray_centers_xyz,
                 )
 
         # Keep sep_token connected in all layouts (including interleave without SEP)
@@ -860,14 +898,15 @@ class PatchTransformerNepaClassifier(nn.Module):
                 ray_unc=None,
                 ray_available=None,
             )
+            Pr = int(ray_out.q_tok.shape[1])
             q_ray_type = torch.where(
                 ray_out.has_ray,
-                torch.full((B, P), int(TYPE_Q_RAY), device=dev, dtype=torch.long),
-                torch.full((B, P), int(TYPE_MISSING_RAY), device=dev, dtype=torch.long),
+                torch.full((B, Pr), int(TYPE_Q_RAY), device=dev, dtype=torch.long),
+                torch.full((B, Pr), int(TYPE_MISSING_RAY), device=dev, dtype=torch.long),
             )
             parts.append(ray_out.q_tok)
             types.append(q_ray_type)
-            centers_parts.append(centers_xyz)
+            centers_parts.append(ray_out.centers_xyz)
 
         parts.append(self.core.eos_token.expand(B, 1, D))
         types.append(torch.full((B, 1), int(TYPE_EOS), device=dev, dtype=torch.long))

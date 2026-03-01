@@ -2001,3 +2001,389 @@ Rationale:
 Compatibility:
 - `pointcloud_meshray` keeps legacy fallback behavior (`pt_dist_pool`) for explicit ablation/repro paths.
 - current `shapenet_cache_v0` already includes `pt_dist_pc_pool` (checked), so mainline pointcloud pretrain is unaffected.
+
+## 46. FPS strict fail-fast + FPS/Random A-B submission (2026-03-01)
+
+Code-policy hardening:
+
+- `nepa3d/data/dataset.py`
+  - `pt_sample_mode='fps'` now hard-fails when FPS order key is missing.
+  - removed warning-only behavior that allowed silent on-the-fly FPS fallback.
+- `nepa3d/token/tokenizer.py`
+  - `_sample_point_indices(..., pt_sample_mode='fps')` now raises when cached FPS order is not provided.
+  - removed on-the-fly FPS fallback path for strict reproducibility.
+
+Rationale:
+
+- Stage-2 strict comparisons should not run with mixed execution paths
+  (`cached order` vs `on-the-fly FPS`) because throughput and token partitions differ.
+
+Cache readiness check:
+
+- `shapenet_cache_v0` sample check confirms `pt_fps_order` exists.
+- no additional FPS backfill is required for this specific corpus.
+
+2D-comparability A/B submission (sampling-mode cut only):
+
+Pretrain A (FPS fixed):
+- job: `100559.qjcm` (`patchnepa_ryFPS`)
+- run_set: `patchnepa_ray_fpscmp_fps_20260301_205158`
+- key settings:
+  - `PT_SAMPLE_MODE=fps`
+  - `PT_FPS_KEY=pt_fps_order`
+  - `POINT_ORDER_MODE=morton`
+  - `qa_layout=split_sep`, `encdec_arch=0`
+  - `dual_mask=(0.5,0.1,w=32,type_aware=1)`
+  - `use_ray_patch=1`, `n_ray=1024`
+  - `global_batch=128` (16GPU)
+
+Pretrain B (Random baseline):
+- job: `100560.qjcm` (`patchnepa_ryRAND`)
+- run_set: `patchnepa_ray_fpscmp_rand_20260301_205203`
+- key settings:
+  - `PT_SAMPLE_MODE=random`
+  - all other recipe knobs matched to Pretrain A
+
+Dependent FT (obj_only only, direct PatchNEPA FT):
+- from `100559`:
+  - `100561.qjcm` (`pn_obj_only`), hold via `depend=afterok:100559`
+  - run_set: `patchnepaFT_from_fpscmp_fps_20260301_205210`
+  - ckpt: `runs/patchnepa_rayqa/patchnepa_ray_fpscmp_fps_20260301_205158/ckpt_latest.pt`
+- from `100560`:
+  - `100562.qjcm` (`pn_obj_only`), hold via `depend=afterok:100560`
+  - run_set: `patchnepaFT_from_fpscmp_rand_20260301_205215`
+  - ckpt: `runs/patchnepa_rayqa/patchnepa_ray_fpscmp_rand_20260301_205203/ckpt_latest.pt`
+
+## 47. Re-submit after launcher env propagation fix (2026-03-01)
+
+Issue found immediately after Section 46 submission:
+
+- first FPS/Random pair (`100559`/`100560`) aborted at init with
+  `RuntimeError: Invalid value for environment variable: TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC`
+- cause: empty NCCL env strings were propagated via `qsub -v` and interpreted by torch.distributed.
+
+Fixes applied:
+
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh`
+  - sanitize optional NCCL vars by unsetting empty strings before launch.
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`
+  - same sanitization added to `node_entry.sh` after env import.
+- `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh`
+  - fixed env propagation for sampling keys:
+    - now forwards `PT_FPS_KEY`, `PT_RFPS_M` (in addition to `PT_SAMPLE_MODE`, `PT_RFPS_KEY`).
+
+Superseded/invalid jobs:
+
+- pretrain: `100559`, `100560` (init-failed)
+- dependent FT: `100561`, `100562` (finished without valid upstream)
+
+Replacement submissions (valid):
+
+Pretrain A (FPS fixed):
+- `100563.qjcm` (`patchnepa_ryFPS`)
+- run_set: `patchnepa_ray_fpscmp_fps_20260301_205529`
+- verified startup:
+  - `pt_sample_mode=fps`
+  - `pt_fps_key=pt_fps_order`
+  - `effective_global_batch=128`
+
+Pretrain B (Random baseline):
+- `100564.qjcm` (`patchnepa_ryRAND`)
+- run_set: `patchnepa_ray_fpscmp_rand_20260301_205535`
+- verified startup:
+  - `pt_sample_mode=random`
+  - `effective_global_batch=128`
+
+Dependent FT (obj_only):
+- from `100563`: `100565.qjcm` (hold, `afterok:100563`)
+- from `100564`: `100566.qjcm` (hold, `afterok:100564`)
+
+## 48. 300-epoch status check (2026-03-01)
+
+User check request: verify whether 300-epoch branch has finished.
+
+### 48.1 Ray E300 (base width) — strict-valid complete
+
+Pretrain:
+- `100424.qjcm` (`patchnepa_ryE300`) finished (`job_state=F`, `Exit_status=0`).
+- rank0 log confirms full completion:
+  - `epoch 299 ...`
+  - `Done. checkpoints: runs/patchnepa_rayqa/patchnepa_ray_splitx2_dualmask_E300_20260301_170800`
+
+Dependent FT from `100424` (all finished):
+- `100425` (`obj_only`): `TEST acc=0.7866`
+  - `logs/sanity/patchnepa_ft/patchnepaFT_objonly_fromE300_dualmask_splitsep_20260301_170815/obj_only.out`
+- `100426` (`obj_bg`): `TEST acc=0.8072`
+  - `logs/sanity/patchnepa_ft/obj_bg.out`
+- `100427` (`pb_t50_rs`): `TEST acc=0.7720`
+  - `logs/sanity/patchnepa_ft/pb_t50_rs.out`
+
+### 48.2 B768 E300 branches — pretrain invalid (runtime fail)
+
+B768 E300 (first):
+- `100432.qjcm` finished in scheduler metadata (`Exit_status=0`) but pretrain log has
+  `ChildFailedError` / `Signal 6 (SIGABRT)`.
+- not strict-valid as completed pretrain.
+
+B768 E300 retry:
+- `100549.qjcm` similarly shows scheduler `Exit_status=0` but rank0 log has
+  NCCL watchdog + `CUDA error: uncorrectable ECC error encountered` and `ChildFailedError`.
+- not strict-valid as completed pretrain.
+
+Dependent FT note:
+- `100550` (`obj_only`) ran and produced `TEST acc=0.8158`,
+  but this comes from an invalid upstream pretrain run and is diagnostic-only (not strict-valid for comparison).
+
+### 48.3 Current active jobs (sampling A/B)
+
+- `100563` (`FPS fixed`) running
+- `100564` (`Random`) running
+- `100565/100566` (`obj_only` FT) are dependency-hold until pretrains complete
+
+## 49. B768 E300 retry path (ECC-focused rerun, 2026-03-01)
+
+Why previous B768 E300 was invalid:
+- `100432` and `100549` failed inside distributed runtime (`ChildFailedError`),
+  with `100549` showing explicit `CUDA error: uncorrectable ECC error encountered`.
+- this is hardware/runtime-side instability (node/GPU), not NEPA objective logic.
+
+Hardening change applied:
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`
+  - ECC preflight now checks both:
+    - `ecc.errors.uncorrected.volatile.total`
+    - `retired_pages.pending`
+  - node fails fast (`exit 86`) if either indicates unhealthy GPU state.
+
+Retry submissions:
+
+1) `100568` (`patchnepa_ryB8E3r3`) — invalid by config drift / terminated
+- intended as B768 E300 retry, but startup showed unintended `dual_mask off`
+  (`near=0.0 far=0.0 type_aware=0`), so this run is excluded.
+- scheduler status: `Exit_status=271` (terminated path), no valid comparison claim.
+
+2) `100570` (`patchnepa_ryB8E34`) — current valid retry
+- run_set: `patchnepa_ray_splitx2_dualmask_B768_E300_retry4_20260301_210347`
+- fixed recipe (matches dualmask branch):
+  - `D_MODEL=768, N_LAYERS=12, N_HEADS=12, EPOCHS=300`
+  - `qa_layout=split_sep, qa_tokens=1, encdec_arch=0`
+  - `dual_mask=(0.5,0.1,w=32,type_aware=1)`
+  - `pt_sample_mode=rfps_cached, pt_rfps_key=pt_rfps_order_bank`
+  - `global_batch=128 (16GPU)`
+  - `NCCL_STABLE_MODE=1`, `ENABLE_ECC_PREFLIGHT=1`
+- status at append time: running.
+
+Dependent FT:
+- `100571` (`obj_only`, `afterok:100570`) submitted and on hold.
+
+## 50. Invalid beforeok chain guard (2026-03-01)
+
+Issue observed:
+- some failed pretrains (`100432`, `100549`) still ended as scheduler `Exit_status=0`,
+  so `beforeok` dependent FT could start and produce misleading numbers.
+- practical impact: invalid upstream checkpoints were accidentally consumed in downstream FT.
+
+Root cause:
+- runtime failure happened inside distributed child processes (`ChildFailedError`), but the
+  multinode launch wrapper path did not enforce a strict "clean completion marker" gate.
+
+Fix applied (launcher hardening):
+
+1) `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh`
+- on successful completion, only `MACHINE_RANK=0` writes:
+  - `${PRETRAIN_DONE_MARKER}`
+- log now also prints marker path when written.
+
+2) `scripts/pretrain/nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`
+- creates per-run marker path:
+  - `${RUN_DIR}/pretrain_done.marker`
+- passes `PRETRAIN_DONE_MARKER` to node launcher env.
+- after `pbsdsh` returns, requires marker existence.
+  - missing marker => hard fail `exit 97`.
+
+Policy after this fix:
+- dependent FT runs are strict-valid only when upstream pretrain has both:
+  - normal training completion in log (`Done. checkpoints ...`) and
+  - launcher completion marker present.
+- this blocks accidental `beforeok` pass-through from partial/failed pretrains.
+
+## 51. B768 E300 strict rerun after fail-safe patch (2026-03-01)
+
+User action request:
+- rerun B768 E300 after fixing failure handling, because previous B768 E300 branches were invalid.
+
+Cancelled old chain:
+- pretrain `100570` and dependent FT `100571` (launched before Section 50 guard).
+
+Resubmitted with fail-safe launcher:
+- pretrain: `100572.qjcm` (`patchnepa_ryB8E35`)
+  - run_set: `patchnepa_ray_splitx2_dualmask_B768_E300_retry5_20260301_210956`
+  - recipe:
+    - `D_MODEL=768, N_LAYERS=12, N_HEADS=12, EPOCHS=300`
+    - `qa_layout=split_sep`, `qa_tokens=1`, `encdec_arch=0`
+    - `dual_mask=(0.5,0.1,w=32,type_aware=1)`
+    - `pt_sample_mode=rfps_cached`, `pt_rfps_key=pt_rfps_order_bank`
+    - global batch `128` (`BATCH=8`, `16 GPU`)
+    - `NCCL_STABLE_MODE=1`, `ENABLE_ECC_PREFLIGHT=1`
+  - verification:
+    - generated env contains `PRETRAIN_DONE_MARKER=.../pretrain_done.marker`
+
+- dependent FT: `100573.qjcm` (`obj_only`)
+  - dependency: `afterok:100572`
+  - strict FT settings:
+    - `MODEL_SOURCE=patchnepa`
+    - `PATCHNEPA_FT_MODE=qa_zeroa`
+    - `PATCHNEPA_CLS_TOKEN_SOURCE=last_q`
+    - `PATCHNEPA_FREEZE_PATCH_EMBED=1`
+    - `LLRD=0.35->1.0` (`llrd_cosine_warmup`)
+    - `file + TTA10`
+
+Status at append time:
+- `100572` running
+- `100573` hold
+
+## 52. Ray-bind vs Ray-independent patch (same recipe, `ray_num_groups=32`) (2026-03-01)
+
+Goal:
+
+- isolate only ray grouping strategy difference while keeping Stage-2 ray recipe fixed.
+- report `MISSING_RAY` change at step-0 sanity token counts.
+
+Baseline (current bind mode):
+
+- job: `100643.qjcm` (`patchnepa_rayqa`)
+- key settings:
+  - `RAY_ASSIGN_MODE=proxy_sphere`
+  - `RAY_NUM_GROUPS=32`, `RAY_GROUP_SIZE=32`
+  - `qa_layout=split_sep`, `dual_mask=(0.5,0.1,w=32,type_aware=1)`
+  - `global_batch=128`, `USE_EMA=0`
+  - `PT_SAMPLE_MODE=fps`, `PT_FPS_KEY=pt_fps_order`
+  - aug parity: `scale=[0.667,1.5]`, `translate=0.2`
+- step-0 sanity (`run_ray_fpscmp_fps_augpm_dm.mr0.log`):
+  - `Q_RAY=21`, `A_RAY=21`, `MISSING_RAY=86`
+
+New (ray-independent patch):
+
+- transient smoke run: `100698.qjcm` (terminated by user after confirming token behavior)
+- canonical matched run: `100699.qjcm` (`patchnepa_ryIND`)
+- key settings (matched to baseline except ray assign mode):
+  - `RAY_ASSIGN_MODE=independent_fps_knn`
+  - `RAY_NUM_GROUPS=32`, `RAY_GROUP_SIZE=32`
+  - same `qa_layout`, `dual_mask`, batch, optimizer, aug, and data keys as baseline
+- step-0 sanity (`run_ray_fpscmp_indpatch_dm_augpm.mr0.log`):
+  - `Q_RAY=32`, `A_RAY=32`, `MISSING_RAY=0`
+
+Observed delta (sample-0 sanity count):
+
+- `MISSING_RAY`: `86 -> 0` (absolute `-86`, relative `-100%`)
+- `Q_RAY`: `21 -> 32`
+- `A_RAY`: `21 -> 32`
+
+Implementation note required for this run:
+
+- `nepa3d/train/pretrain_patch_nepa.py` now accepts
+  `--ray_assign_mode independent_fps_knn` in argparse choices.
+
+## 53. `fpscmp` branch status audit (2026-03-01)
+
+Scope:
+
+- `patchnepa_ray_fpscmp_*` runs for FPS-vs-random and ray-bind-vs-independent checks.
+
+Status table (pretrain only):
+
+| job | run_set | key recipe | status | validity |
+|---|---|---|---|---|
+| `100559` | `patchnepa_ray_fpscmp_fps_20260301_205158` | `pt_sample_mode=fps` | failed at startup (`TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC` invalid) | invalid |
+| `100560` | `patchnepa_ray_fpscmp_rand_20260301_205203` | `pt_sample_mode=random` | failed at startup (`TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC` invalid) | invalid |
+| `100563` | `patchnepa_ray_fpscmp_fps_20260301_205529` | `fps`, no aug, dualmask on | completed (`Done. checkpoints ...`) | valid |
+| `100564` | `patchnepa_ray_fpscmp_rand_20260301_205535` | `random`, no aug, dualmask on | completed (`Done. checkpoints ...`) | valid |
+| `100642` | `patchnepa_ray_fpscmp_fps_augpm_20260301_215528` | `fps`, PM-like aug, dualmask off | terminated by user (`Exit_status=265`) | invalid |
+| `100643` | `patchnepa_ray_fpscmp_fps_augpm_dm_20260301_215549` | `fps`, PM-like aug, dualmask on | running | pending |
+| `100698` | `patchnepa_ray_fpscmp_indpatch_dm_20260301_222239` | `independent ray patch`, no aug | terminated by user after sanity check (`Exit_status=271`) | invalid for final metric |
+| `100699` | `patchnepa_ray_fpscmp_indpatch_dm_augpm_20260301_222542` | `independent ray patch`, PM-like aug, dualmask on | running | pending |
+
+Clarification on augmentation-side question:
+
+- augmentation configuration itself is **not** the failure cause.
+- the only aug run that ended (`100642`) is a manual termination (not model crash/regression).
+- aug+dualmask branches (`100643`, `100699`) are active; final verdict should use their completed logs.
+
+## 54. Point-only + EMA + E100 submission (comparison branch attach) (2026-03-01)
+
+User request:
+
+- add `point-only + EMA + E100` into current comparison branch.
+
+Submitted pretrain:
+
+- job: `100700.qjcm` (`patchnepa_ptE100EM`)
+- run_set:
+  - `patchnepa_ptonly_ema_e100_fpscmp_20260301_223010`
+- save/log:
+  - `runs/patchnepa_pointonly/patchnepa_ptonly_ema_e100_fpscmp_20260301_223010`
+  - `logs/patch_nepa_pretrain/patchnepa_ptonly_ema_e100_fpscmp_20260301_223010`
+- key recipe:
+  - point-only: `USE_RAY_PATCH=0`, `N_RAY=0`, `STAGE2_REQUIRE_RAY=0`
+  - `MIX_CONFIG=pretrain_mixed_shapenet_pointcloud_only_onepass.yaml`
+  - `EPOCHS=100`, global batch `128` (`BATCH=8`, `16 GPU`)
+  - `USE_EMA=1`, `EMA_DECAY=0.9999`
+  - `qa_layout=split_sep`, `qa_tokens=1`, `encdec_arch=0`
+  - `dual_mask=(0.5,0.1,w=32,type_aware=1)`
+  - `pt_sample_mode=fps`, `pt_fps_key=pt_fps_order`
+  - PM-like pretrain aug: `scale=[0.667,1.5]`, `translate=0.2`
+
+Dependent direct PatchNEPA FT (afterok:100700):
+
+- `100701.qjcm` (`obj_bg`)
+- `100702.qjcm` (`obj_only`)
+- `100703.qjcm` (`pb_t50_rs`)
+
+FT recipe snapshot:
+
+- `MODEL_SOURCE=patchnepa`, `CKPT_USE_EMA=1`
+- strict eval: `val_split_mode=file`, `AUG_EVAL=1`, `MC_TEST=10`
+- `PATCHNEPA_FT_MODE=qa_zeroa`, `PATCHNEPA_CLS_TOKEN_SOURCE=last_q`
+- `PATCHNEPA_FREEZE_PATCH_EMBED=1`, `LLRD=0.35->1.0`
+- point-only FT side: `USE_RAY_PATCH=0`, `N_RAY=0`
+
+Status at append time:
+
+- `100700`: running
+- `100701/100702/100703`: hold (afterok dependency)
+
+## 55. 3x2 short-screen submission (pretrain+FT set) (2026-03-01)
+
+User request:
+
+- do not screen with pretrain-only; submit pretrain+FT as a set.
+- 3x2 matrix over `{random,fps,rfps_cached} x {aug off,on}`.
+
+Screening protocol:
+
+- pretrain: `E12` (short-screen, ~7k-10k step band), `16 GPU`, global batch `128`
+- FT: dependent `obj_only` run for each pretrain (`afterok`), `E120`
+- fixed across all 6 cells:
+  - `ray_assign_mode=independent_fps_knn`
+  - `ray_num_groups=32`, `ray_group_size=32`
+  - `qa_layout=split_sep`, `dual_mask=(0.5,0.1,w=32,type_aware=1)`
+  - `USE_EMA=0`
+
+Submitted pairs:
+
+| mode | aug | pretrain job | finetune job (`obj_only`) |
+|---|---|---|---|
+| random | off | `100704` | `100705` |
+| random | on | `100706` | `100707` |
+| fps | off | `100708` | `100709` |
+| fps | on | `100710` | `100711` |
+| rfps_cached | off | `100712` | `100713` |
+| rfps_cached | on | `100714` | `100715` |
+
+Run-set summary file:
+
+- `logs/patch_nepa_pretrain/patchnepa_sanity6_20260301_224515_submission_summary.tsv`
+
+Status at append time:
+
+- pretrain `100704/706/708/710/712/714`: running
+- finetune `100705/707/709/711/713/715`: hold (afterok dependency)

@@ -49,6 +49,7 @@ fi
 
 RUN_DIR="${DDP_LOG_ROOT}/ddp_patchnepa_${PBS_JOBID:-manual}_${RUN_TAG}"
 mkdir -p "${RUN_DIR}/logs"
+PRETRAIN_DONE_MARKER="${RUN_DIR}/pretrain_done.marker"
 
 HOSTS_FILE="${RUN_DIR}/hosts.txt"
 awk '!seen[$0]++{print}' "${PBS_NODEFILE}" > "${HOSTS_FILE}"
@@ -81,6 +82,7 @@ ENVCONF="${RUN_DIR}/env.conf"
 cat > "${ENVCONF}" <<EOF
 WORKDIR="${WORKDIR}"
 RUN_DIR="${RUN_DIR}"
+PRETRAIN_DONE_MARKER="${PRETRAIN_DONE_MARKER}"
 HOSTS_FILE="${HOSTS_FILE}"
 MASTER_ADDR="${MASTER_ADDR}"
 MASTER_PORT="${MASTER_PORT}"
@@ -103,6 +105,12 @@ cat > "${NODE_ENTRY}" <<'SH2'
 #!/bin/bash
 set -euo pipefail
 source "$(dirname "$0")/env.conf"
+# qsub may pass empty strings; unset to avoid torch.distributed parse errors.
+[[ -z "${NCCL_P2P_DISABLE}" ]] && unset NCCL_P2P_DISABLE
+[[ -z "${NCCL_NET_GDR_LEVEL}" ]] && unset NCCL_NET_GDR_LEVEL
+[[ -z "${TORCH_NCCL_ENABLE_MONITORING}" ]] && unset TORCH_NCCL_ENABLE_MONITORING
+[[ -z "${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC}" ]] && unset TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC
+
 
 host="$(hostname)"
 log="${RUN_DIR}/logs/${host}.patchnepa.log"
@@ -144,9 +152,11 @@ export NCCL_IB_HCA="${NCCL_IB_HCA:-mlx5_0,mlx5_1}"
 export TORCH_NCCL_ASYNC_ERROR_HANDLING="${TORCH_NCCL_ASYNC_ERROR_HANDLING:-1}"
 
 if [[ "${ENABLE_ECC_PREFLIGHT:-1}" == "1" ]] && command -v nvidia-smi >/dev/null 2>&1; then
+  bad_gpu=0
+
+  # 1) Volatile uncorrectable ECC must be zero on all visible GPUs.
   ecc_vals="$(nvidia-smi --query-gpu=ecc.errors.uncorrected.volatile.total --format=csv,noheader,nounits 2>/dev/null || true)"
   if [[ -n "${ecc_vals}" ]]; then
-    bad_gpu=0
     while IFS= read -r v; do
       v="$(echo "${v}" | xargs)"
       if [[ "${v}" =~ ^[0-9]+$ ]] && [[ "${v}" -gt 0 ]]; then
@@ -154,12 +164,28 @@ if [[ "${ENABLE_ECC_PREFLIGHT:-1}" == "1" ]] && command -v nvidia-smi >/dev/null
         break
       fi
     done <<< "${ecc_vals}"
-    if [[ "${bad_gpu}" == "1" ]]; then
-      echo "ERROR: ECC preflight failed on ${host}. volatile uncorrectable ECC counts are non-zero."
-      nvidia-smi -L || true
-      echo "${ecc_vals}"
-      exit 86
-    fi
+  fi
+
+  # 2) Pending retired pages indicate unstable device state; fail fast.
+  pend_vals="$(nvidia-smi --query-gpu=retired_pages.pending --format=csv,noheader 2>/dev/null || true)"
+  if [[ -n "${pend_vals}" ]]; then
+    while IFS= read -r p; do
+      p="$(echo "${p}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')"
+      if [[ "${p}" == "yes" || "${p}" == "1" ]]; then
+        bad_gpu=1
+        break
+      fi
+    done <<< "${pend_vals}"
+  fi
+
+  if [[ "${bad_gpu}" == "1" ]]; then
+    echo "ERROR: ECC preflight failed on ${host}."
+    echo "  ecc.errors.uncorrected.volatile.total="
+    echo "${ecc_vals}"
+    echo "  retired_pages.pending="
+    echo "${pend_vals}"
+    nvidia-smi -L || true
+    exit 86
   fi
 fi
 
@@ -191,13 +217,25 @@ exec env \
   MACHINE_RANK="${NODE_RANK}" \
   MAIN_PROCESS_IP="${MASTER_ADDR}" \
   MAIN_PROCESS_PORT="${MASTER_PORT}" \
+  PRETRAIN_DONE_MARKER="${PRETRAIN_DONE_MARKER}" \
   bash "${WORKDIR}/scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh"
 SH2
 chmod +x "${NODE_ENTRY}"
 
 echo "=== LAUNCH via pbsdsh ==="
 echo "+ pbsdsh -c ${NNODES} -- bash ${NODE_ENTRY}"
+rm -f "${PRETRAIN_DONE_MARKER}"
 pbsdsh -c "${NNODES}" -- bash "${NODE_ENTRY}"
+
+# Some pbsdsh failures are not propagated reliably to qsub exit status.
+# Require an explicit completion marker from machine_rank=0 script.
+if [[ ! -f "${PRETRAIN_DONE_MARKER}" ]]; then
+  echo "ERROR: pretrain completion marker missing: ${PRETRAIN_DONE_MARKER}"
+  echo "Most likely: one or more node launches failed before clean completion."
+  echo "Per-node logs:"
+  ls -lh "${RUN_DIR}/logs" | sed -n '1,200p'
+  exit 97
+fi
 
 echo "=== DONE ==="
 echo "Per-node logs:"

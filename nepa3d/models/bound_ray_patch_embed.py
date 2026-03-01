@@ -6,14 +6,17 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
+from .point_patch_embed import _index_points, farthest_point_sample, knn_indices
+
 
 @dataclass
 class BoundRayPatchOutput:
-    """Ray tokens aligned to existing point patches."""
+    """Ray tokens and centers for sequence construction."""
 
     q_tok: torch.Tensor
     a_tok: torch.Tensor
     has_ray: torch.Tensor
+    centers_xyz: torch.Tensor
 
 
 def _ensure_3d(x: Optional[torch.Tensor], last_dim: int) -> Optional[torch.Tensor]:
@@ -53,7 +56,12 @@ def _sphere_proxy_anchor(
 
 
 class BoundRayPatchEmbed(nn.Module):
-    """Bind rays to nearest point-patch centers and pool per patch."""
+    """Ray patch embedding.
+
+    Modes:
+    - proxy_sphere/x_anchor: bind rays to nearest point patch center (legacy).
+    - independent_fps_knn: build ray-only patches via FPS+kNN on ray anchors.
+    """
 
     def __init__(
         self,
@@ -62,9 +70,11 @@ class BoundRayPatchEmbed(nn.Module):
         include_ray_normal: bool = True,
         include_ray_unc: bool = False,
         use_ray_origin: bool = False,
-        assign_mode: str = "proxy_sphere",  # proxy_sphere|x_anchor
+        assign_mode: str = "proxy_sphere",  # proxy_sphere|x_anchor|independent_fps_knn
         proxy_radius_scale: float = 1.05,
-        pool: str = "amax",  # amax|mean
+        pool: str = "amax",  # amax|mean|max
+        ray_num_groups: int = 32,
+        ray_group_size: int = 32,
     ) -> None:
         super().__init__()
         self.d_model = int(d_model)
@@ -73,10 +83,16 @@ class BoundRayPatchEmbed(nn.Module):
         self.use_ray_origin = bool(use_ray_origin)
         self.assign_mode = str(assign_mode)
         self.proxy_radius_scale = float(proxy_radius_scale)
-        self.pool = str(pool)
+        self.pool = "amax" if str(pool) == "max" else str(pool)
+        self.ray_num_groups = int(ray_num_groups)
+        self.ray_group_size = int(ray_group_size)
 
         if self.pool not in ("amax", "mean"):
             raise ValueError(f"Unsupported pool={pool}.")
+        if self.ray_num_groups <= 0:
+            raise ValueError(f"ray_num_groups must be >0, got {self.ray_num_groups}")
+        if self.ray_group_size <= 0:
+            raise ValueError(f"ray_group_size must be >0, got {self.ray_group_size}")
 
         in_q = 6 + (3 if self.use_ray_origin else 0)  # rel_anchor(3)+ray_d(3)+optional rel_o(3)
         in_a = 8 + (3 if self.include_ray_normal else 0) + (1 if self.include_ray_unc else 0)
@@ -100,6 +116,177 @@ class BoundRayPatchEmbed(nn.Module):
         r = torch.clamp(r, min=1e-3) * self.proxy_radius_scale
         return center, r
 
+    def _build_anchor(
+        self,
+        centers_xyz: torch.Tensor,
+        ray_o: torch.Tensor,
+        ray_d: torch.Tensor,
+        ray_t: torch.Tensor,
+        mode: str,
+    ) -> torch.Tensor:
+        if mode == "proxy_sphere" or mode == "independent_fps_knn":
+            pc_center, pc_radius = self._compute_proxy_center_radius(centers_xyz)
+            return _sphere_proxy_anchor(ray_o, ray_d, pc_center, pc_radius)
+        if mode == "x_anchor":
+            return ray_o + ray_t * ray_d
+        raise ValueError(f"Unknown assign_mode={mode}")
+
+    def _mask_outputs(self, out_q: torch.Tensor, out_a: torch.Tensor, has_ray: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        mask = has_ray[..., None].to(dtype=out_q.dtype)
+        out_q = out_q * mask
+        out_a = out_a * mask
+        return out_q, out_a
+
+    def _forward_bind(
+        self,
+        *,
+        centers_xyz: torch.Tensor,
+        ray_o: torch.Tensor,
+        ray_d: torch.Tensor,
+        ray_t: torch.Tensor,
+        ray_hit: torch.Tensor,
+        ray_n: Optional[torch.Tensor],
+        ray_unc: Optional[torch.Tensor],
+        ray_available: Optional[torch.Tensor],
+    ) -> BoundRayPatchOutput:
+        device = centers_xyz.device
+        B, P, _ = centers_xyz.shape
+        _, R, _ = ray_o.shape
+
+        if self.use_ray_origin:
+            pc_center, _ = self._compute_proxy_center_radius(centers_xyz)
+            ray_o_rel = ray_o - pc_center[:, None, :]
+        else:
+            ray_o_rel = None
+
+        anchor = self._build_anchor(centers_xyz, ray_o, ray_d, ray_t, self.assign_mode)
+
+        assign = torch.cdist(anchor, centers_xyz).argmin(dim=-1)  # (B,R)
+        centers_assigned = torch.gather(centers_xyz, 1, assign[..., None].expand(-1, -1, 3))
+        rel_anchor = anchor - centers_assigned
+
+        q_parts = [rel_anchor, ray_d]
+        if ray_o_rel is not None:
+            q_parts.append(ray_o_rel)
+        feat_q = torch.cat(q_parts, dim=-1)
+        f_q = self.mlp_q(feat_q)
+
+        a_parts = [rel_anchor, ray_d, ray_hit, ray_t]
+        if self.include_ray_normal and ray_n is not None:
+            a_parts.append(ray_n)
+        if self.include_ray_unc and ray_unc is not None:
+            a_parts.append(ray_unc)
+        if ray_o_rel is not None:
+            a_parts.append(ray_o_rel)
+        feat_a = torch.cat(a_parts, dim=-1)
+        f_a = self.mlp_a(feat_a)
+
+        if self.pool == "amax":
+            neg = torch.finfo(f_q.dtype).min
+            out_q = torch.full((B, P, self.d_model), neg, device=device, dtype=f_q.dtype)
+            out_a = torch.full((B, P, self.d_model), neg, device=device, dtype=f_a.dtype)
+            idx = assign[..., None].expand(-1, -1, self.d_model)
+            out_q = out_q.scatter_reduce(1, idx, f_q, reduce="amax", include_self=True)
+            out_a = out_a.scatter_reduce(1, idx, f_a, reduce="amax", include_self=True)
+        else:
+            out_q = torch.zeros((B, P, self.d_model), device=device, dtype=f_q.dtype)
+            out_a = torch.zeros((B, P, self.d_model), device=device, dtype=f_a.dtype)
+            idx = assign[..., None].expand(-1, -1, self.d_model)
+            out_q = out_q.scatter_add(1, idx, f_q)
+            out_a = out_a.scatter_add(1, idx, f_a)
+            denom = torch.clamp(
+                torch.zeros((B, P), device=device, dtype=torch.long).scatter_add(1, assign, torch.ones((B, R), device=device, dtype=torch.long)),
+                min=1,
+            ).to(out_q.dtype).unsqueeze(-1)
+            out_q = out_q / denom
+            out_a = out_a / denom
+
+        counts = torch.zeros((B, P), device=device, dtype=torch.long).scatter_add(
+            1, assign, torch.ones((B, R), device=device, dtype=torch.long)
+        )
+        has_ray = counts > 0
+        if ray_available is not None:
+            has_ray = has_ray & ray_available.to(device=device).bool().view(B, 1)
+
+        out_q, out_a = self._mask_outputs(out_q, out_a, has_ray)
+        return BoundRayPatchOutput(q_tok=out_q, a_tok=out_a, has_ray=has_ray, centers_xyz=centers_xyz)
+
+    def _forward_independent(
+        self,
+        *,
+        centers_xyz: torch.Tensor,
+        ray_o: torch.Tensor,
+        ray_d: torch.Tensor,
+        ray_t: torch.Tensor,
+        ray_hit: torch.Tensor,
+        ray_n: Optional[torch.Tensor],
+        ray_unc: Optional[torch.Tensor],
+        ray_available: Optional[torch.Tensor],
+    ) -> BoundRayPatchOutput:
+        device = centers_xyz.device
+        dtype = centers_xyz.dtype
+        B, _, _ = centers_xyz.shape
+        _, R, _ = ray_o.shape
+
+        if R <= 0:
+            G = int(self.ray_num_groups)
+            zero_tok = torch.zeros((B, G, self.d_model), device=device, dtype=dtype)
+            zero_ctr = torch.zeros((B, G, 3), device=device, dtype=dtype)
+            has = torch.zeros((B, G), device=device, dtype=torch.bool)
+            return BoundRayPatchOutput(q_tok=zero_tok, a_tok=zero_tok.clone(), has_ray=has, centers_xyz=zero_ctr)
+
+        anchor = self._build_anchor(centers_xyz, ray_o, ray_d, ray_t, "independent_fps_knn")
+
+        G = min(int(self.ray_num_groups), R)
+        K = min(int(self.ray_group_size), R)
+
+        center_idx = farthest_point_sample(anchor, G)  # (B,G)
+        ray_centers = _index_points(anchor, center_idx)  # (B,G,3)
+        group_idx = knn_indices(anchor, ray_centers, K)  # (B,G,K)
+
+        grouped_anchor = _index_points(anchor, group_idx)  # (B,G,K,3)
+        rel_anchor = grouped_anchor - ray_centers.unsqueeze(2)
+        grouped_d = _index_points(ray_d, group_idx)
+
+        if self.use_ray_origin:
+            grouped_o = _index_points(ray_o, group_idx)
+            rel_o = grouped_o - ray_centers.unsqueeze(2)
+        else:
+            rel_o = None
+
+        q_parts = [rel_anchor, grouped_d]
+        if rel_o is not None:
+            q_parts.append(rel_o)
+        feat_q = torch.cat(q_parts, dim=-1)  # (B,G,K,Cq)
+
+        grouped_hit = _index_points(ray_hit, group_idx)
+        grouped_t = _index_points(ray_t, group_idx)
+        a_parts = [rel_anchor, grouped_d, grouped_hit, grouped_t]
+        if self.include_ray_normal and ray_n is not None:
+            a_parts.append(_index_points(ray_n, group_idx))
+        if self.include_ray_unc and ray_unc is not None:
+            a_parts.append(_index_points(ray_unc, group_idx))
+        if rel_o is not None:
+            a_parts.append(rel_o)
+        feat_a = torch.cat(a_parts, dim=-1)  # (B,G,K,Ca)
+
+        q_flat = self.mlp_q(feat_q.reshape(B * G * K, -1)).view(B, G, K, self.d_model)
+        a_flat = self.mlp_a(feat_a.reshape(B * G * K, -1)).view(B, G, K, self.d_model)
+
+        if self.pool == "amax":
+            out_q = q_flat.max(dim=2).values
+            out_a = a_flat.max(dim=2).values
+        else:
+            out_q = q_flat.mean(dim=2)
+            out_a = a_flat.mean(dim=2)
+
+        has_ray = torch.ones((B, G), device=device, dtype=torch.bool)
+        if ray_available is not None:
+            has_ray = has_ray & ray_available.to(device=device).bool().view(B, 1)
+
+        out_q, out_a = self._mask_outputs(out_q, out_a, has_ray)
+        return BoundRayPatchOutput(q_tok=out_q, a_tok=out_a, has_ray=has_ray, centers_xyz=ray_centers)
+
     def forward(
         self,
         *,
@@ -121,7 +308,7 @@ class BoundRayPatchEmbed(nn.Module):
 
         device = centers_xyz.device
         dtype = centers_xyz.dtype
-        B, P, _ = centers_xyz.shape
+        B, _, _ = centers_xyz.shape
         _, R, _ = ray_o.shape
 
         ray_t_ = _ensure_3d(ray_t, 1)
@@ -137,72 +324,25 @@ class BoundRayPatchEmbed(nn.Module):
         if self.include_ray_unc and ray_unc_ is None:
             ray_unc_ = torch.zeros((B, R, 1), device=device, dtype=dtype)
 
-        if self.use_ray_origin:
-            pc_center, _ = self._compute_proxy_center_radius(centers_xyz)
-            ray_o_rel = ray_o - pc_center[:, None, :]
-        else:
-            ray_o_rel = None
+        if self.assign_mode == "independent_fps_knn":
+            return self._forward_independent(
+                centers_xyz=centers_xyz,
+                ray_o=ray_o,
+                ray_d=ray_d,
+                ray_t=ray_t_,
+                ray_hit=ray_hit_,
+                ray_n=ray_n,
+                ray_unc=ray_unc_,
+                ray_available=ray_available,
+            )
 
-        if self.assign_mode == "proxy_sphere":
-            pc_center, pc_radius = self._compute_proxy_center_radius(centers_xyz)
-            anchor = _sphere_proxy_anchor(ray_o, ray_d, pc_center, pc_radius)
-        elif self.assign_mode == "x_anchor":
-            anchor = ray_o + ray_t_ * ray_d
-        else:
-            raise ValueError(f"Unknown assign_mode={self.assign_mode}")
-
-        assign = torch.cdist(anchor, centers_xyz).argmin(dim=-1)  # (B,R)
-        centers_assigned = torch.gather(centers_xyz, 1, assign[..., None].expand(-1, -1, 3))
-        rel_anchor = anchor - centers_assigned
-
-        q_parts = [rel_anchor, ray_d]
-        if ray_o_rel is not None:
-            q_parts.append(ray_o_rel)
-        feat_q = torch.cat(q_parts, dim=-1)
-        f_q = self.mlp_q(feat_q)
-
-        a_parts = [rel_anchor, ray_d, ray_hit_, ray_t_]
-        if self.include_ray_normal and ray_n is not None:
-            a_parts.append(ray_n)
-        if self.include_ray_unc and ray_unc_ is not None:
-            a_parts.append(ray_unc_)
-        if ray_o_rel is not None:
-            a_parts.append(ray_o_rel)
-        feat_a = torch.cat(a_parts, dim=-1)
-        f_a = self.mlp_a(feat_a)
-
-        if self.pool == "amax":
-            neg = torch.finfo(f_q.dtype).min
-            out_q = torch.full((B, P, self.d_model), neg, device=device, dtype=f_q.dtype)
-            out_a = torch.full((B, P, self.d_model), neg, device=device, dtype=f_a.dtype)
-            idx = assign[..., None].expand(-1, -1, self.d_model)
-            out_q = out_q.scatter_reduce(1, idx, f_q, reduce="amax", include_self=True)
-            out_a = out_a.scatter_reduce(1, idx, f_a, reduce="amax", include_self=True)
-        else:
-            out_q = torch.zeros((B, P, self.d_model), device=device, dtype=f_q.dtype)
-            out_a = torch.zeros((B, P, self.d_model), device=device, dtype=f_a.dtype)
-            idx = assign[..., None].expand(-1, -1, self.d_model)
-            out_q = out_q.scatter_add(1, idx, f_q)
-            out_a = out_a.scatter_add(1, idx, f_a)
-
-        ones = torch.ones((B, R), device=device, dtype=torch.long)
-        counts = torch.zeros((B, P), device=device, dtype=torch.long).scatter_add(1, assign, ones)
-        has_ray = counts > 0
-        if ray_available is not None:
-            has_ray = has_ray & ray_available.to(device=device).bool().view(B, 1)
-
-        # IMPORTANT (DDP stability): use multiplicative masking instead of torch.where.
-        # When a full mini-batch has no valid rays on a rank, torch.where(all_false, x, 0)
-        # can disconnect x-side parameters from the graph and trigger "unused parameter"
-        # reduction errors. Multiplication keeps the graph connected while zeroing outputs.
-        mask = has_ray[..., None].to(dtype=out_q.dtype)
-        if self.pool == "amax":
-            out_q = out_q * mask
-            out_a = out_a * mask
-        else:
-            denom = torch.clamp(counts, min=1).to(out_q.dtype).unsqueeze(-1)
-            out_q = (out_q / denom) * mask
-            out_a = (out_a / denom) * mask
-
-        return BoundRayPatchOutput(q_tok=out_q, a_tok=out_a, has_ray=has_ray)
-
+        return self._forward_bind(
+            centers_xyz=centers_xyz,
+            ray_o=ray_o,
+            ray_d=ray_d,
+            ray_t=ray_t_,
+            ray_hit=ray_hit_,
+            ray_n=ray_n,
+            ray_unc=ray_unc_,
+            ray_available=ray_available,
+        )

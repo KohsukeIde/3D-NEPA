@@ -49,7 +49,7 @@ echo "=== PATCH-NEPA PRETRAIN (single-node helper, RAY DEFAULT) ===" | tee "${LO
 echo "root=${ROOT_DIR}" | tee -a "${LOG_PATH}"
 echo "mix_config=${MIX_CFG}" | tee -a "${LOG_PATH}"
 echo "save_dir=${SAVE_DIR}" | tee -a "${LOG_PATH}"
-echo "qa_tokens=${QA_TOKENS:-1} qa_layout=${QA_LAYOUT:-split_sep} encdec_arch=${ENCDEC_ARCH:-0} dual_mask=(${DUAL_MASK_NEAR:-0.0},${DUAL_MASK_FAR:-0.0},w=${DUAL_MASK_WINDOW:-32}) use_ray_patch=${USE_RAY_PATCH:-1} n_ray=${N_RAY:-1024}" | tee -a "${LOG_PATH}"
+echo "qa_tokens=${QA_TOKENS:-1} qa_layout=${QA_LAYOUT:-split_sep} encdec_arch=${ENCDEC_ARCH:-0} dual_mask=(${DUAL_MASK_NEAR:-0.0},${DUAL_MASK_FAR:-0.0},w=${DUAL_MASK_WINDOW:-32}) use_ray_patch=${USE_RAY_PATCH:-1} n_ray=${N_RAY:-1024} ray_num_groups=${RAY_NUM_GROUPS:-32} ray_group_size=${RAY_GROUP_SIZE:-32}" | tee -a "${LOG_PATH}"
 echo "optimizer: lr_scheduler=${LR_SCHEDULER:-cosine} warmup_epochs=${WARMUP_EPOCHS} warmup_ratio=${WARMUP_RATIO} min_lr=${MIN_LR:-1e-6} weight_decay=${WEIGHT_DECAY:-0.05}" | tee -a "${LOG_PATH}"
 echo "run_name=${RUN_NAME}" | tee -a "${LOG_PATH}"
 
@@ -83,6 +83,8 @@ python -u -m nepa3d.train.pretrain_patch_nepa \
   --ray_assign_mode "${RAY_ASSIGN_MODE:-proxy_sphere}" \
   --ray_use_origin "${RAY_USE_ORIGIN:-0}" \
   --ray_proxy_radius_scale "${RAY_PROXY_RADIUS_SCALE:-1.05}" \
+  --ray_num_groups "${RAY_NUM_GROUPS:-32}" \
+  --ray_group_size "${RAY_GROUP_SIZE:-32}" \
   --ray_miss_t "${RAY_MISS_T:-4.0}" \
   --ray_hit_threshold "${RAY_HIT_THRESHOLD:-0.5}" \
   --backbone_mode "${BACKBONE_MODE:-nepa2d}" \

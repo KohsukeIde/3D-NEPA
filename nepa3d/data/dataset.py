@@ -239,7 +239,6 @@ class ModelNet40QueryDataset(Dataset):
         self.pt_sample_mode = str(pt_sample_mode)
         self.pt_fps_key = str(pt_fps_key)
         self.pt_rfps_key = str(pt_rfps_key)
-        self._warned_missing_fps_order = False
         self._warned_missing_rfps_order = False
         self.pt_rfps_m = int(pt_rfps_m)
         self.point_order_mode = str(point_order_mode)
@@ -442,14 +441,13 @@ class ModelNet40QueryDataset(Dataset):
                 if (
                     str(self.pt_sample_mode).lower() == "fps"
                     and pt_fps_order is None
-                    and not self._warned_missing_fps_order
                 ):
-                    warnings.warn(
-                        f"pt_sample_mode='fps' but FPS order key is missing "
-                        f"(pt_fps_key={self.pt_fps_key}, resolved={resolved_fps_key}, path={path}). "
-                        "Falling back to on-the-fly FPS in tokenizer (slower)."
+                    raise ValueError(
+                        f"CRITICAL: pt_sample_mode='fps' requires a cached FPS order key, "
+                        f"but key is missing (pt_fps_key={self.pt_fps_key}, "
+                        f"resolved={resolved_fps_key}, path={path}). "
+                        "Backfill FPS order first (e.g., pt_fps_order)."
                     )
-                    self._warned_missing_fps_order = True
 
                 rfps_key = self.pt_rfps_key
                 if str(rfps_key).lower() == "auto":

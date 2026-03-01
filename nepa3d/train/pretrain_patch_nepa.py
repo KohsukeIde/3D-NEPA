@@ -113,9 +113,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--ray_pool_k_max", type=int, default=32)
     p.add_argument("--ray_pool_mode", type=str, default="amax", choices=["mean", "max", "amax"])
     p.add_argument("--ray_fuse", type=str, default="add", choices=["add", "concat"])
-    p.add_argument("--ray_assign_mode", type=str, default="proxy_sphere", choices=["proxy_sphere", "x_anchor"])
+    p.add_argument("--ray_assign_mode",
+        type=str,
+        default="proxy_sphere",
+        choices=["proxy_sphere", "x_anchor", "independent_fps_knn"],
+    )
     p.add_argument("--ray_use_origin", type=int, default=0, choices=[0, 1])
     p.add_argument("--ray_proxy_radius_scale", type=float, default=1.05)
+    p.add_argument("--ray_num_groups", type=int, default=32)
+    p.add_argument("--ray_group_size", type=int, default=32)
 
     # Train
     p.add_argument("--epochs", type=int, default=50)
@@ -354,6 +360,8 @@ def main() -> None:
         use_ray_origin=bool(int(args.ray_use_origin)),
         ray_proxy_radius_scale=float(args.ray_proxy_radius_scale),
         ray_pool_mode=("amax" if str(args.ray_pool_mode) == "max" else str(args.ray_pool_mode)),
+        ray_num_groups=int(args.ray_num_groups),
+        ray_group_size=int(args.ray_group_size),
     )
 
     optimizer = optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
@@ -379,7 +387,7 @@ def main() -> None:
         f"patch_embed={args.patch_embed} "
         f"group_size={int(args.group_size)} num_groups={int(args.num_groups)} "
         f"n_point={int(args.n_point)} n_ray={int(args.n_ray)} use_ray_patch={int(bool(args.use_ray_patch))} "
-        f"ray_assign={str(args.ray_assign_mode)} ray_pool={str(args.ray_pool_mode)} "
+        f"ray_assign={str(args.ray_assign_mode)} ray_pool={str(args.ray_pool_mode)} ray_groups={int(args.ray_num_groups)} ray_group_size={int(args.ray_group_size)} "
         f"ray_use_origin={int(args.ray_use_origin)} include_ray_unc={int(args.include_ray_unc)} "
         f"pt_sample_mode={str(args.pt_sample_mode)} pt_fps_key={str(args.pt_fps_key)} pt_rfps_m={int(args.pt_rfps_m)} "
         f"pt_rfps_key={str(args.pt_rfps_key)} "

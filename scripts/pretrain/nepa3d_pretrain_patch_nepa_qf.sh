@@ -51,6 +51,8 @@ RAY_FUSE="${RAY_FUSE:-add}"
 RAY_ASSIGN_MODE="${RAY_ASSIGN_MODE:-proxy_sphere}"
 RAY_USE_ORIGIN="${RAY_USE_ORIGIN:-0}"
 RAY_PROXY_RADIUS_SCALE="${RAY_PROXY_RADIUS_SCALE:-1.05}"
+RAY_NUM_GROUPS="${RAY_NUM_GROUPS:-32}"
+RAY_GROUP_SIZE="${RAY_GROUP_SIZE:-32}"
 RAY_MISS_T="${RAY_MISS_T:-4.0}"
 RAY_HIT_THRESHOLD="${RAY_HIT_THRESHOLD:-0.5}"
 
@@ -95,6 +97,12 @@ NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-}"
 NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:-}"
 TORCH_NCCL_ENABLE_MONITORING="${TORCH_NCCL_ENABLE_MONITORING:-}"
 TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC="${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-}"
+# qsub may pass empty strings; unset to avoid torch.distributed parse errors.
+[[ -z "${NCCL_P2P_DISABLE}" ]] && unset NCCL_P2P_DISABLE
+[[ -z "${NCCL_NET_GDR_LEVEL}" ]] && unset NCCL_NET_GDR_LEVEL
+[[ -z "${TORCH_NCCL_ENABLE_MONITORING}" ]] && unset TORCH_NCCL_ENABLE_MONITORING
+[[ -z "${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC}" ]] && unset TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC
+
 
 WARMUP_EPOCHS="${WARMUP_EPOCHS:-}"
 WARMUP_RATIO="${WARMUP_RATIO:-0.025}"
@@ -208,7 +216,7 @@ echo "workdir=${WORKDIR}" | tee -a "${LOG_PATH}"
 echo "run_tag=${RUN_TAG}" | tee -a "${LOG_PATH}"
 echo "mix_config=${MIX_CONFIG}" | tee -a "${LOG_PATH}"
 echo "save_dir=${SAVE_DIR}" | tee -a "${LOG_PATH}"
-echo "n_point=${N_POINT} n_ray=${N_RAY} use_ray_patch=${USE_RAY_PATCH} ray_assign=${RAY_ASSIGN_MODE} ray_pool=${RAY_POOL_MODE} include_ray_unc=${INCLUDE_RAY_UNC}" | tee -a "${LOG_PATH}"
+echo "n_point=${N_POINT} n_ray=${N_RAY} use_ray_patch=${USE_RAY_PATCH} ray_assign=${RAY_ASSIGN_MODE} ray_pool=${RAY_POOL_MODE} ray_num_groups=${RAY_NUM_GROUPS} ray_group_size=${RAY_GROUP_SIZE} include_ray_unc=${INCLUDE_RAY_UNC}" | tee -a "${LOG_PATH}"
 echo "patch_embed=${PATCH_EMBED} group_size=${GROUP_SIZE} num_groups=${NUM_GROUPS} serial_order=${SERIAL_ORDER}" | tee -a "${LOG_PATH}"
 echo "pt_xyz_key=${PT_XYZ_KEY} pt_dist_key=${PT_DIST_KEY} ablate_point_dist=${ABLATE_POINT_DIST} pt_sample_mode=${PT_SAMPLE_MODE} pt_fps_key=${PT_FPS_KEY} pt_rfps_key=${PT_RFPS_KEY} pt_rfps_m=${PT_RFPS_M} point_order_mode=${POINT_ORDER_MODE}" | tee -a "${LOG_PATH}"
 echo "qa: tokens=${QA_TOKENS} layout=${QA_LAYOUT} sep=${QA_SEP_TOKEN} fuse=${QA_FUSE} encdec_arch=${ENCDEC_ARCH} use_pt_dist=${USE_PT_DIST} use_pt_grad=${USE_PT_GRAD} nepa_skip_k=${NEPA_SKIP_K} nepa_multi_k=${NEPA_MULTI_K:-none}" | tee -a "${LOG_PATH}"
@@ -270,6 +278,8 @@ TRAIN_ARGS=(
   --ray_assign_mode "${RAY_ASSIGN_MODE}"
   --ray_use_origin "${RAY_USE_ORIGIN}"
   --ray_proxy_radius_scale "${RAY_PROXY_RADIUS_SCALE}"
+  --ray_num_groups "${RAY_NUM_GROUPS}"
+  --ray_group_size "${RAY_GROUP_SIZE}"
   --ray_miss_t "${RAY_MISS_T}"
   --ray_hit_threshold "${RAY_HIT_THRESHOLD}"
   --d_model "${D_MODEL}"
@@ -347,3 +357,8 @@ else
 fi
 
 echo "[done] log=${LOG_PATH}" | tee -a "${LOG_PATH}"
+if [[ "${MACHINE_RANK:-0}" == "0" && -n "${PRETRAIN_DONE_MARKER:-}" ]]; then
+  mkdir -p "$(dirname "${PRETRAIN_DONE_MARKER}")"
+  date -Is > "${PRETRAIN_DONE_MARKER}"
+  echo "[done] marker=${PRETRAIN_DONE_MARKER}" | tee -a "${LOG_PATH}"
+fi

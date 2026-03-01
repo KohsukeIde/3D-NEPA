@@ -16,6 +16,7 @@ This file separates documentation by model line to avoid mixing conclusions:
 - Gap audit: `nepa3d/docs/patch_nepa/gap_audit_query_to_patch_active.md`
 - Query chronology audit for porting: `nepa3d/docs/patch_nepa/query_nepa_chronology_audit_202602_active.md`
 - Benchmark table (shared output surface): `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
+- Scratch->PatchNEPA comparison matrix: `nepa3d/docs/patch_nepa/comparison_scratch_to_patchnepa.md`
 
 ## 3. Legacy Line (Query-NEPA)
 

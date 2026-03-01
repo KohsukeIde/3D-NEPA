@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-import warnings
 
 from .ordering import (
     morton3d,
@@ -37,7 +36,6 @@ TYPE_SEP = 9
 # Size of the type-id vocabulary.
 TYPE_VOCAB_SIZE = TYPE_SEP + 1
 
-_WARNED_FPS_FALLBACK = False
 
 
 def _choice(n, k, rng=None):
@@ -165,7 +163,6 @@ def _sample_point_indices(
     pt_rfps_m: int = 4096,
 ) -> np.ndarray:
     """Select point indices according to a sampling policy."""
-    global _WARNED_FPS_FALLBACK
     n_pool = int(pt_xyz_pool.shape[0])
     n_point = int(n_point)
     if n_point <= 0:
@@ -207,17 +204,9 @@ def _sample_point_indices(
                 order = cand.astype(np.int64, copy=False)
 
         if order is None:
-            if not _WARNED_FPS_FALLBACK:
-                warnings.warn(
-                    "pt_sample_mode='fps' but no valid FPS order was provided; "
-                    "computing FPS on-the-fly. For strict reproducibility and speed, "
-                    "precompute FPS order in cache and set --pt_fps_key accordingly."
-                )
-                _WARNED_FPS_FALLBACK = True
-            from nepa3d.utils.fps import fps_order
-
-            order = fps_order(pt_xyz_pool.astype(np.float32, copy=False), k=k).astype(
-                np.int64, copy=False
+            raise ValueError(
+                "pt_sample_mode='fps' requires a valid cached FPS order, but none was "
+                "provided. Backfill and pass an FPS key (e.g., pt_fps_order)."
             )
 
         k0 = min(k, int(order.shape[0]))
