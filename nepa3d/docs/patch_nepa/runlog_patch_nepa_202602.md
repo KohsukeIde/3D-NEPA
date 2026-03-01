@@ -2387,3 +2387,111 @@ Status at append time:
 
 - pretrain `100704/706/708/710/712/714`: running
 - finetune `100705/707/709/711/713/715`: hold (afterok dependency)
+
+## 56. Completion Update (2026-03-01, table-default append)
+
+Finished jobs recorded in this update:
+
+### 56.1 `100643` status correction (bind+aug+dualmask)
+
+| job | run_set | previous note | actual final status | validity |
+|---|---|---|---|---|
+| `100643` | `patchnepa_ray_fpscmp_fps_augpm_dm_20260301_215549` | running/pending | `Exit_status=97` (`job_state=F`) | invalid |
+
+Failure signature:
+- `run_ray_fpscmp_fps_augpm_dm.pbs.log` reports missing completion marker.
+- non-rank0 node logs show shell parse failure near end (`unexpected EOF while looking for matching '"'`).
+
+### 56.2 Sanity6 matrix completion (`100704`-`100715`)
+
+All 6 short pretrains and dependent FT jobs finished with `Exit_status=0`.
+
+| pretrain job | ft job | condition | FT result (`obj_only`, TEST acc) |
+|---|---|---|---:|
+| `100704` | `100705` | `random`, aug off | `0.6833` |
+| `100706` | `100707` | `random`, aug on | `0.6196` |
+| `100708` | `100709` | `fps`, aug off | `0.6454` |
+| `100710` | `100711` | `fps`, aug on | `0.5318` |
+| `100712` | `100713` | `rfps_cached`, aug off | `0.6368` |
+| `100714` | `100715` | `rfps_cached`, aug on | `0.6317` |
+
+Current ordering in this E12->E120 short-screen branch:
+- best: `random/off (0.6833)`
+- worst: `fps/on (0.5318)`
+
+### 56.3 Point-only EMA E100 completion (`100700`)
+
+| job | run_set | status | note |
+|---|---|---|---|
+| `100700` | `patchnepa_ptonly_ema_e100_fpscmp_20260301_223010` | `Exit_status=0` | pretrain completed |
+
+Dependent FT jobs from `100700`:
+- `100701` (`obj_bg`) running
+- `100702` (`obj_only`) running
+- `100703` (`pb_t50_rs`) running
+
+### 56.4 Branch state snapshot after this append
+
+| branch | latest state |
+|---|---|
+| bind+aug+dualmask (`100643`) | finished invalid |
+| independent+aug+dualmask (`100699`) | running |
+| ptonly+EMA E100 (`100700`) | finished valid |
+| FT from ptonly+EMA (`100701/100702/100703`) | running |
+
+## 57. `100643` invalid root cause + fix/resubmission (2026-03-01)
+
+Question addressed:
+
+- why `100643` became invalid and whether it should be fixed/resubmitted.
+
+Root cause (confirmed from logs):
+
+- `100643` ended with `Exit_status=97` due missing completion marker, while rank0 log had reached `Done. checkpoints`.
+- non-rank logs (for example `qh055.patchnepa.log`) ended with:
+  - `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh: line 368: unexpected EOF while looking for matching '"'`
+- this means worker nodes parsed a broken/changed launcher script at runtime.
+
+Fix applied:
+
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`
+  - now snapshots launcher script at job start:
+    - source: `${WORKDIR}/scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh`
+    - snapshot: `${RUN_DIR}/nepa3d_pretrain_patch_nepa_qf.snapshot.sh`
+  - node entry executes the snapshot (immutable per-job), not repo-head script.
+  - topology and node logs now print snapshot path + sha256.
+
+Resubmission (same recipe as `100643`):
+
+| job | run_set | purpose | status |
+|---|---|---|---|
+| `100741` | `patchnepa_ray_fpscmp_fps_augpm_dm_fixlaunch_20260301_233109` | replacement of invalid `100643` under fixed launcher | running |
+
+Early verification in `100741` PBS log:
+
+- `LAUNCH_SCRIPT_RUN=.../ddp_patchnepa_100741.../nepa3d_pretrain_patch_nepa_qf.snapshot.sh`
+- `launch_script_sha256=...`
+
+So this branch is now corrected and re-running under deterministic launcher artifact.
+
+## TODO (Hold Until Current Results Complete) — 2026-03-01
+
+Policy (requested):
+- Do not submit new jobs now; wait for current running jobs to finish and evaluate first.
+
+Next action after current results are in:
+- Promote selected settings from short-screen to full ShapeNet-standard pretrain (`E300`), with FT chained after pretrain completion.
+
+Mandatory pretrain contract for that E300 promotion:
+- `RAY_ASSIGN_MODE=independent_fps_knn`
+- `RAY_NUM_GROUPS=32`
+- `RAY_GROUP_SIZE=32`
+- Step-0 sanity gate must show `MISSING_RAY=0` before accepting run as valid.
+
+Candidate E300 settings to evaluate after hold is lifted:
+- `random/off`
+- `rfps_cached/off`
+- `rfps_cached/on` (with `AUG_RECOMPUTE_DIST=1` for xyz-dist consistency under augmentation)
+
+Note:
+- Current phase is "result waiting" only; no additional submissions until this hold is explicitly cleared.

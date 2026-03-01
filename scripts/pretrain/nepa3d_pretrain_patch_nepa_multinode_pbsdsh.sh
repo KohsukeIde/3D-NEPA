@@ -50,6 +50,15 @@ fi
 RUN_DIR="${DDP_LOG_ROOT}/ddp_patchnepa_${PBS_JOBID:-manual}_${RUN_TAG}"
 mkdir -p "${RUN_DIR}/logs"
 PRETRAIN_DONE_MARKER="${RUN_DIR}/pretrain_done.marker"
+LAUNCH_SCRIPT_SRC="${WORKDIR}/scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh"
+LAUNCH_SCRIPT_RUN="${RUN_DIR}/nepa3d_pretrain_patch_nepa_qf.snapshot.sh"
+
+if [[ ! -f "${LAUNCH_SCRIPT_SRC}" ]]; then
+  echo "ERROR: launch script missing: ${LAUNCH_SCRIPT_SRC}"
+  exit 1
+fi
+cp -f "${LAUNCH_SCRIPT_SRC}" "${LAUNCH_SCRIPT_RUN}"
+chmod +x "${LAUNCH_SCRIPT_RUN}"
 
 HOSTS_FILE="${RUN_DIR}/hosts.txt"
 awk '!seen[$0]++{print}' "${PBS_NODEFILE}" > "${HOSTS_FILE}"
@@ -75,6 +84,10 @@ echo "MASTER_HOST=${MASTER_HOST}"
 echo "MASTER_ADDR=${MASTER_ADDR}"
 echo "MASTER_PORT=${MASTER_PORT}"
 echo "RUN_DIR=${RUN_DIR}"
+echo "LAUNCH_SCRIPT_RUN=${LAUNCH_SCRIPT_RUN}"
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum "${LAUNCH_SCRIPT_RUN}" | sed 's/^/launch_script_sha256=/'
+fi
 nl -ba "${HOSTS_FILE}"
 echo
 
@@ -94,6 +107,7 @@ VENV_ACTIVATE="${VENV_ACTIVATE}"
 PREFERRED_IFNAME="${PREFERRED_IFNAME}"
 NCCL_STABLE_MODE="${NCCL_STABLE_MODE}"
 ENABLE_ECC_PREFLIGHT="${ENABLE_ECC_PREFLIGHT}"
+LAUNCH_SCRIPT_RUN="${LAUNCH_SCRIPT_RUN}"
 NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-}"
 NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:-}"
 TORCH_NCCL_ENABLE_MONITORING="${TORCH_NCCL_ENABLE_MONITORING:-}"
@@ -208,6 +222,10 @@ echo "NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-unset}"
 echo "NCCL_NET_GDR_LEVEL=${NCCL_NET_GDR_LEVEL:-unset}"
 echo "TORCH_NCCL_ENABLE_MONITORING=${TORCH_NCCL_ENABLE_MONITORING:-unset}"
 echo "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:-unset}"
+echo "LAUNCH_SCRIPT_RUN=${LAUNCH_SCRIPT_RUN}"
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum "${LAUNCH_SCRIPT_RUN}" | sed 's/^/launch_script_sha256=/'
+fi
 echo "python=$(which python)"
 python -V || true
 
@@ -218,7 +236,7 @@ exec env \
   MAIN_PROCESS_IP="${MASTER_ADDR}" \
   MAIN_PROCESS_PORT="${MASTER_PORT}" \
   PRETRAIN_DONE_MARKER="${PRETRAIN_DONE_MARKER}" \
-  bash "${WORKDIR}/scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh"
+  bash "${LAUNCH_SCRIPT_RUN}"
 SH2
 chmod +x "${NODE_ENTRY}"
 

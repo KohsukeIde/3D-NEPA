@@ -64,14 +64,14 @@ All rows below are protocol-valid (`val_split_mode=file`, `aug_eval=1`, `mc_test
 
 ## 6. FPS-Comparison Branch Status (Pretrain Sanity)
 
-This branch is for causal diagnosis of patch sampling / ray grouping; it is **not** yet a finished leaderboard row because two key runs are still active.
+This branch is for causal diagnosis of patch sampling / ray grouping; it is **not** yet a finished leaderboard row because the independent branch (`100699`) is still active and bind+aug+dualmask (`100643`) ended invalid.
 
 | branch | job | setting delta | status | usable for final comparison |
 |---|---|---|---|---|
 | fps baseline (no aug) | `100563` | `pt_sample_mode=fps`, bind ray | completed | yes (pretrain-side) |
 | random baseline (no aug) | `100564` | `pt_sample_mode=random`, bind ray | completed | yes (pretrain-side) |
 | fps + aug (dualmask off) | `100642` | PM-like aug only | terminated by user (`Exit_status=265`) | no |
-| fps + aug + dualmask | `100643` | PM-like aug + dualmask | running | pending |
+| fps + aug + dualmask | `100643` | PM-like aug + dualmask | finished (`Exit_status=97`) | no (launcher marker missing / invalid) |
 | independent ray patch + aug + dualmask | `100699` | `ray_assign_mode=independent_fps_knn`, `ray_num_groups=32` | running | pending |
 
 Step-0 token sanity (sample-0):
@@ -177,14 +177,14 @@ Note on the augmentation question:
 ## 10. Exhaustive Coverage Audit (No Drop Policy)
 
 - policy: every `logs/sanity/patchnepa_ft/**/*.out` entry is tracked (completed + incomplete)
-- direct-ft files scanned: `88`
+- direct-ft files scanned: `91`
 - completed (`TEST acc` present): `59`
-- incomplete (`TEST acc` absent): `29`
+- incomplete (`TEST acc` absent): `32`
 
 Coverage (all scanned):
-- `patchnepa_ft_mode`: `-`=22, `q_only`=18, `qa_zeroa`=48
-- `pooling`: `-`=20, `cls`=33, `cls_max`=29, `mean_q`=6
-- `cls_token`: `-`=46, `bos`=10, `last_q`=32
+- `patchnepa_ft_mode`: `-`=22, `q_only`=18, `qa_zeroa`=51
+- `pooling`: `-`=20, `cls`=36, `cls_max`=29, `mean_q`=6
+- `cls_token`: `-`=46, `bos`=10, `last_q`=35
 
 Coverage (completed only):
 - `patchnepa_ft_mode`: `-`=2, `q_only`=9, `qa_zeroa`=48
@@ -205,10 +205,12 @@ Explicit check for requested settings:
 | `obj_bg` | `patchnepaFT_splitx2_dualmask_qonly_20260301_040743` | `q_only` | `cls_max` | `-` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_qonly_20260301_040743/obj_bg.out` |
 | `obj_bg` | `patchnepaFT_splitx2_dualmask_qonly_meanq_20260301_040745` | `q_only` | `mean_q` | `-` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_qonly_meanq_20260301_040745/obj_bg.out` |
 | `obj_bg` | `patchnepaFT_splitx2_encdec1_qonly_20260301_040738` | `q_only` | `cls_max` | `-` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_encdec1_qonly_20260301_040738/obj_bg.out` |
+| `obj_bg` | `patchnepa_ft_variants_20260301_223043` | `qa_zeroa` | `cls` | `last_q` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepa_ft_variants_20260301_223043/obj_bg.out` |
 | `obj_only` | `patchnepaFT_from_ray_interleave_20260301_014535` | `-` | `-` | `-` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepaFT_from_ray_interleave_20260301_014535/obj_only.out` |
 | `obj_only` | `patchnepaFT_splitx2_dualmask_qonly_20260301_040743` | `q_only` | `cls_max` | `-` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_qonly_20260301_040743/obj_only.out` |
 | `obj_only` | `patchnepaFT_splitx2_dualmask_qonly_meanq_20260301_040745` | `q_only` | `mean_q` | `-` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_qonly_meanq_20260301_040745/obj_only.out` |
 | `obj_only` | `patchnepaFT_splitx2_encdec1_qonly_20260301_040738` | `q_only` | `cls_max` | `-` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_encdec1_qonly_20260301_040738/obj_only.out` |
+| `obj_only` | `patchnepa_ft_variants_20260301_223043` | `qa_zeroa` | `cls` | `last_q` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepa_ft_variants_20260301_223043/obj_only.out` |
 | `obj_only` | `patchnepa_stage2_sanity32_20260301_162811_ft_lI_d0_ta0_tp0_r0` | `-` | `-` | `-` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepa_stage2_sanity32_20260301_162811_ft_lI_d0_ta0_tp0_r0/obj_only.out` |
 | `obj_only` | `patchnepa_stage2_sanity32_20260301_162811_ft_lI_d0_ta0_tp0_r1` | `-` | `-` | `-` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepa_stage2_sanity32_20260301_162811_ft_lI_d0_ta0_tp0_r1/obj_only.out` |
 | `obj_only` | `patchnepa_stage2_sanity32_20260301_162811_ft_lI_d0_ta0_tp1_r0` | `-` | `-` | `-` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepa_stage2_sanity32_20260301_162811_ft_lI_d0_ta0_tp1_r0/obj_only.out` |
@@ -230,8 +232,32 @@ Explicit check for requested settings:
 | `pb_t50_rs` | `patchnepaFT_splitx2_dualmask_qonly_20260301_040743` | `q_only` | `cls_max` | `-` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_qonly_20260301_040743/pb_t50_rs.out` |
 | `pb_t50_rs` | `patchnepaFT_splitx2_dualmask_qonly_meanq_20260301_040745` | `q_only` | `mean_q` | `-` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_dualmask_qonly_meanq_20260301_040745/pb_t50_rs.out` |
 | `pb_t50_rs` | `patchnepaFT_splitx2_encdec1_qonly_20260301_040738` | `q_only` | `cls_max` | `-` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepaFT_splitx2_encdec1_qonly_20260301_040738/pb_t50_rs.out` |
+| `pb_t50_rs` | `patchnepa_ft_variants_20260301_223043` | `qa_zeroa` | `cls` | `last_q` | `no_test_acc` | `logs/sanity/patchnepa_ft/patchnepa_ft_variants_20260301_223043/pb_t50_rs.out` |
 
 ## 12. Exhaustive Sources
 
 - `nepa3d/docs/patch_nepa/patchnepa_ft_exhaustive_audit.tsv` (all direct-ft `.out`, completed + incomplete)
 - `nepa3d/docs/patch_nepa/patchcls_exhaustive_audit.tsv` (all patchcls `.out`, completed + incomplete)
+
+## 13. Latest Completion Snapshot (2026-03-01)
+
+### 13.1 Newly finished jobs in this update
+
+| job | purpose | status | key output |
+|---|---|---|---|
+| `100643` | bind + aug + dualmask pretrain | finished invalid (`Exit_status=97`) | launcher marker missing |
+| `100700` | point-only + EMA E100 pretrain | finished valid (`Exit_status=0`) | ckpt produced |
+| `100704`-`100715` | sanity6 short-screen pretrain+FT | all finished valid (`Exit_status=0`) | FT `obj_only` results below |
+
+### 13.2 sanity6 (E12->E120) FT results (`obj_only`)
+
+| condition | pretrain job | FT job | TEST acc |
+|---|---|---|---:|
+| random, aug off | `100704` | `100705` | `0.6833` |
+| random, aug on | `100706` | `100707` | `0.6196` |
+| fps, aug off | `100708` | `100709` | `0.6454` |
+| fps, aug on | `100710` | `100711` | `0.5318` |
+| rfps_cached, aug off | `100712` | `100713` | `0.6368` |
+| rfps_cached, aug on | `100714` | `100715` | `0.6317` |
+
+Current best in this short-screen branch: `random + aug off (0.6833)`.

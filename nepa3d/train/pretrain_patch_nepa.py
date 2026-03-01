@@ -536,4 +536,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        # Avoid noisy NCCL warnings on clean shutdown in multi-process runs.
+        try:
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                torch.distributed.destroy_process_group()
+        except Exception:
+            pass
