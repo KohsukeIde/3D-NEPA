@@ -39,12 +39,14 @@ from ..token.tokenizer import (
 
 @dataclass
 class PatchNepaOutput:
+    tokens: torch.Tensor
     z: torch.Tensor
     h: torch.Tensor
     z_hat: torch.Tensor
     type_id: torch.Tensor
     centers_xyz: torch.Tensor
     group_idx: Optional[torch.Tensor] = None
+    q_keep_ratio: Optional[torch.Tensor] = None
 
 
 class AnswerPatchEmbed(nn.Module):
@@ -137,6 +139,7 @@ class PatchTransformerNepa(nn.Module):
         use_pt_grad: bool = False,
         answer_mlp_layers: int = 2,
         answer_pool: str = "max",
+        q_mask_mode: str = "mask_token",  # mask_token|zero
         # embeddings / arch
         max_len: int = 4096,
         nepa2d_pos: bool = True,
@@ -164,6 +167,8 @@ class PatchTransformerNepa(nn.Module):
             raise ValueError(f"qa_tokens must be 0/1, got {qa_tokens}")
         if str(qa_layout) not in ("interleave", "split"):
             raise ValueError(f"qa_layout must be interleave/split, got {qa_layout}")
+        if str(q_mask_mode) not in ("mask_token", "zero"):
+            raise ValueError(f"q_mask_mode must be mask_token/zero, got {q_mask_mode}")
 
         self.d_model = int(d_model)
         self.use_normals = bool(use_normals)
@@ -171,6 +176,7 @@ class PatchTransformerNepa(nn.Module):
         self.qa_layout = str(qa_layout)
         self.qa_sep_token = bool(qa_sep_token)
         self.qa_fuse = str(qa_fuse)
+        self.q_mask_mode = str(q_mask_mode)
         self.nepa2d_pos = bool(nepa2d_pos)
         self.type_specific_pos = bool(type_specific_pos)
         self.type_pos_max_len = int(type_pos_max_len)
@@ -243,9 +249,11 @@ class PatchTransformerNepa(nn.Module):
         self.bos_token = nn.Parameter(torch.zeros(1, 1, self.d_model))
         self.eos_token = nn.Parameter(torch.zeros(1, 1, self.d_model))
         self.sep_token = nn.Parameter(torch.zeros(1, 1, self.d_model))
+        self.q_mask_token = nn.Parameter(torch.zeros(1, 1, self.d_model))
         nn.init.trunc_normal_(self.bos_token, std=0.02)
         nn.init.trunc_normal_(self.eos_token, std=0.02)
         nn.init.trunc_normal_(self.sep_token, std=0.02)
+        nn.init.trunc_normal_(self.q_mask_token, std=0.02)
 
         self.type_emb = nn.Embedding(int(TYPE_VOCAB_SIZE), self.d_model)
 
@@ -339,6 +347,44 @@ class PatchTransformerNepa(nn.Module):
             cen = cen.masked_fill(special.unsqueeze(-1), 0.0)
             out = out + cen
         return out
+
+    def _apply_query_mask(
+        self,
+        tokens: torch.Tensor,
+        type_id: torch.Tensor,
+        q_mask_prob: float,
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+        p = float(q_mask_prob)
+        if p <= 0.0 or not self.training:
+            return tokens, None
+        p = min(max(p, 0.0), 1.0)
+
+        q_mask = (
+            (type_id == int(TYPE_Q_POINT))
+            | (type_id == int(TYPE_Q_RAY))
+            | (type_id == int(TYPE_POINT))
+            | (type_id == int(TYPE_RAY))
+        )
+        n_q = q_mask.sum()
+        if int(n_q.item()) <= 0:
+            keep_ratio = torch.tensor(1.0, device=tokens.device, dtype=tokens.dtype)
+            return tokens, keep_ratio
+
+        drop_mask = (torch.rand_like(tokens[:, :, 0]) < p) & q_mask
+        kept = ((~drop_mask) & q_mask).sum().to(dtype=tokens.dtype)
+        keep_ratio = kept / n_q.to(dtype=tokens.dtype)
+        if not bool(drop_mask.any()):
+            return tokens, keep_ratio
+
+        out = tokens.clone()
+        if self.q_mask_mode == "zero":
+            out = out.masked_fill(drop_mask.unsqueeze(-1), 0.0)
+        elif self.q_mask_mode == "mask_token":
+            mask_tok = self.q_mask_token.expand(out.shape[0], out.shape[1], out.shape[2])
+            out = torch.where(drop_mask.unsqueeze(-1), mask_tok, out)
+        else:
+            raise RuntimeError(f"invalid q_mask_mode={self.q_mask_mode}")
+        return out, keep_ratio
 
     def _build_seq_qa0(
         self,
@@ -574,6 +620,7 @@ class PatchTransformerNepa(nn.Module):
         dual_mask_far: float = 0.0,
         dual_mask_window: int = 0,
         dual_mask_type_aware: int | bool = 0,
+        q_mask_prob: float = 0.0,
     ) -> PatchNepaOutput:
         if pt_xyz is None:
             pt_xyz = points_xyz
@@ -667,6 +714,9 @@ class PatchTransformerNepa(nn.Module):
         # Keep sep_token connected in all layouts (including interleave without SEP)
         # to avoid DDP unused-parameter errors.
         tokens = tokens + (self.sep_token.sum() * 0.0)
+        # Keep q_mask_token connected even when q_mask_prob=0 to avoid DDP unused-parameter errors.
+        tokens = tokens + (self.q_mask_token.sum() * 0.0)
+        tokens, q_keep_ratio = self._apply_query_mask(tokens, type_id, float(q_mask_prob))
         z = self._add_embeddings(tokens, type_id, centers_seq)
 
         if isinstance(self.backbone, EncoderDecoderTransformer):
@@ -694,12 +744,14 @@ class PatchTransformerNepa(nn.Module):
 
         z_hat = self.pred_head(h)
         return PatchNepaOutput(
+            tokens=tokens,
             z=z,
             h=h,
             z_hat=z_hat,
             type_id=type_id,
             centers_xyz=centers_xyz,
             group_idx=group_idx,
+            q_keep_ratio=q_keep_ratio,
         )
 
     @staticmethod
@@ -709,15 +761,21 @@ class PatchTransformerNepa(nn.Module):
         type_id: Optional[torch.Tensor] = None,
         *,
         skip_k: int = 1,
+        target: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         k = int(skip_k)
         if k < 1:
             raise ValueError(f"skip_k must be >=1, got {skip_k}")
-        if z.size(1) <= k:
+        target_seq = z if target is None else target
+        if target_seq.size(1) <= k:
             return z_hat.sum() * 0.0
+        if target_seq.shape != z.shape:
+            raise ValueError(
+                f"target shape mismatch: z={tuple(z.shape)} target={tuple(target_seq.shape)}"
+            )
 
         pred = z_hat[:, :-k, :]
-        tgt = z[:, k:, :].detach()
+        tgt = target_seq[:, k:, :].detach()
 
         if type_id is None:
             mask = torch.ones(pred.shape[:2], device=z.device, dtype=torch.bool)

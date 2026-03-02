@@ -114,6 +114,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--answer_pool", type=str, default="max", choices=["max", "mean"])
     p.add_argument("--nepa_skip_k", type=int, default=1)
     p.add_argument("--nepa_multi_k", type=str, default="")
+    p.add_argument("--loss_target_mode", type=str, default="full_z", choices=["full_z", "content_tokens"])
+    p.add_argument("--q_mask_prob", type=float, default=0.0)
+    p.add_argument("--q_mask_warmup_epochs", type=float, default=0.0)
+    p.add_argument("--q_mask_mode", type=str, default="mask_token", choices=["mask_token", "zero"])
 
     # Ray binding
     p.add_argument("--use_ray_patch", type=int, default=0)
@@ -298,18 +302,18 @@ def _masked_mean(values: torch.Tensor, mask: torch.Tensor | None) -> float:
 
 
 def _compute_copy_diag(
-    z: torch.Tensor,
+    target_seq: torch.Tensor,
     z_hat: torch.Tensor,
     type_id: torch.Tensor | None,
     k: int,
 ) -> dict[str, float] | None:
     k = max(1, int(k))
-    if z.size(1) <= k or z_hat.size(1) <= k:
+    if target_seq.size(1) <= k or z_hat.size(1) <= k:
         return None
 
     pred = z_hat[:, :-k, :].detach()
-    tgt = z[:, k:, :].detach()
-    prev = z[:, :-k, :].detach()
+    tgt = target_seq[:, k:, :].detach()
+    prev = target_seq[:, :-k, :].detach()
 
     mask = _nepa_target_mask(type_id, k)
     cos_tgt = F.cosine_similarity(pred, tgt, dim=-1)
@@ -477,6 +481,7 @@ def main() -> None:
         use_pt_grad=bool(int(args.use_pt_grad)),
         answer_mlp_layers=int(args.answer_mlp_layers),
         answer_pool=str(args.answer_pool),
+        q_mask_mode=str(args.q_mask_mode),
         max_len=int(args.max_len),
         nepa2d_pos=bool(int(args.nepa2d_pos)),
         type_specific_pos=bool(int(args.type_specific_pos)),
@@ -527,6 +532,8 @@ def main() -> None:
         f"point_order_mode={str(args.point_order_mode)} "
         f"qa_tokens={int(args.qa_tokens)} qa_layout={str(args.qa_layout)} qa_sep={int(args.qa_sep_token)} "
         f"qa_fuse={str(args.qa_fuse)} use_pt_dist={int(args.use_pt_dist)} use_pt_grad={int(args.use_pt_grad)} skip_k={skip_k_list} "
+        f"loss_target_mode={str(args.loss_target_mode)} "
+        f"q_mask_prob={float(args.q_mask_prob):.3f} q_mask_warmup_epochs={float(args.q_mask_warmup_epochs):.2f} q_mask_mode={str(args.q_mask_mode)} "
         f"type_specific_pos={int(args.type_specific_pos)} "
         f"dual_mask=({float(args.dual_mask_near):.2f},{float(args.dual_mask_far):.2f},w={int(args.dual_mask_window)},type_aware={int(args.dual_mask_type_aware)}) "
         f"batch_per_proc={int(args.batch_size)} grad_accum={int(args.grad_accum)} "
@@ -565,6 +572,7 @@ def main() -> None:
 
     total_steps = max(1, int(args.epochs) * max(1, len(train_loader)))
     warmup_steps = max(1, int(float(args.dual_mask_warmup_frac) * float(total_steps)))
+    q_mask_warmup_steps = max(0, int(float(args.q_mask_warmup_epochs) * max(1, len(train_loader))))
     printed_token_sanity = False
 
     try:
@@ -581,6 +589,10 @@ def main() -> None:
                         ramp = min(float(global_step) / float(warmup_steps), 1.0)
                     dm_near = float(args.dual_mask_near) * ramp
                     dm_far = float(args.dual_mask_far) * ramp
+                    q_mask_ramp = 1.0
+                    if q_mask_warmup_steps > 0:
+                        q_mask_ramp = min(float(global_step) / float(q_mask_warmup_steps), 1.0)
+                    q_mask_prob_eff = float(args.q_mask_prob) * q_mask_ramp
 
                     out = model(
                         pt_xyz=batch["pt_xyz"],
@@ -599,6 +611,7 @@ def main() -> None:
                         dual_mask_far=dm_far,
                         dual_mask_window=int(args.dual_mask_window),
                         dual_mask_type_aware=int(args.dual_mask_type_aware),
+                        q_mask_prob=q_mask_prob_eff,
                     )
                     if (not printed_token_sanity) and (global_step == 0) and accelerator.is_main_process:
                         c = Counter(out.type_id[0].detach().cpu().tolist())
@@ -620,8 +633,15 @@ def main() -> None:
                             print(f"  {name:12s} ({int(tid):2d}): {int(c.get(int(tid), 0))}")
                         print("=" * 56 + "\n")
                         printed_token_sanity = True
+                    target_seq = out.z if str(args.loss_target_mode) == "full_z" else out.tokens
                     loss_terms = [
-                        PatchTransformerNepa.nepa_loss(out.z, out.z_hat, out.type_id, skip_k=int(k))
+                        PatchTransformerNepa.nepa_loss(
+                            out.z,
+                            out.z_hat,
+                            out.type_id,
+                            skip_k=int(k),
+                            target=target_seq,
+                        )
                         for k in skip_k_list
                     ]
                     loss = torch.stack(loss_terms).mean()
@@ -633,44 +653,57 @@ def main() -> None:
                         _update_ema(ema_model, model_raw, float(args.ema_decay))
                     optimizer.zero_grad(set_to_none=True)
 
-                if accelerator.is_main_process and (global_step % 50 == 0):
-                    lr = optimizer.param_groups[0]["lr"]
-                    diag_msg = ""
-                    diag = None
-                    if diag_enabled and (global_step % diag_every == 0):
-                        k_diag = int(args.diag_k) if int(args.diag_k) > 0 else int(skip_k_list[0])
-                        with torch.no_grad():
-                            diag = _compute_copy_diag(out.z, out.z_hat, out.type_id, k_diag)
-                        if diag is not None:
-                            diag_msg = (
-                                f" kdiag={int(diag['k'])}"
-                                f" cos_tgt={_fmt_diag(float(diag['cos_tgt']))}"
-                                f" cos_prev={_fmt_diag(float(diag['cos_prev']))}"
-                                f" gap={_fmt_diag(float(diag['gap']))}"
-                                f" copy_win={_fmt_diag(float(diag['copy_win']))}"
-                            )
-                    print(
-                        f"[epoch {epoch:03d} step {global_step:06d}] "
-                        f"loss={loss.item():.8e} lr={lr:.2e} "
-                        f"dm=({dm_near:.2f},{dm_far:.2f},ramp={ramp:.2f})"
-                        f"{diag_msg}"
-                    )
-                    if wandb_run is not None and (global_step % wandb_log_every == 0):
-                        wb = {
-                            "train/loss": float(loss.item()),
-                            "train/lr": float(lr),
-                            "train/epoch": float(epoch),
-                            "train/global_step": float(global_step),
-                            "train/dm_near": float(dm_near),
-                            "train/dm_far": float(dm_far),
-                            "train/dm_ramp": float(ramp),
-                        }
-                        if diag is not None:
-                            wb["diag/cos_tgt"] = float(diag["cos_tgt"])
-                            wb["diag/cos_prev"] = float(diag["cos_prev"])
-                            wb["diag/gap"] = float(diag["gap"])
-                            wb["diag/copy_win"] = float(diag["copy_win"])
-                        wandb_run.log(wb, step=int(global_step))
+                    if accelerator.is_main_process and (global_step % 50 == 0):
+                        lr = optimizer.param_groups[0]["lr"]
+                        loss_val = float(loss.item())
+                        # 2D ViT-NEPA reports pretrain objective as -cos.
+                        # PatchNEPA uses (1-cos), so convert by subtracting 1 for direct axis parity.
+                        loss_2d_equiv = loss_val - 1.0
+                        q_keep = float("nan")
+                        if out.q_keep_ratio is not None:
+                            q_keep = float(out.q_keep_ratio.detach().float().item())
+                        diag_msg = ""
+                        diag = None
+                        if diag_enabled and (global_step % diag_every == 0):
+                            k_diag = int(args.diag_k) if int(args.diag_k) > 0 else int(skip_k_list[0])
+                            with torch.no_grad():
+                                diag = _compute_copy_diag(target_seq, out.z_hat, out.type_id, k_diag)
+                            if diag is not None:
+                                diag_msg = (
+                                    f" kdiag={int(diag['k'])}"
+                                    f" cos_tgt={_fmt_diag(float(diag['cos_tgt']))}"
+                                    f" cos_prev={_fmt_diag(float(diag['cos_prev']))}"
+                                    f" gap={_fmt_diag(float(diag['gap']))}"
+                                    f" copy_win={_fmt_diag(float(diag['copy_win']))}"
+                                )
+                        print(
+                            f"[epoch {epoch:03d} step {global_step:06d}] "
+                            f"loss={loss_val:.8e} loss2d={loss_2d_equiv:.8e} lr={lr:.2e} "
+                            f"dm=({dm_near:.2f},{dm_far:.2f},ramp={ramp:.2f}) "
+                            f"qmask=({q_mask_prob_eff:.2f},ramp={q_mask_ramp:.2f},keep={_fmt_diag(q_keep)})"
+                            f"{diag_msg}"
+                        )
+                        if wandb_run is not None and (global_step % wandb_log_every == 0):
+                            wb = {
+                                "train/loss": loss_val,
+                                "train/loss_2d_equiv": loss_2d_equiv,
+                                "train/lr": float(lr),
+                                "train/epoch": float(epoch),
+                                "train/global_step": float(global_step),
+                                "train/dm_near": float(dm_near),
+                                "train/dm_far": float(dm_far),
+                                "train/dm_ramp": float(ramp),
+                                "train/q_mask_prob": float(q_mask_prob_eff),
+                                "train/q_mask_ramp": float(q_mask_ramp),
+                            }
+                            if q_keep == q_keep:
+                                wb["train/q_keep_ratio"] = float(q_keep)
+                            if diag is not None:
+                                wb["diag/cos_tgt"] = float(diag["cos_tgt"])
+                                wb["diag/cos_prev"] = float(diag["cos_prev"])
+                                wb["diag/gap"] = float(diag["gap"])
+                                wb["diag/copy_win"] = float(diag["copy_win"])
+                            wandb_run.log(wb, step=int(global_step))
                 global_step += 1
 
             if scheduler is not None:

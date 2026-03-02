@@ -1,3 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
 # ========================
 export NCCL_DEBUG=INFO
 export NCCL_IB_TC=106
@@ -14,25 +17,44 @@ export TORCH_DISTRIBUTED_TIMEOUT=1800
 # ========================
 NGPU=$(python -c "import torch; print(torch.cuda.device_count())")
 
-EXPERIMENT_NAME="nepa-large-patch14-224"
-WANDB_PROJECT="Nepa-Pretrain"
+: "${EXPERIMENT_NAME:=nepa-large-patch14-224}"
+: "${WANDB_PROJECT:=Nepa-Pretrain}"
 
-CONFIG_NAME="configs/pretrain/nepa-large-patch14-224"
-DATASET_PATH="data/imagenet-1k-hf"
-OUTPUT_DIR="outputs/${EXPERIMENT_NAME}"
+: "${CONFIG_NAME:=configs/pretrain/nepa-large-patch14-224}"
+: "${DATASET_PATH:=data/imagenet-1k-hf}"
+: "${TRAIN_DIR:=}"
+: "${VALIDATION_DIR:=}"
+: "${OUTPUT_DIR:=outputs/${EXPERIMENT_NAME}}"
+: "${LOAD_FROM_DISK:=True}"
+: "${IMAGE_COLUMN_NAME:=image}"
 
-TOTAL_BATCH_SIZE=4096
-PER_DEVICE_BATCH_SIZE=128
+: "${TOTAL_BATCH_SIZE:=4096}"
+: "${PER_DEVICE_BATCH_SIZE:=128}"
 GRAD_ACCUM_STEPS=$(( TOTAL_BATCH_SIZE / (PER_DEVICE_BATCH_SIZE * NGPU * WORLD_SIZE) ))
-NUM_EPOCHS=1600
+: "${NUM_EPOCHS:=1600}"
 
-BASE_LEARNING_RATE=3e-4
+: "${BASE_LEARNING_RATE:=3e-4}"
 LEARNING_RATE=$(python -c "print(${BASE_LEARNING_RATE} * ${TOTAL_BATCH_SIZE} / 256)")
 
 DATALOADER_NUM_WORKERS=$((4 * NGPU))
+: "${DIAG_COPY:=1}"
+: "${DIAG_EVERY:=50}"
+: "${DIAG_K:=1}"
 
 # ========================
 export WANDB_PROJECT=$WANDB_PROJECT
+
+# dataset source: HF dataset on disk vs imagefolder directories.
+DATASET_ARGS=""
+if [[ -n "${TRAIN_DIR}" || -n "${VALIDATION_DIR}" ]]; then
+    if [[ -z "${TRAIN_DIR}" || -z "${VALIDATION_DIR}" ]]; then
+        echo "ERROR: TRAIN_DIR and VALIDATION_DIR must be set together."
+        exit 2
+    fi
+    DATASET_ARGS="--train_dir ${TRAIN_DIR} --validation_dir ${VALIDATION_DIR}"
+else
+    DATASET_ARGS="--dataset_name ${DATASET_PATH} --load_from_disk ${LOAD_FROM_DISK}"
+fi
 
 # ========================
 torchrun \
@@ -47,8 +69,8 @@ torchrun \
     \
     --config_name $CONFIG_NAME \
     --image_processor_name  $CONFIG_NAME \
-    --dataset_name $DATASET_PATH \
-    --load_from_disk True \
+    $DATASET_ARGS \
+    --image_column_name $IMAGE_COLUMN_NAME \
     --dataloader_drop_last True \
     \
     --do_train \
@@ -77,6 +99,10 @@ torchrun \
     --dataloader_num_workers $DATALOADER_NUM_WORKERS \
     --dataloader_persistent_workers True \
     --dataloader_pin_memory False \
+    \
+    --diag_copy "${DIAG_COPY}" \
+    --diag_every "${DIAG_EVERY}" \
+    --diag_k "${DIAG_K}" \
     \
     --report_to wandb \
     --run_name $EXPERIMENT_NAME

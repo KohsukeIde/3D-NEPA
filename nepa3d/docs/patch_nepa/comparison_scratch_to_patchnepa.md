@@ -49,6 +49,30 @@ All rows below are protocol-valid (`val_split_mode=file`, `aug_eval=1`, `mc_test
 | masking style (E100) | encdec1 baseline (`100188/189/190`) | dualmask baseline (`100194/195/196`) | +0.0103 | +0.0293 | +0.0017 | +0.0138 | dualmask wins in this matched E100 pair |
 | pretrain length (ray dualmask) | E100 (`100194/195/196`) | E300 (`100426/425/427`) | +0.0172 | -0.0327 | +0.0201 | +0.0015 | longer pretrain helped `obj_bg/pb_t50_rs`, hurt `obj_only` |
 
+### 3.2 Dual-mask and Loss-Curve Shape (Pretrain-side)
+
+Question:
+- does dual-mask change the *initial* loss collapse pattern?
+
+Matched sanity pair (pretrain, `mr0` logs):
+- off: `patchnepa_stage2_sanity32_20260301_162811_lS_d0_ta1_tp0_r0`
+- on:  `patchnepa_stage2_sanity32_20260301_162811_lS_d1_ta1_tp0_r0`
+
+Observed:
+- step0 loss is identical (`0.9750`).
+- step100 loss is also almost identical:
+  - off: `0.0048597`
+  - on:  `0.0048567`
+- interpretation: dual-mask is not the dominant cause of early rapid drop.
+
+Later-phase tendency (same pair):
+- late segment mean (roughly step `1450-4000`) is higher for dual-mask on.
+- this suggests dual-mask influences sustained optimization pressure more than initial collapse.
+
+Caveat:
+- strict Q1 random point-only on/off pair is still missing (Q1 mainline has on only).
+- so this is a nearest-match inference, not the final Q1-causal verdict.
+
 ### 3.1 Serialization (`serial` / `serial_ztrans`) delta summary
 
 These are `PatchCls scratch`-side comparisons for `pb_t50_rs` only (not direct PatchNEPA FT).
@@ -443,3 +467,35 @@ Current counts after refresh:
 - completed rows: `73`
 - exhaustive rows: `113`
 - exhaustive status split: `completed=73`, `no_test_acc=40`
+
+## 19. Q1/Q2 hypothesis jobs launched (pretrain+FT chain, 2026-03-02)
+
+Goal split:
+
+- Q1: does sampling/task diversity (`random`) beat fixed order (`rfps_cached`) under point-only pretrain?
+- Q2: does modal-specific mixed pretrain (`mesh+udf`) transfer better than point-only pretrain under matched settings?
+
+Launched matrix (all with dependent `obj_only` FT):
+
+| arm | pretrain job | pretrain run_set | dependent FT job | FT run_set |
+|---|---|---|---|---|
+| Q1-random | `100778` | `patchnepa_q1_ptonly_random_e100_20260302_053501` | `100781` | `patchnepaFT_objonly_from_q1_ptonly_random_e100_20260302_053501` |
+| Q1/Q2-control (rfps) | `100779` | `patchnepa_q1q2_ptonly_rfps_e100_20260302_053501` | `100782` | `patchnepaFT_objonly_from_q1q2_ptonly_rfps_e100_20260302_053501` |
+| Q2-mix (mesh+udf, rfps) | `100780` | `patchnepa_q2_mix_meshudf_rfps_e100_20260302_053501` | `100783` | `patchnepaFT_objonly_from_q2_mix_meshudf_rfps_e100_20260302_053501` |
+
+Comparison contract:
+
+- Q1 uses `100778 vs 100779` (only `PT_SAMPLE_MODE` differs: `random` vs `rfps_cached`).
+- Q2 uses `100780 vs 100779` (same `rfps_cached`; only mixed corpus differs).
+- all three branches share:
+  - pretrain: `E100`, global batch `128`, dual-mask on, EMA on, point-only token path (`USE_RAY_PATCH=0`, `N_RAY=0`)
+  - FT: direct PatchNEPA, `qa_zeroa`, `cls_max + pointmae_mlp`, `cls_token=bos`, strict eval (`file + TTA10`), `CKPT_USE_EMA=1`.
+
+Current status snapshot:
+
+- pretrains `100778/100779/100780`: `R`
+- dependent FT `100781/100782/100783`: `H` (`afterok`)
+
+Tracking table:
+
+- `logs/sanity/patchnepa_ft/patchnepa_q1q2_matrix_20260302_053501_jobs.tsv`

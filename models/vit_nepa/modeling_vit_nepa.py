@@ -241,6 +241,8 @@ class EmbeddedModelingOutput(ModelOutput):
     loss: Optional[torch.FloatTensor] = None
     hidden_states: Optional[tuple[torch.FloatTensor, ...]] = None
     attentions: Optional[tuple[torch.FloatTensor, ...]] = None
+    sequence_input: Optional[torch.FloatTensor] = None
+    sequence_output: Optional[torch.FloatTensor] = None
 
     @property
     def logits(self):
@@ -880,6 +882,8 @@ class ViTNepaForPreTraining(ViTNepaPreTrainedModel):
             loss=embedded_loss,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
+            sequence_input=sequence_input,
+            sequence_output=sequence_output,
         )
 
 

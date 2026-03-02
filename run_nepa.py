@@ -31,6 +31,7 @@ from typing import Optional
 # import evaluate
 import numpy as np
 import torch
+import torch.nn.functional as F
 from datasets import load_dataset, load_from_disk
 from PIL import Image
 from torchvision.transforms import (
@@ -83,6 +84,9 @@ class EnhancedTrainer(Trainer):
         embed_lr=None,
         ema_decay=0.9999,
         use_ema=True,
+        diag_copy=True,
+        diag_every=50,
+        diag_k=1,
         **kwargs
     ):
         super().__init__(*args, **kwargs)
@@ -90,6 +94,86 @@ class EnhancedTrainer(Trainer):
         self.ema_decay = ema_decay
         self.use_ema = use_ema
         self.ema_model = None
+        self.diag_copy = bool(diag_copy)
+        self.diag_every = max(1, int(diag_every))
+        self.diag_k = max(1, int(diag_k))
+        self._diag_last_logged_step = -1
+
+    @staticmethod
+    def _fmt_diag(x: float) -> str:
+        return "nan" if (x != x) else f"{x:.4f}"
+
+    @staticmethod
+    def _compute_copy_diag(
+        sequence_input: Optional[torch.Tensor],
+        sequence_output: Optional[torch.Tensor],
+        k: int,
+    ) -> Optional[dict]:
+        if sequence_input is None or sequence_output is None:
+            return None
+        if sequence_input.ndim != 3 or sequence_output.ndim != 3:
+            return None
+        if sequence_input.shape != sequence_output.shape:
+            return None
+        k = max(1, int(k))
+        if sequence_input.size(1) <= k:
+            return None
+
+        pred = sequence_output[:, :-k, :].detach().float()
+        tgt = sequence_input[:, k:, :].detach().float()
+        prev = sequence_input[:, :-k, :].detach().float()
+
+        cos_tgt = F.cosine_similarity(pred, tgt, dim=-1)
+        cos_prev = F.cosine_similarity(pred, prev, dim=-1)
+        cos_tgt_m = float(cos_tgt.mean().item())
+        cos_prev_m = float(cos_prev.mean().item())
+        copy_win = float((cos_prev >= cos_tgt).float().mean().item())
+
+        return {
+            "k": float(k),
+            "cos_tgt": cos_tgt_m,
+            "cos_prev": cos_prev_m,
+            "gap": float(cos_tgt_m - cos_prev_m),
+            "copy_win": copy_win,
+        }
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        outputs = model(**inputs, return_dict=True)
+
+        if isinstance(outputs, dict):
+            loss = outputs.get("loss")
+        else:
+            loss = outputs.loss if hasattr(outputs, "loss") else outputs[0]
+        if loss is None:
+            raise ValueError("Model did not return `loss` in pretraining forward.")
+
+        if self.diag_copy and model.training:
+            step = int(self.state.global_step)
+            if step % self.diag_every == 0 and step != self._diag_last_logged_step:
+                sequence_input = outputs.get("sequence_input") if isinstance(outputs, dict) else getattr(outputs, "sequence_input", None)
+                sequence_output = outputs.get("sequence_output") if isinstance(outputs, dict) else getattr(outputs, "sequence_output", None)
+                diag = self._compute_copy_diag(sequence_input, sequence_output, self.diag_k)
+                if diag is not None and self.is_world_process_zero():
+                    self._diag_last_logged_step = step
+                    logger.info(
+                        "[diag-copy] step=%d kdiag=%d cos_tgt=%s cos_prev=%s gap=%s copy_win=%s",
+                        step,
+                        int(diag["k"]),
+                        self._fmt_diag(float(diag["cos_tgt"])),
+                        self._fmt_diag(float(diag["cos_prev"])),
+                        self._fmt_diag(float(diag["gap"])),
+                        self._fmt_diag(float(diag["copy_win"])),
+                    )
+                    self.log(
+                        {
+                            "diag/cos_tgt": float(diag["cos_tgt"]),
+                            "diag/cos_prev": float(diag["cos_prev"]),
+                            "diag/gap": float(diag["gap"]),
+                            "diag/copy_win": float(diag["copy_win"]),
+                        }
+                    )
+
+        return (loss, outputs) if return_outputs else loss
 
     def get_decay_parameter_names(self, model) -> list[str]:
         forbidden_name_patterns = [r"bias", r"layernorm", r"rmsnorm", r"layer_scale", r"(?:^|\.)norm(?:$|\.)", r"_norm(?:$|\.)"]
@@ -332,6 +416,18 @@ class ModelArguments:
     embed_lr: Optional[float] = field(
         default=None,
         metadata={"help": "Learning rate for embedding layer parameters."},
+    )
+    diag_copy: int = field(
+        default=1,
+        metadata={"help": "Enable copy diagnostics logging (0/1)."},
+    )
+    diag_every: int = field(
+        default=50,
+        metadata={"help": "Log copy diagnostics every N optimizer steps."},
+    )
+    diag_k: int = field(
+        default=1,
+        metadata={"help": "Shift-k for copy diagnostics."},
     )
 
 
@@ -580,6 +676,9 @@ def main():
         processing_class=image_processor,
         data_collator=collate_fn,
         embed_lr=model_args.embed_lr,
+        diag_copy=bool(int(model_args.diag_copy)),
+        diag_every=int(model_args.diag_every),
+        diag_k=int(model_args.diag_k),
     )
 
     # Training

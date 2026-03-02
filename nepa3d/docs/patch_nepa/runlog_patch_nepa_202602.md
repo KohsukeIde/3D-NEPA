@@ -3325,3 +3325,852 @@ Interim interpretation:
 
 - under the current fixed FT recipe, `obj_only` shows no clear pretrain-init advantage over scratch-init (`0.8021` vs `0.8055`, delta `-0.0034` for pretrain-init).
 - final branch conclusion remains pending until `pb_t50_rs` (`100769/100772`) finishes.
+
+## 81. Q1/Q2 validation matrix submitted (2026-03-02)
+
+User-requested validation:
+
+- Q1 (task diversity): point-only `random` vs point-only `rfps_cached`.
+- Q2 (modal-specific transfer): `mix(mesh+udf)` vs point-only control under matched recipe.
+- all branches use pretrain+dependent FT (`obj_only`) chaining.
+
+Submission summary:
+
+| role | question | job | run_set | state |
+|---|---|---|---|---|
+| pretrain | Q1-diversity | `100778.qjcm` | `patchnepa_q1_ptonly_random_e100_20260302_053501` | `R` |
+| pretrain | Q1/Q2-control | `100779.qjcm` | `patchnepa_q1q2_ptonly_rfps_e100_20260302_053501` | `R` |
+| pretrain | Q2-modal | `100780.qjcm` | `patchnepa_q2_mix_meshudf_rfps_e100_20260302_053501` | `R` |
+| FT (`obj_only`) | from `100778` | `100781.qjcm` | `patchnepaFT_objonly_from_q1_ptonly_random_e100_20260302_053501` | `H` (`afterok:100778`) |
+| FT (`obj_only`) | from `100779` | `100782.qjcm` | `patchnepaFT_objonly_from_q1q2_ptonly_rfps_e100_20260302_053501` | `H` (`afterok:100779`) |
+| FT (`obj_only`) | from `100780` | `100783.qjcm` | `patchnepaFT_objonly_from_q2_mix_meshudf_rfps_e100_20260302_053501` | `H` (`afterok:100780`) |
+
+Pretrain contract (common unless noted):
+
+- topology/global batch: `16 GPU (4x4)`, `batch=8` per proc, global `128`
+- sequence/objective: `qa_layout=split_sep`, `qa_tokens=1`, `encdec_arch=0`
+- dual-mask: `near=0.5`, `far=0.1`, `window=32`, `type_aware=1`
+- point-only path for Q1/control: `USE_RAY_PATCH=0`, `N_RAY=0`, `STAGE2_REQUIRE_RAY=0`
+- answer-side signal: `use_pt_dist=1`, `pt_dist_key=pt_dist_pool`, `ablate_point_dist=0`
+- optimizer: `lr=3e-4`, `scheduler=cosine`, `warmup_ratio=0.025`
+- EMA: `use_ema=1`, `ema_decay=0.9999`
+
+Axis-specific deltas:
+
+- Q1-diversity (`100778` vs `100779`):
+  - only sampling mode differs (`random` vs `rfps_cached`) under point-only pretrain recipe.
+- Q2-modal (`100780` vs `100779`):
+  - same sampling mode (`rfps_cached`) and optimizer topology;
+  - mix source differs (`mesh+udf one-pass` vs `pointcloud-only one-pass`).
+
+Dependent FT recipe (fixed across `100781`~`100783`):
+
+- direct PatchNEPA FT (`MODEL_SOURCE=patchnepa`), `variant=obj_only`
+- point-only FT side: `USE_RAY_PATCH=0`, `N_RAY=0`
+- readout/head: `pooling=cls_max`, `head_mode=pointmae_mlp`
+- mode/token: `patchnepa_ft_mode=qa_zeroa`, `cls_token_source=bos`
+- LLRD/freeze: `freeze_patch_embed=0`, `llrd_start=end=1.0`, `llrd_scheduler=static`
+- strict eval: `val_split_mode=file`, `AUG_EVAL=1`, `MC_TEST=10`
+- checkpoint source: `CKPT_USE_EMA=1` for all three branches.
+
+Key logs:
+
+- pretrain logs:
+  - `logs/patch_nepa_pretrain/patchnepa_q1_ptonly_random_e100_20260302_053501/run_q1_ptonly_random.mr0.log`
+  - `logs/patch_nepa_pretrain/patchnepa_q1q2_ptonly_rfps_e100_20260302_053501/run_q1q2_ptonly_rfps.mr0.log`
+  - `logs/patch_nepa_pretrain/patchnepa_q2_mix_meshudf_rfps_e100_20260302_053501/run_q2_mix_meshudf_rfps.mr0.log`
+- FT logs:
+  - `logs/sanity/patchnepa_ft/patchnepaFT_objonly_from_q1_ptonly_random_e100_20260302_053501/obj_only.out`
+  - `logs/sanity/patchnepa_ft/patchnepaFT_objonly_from_q1q2_ptonly_rfps_e100_20260302_053501/obj_only.out`
+  - `logs/sanity/patchnepa_ft/patchnepaFT_objonly_from_q2_mix_meshudf_rfps_e100_20260302_053501/obj_only.out`
+- submission table:
+  - `logs/sanity/patchnepa_ft/patchnepa_q1q2_matrix_20260302_053501_jobs.tsv`
+
+## 82. Q1/Q2 matrix expansion (`obj_bg`/`pb_t50_rs`) (2026-03-02)
+
+User request:
+
+- `obj_only` だけでなく、同一3系統で `obj_bg` / `pb_t50_rs` も追加。
+
+Added dependent FT jobs (all `afterok`, same FT recipe as `100781`~`100783`):
+
+| question | source pretrain | obj_bg | pb_t50_rs |
+|---|---|---|---|
+| Q1-diversity (`random`) | `100778` | `100784.qjcm` | `100785.qjcm` |
+| Q1/Q2-control (`rfps_cached`) | `100779` | `100786.qjcm` | `100787.qjcm` |
+| Q2-modal (`mix mesh+udf`) | `100780` | `100788.qjcm` | `100789.qjcm` |
+
+Status at submission check:
+
+- `100784`~`100789`: all `H` (`afterok` hold)
+- existing `obj_only` chain remains:
+  - `100781`~`100783`: `H`
+
+FT recipe parity (all 9 FT jobs):
+
+- `MODEL_SOURCE=patchnepa`, `PATCHNEPA_FT_MODE=qa_zeroa`
+- `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp`
+- `PATCHNEPA_CLS_TOKEN_SOURCE=bos`, `PATCHNEPA_FREEZE_PATCH_EMBED=0`
+- `LLRD_START=1.0`, `LLRD_END=1.0`, `LLRD_SCHEDULER=static`, `LLRD_MODE=linear`
+- strict eval: `val_split_mode=file`, `AUG_EVAL=1`, `MC_TEST=10`
+- point-only FT side: `USE_RAY_PATCH=0`, `N_RAY=0`
+- `CKPT_USE_EMA=1`
+
+New FT log roots:
+
+- `logs/sanity/patchnepa_ft/patchnepaFT_objbg_from_q1_ptonly_random_e100_20260302_053501`
+- `logs/sanity/patchnepa_ft/patchnepaFT_pbt50rs_from_q1_ptonly_random_e100_20260302_053501`
+- `logs/sanity/patchnepa_ft/patchnepaFT_objbg_from_q1q2_ptonly_rfps_e100_20260302_053501`
+- `logs/sanity/patchnepa_ft/patchnepaFT_pbt50rs_from_q1q2_ptonly_rfps_e100_20260302_053501`
+- `logs/sanity/patchnepa_ft/patchnepaFT_objbg_from_q2_mix_meshudf_rfps_e100_20260302_053501`
+- `logs/sanity/patchnepa_ft/patchnepaFT_pbt50rs_from_q2_mix_meshudf_rfps_e100_20260302_053501`
+
+Tracking table updated:
+
+- `logs/sanity/patchnepa_ft/patchnepa_q1q2_matrix_20260302_053501_jobs.tsv`
+
+## 83. Q1/Q2 matrix completion + result readout (2026-03-02)
+
+Completion status:
+
+- pretrain `100778/100779/100780`: all `Exit_status=0`
+- dependent FT `100781`~`100789`: all `Exit_status=0`
+
+Pretrain status snapshot:
+
+| job | question arm | status |
+|---|---|---|
+| `100778` | Q1-diversity (`point-only + random`) | `Exit_status=0` |
+| `100779` | Q1/Q2-control (`point-only + rfps_cached`) | `Exit_status=0` |
+| `100780` | Q2-modal (`mix(mesh+udf) + rfps_cached`) | `Exit_status=0` |
+
+FT results (`TEST acc`, strict eval `file + TTA10`):
+
+| question arm | obj_bg | obj_only | pb_t50_rs |
+|---|---:|---:|---:|
+| Q1-diversity (`100778` source) | `0.8158` (`100784`) | `0.8176` (`100781`) | `0.7724` (`100785`) |
+| Q1/Q2-control (`100779` source) | `0.7900` (`100786`) | `0.8124` (`100782`) | `0.7474` (`100787`) |
+| Q2-modal (`100780` source) | `0.8244` (`100788`) | `0.7935` (`100783`) | `0.7661` (`100789`) |
+
+Q1 answer (`random` vs `rfps_cached`, point-only):
+
+- `obj_bg`: `+0.0258` (`0.8158 - 0.7900`)
+- `obj_only`: `+0.0052` (`0.8176 - 0.8124`)
+- `pb_t50_rs`: `+0.0250` (`0.7724 - 0.7474`)
+
+Readout:
+- in this matched run, `random` is better on all three variants.
+- this supports the hypothesis that fixed-order (`rfps_cached`) can underprovide task diversity relative to `random` in the current recipe.
+
+Q2 answer (`mix(mesh+udf)` vs point-only control, both `rfps_cached`):
+
+- `obj_bg`: `+0.0344` (`0.8244 - 0.7900`)
+- `obj_only`: `-0.0189` (`0.7935 - 0.8124`)
+- `pb_t50_rs`: `+0.0187` (`0.7661 - 0.7474`)
+
+Readout:
+- modal-mix is not uniformly better, but improves `obj_bg/pb_t50_rs` and drops `obj_only`.
+- current evidence is compatible with "modal-specific signal can help some tasks", but not yet a stable all-variant gain.
+
+Caution for interpretation:
+
+- this matrix is single-seed/single-run per arm; claims should remain provisional until repeated runs close variance.
+- for paper-level claim, repeat at least one additional seed per arm under the same contract.
+
+Key logs:
+
+- `logs/sanity/patchnepa_ft/patchnepaFT_objonly_from_q1_ptonly_random_e100_20260302_053501/obj_only.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_objonly_from_q1q2_ptonly_rfps_e100_20260302_053501/obj_only.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_objonly_from_q2_mix_meshudf_rfps_e100_20260302_053501/obj_only.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_objbg_from_q1_ptonly_random_e100_20260302_053501/obj_bg.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_objbg_from_q1q2_ptonly_rfps_e100_20260302_053501/obj_bg.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_objbg_from_q2_mix_meshudf_rfps_e100_20260302_053501/obj_bg.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_pbt50rs_from_q1_ptonly_random_e100_20260302_053501/pb_t50_rs.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_pbt50rs_from_q1q2_ptonly_rfps_e100_20260302_053501/pb_t50_rs.out`
+- `logs/sanity/patchnepa_ft/patchnepaFT_pbt50rs_from_q2_mix_meshudf_rfps_e100_20260302_053501/pb_t50_rs.out`
+
+## 84. Loss-axis parity note (`1-cos` vs `-cos`) + logging update (2026-03-02)
+
+Clarification:
+
+- 3D PatchNEPA pretrain objective uses `loss_3d = 1 - cos(pred, target)`.
+- 2D ViT-NEPA pretrain reports `loss_2d = -cos(pred, target)`.
+- exact relation: `loss_2d = loss_3d - 1`.
+
+Operational update:
+
+- `nepa3d/train/pretrain_patch_nepa.py` now logs both:
+  - console step log: `loss=` (`1-cos`) and `loss2d=` (`loss-1`)
+  - W&B keys:
+    - `train/loss` (`1-cos`, existing)
+    - `train/loss_2d_equiv` (`-cos` equivalent, newly added)
+
+Purpose:
+
+- align PatchNEPA curves with 2D-NEPA paper-style y-axis without changing optimization behavior.
+
+## 85. Content-only target ablation launch (`loss_target_mode=content_tokens`, 2026-03-02)
+
+Purpose:
+
+- test the root hypothesis that pretrain target leakage from `pos/type` makes the task too easy.
+- run a minimal strict A/B by changing only loss target definition.
+
+A/B contract:
+
+- baseline reference (already completed):
+  - pretrain `100778` (`point-only + random`) -> FT `100781` (`obj_only`)
+- new ablation chain (this update):
+  - same recipe as `100778 -> 100781`, except:
+    - pretrain `loss_target_mode=content_tokens` (target=`tokens.detach()` before pos/type add)
+
+Code updates for this ablation:
+
+- `nepa3d/models/patch_nepa.py`
+  - `PatchNepaOutput` now exposes `tokens` sequence.
+  - `PatchTransformerNepa.nepa_loss(...)` now accepts optional `target=` tensor.
+- `nepa3d/train/pretrain_patch_nepa.py`
+  - new arg: `--loss_target_mode {full_z,content_tokens}` (default `full_z`)
+  - training loss uses:
+    - `full_z`: existing target (`out.z`)
+    - `content_tokens`: content-only target (`out.tokens`)
+- launcher plumbing:
+  - `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh`
+  - `scripts/pretrain/submit_pretrain_patch_nepa_pointonly_qf.sh`
+  - new env/arg pass-through: `LOSS_TARGET_MODE`.
+
+Submitted jobs:
+
+| role | job | run_set | key delta | status |
+|---|---|---|---|---|
+| pretrain | `101051.qjcm` | `pt_q1tc_0302_133221` | `LOSS_TARGET_MODE=content_tokens` | `F` (`Exit_status=271`) |
+| FT (`obj_only`) | `101052.qjcm` | `patchnepaFT_objonly_from_q1_ptonly_random_tgtcontent_20260302_133330` | `afterok:101051` | `F` (dependency-hold path, `Time_Use=0`) |
+
+Pretrain recipe parity vs `100778`:
+
+- point-only (`USE_RAY_PATCH=0`, `N_RAY=0`, `STAGE2_REQUIRE_RAY=0`)
+- `MIX_CONFIG=pretrain_mixed_shapenet_pointcloud_only_onepass.yaml`
+- sampling `PT_SAMPLE_MODE=random`
+- dual-mask `near=0.5`, `far=0.1`, `window=32`, `type_aware=1`
+- `EPOCHS=100`, `BATCH=8`, global batch `128`, `USE_EMA=1`, `EMA_DECAY=0.9999`
+- only intentional change: `loss_target_mode`.
+
+FT recipe parity vs `100781`:
+
+- `MODEL_SOURCE=patchnepa`, `variant=obj_only`
+- `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp`
+- `PATCHNEPA_FT_MODE=qa_zeroa`, `PATCHNEPA_CLS_TOKEN_SOURCE=bos`
+- `PATCHNEPA_FREEZE_PATCH_EMBED=0`
+- `LLRD_START=1.0`, `LLRD_END=1.0`, `LLRD_SCHEDULER=static`, `LLRD_MODE=linear`
+- strict eval: `val_split_mode=file`, `AUG_EVAL=1`, `MC_TEST=10`
+- `CKPT_USE_EMA=1`.
+
+Paths:
+
+- pretrain logs:
+  - `logs/patch_nepa_pretrain/pt_q1tc_0302_133221`
+- finetune logs:
+  - `logs/sanity/patchnepa_ft/patchnepaFT_objonly_from_q1_ptonly_random_tgtcontent_20260302_133330`
+
+Operational note:
+
+- `scripts/sanity/submit_patchnepa_finetune_variants_qf.sh` hit PBS env-size error (`qsub: cannot send environment with the job`) in this environment.
+- dependent FT was submitted directly via `qsub` + `scripts/finetune/patchnepa_scanobjectnn_finetune.sh` with minimal `-v` set to keep recipe parity.
+
+## 86. Content-target rerun with W&B enabled (`USE_WANDB=1`) (2026-03-02)
+
+Reason:
+
+- Section 85 chain (`101051`) was launched with `USE_WANDB=0`, so run was not visible in W&B.
+- user requested same-condition rerun with W&B logging enabled.
+
+Submitted replacement/parallel chain (same recipe as Section 85 except W&B on):
+
+| role | job | run_set | key delta | status |
+|---|---|---|---|---|
+| pretrain | `101062.qjcm` | `pt_q1tcwb2_0302_134311` | `USE_WANDB=1` | `R` |
+| FT (`obj_only`) | `101063.qjcm` | `patchnepaFT_objonly_from_q1_ptonly_random_tgtcontent_wb_20260302_134322` | `afterok:101062` | `H` |
+
+W&B contract for `101062`:
+
+- `WANDB_PROJECT=patchnepa-pretrain`
+- `WANDB_RUN_NAME=r_q1tcwb2`
+- `WANDB_GROUP=patchnepa-pretrain`
+- `WANDB_TAGS=t`
+- startup header confirms:
+  - `wandb: use=1 project=patchnepa-pretrain ... run=r_q1tcwb2 ...`
+
+Paths:
+
+- pretrain logs:
+  - `logs/patch_nepa_pretrain/pt_q1tcwb2_0302_134311`
+  - per-node rank0 launcher log:
+    - `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_101062.qjcm_r_q1tcwb2/logs/qh168.patchnepa.log`
+- FT logs:
+  - `logs/sanity/patchnepa_ft/patchnepaFT_objonly_from_q1_ptonly_random_tgtcontent_wb_20260302_134322`
+
+Operational note:
+
+- submit helper hit PBS env-size/hook limits for this rerun path.
+- this chain was submitted via direct `qsub` with reduced `-v` keys while keeping recipe parity.
+
+## 87. Diag-space alignment fix + rerun (`content_tokens`, 2026-03-02)
+
+Reason:
+
+- in Sections 85/86, pretrain loss target was switched to `content_tokens`, but copy diagnostics
+  (`cos_tgt/cos_prev/gap/copy_win`) were still computed in `z` space.
+- this makes `cos_prev` interpretation inconsistent with the active objective space.
+
+Code fix:
+
+- `nepa3d/train/pretrain_patch_nepa.py`
+  - `_compute_copy_diag(...)` now receives `target_seq` and computes:
+    - `tgt = target_seq[:, k:, :]`
+    - `prev = target_seq[:, :-k, :]`
+  - training loop now passes the same `target_seq` used in loss:
+    - `full_z` -> `out.z`
+    - `content_tokens` -> `out.tokens`
+
+Action:
+
+- old content-target runs were stopped for diagnostic comparison purposes:
+  - `101051.qjcm`, `101062.qjcm` (and dependent held FT jobs).
+- corrected rerun submitted:
+  - pretrain `101091.qjcm`
+  - run_set: `pt_q1tcwb4_fixdiag_20260302_135718`
+  - run_tag: `r_q1tcwb4_fixdiag`
+  - status at submission check: `R`
+
+Recipe parity (kept same as Section 86):
+
+- point-only: `MIX_CONFIG=pretrain_mixed_shapenet_pointcloud_only_onepass.yaml`
+- `USE_RAY_PATCH=0`, `N_RAY=0`, `PT_SAMPLE_MODE=random`
+- `LOSS_TARGET_MODE=content_tokens`
+- dual-mask: `near=0.5`, `far=0.1`, `window=32`, `type_aware=1`
+- `USE_EMA=1`, `EMA_DECAY=0.9999`
+- `EPOCHS=100`, `BATCH=8`, global batch `128`
+- W&B on:
+  - project `patchnepa-pretrain`
+  - run `r_q1tcwb4_fixdiag`
+
+Startup sanity from rank0 log (`qh004`):
+
+- configuration is correctly applied:
+  - `workdir=/groups/qgah50055/ide/VGI/3D-NEPA`
+  - `loss_target_mode=content_tokens`
+  - `pt_sample_mode=random`, `n_ray=0`, `use_ray_patch=0`
+- W&B run URL:
+  - `https://wandb.ai/ide_koh/patchnepa-pretrain/runs/5emh8ppf`
+
+Observed early-step diagnostic behavior (same run):
+
+- `step 0`: `cos_tgt=-0.1111`, `cos_prev=-0.1110`
+- `step 100`: `cos_tgt=0.9912`, `cos_prev=0.9812`, `gap=0.0099`
+
+Paths:
+
+- pretrain logs:
+  - `logs/patch_nepa_pretrain/pt_q1tcwb4_fixdiag_20260302_135718`
+- per-node rank0 log:
+  - `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_101091.qjcm_r_q1tcwb4_fixdiag/logs/qh004.patchnepa.log`
+
+## 88. Dual-mask on/off loss-curve note (2026-03-02)
+
+Purpose:
+
+- answer whether dual-mask presence changes the *early loss drop shape*.
+
+Findings:
+
+- in a matched stage2 sanity pair (same launcher family, same scheduler/seed family),
+  early-step loss drop is nearly identical between dual-mask off/on.
+- example (`mr0`, step-0 to step-100):
+  - off (`lS_d0_ta1_tp0_r0`): `0.9750 -> 0.0048597`
+  - on  (`lS_d1_ta1_tp0_r0`): `0.9750 -> 0.0048567`
+- this indicates dual-mask is **not** the primary driver of the initial rapid convergence.
+
+Secondary observation:
+
+- later phase can diverge by run; in the same matched pair, dual-mask on trends slightly higher loss.
+- with ray-enabled sibling pair (`..._r1`), the late-phase gap (on > off) is larger.
+- interpretation: dual-mask effect is more visible in sustained training dynamics than in initial drop.
+
+Important limitation:
+
+- there is currently **no completed strict Q1-random point-only dual-mask-off control**.
+- therefore, for Q1 random mainline (`100778` family), we cannot yet claim an apples-to-apples
+  on/off conclusion; current statement is based on nearest matched sanity pairs.
+
+Reference logs used for this note:
+
+- point-only pair:
+  - `logs/patch_nepa_pretrain/patchnepa_stage2_sanity32_20260301_162811_lS_d0_ta1_tp0_r0/run_patchnepa_stage2_sanity32_20260301_162811_lS_d0_ta1_tp0_r0.mr0.log`
+  - `logs/patch_nepa_pretrain/patchnepa_stage2_sanity32_20260301_162811_lS_d1_ta1_tp0_r0/run_patchnepa_stage2_sanity32_20260301_162811_lS_d1_ta1_tp0_r0.mr0.log`
+- ray+point sibling pair:
+  - `logs/patch_nepa_pretrain/patchnepa_stage2_sanity32_20260301_162811_lS_d0_ta1_tp0_r1/run_patchnepa_stage2_sanity32_20260301_162811_lS_d0_ta1_tp0_r1.mr0.log`
+  - `logs/patch_nepa_pretrain/patchnepa_stage2_sanity32_20260301_162811_lS_d1_ta1_tp0_r1/run_patchnepa_stage2_sanity32_20260301_162811_lS_d1_ta1_tp0_r1.mr0.log`
+
+## 89. Chain result update (`101051` / `101052`, 2026-03-02)
+
+Status (final, from `qstat -x`):
+
+- `101051.qjcm` (`patchnepa_rayqa`): `F` (finished), `Exit_status=271`
+- `101052.qjcm` (`pn_obj_only`): `F` (finished without run), dependent hold path
+
+Pretrain (`101051`) summary:
+
+- run set:
+  - `logs/patch_nepa_pretrain/pt_q1tc_0302_133221`
+- config highlights:
+  - point-only (`USE_RAY_PATCH=0`, `N_RAY=0`)
+  - `LOSS_TARGET_MODE=content_tokens`
+  - `PT_SAMPLE_MODE=random`
+  - dual-mask on (`near=0.5`, `far=0.1`, `window=32`, `type_aware=1`)
+  - W&B off (`USE_WANDB=0`)
+- runtime/result:
+  - reached approximately `epoch 54`, `step 20200` before termination
+  - last logged line (`mr0`):
+    - `loss=5.0332e-04`, `loss2d=-9.99496678e-01`
+    - `cos_tgt=0.4274`, `cos_prev=0.4120`, `gap=0.0154`, `copy_win=0.3223`
+  - checkpoints saved up to `ckpt_epoch_0053.pt` + `ckpt_latest.pt`:
+    - `runs/patchnepa_rayqa/pt_q1tc_0302_133221`
+- operational note:
+  - PBS history shows the job was terminated from submit host side (`Exit_status=271`), so this chain is not a clean `afterok` success completion.
+
+Finetune dependent job (`101052`) summary:
+
+- dependency:
+  - `afterok:101051`
+- observed state:
+  - finished with hold/dependency path (`Hold_Types=s`, `Time_Use=0`)
+  - no `.out/.err` payload produced in:
+    - `logs/sanity/patchnepa_ft/patchnepaFT_objonly_from_q1_ptonly_random_tgtcontent_20260302_133330`
+- interpretation:
+  - `101051` not satisfying a clean `afterok` completion prevented `101052` from executing.
+
+Primary references:
+
+- pretrain launcher PBS log:
+  - `logs/patch_nepa_pretrain/pt_q1tc_0302_133221/r_q1tc.pbs.log`
+- pretrain rank0 log (metrics):
+  - `logs/patch_nepa_pretrain/pt_q1tc_0302_133221/r_q1tc.mr0.log`
+- pretrain artifacts:
+  - `runs/patchnepa_rayqa/pt_q1tc_0302_133221`
+
+## 90. FT all-variant relaunch from content-target ckpt (`101105`~`101107`, 2026-03-02)
+
+Purpose:
+
+- user-requested completion of FT for all three ScanObjectNN variants so results can be compared against prior 3-variant baselines (`100784`/`100781`/`100785` etc.).
+
+Source checkpoint:
+
+- `runs/patchnepa_rayqa/pt_q1tc_0302_133221/ckpt_latest.pt`
+  - pretrain run corresponds to Section 89 (`LOSS_TARGET_MODE=content_tokens` branch).
+
+Submitted FT jobs (independent, no `afterok`):
+
+| variant | job | status at submit check |
+|---|---|---|
+| `obj_bg` | `101105.qjcm` (`pn_obj_bg`) | `R` |
+| `obj_only` | `101106.qjcm` (`pn_obj_only`) | `R` |
+| `pb_t50_rs` | `101107.qjcm` (`pn_pb_t50_rs`) | `R` |
+
+Run set / paths:
+
+- run set: `patchnepaFT_from_q1_tgtcontent_all3_20260302_1436`
+- logs:
+  - `logs/sanity/patchnepa_ft/patchnepaFT_from_q1_tgtcontent_all3_20260302_1436`
+- submitted job list:
+  - `logs/sanity/patchnepa_ft/patchnepaFT_from_q1_tgtcontent_all3_20260302_1436/job_ids.txt`
+
+FT recipe alignment (kept comparable to prior direct PatchNEPA FT):
+
+- `MODEL_SOURCE=patchnepa`, `PATCHNEPA_FT_MODE=qa_zeroa`
+- `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp`
+- `PATCHNEPA_CLS_TOKEN_SOURCE=bos`, `PATCHNEPA_FREEZE_PATCH_EMBED=0`
+- `CKPT_USE_EMA=1`
+- point-only FT side: `USE_RAY_PATCH=0`, `N_RAY=0`
+- strict eval: `VAL_SPLIT_MODE=file`, `AUG_EVAL=1`, `MC_EVAL_K_TEST=10`
+- W&B on: `USE_WANDB=1`, project `patchnepa-finetune`, group `patchnepa-ft-contenttok`.
+
+Operational note:
+
+- `scripts/sanity/submit_patchnepa_finetune_variants_qf.sh` again hit
+  `qsub: cannot send environment with the job`.
+- workaround used: per-variant PBS wrapper scripts under the run-set log directory
+  with env exports inside the script body (no large `-v` payload).
+
+## 91. FT all-variant result check (completed) (`101105`~`101107`, 2026-03-02)
+
+Status snapshot (`qstat -x`):
+
+- `101105.qjcm` (`obj_bg`): `F`, `Exit_status=0`
+- `101106.qjcm` (`obj_only`): `F`, `Exit_status=0`
+- `101107.qjcm` (`pb_t50_rs`): `F`, `Exit_status=0`
+
+Confirmed final metrics:
+
+- `obj_bg` (`101105`):
+  - `TEST acc=0.8279` (`obj_bg.out`)
+- `obj_only` (`101106`):
+  - `TEST acc=0.8417` (`obj_only.out`)
+- `pb_t50_rs` (`101107`):
+  - `TEST acc=0.7915` (`pb_t50_rs.out`)
+
+Comparison vs prior Q1 point-only baseline (`100784/100781/100785` from Section 83):
+
+- baseline `obj_bg=0.8158` -> now `0.8279` (`+0.0121`)
+- baseline `obj_only=0.8176` -> now `0.8417` (`+0.0241`)
+- baseline `pb_t50_rs=0.7724` -> now `0.7915` (`+0.0191`)
+
+W&B runs for this set:
+
+- `obj_bg`: `https://wandb.ai/ide_koh/patchnepa-finetune/runs/3ibchg5w`
+- `obj_only`: `https://wandb.ai/ide_koh/patchnepa-finetune/runs/uyxwve25`
+- `pb_t50_rs`: `https://wandb.ai/ide_koh/patchnepa-finetune/runs/coo51vsk`
+
+## 92. Convergence-speed comparison vs Q1 baseline (2026-03-02)
+
+Comparison target:
+
+- baseline (Q1 point-only random branch, Section 83):
+  - `obj_bg`: `100784` (`.../patchnepaFT_objbg_from_q1_ptonly_random_e100_20260302_053501/obj_bg.out`)
+  - `obj_only`: `100781` (`.../patchnepaFT_objonly_from_q1_ptonly_random_e100_20260302_053501/obj_only.out`)
+- current content-target branch:
+  - `obj_bg`: `101105` (`.../patchnepaFT_from_q1_tgtcontent_all3_20260302_1436/obj_bg.out`)
+  - `obj_only`: `101106` (`.../patchnepaFT_from_q1_tgtcontent_all3_20260302_1436/obj_only.out`)
+
+Epoch-to-threshold (lower is faster):
+
+| variant | run | t80 | t82 | t84 | t86 | best val (epoch) |
+|---|---:|---:|---:|---:|---:|---:|
+| `obj_bg` | baseline (`100784`) | 40 | 51 | 51 | 104 | `0.8744` (173) |
+| `obj_bg` | content-target (`101105`) | 65 | 83 | 91 | 160 | `0.8744` (222) |
+| `obj_only` | baseline (`100781`) | 46 | 59 | 98 | 147 | `0.8700` (203) |
+| `obj_only` | content-target (`101106`) | 62 | 71 | 83 | 119 | `0.8924` (271) |
+
+Readout:
+
+- `obj_bg`: content-target branch is consistently slower to reach the same val-acc levels
+  (`+25`/`+32`/`+40`/`+56` epochs for t80/t82/t84/t86), while final test is higher (`0.8279` vs `0.8158`).
+- `obj_only`: early rise is slower at low thresholds (t80/t82), but overtakes at higher thresholds
+  (t84/t86 faster by `15`/`28` epochs) and reaches a higher ceiling
+  (`best val 0.8924`, `TEST 0.8417` vs baseline `0.8176`).
+
+Walltime check (full 300-epoch completed jobs):
+
+- `obj_bg`: baseline `00:10:49` (`100784`) vs content-target `00:10:41` (`101105`)
+- `obj_only`: baseline `00:10:58` (`100781`) vs content-target `00:11:00` (`101106`)
+- throughput is essentially unchanged; difference is in optimization trajectory, not runtime speed.
+
+## 93. Pretrain convergence-speed comparison (`100778` vs `101091`) (2026-03-02)
+
+Comparison pair (both completed, same Q1 point-only random base recipe):
+
+- baseline (`full_z` target): `100778.qjcm`
+  - log: `logs/patch_nepa_pretrain/patchnepa_q1_ptonly_random_e100_20260302_053501/run_q1_ptonly_random.mr0.log`
+- content-target (`content_tokens`): `101091.qjcm`
+  - log: `logs/patch_nepa_pretrain/pt_q1tcwb4_fixdiag_20260302_135718/r_q1tcwb4_fixdiag.mr0.log`
+
+Scheduler/runtime parity:
+
+- `100778`: walltime `00:38:37`, exit `0`
+- `101091`: walltime `00:38:28`, exit `0`
+- both end at global step `36750` (throughput difference is negligible).
+
+Important caveat:
+
+- objective target differs (`full_z` vs `content_tokens`), so absolute loss values are not strictly apples-to-apples.
+- therefore we compare *shape/speed indicators* at matched steps and threshold crossings.
+
+Loss threshold crossing (first step; lower is faster):
+
+| metric | `100778` full_z | `101091` content_tokens |
+|---|---:|---:|
+| `loss <= 1e-2` | `100` | `100` |
+| `loss <= 5e-3` | `250` | `150` |
+| `loss <= 3e-3` | `6050` | `4300` |
+| `loss <= 2e-3` | `6200` | `4950` |
+| `loss <= 1e-3` | `6800` | `7600` |
+| `loss <= 8e-4` | `7100` | `7900` |
+| `loss <= 6e-4` | `7500` | `9450` |
+
+Fixed-step loss snapshot:
+
+| step | `100778` full_z | `101091` content_tokens |
+|---:|---:|---:|
+| `100` | `7.69e-03` | `8.85e-03` |
+| `1,000` | `3.87e-03` | `4.59e-03` |
+| `3,000` | `1.70e-02` | `1.17e-02` |
+| `5,000` | `9.90e-03` | `2.49e-03` |
+| `10,000` | `1.52e-03` | `4.31e-04` |
+| `20,000` | `1.96e-03` | `4.26e-04` |
+| `36,700` | `9.16e-04` | `6.39e-04` |
+
+Readout (pretrain convergence):
+
+- very early phase (`~0` to `1k` steps): baseline (`full_z`) is slightly lower loss.
+- from mid phase (`~3k` onward): content-target run trends lower loss at matched steps.
+- crossing of tighter thresholds (`<=1e-3` and below) is mixed:
+  - first `1e-3` crossing is earlier in baseline,
+  - but sustained mid/late-step loss is generally lower in content-target run.
+
+## 94. Q-mask ablation launch (`q_mask_prob=0.6/0.8`) + launcher fix (2026-03-02)
+
+Objective:
+
+- run the suggested split-layout "Q-token masking" ablation against the same base recipe as `101091`
+  (`content_tokens`, point-only, dual-mask on), changing only `q_mask_prob`.
+
+Failed first attempt (recorded):
+
+- `101153.qjcm` (`patchnepa_qmask6`) and `101155.qjcm` (`patchnepa_qmask8`) ended `F` quickly.
+- failure mode:
+  - `ModuleNotFoundError: No module named 'nepa3d'`
+  - launch header showed wrong `workdir=/groups/qgah50055/ide/VGI/3D-NEPA/logs`
+  - defaults were unintentionally used (`loss_target_mode=full_z`, `q_mask_prob=0.0`, `use_ray_patch=1`).
+- root cause:
+  - multinode wrapper executed a snapshot launch script under `RUN_DIR`; when `WORKDIR` was not exported
+    into node-entry child env, the script resolved default workdir from its snapshot path (`../.. -> logs`).
+
+Launcher hardening:
+
+- updated:
+  - `scripts/pretrain/nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`
+- fix:
+  - node-entry now passes `WORKDIR` and `PYTHONPATH=${WORKDIR}:${PYTHONPATH:-}` explicitly to child launch.
+- intent:
+  - avoid snapshot-path-dependent module import failures in reduced-env submit paths.
+
+Relaunch (corrected):
+
+| setting | job | run_set | run_tag | status (launch check) |
+|---|---|---|---|---|
+| `q_mask_prob=0.6` | `101156.qjcm` | `pt_q1tc_qmask60_20260302_155835` | `r_q1tc_qmask60` | `R` |
+| `q_mask_prob=0.8` | `101157.qjcm` | `pt_q1tc_qmask80_20260302_155835` | `r_q1tc_qmask80` | `R` |
+
+Parity controls vs `101091` (kept fixed):
+
+- `MIX_CONFIG=pretrain_mixed_shapenet_pointcloud_only_onepass.yaml`
+- `USE_RAY_PATCH=0`, `N_RAY=0`, `PT_SAMPLE_MODE=random`
+- `LOSS_TARGET_MODE=content_tokens`
+- dual-mask on: `near=0.5`, `far=0.1`, `window=32`, `type_aware=1`
+- `USE_EMA=1`, `EMA_DECAY=0.9999`
+- `EPOCHS=100`, `BATCH=8`, global batch `128`
+- W&B on (`patchnepa-pretrain`).
+
+Startup sanity (rank0):
+
+- `101156` (`qh043`):
+  - `q_mask_prob=0.600`, first step:
+    - `qmask=(0.60,ramp=1.00,keep=0.4238)`
+  - W&B:
+    - `https://wandb.ai/ide_koh/patchnepa-pretrain/runs/9iezgn16`
+- `101157` (`qh167`):
+  - `q_mask_prob=0.800`, first step:
+    - `qmask=(0.80,ramp=1.00,keep=0.2207)`
+  - W&B:
+    - `https://wandb.ai/ide_koh/patchnepa-pretrain/runs/190gxmkq`
+
+Primary logs:
+
+- `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_101156.qjcm_r_q1tc_qmask60/logs/qh043.patchnepa.log`
+- `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_101157.qjcm_r_q1tc_qmask80/logs/qh167.patchnepa.log`
+
+Follow-up issue found during this relaunch:
+
+- non-rank0 workers hit:
+  - `UnboundLocalError: local variable 'loss_val' referenced before assignment`
+  - source: `nepa3d/train/pretrain_patch_nepa.py` (logging block scope at step print)
+- affected jobs:
+  - `101156.qjcm`, `101157.qjcm` (both ended `F`, `Exit_status=271`)
+
+Fix:
+
+- `nepa3d/train/pretrain_patch_nepa.py`
+  - moved `diag/print/wandb` logging block fully under:
+    - `if accelerator.is_main_process and (global_step % 50 == 0):`
+  - this restores rank-local variable scope correctness and avoids non-main-process logging crashes.
+
+Relaunch after print-scope fix:
+
+| setting | job | run_set | run_tag | status (launch check) |
+|---|---|---|---|---|
+| `q_mask_prob=0.6` | `101160.qjcm` | `pt_q1tc_qmask60_v2_20260302_160325` | `r_q1tc_qmask60_v2` | `R` |
+| `q_mask_prob=0.8` | `101161.qjcm` | `pt_q1tc_qmask80_v2_20260302_160325` | `r_q1tc_qmask80_v2` | `R` |
+
+Startup sanity (`v2`, rank0):
+
+- `101160`:
+  - W&B: `https://wandb.ai/ide_koh/patchnepa-pretrain/runs/wde12g97`
+  - step0: `qmask=(0.60,ramp=1.00,keep=0.4238)`
+  - step100: `loss=7.8058e-03`, `qmask keep=0.4004`
+- `101161`:
+  - W&B: `https://wandb.ai/ide_koh/patchnepa-pretrain/runs/a9eq02vw`
+  - step0: `qmask=(0.80,ramp=1.00,keep=0.2207)`
+  - step100: `loss=7.8086e-03`, `qmask keep=0.1973`
+
+Current active logs:
+
+- `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_101160.qjcm_r_q1tc_qmask60_v2/logs/qh043.patchnepa.log`
+- `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_101161.qjcm_r_q1tc_qmask80_v2/logs/qh129.patchnepa.log`
+
+## 95. FT x6 submission from qmask-v2 pretrains (`101160`/`101161`) (2026-03-02)
+
+Request:
+
+- submit all 3 ScanObjectNN variants for both running qmask-v2 pretrains:
+  - parent `101160` (`qmask=0.6`)
+  - parent `101161` (`qmask=0.8`)
+- total `3 x 2 = 6` jobs, all with dependency hold (`afterok`).
+
+Submission method:
+
+- direct `qsub -v` helper can hit env-size limits, so per-variant PBS wrapper scripts were generated under each run-set log directory.
+- each child job runs:
+  - `scripts/finetune/patchnepa_scanobjectnn_finetune.sh`
+  - with recipe parity to Section 90/91 FT:
+    - `MODEL_SOURCE=patchnepa`
+    - `PATCHNEPA_FT_MODE=qa_zeroa`
+    - `POOLING=cls_max`, `HEAD_MODE=pointmae_mlp`
+    - `PATCHNEPA_CLS_TOKEN_SOURCE=bos`
+    - `PATCHNEPA_FREEZE_PATCH_EMBED=0`
+    - `USE_RAY_PATCH=0`, `N_RAY=0`
+    - `VAL_SPLIT_MODE=file`, `AUG_EVAL=1`, `MC_EVAL_K_TEST=10`
+    - `CKPT_USE_EMA=1`
+    - `batch=64 (global)`, `epochs=300`, `nproc_per_node=4`.
+
+Submitted jobs:
+
+| parent pretrain | variant | FT job | status at submit check |
+|---|---|---|---|
+| `101160` | `obj_bg` | `101200.qjcm` | `H` (`afterok:101160`) |
+| `101160` | `obj_only` | `101201.qjcm` | `H` (`afterok:101160`) |
+| `101160` | `pb_t50_rs` | `101202.qjcm` | `H` (`afterok:101160`) |
+| `101161` | `obj_bg` | `101203.qjcm` | `H` (`afterok:101161`) |
+| `101161` | `obj_only` | `101204.qjcm` | `H` (`afterok:101161`) |
+| `101161` | `pb_t50_rs` | `101205.qjcm` | `H` (`afterok:101161`) |
+
+Run-set paths:
+
+- `logs/sanity/patchnepa_ft/patchnepaFT_from_q1tc_qmask60v2_all3_20260302_161951`
+  - job list: `logs/sanity/patchnepa_ft/patchnepaFT_from_q1tc_qmask60v2_all3_20260302_161951/job_ids.txt`
+- `logs/sanity/patchnepa_ft/patchnepaFT_from_q1tc_qmask80v2_all3_20260302_161951`
+  - job list: `logs/sanity/patchnepa_ft/patchnepaFT_from_q1tc_qmask80v2_all3_20260302_161951/job_ids.txt`
+
+## 96. 2DNEPA pretrain failure cause + interface-fix relaunch (2026-03-02)
+
+Observed failure:
+
+- job: `101197.qjcm` (`nepa2d_bdef`) finished `F` (`Exit_status=1`).
+- dependency preflight passed (`transformers/timm` was OK), but DDP init failed with NCCL bootstrap:
+  - `Bootstrap : no socket interface found`
+  - `DistBackendError ... ncclInvalidUsage`
+- root cause: fixed interface pin in `scripts/pretrain/nepa_b.sh`:
+  - `NCCL_SOCKET_IFNAME=eth0`
+  - compute node did not provide a valid `eth0` route for NCCL bootstrap.
+
+Fix:
+
+- updated `scripts/pretrain/nepa_b.sh`:
+  - removed hard-coded `NCCL_SOCKET_IFNAME=eth0`
+  - added auto-pick logic from available interfaces (`ibp|ib|en|eth`, optional `PREFERRED_IFNAME`)
+  - exports both `NCCL_SOCKET_IFNAME` and `GLOO_SOCKET_IFNAME`
+  - prints selected interface in startup log.
+
+Relaunch:
+
+- job: `101248.qjcm` (`nepa2d_bdef`)
+- run tag: `nepa2d_bdef_ifauto_20260302_164309`
+- status at check: `R`
+
+Startup evidence (`nepa2d_bdef.o101248`):
+
+- `[deps] preflight OK`
+- `[nccl] socket_ifname=enp0s20f0u5u2`
+- no `Bootstrap : no socket interface found` error
+- distributed ranks reached trainer initialization normally.
+
+## 97. 2DNEPA copy-diagnostic logging parity with PatchNEPA (2026-03-02)
+
+Goal:
+
+- make 2DNEPA pretrain logs/W&B expose the same copy diagnostics as PatchNEPA:
+  - `diag/cos_tgt`
+  - `diag/cos_prev`
+  - `diag/gap`
+  - `diag/copy_win`
+
+Code changes:
+
+- `run_nepa.py`:
+  - `EnhancedTrainer.compute_loss` now computes and logs copy diagnostics from
+    model internals every `diag_every` steps (`diag_copy=1` enabled).
+  - added CLI args: `--diag_copy`, `--diag_every`, `--diag_k`.
+- `models/vit_nepa/modeling_vit_nepa.py`:
+  - `EmbeddedModelingOutput` now returns `sequence_input` / `sequence_output`
+    so trainer can compute diagnostics without recomputation.
+- launch scripts:
+  - `scripts/pretrain/nepa_b.sh`, `scripts/pretrain/nepa_l.sh` pass
+    `--diag_copy/--diag_every/--diag_k` to `run_nepa.py`.
+  - `scripts/pretrain/nepa2d_pretrain_b_qf.sh` logs and exports
+    `DIAG_COPY/DIAG_EVERY/DIAG_K`.
+
+Expected log line example:
+
+- `[diag-copy] step=... kdiag=1 cos_tgt=... cos_prev=... gap=... copy_win=...`
+
+## 98. 2DNEPA re-submit with copy diagnostics (2026-03-02)
+
+Request:
+
+- re-submit 2DNEPA pretrain after enabling PatchNEPA-parity diagnostics.
+
+Submissions:
+
+- `101257.qjcm` (`nepa2d_bdiag`) failed immediately (`Exit_status=1`).
+  - stdout: `mkdir: cannot create directory '/var/spool/pbs/logs': Permission denied`
+  - root cause: `WORKDIR` env was not passed at submit, so script resolved default
+    to a PBS spool path and attempted to create logs there.
+- `101258.qjcm` (`nepa2d_bdiag`) re-submitted with explicit `WORKDIR` and dataset vars.
+  - status at check: `R`
+  - run tag: `nepa2d_bdiagcopy_20260302_172631`
+  - log: `logs/pretrain/nepa2d/nepa2d_bdiagcopy_20260302_172631.log`
+  - startup confirmed:
+    - `diag_copy=1 diag_every=50 diag_k=1`
+    - `[deps] preflight OK`
+    - NCCL interface auto-pick active.
+
+## 99. FT x6 completed (`101200`-`101205`) and comparison vs baseline (2026-03-02)
+
+Completion status:
+
+- all 6 child FT jobs finished successfully (`Exit_status=0`):
+  - `101200`, `101201`, `101202`, `101203`, `101204`, `101205`
+- last two (`pb_t50_rs`) completed at:
+  - `101202`: `obittime=2026-03-02 17:29:27`
+  - `101205`: `obittime=2026-03-02 17:30:02`
+
+Final TEST metrics:
+
+Baseline for comparison (`q1_tgtcontent_all3`, Section 93):
+- `obj_bg=0.8279`, `obj_only=0.8417`, `pb_t50_rs=0.7915`
+
+`qmask60v2` parent (`101160`) -> run dir:
+- `logs/sanity/patchnepa_ft/patchnepaFT_from_q1tc_qmask60v2_all3_20260302_161951`
+- `obj_bg`: `TEST acc=0.8193` (delta vs baseline: `-0.0086`)
+- `obj_only`: `TEST acc=0.8348` (delta vs baseline: `-0.0069`)
+- `pb_t50_rs`: `TEST acc=0.7977` (delta vs baseline: `+0.0062`)
+
+`qmask80v2` parent (`101161`) -> run dir:
+- `logs/sanity/patchnepa_ft/patchnepaFT_from_q1tc_qmask80v2_all3_20260302_161951`
+- `obj_bg`: `TEST acc=0.8262` (delta vs baseline: `-0.0017`)
+- `obj_only`: `TEST acc=0.8176` (delta vs baseline: `-0.0241`)
+- `pb_t50_rs`: `TEST acc=0.7845` (delta vs baseline: `-0.0070`)
+
+Quick read:
+
+- `qmask60v2` is mostly neutral/slightly worse, but improved on `pb_t50_rs`.
+- `qmask80v2` underperformed baseline on all three variants, with the largest drop on `obj_only`.

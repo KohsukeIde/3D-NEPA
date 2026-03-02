@@ -230,6 +230,8 @@ echo "python=$(which python)"
 python -V || true
 
 exec env \
+  WORKDIR="${WORKDIR}" \
+  PYTHONPATH="${WORKDIR}:${PYTHONPATH:-}" \
   NUM_PROCESSES="${NUM_PROCESSES}" \
   NUM_MACHINES="${NUM_MACHINES}" \
   MACHINE_RANK="${NODE_RANK}" \
