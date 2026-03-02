@@ -137,6 +137,20 @@ def add_args(p: argparse.ArgumentParser) -> None:
         choices=["fps_knn", "serial"],
         help="Patch grouping backend: fps_knn (default) or serial (Morton/chunk).",
     )
+    p.add_argument(
+        "--patch_local_encoder",
+        type=str,
+        default="mlp",
+        choices=["mlp", "pointmae_conv"],
+        help="Local patch encoder for fps_knn patch embed.",
+    )
+    p.add_argument(
+        "--patch_fps_random_start",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Use random FPS start for fps_knn patch embed.",
+    )
     p.add_argument("--num_groups", type=int, default=64)
     p.add_argument("--group_size", type=int, default=32)
     p.add_argument("--center_mode", type=str, default="fps", choices=["fps", "first"])
@@ -144,7 +158,6 @@ def add_args(p: argparse.ArgumentParser) -> None:
         "--serial_order",
         type=str,
         default="morton",
-        choices=["morton", "morton_trans", "z", "z-trans", "random", "identity"],
     )
     p.add_argument("--serial_bits", type=int, default=10)
     p.add_argument("--serial_shuffle_within_patch", type=int, default=0, choices=[0, 1])
@@ -161,7 +174,7 @@ def add_args(p: argparse.ArgumentParser) -> None:
         choices=["patchcls", "pointmae", "patchnepa"],
         help="Backbone source: patchcls(custom), pointmae(backbone-parity), or patchnepa(direct pretrain->ft).",
     )
-    p.add_argument("--backbone_mode", type=str, default="nepa2d", choices=["nepa2d", "vanilla"])
+    p.add_argument("--backbone_mode", type=str, default="nepa2d", choices=["nepa2d", "vanilla", "pointmae"])
     p.add_argument("--qk_norm", type=int, default=1, choices=[0, 1])
     p.add_argument("--qk_norm_affine", type=int, default=0, choices=[0, 1])
     p.add_argument("--qk_norm_bias", type=int, default=0, choices=[0, 1])
@@ -170,7 +183,14 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--rope_prefix_tokens", type=int, default=1)
     p.add_argument("--use_gated_mlp", type=int, default=0, choices=[0, 1], help="Enable gated MLP path.")
     p.add_argument("--hidden_act", type=str, default="gelu", choices=["gelu", "silu"], help="MLP activation.")
-    p.add_argument("--pooling", type=str, default="cls_max", choices=["mean", "mean_q", "cls", "cls_max"])
+    p.add_argument("--pooling", type=str, default="cls_max", choices=["mean", "mean_q", "cls", "cls_max", "sep"])
+    p.add_argument(
+        "--pool_mode",
+        type=str,
+        default="",
+        choices=["", "mean", "mean_q", "cls", "cls_max", "sep"],
+        help="Alias of --pooling for PatchNEPA compatibility.",
+    )
     p.add_argument("--pos_mode", type=str, default="center_mlp", choices=["learned", "center_mlp"])
     p.add_argument("--use_ray_patch", type=int, default=0, choices=[0, 1])
     p.add_argument("--n_ray", type=int, default=256)
@@ -200,6 +220,22 @@ def add_args(p: argparse.ArgumentParser) -> None:
         default=1,
         choices=[0, 1],
         help="Freeze patch embedding during PatchNEPA direct FT.",
+    )
+    p.add_argument(
+        "--patch_order_mode",
+        type=str,
+        default="",
+        help=(
+            "Patch order mode(s) for PatchNEPA. Comma-separated list allowed. "
+            "Empty keeps checkpoint/default setting."
+        ),
+    )
+    p.add_argument(
+        "--patch_order_schedule",
+        type=str,
+        default="fixed",
+        choices=["fixed", "epoch", "batch", "batch_random", "sample"],
+        help="How to switch patch_order_mode when multiple modes are provided.",
     )
 
     # Optim
@@ -484,18 +520,55 @@ def _as_bool01(v: object, default: bool = False) -> bool:
     return bool(v)
 
 
+def _parse_patch_order_modes(raw: str) -> list[str]:
+    txt = str(raw or "").strip()
+    if not txt:
+        return []
+    if txt.lower().replace("-", "_").startswith("sample:"):
+        return [txt]
+    return [m.strip() for m in txt.split(",") if m.strip()]
+
+
+def _select_patch_order_mode(
+    modes: list[str],
+    schedule: str,
+    *,
+    epoch: int,
+    global_step: int,
+    seed: int,
+) -> str:
+    sched = str(schedule).strip().lower()
+    if len(modes) == 1 or sched == "fixed":
+        return modes[0]
+    if sched == "sample":
+        if len(modes) == 1 and str(modes[0]).lower().replace("-", "_").startswith("sample:"):
+            return modes[0]
+        return "sample:" + ",".join(modes)
+    if sched == "epoch":
+        return modes[int(epoch) % len(modes)]
+    if sched == "batch":
+        return modes[int(global_step) % len(modes)]
+    if sched == "batch_random":
+        rng = np.random.RandomState(int(seed) + int(global_step))
+        return modes[int(rng.randint(0, len(modes)))]
+    raise ValueError(f"unknown patch_order_schedule={schedule}")
+
+
 def _patchnepa_kwargs_from_ckpt(ckpt_args: Dict[str, object], args: argparse.Namespace) -> Dict[str, object]:
     """Build PatchTransformerNepa kwargs from pretrain ckpt args, with safe fallbacks."""
     c = ckpt_args or {}
     kw: Dict[str, object] = {
         # patchify
         "patch_embed": str(c.get("patch_embed", args.patch_embed)),
+        "patch_local_encoder": str(c.get("patch_local_encoder", "mlp")),
+        "patch_fps_random_start": _as_bool01(c.get("patch_fps_random_start", 0)),
         "n_point": int(c.get("n_point", args.n_point)),
         "group_size": int(c.get("group_size", args.group_size)),
         "num_groups": int(c.get("num_groups", args.num_groups)),
         "serial_order": str(c.get("serial_order", args.serial_order)),
         "serial_bits": int(c.get("serial_bits", args.serial_bits)),
         "serial_shuffle_within_patch": int(c.get("serial_shuffle_within_patch", args.serial_shuffle_within_patch)),
+        "patch_order_mode": str(c.get("patch_order_mode", "none")),
         "use_normals": _as_bool01(c.get("use_normals", args.use_normals)),
         # transformer
         "d_model": int(c.get("d_model", args.d_model)),
@@ -539,6 +612,18 @@ def _patchnepa_kwargs_from_ckpt(ckpt_args: Dict[str, object], args: argparse.Nam
     }
     # FT-time override for ray usage is allowed.
     kw["use_ray_patch"] = bool(args.use_ray_patch)
+    # Optional FT-time override for patch order mode.
+    ft_patch_modes = _parse_patch_order_modes(str(getattr(args, "patch_order_mode", "")))
+    if ft_patch_modes:
+        kw["patch_order_mode"] = str(
+            _select_patch_order_mode(
+                ft_patch_modes,
+                str(getattr(args, "patch_order_schedule", "fixed")),
+                epoch=0,
+                global_step=0,
+                seed=int(getattr(args, "seed", 0)),
+            )
+        )
     return kw
 
 
@@ -784,6 +869,19 @@ def main() -> None:
         )
 
     _set_seed(args.seed)
+    patch_order_modes = _parse_patch_order_modes(str(getattr(args, "patch_order_mode", "")))
+    patch_order_schedule = str(getattr(args, "patch_order_schedule", "fixed")).strip().lower()
+    active_patch_order_mode: Optional[str]
+    if patch_order_modes:
+        active_patch_order_mode = _select_patch_order_mode(
+            patch_order_modes,
+            patch_order_schedule,
+            epoch=0,
+            global_step=0,
+            seed=int(args.seed),
+        )
+    else:
+        active_patch_order_mode = None
     ddp_find_unused = bool(args.model_source == "patchnepa" and str(args.patchnepa_ft_mode) == "q_only")
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=ddp_find_unused)
     accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
@@ -1049,6 +1147,7 @@ def main() -> None:
             print(f"[ckpt] source={state_source} ckpt_use_ema={int(args.ckpt_use_ema)}")
 
     # Model
+    effective_pooling = str(args.pool_mode).strip() or str(args.pooling)
     if args.model_source == "pointmae":
         if use_normals:
             raise ValueError("--use_normals is not supported with --model_source=pointmae")
@@ -1069,10 +1168,11 @@ def main() -> None:
         # Allow strict A/B with identical FT recipe by supporting patchnepa scratch init
         # when --ckpt is omitted.
         nepa_kwargs = _patchnepa_kwargs_from_ckpt(pretrain_args, args)
-        head_mode = args.head_mode if args.head_mode != "auto" else ("pointmae_mlp" if args.pooling == "cls_max" else "linear")
+        head_mode = args.head_mode if args.head_mode != "auto" else ("pointmae_mlp" if effective_pooling == "cls_max" else "linear")
         model = PatchTransformerNepaClassifier(
             num_classes=num_classes,
-            pooling=args.pooling,
+            pooling=effective_pooling,
+            pool_mode=(str(args.pool_mode).strip() or None),
             head_mode=head_mode,
             head_hidden_dim=args.head_hidden_dim,
             head_dropout=args.head_dropout,
@@ -1081,10 +1181,19 @@ def main() -> None:
             cls_token_source=str(args.patchnepa_cls_token_source),
             **nepa_kwargs,
         )
+        if active_patch_order_mode is None and hasattr(model, "core"):
+            active_patch_order_mode = str(getattr(model.core, "patch_order_mode", "none"))
+        if active_patch_order_mode is not None and hasattr(model, "core"):
+            if hasattr(model.core, "set_patch_order_mode"):
+                model.core.set_patch_order_mode(active_patch_order_mode)
+            else:
+                setattr(model.core, "patch_order_mode", active_patch_order_mode)
     else:
         model = PatchTransformerClassifier(
             num_classes=num_classes,
             patch_embed=args.patch_embed,
+            patch_local_encoder=str(args.patch_local_encoder),
+            patch_fps_random_start=bool(int(args.patch_fps_random_start)),
             num_groups=args.num_groups,
             group_size=args.group_size,
             use_normals=use_normals,
@@ -1107,7 +1216,7 @@ def main() -> None:
             rope_prefix_tokens=int(args.rope_prefix_tokens),
             use_gated_mlp=bool(args.use_gated_mlp),
             hidden_act=str(args.hidden_act),
-            pooling=args.pooling,
+            pooling=effective_pooling,
             pos_mode=args.pos_mode,
             use_ray_patch=bool(args.use_ray_patch),
             ray_pool_mode=args.ray_pool_mode,
@@ -1257,6 +1366,7 @@ def main() -> None:
     # Only train loader is distributed. Val/test are evaluated on main process only
     # to keep single-GPU and DDP metrics strictly comparable.
     model, optimizer, train_loader = accelerator.prepare(model, optimizer, train_loader)
+    model_raw = accelerator.unwrap_model(model)
 
     best_val = -1.0
     best_path = save_dir / "checkpoints" / "best.pt"
@@ -1279,7 +1389,9 @@ def main() -> None:
                 f"PatchCls: classes={num_classes} train={len(train_set)} val={len(val_set)} test={len(test_set)}\n"
                 f"  model_source=patchnepa(direct) n_point={args.n_point} groups={args.num_groups} group_size={args.group_size} "
                 f"use_ray_patch={int(args.use_ray_patch)} n_ray={args.n_ray} "
-                f"pooling={args.pooling} patchnepa_ft_mode={args.patchnepa_ft_mode} cls_token={args.patchnepa_cls_token_source} "
+                f"pooling={effective_pooling} patchnepa_ft_mode={args.patchnepa_ft_mode} cls_token={args.patchnepa_cls_token_source} "
+                f"patch_order_mode={','.join(patch_order_modes) if patch_order_modes else (active_patch_order_mode or 'ckpt/default')} "
+                f"patch_order_schedule={patch_order_schedule} "
                 f"head_mode={args.head_mode} backbone_mode={args.backbone_mode} "
                 f"freeze_patch_embed={int(args.patchnepa_freeze_patch_embed)} llrd=({float(args.llrd_start):.2f}->{float(args.llrd_end):.2f}) "
                 f"llrd_scheduler={args.llrd_scheduler} llrd_mode={args.llrd_mode} "
@@ -1307,7 +1419,7 @@ def main() -> None:
                 f"qk_norm_bias={int(args.qk_norm_bias)} layerscale_value={float(args.layerscale_value):g} "
                 f"rope_theta={float(args.rope_theta):g} rope_prefix_tokens={int(args.rope_prefix_tokens)} "
                 f"use_gated_mlp={int(args.use_gated_mlp)} hidden_act={str(args.hidden_act)} "
-                f"pooling={args.pooling} pos_mode={args.pos_mode} pos_inject={pos_inject_note} head_mode={args.head_mode} "
+                f"pooling={effective_pooling} pos_mode={args.pos_mode} pos_inject={pos_inject_note} head_mode={args.head_mode} "
                 f"init_mode={args.init_mode} "
                 f"is_causal={bool(args.is_causal)}\n"
                 f"  world_size={world_size} batch_mode={args.batch_mode} batch_arg={args.batch} batch_effective={eff_batch}\n"
@@ -1318,11 +1430,52 @@ def main() -> None:
             )
 
     try:
+        global_step = 0
         for epoch in range(args.epochs):
             model.train()
             train_loss_sum = 0.0
             train_loss_count = 0
+            if (
+                args.model_source == "patchnepa"
+                and patch_order_modes
+                and patch_order_schedule == "epoch"
+            ):
+                next_mode = _select_patch_order_mode(
+                    patch_order_modes,
+                    patch_order_schedule,
+                    epoch=epoch,
+                    global_step=global_step,
+                    seed=int(args.seed),
+                )
+                if next_mode != active_patch_order_mode:
+                    if hasattr(model_raw, "core"):
+                        core = model_raw.core
+                        if hasattr(core, "set_patch_order_mode"):
+                            core.set_patch_order_mode(next_mode)
+                        else:
+                            setattr(core, "patch_order_mode", next_mode)
+                    active_patch_order_mode = next_mode
             for batch in train_loader:
+                if (
+                    args.model_source == "patchnepa"
+                    and patch_order_modes
+                    and patch_order_schedule in {"batch", "batch_random"}
+                ):
+                    next_mode = _select_patch_order_mode(
+                        patch_order_modes,
+                        patch_order_schedule,
+                        epoch=epoch,
+                        global_step=global_step,
+                        seed=int(args.seed),
+                    )
+                    if next_mode != active_patch_order_mode:
+                        if hasattr(model_raw, "core"):
+                            core = model_raw.core
+                            if hasattr(core, "set_patch_order_mode"):
+                                core.set_patch_order_mode(next_mode)
+                            else:
+                                setattr(core, "patch_order_mode", next_mode)
+                        active_patch_order_mode = next_mode
                 xyz = batch["xyz"].to(accelerator.device)
                 label = batch["label"].to(accelerator.device)
                 normal = batch.get("normal", None)
@@ -1362,6 +1515,7 @@ def main() -> None:
                 if accelerator.is_main_process:
                     train_loss_sum += float(loss_mean.item())
                     train_loss_count += 1
+                global_step += 1
 
             if lr_scheduler is not None and (not scheduler_step_per_batch):
                 lr_scheduler.step()
@@ -1384,21 +1538,25 @@ def main() -> None:
                 print(
                     f"[ep {epoch+1:03d}/{args.epochs}] lr={lr_now:.2e} "
                     f"train_loss={train_loss_avg:.4f} "
+                    f"{f'po={active_patch_order_mode} ' if active_patch_order_mode is not None else ''}"
                     f"val_acc={val_metrics['acc']:.4f} val_loss={val_metrics['loss']:.4f}"
                 )
 
                 if wandb_run is not None:
-                    wandb_run.log(
-                        {
-                            "train/epoch": float(epoch + 1),
-                            "train/lr": float(lr_now),
-                            "train/loss": float(train_loss_avg),
-                            "val/acc": float(val_metrics["acc"]),
-                            "val/loss": float(val_metrics["loss"]),
-                            "val/best_acc": float(max(best_val, val_metrics["acc"])),
-                        },
-                        step=int(epoch + 1),
-                    )
+                    wb = {
+                        "train/epoch": float(epoch + 1),
+                        "train/lr": float(lr_now),
+                        "train/loss": float(train_loss_avg),
+                        "val/acc": float(val_metrics["acc"]),
+                        "val/loss": float(val_metrics["loss"]),
+                        "val/best_acc": float(max(best_val, val_metrics["acc"])),
+                    }
+                    if patch_order_modes and active_patch_order_mode is not None:
+                        if active_patch_order_mode in patch_order_modes:
+                            wb["train/patch_order_mode_idx"] = float(patch_order_modes.index(active_patch_order_mode))
+                        else:
+                            wb["train/patch_order_mode_idx"] = -1.0
+                    wandb_run.log(wb, step=int(epoch + 1))
 
                 if val_metrics["acc"] > best_val:
                     best_val = val_metrics["acc"]

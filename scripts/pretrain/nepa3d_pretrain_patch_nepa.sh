@@ -54,6 +54,13 @@ if [[ "${STAGE2_REQUIRE_RAY}" == "1" ]]; then
   fi
 fi
 
+PT_SAMPLE_MODE="${PT_SAMPLE_MODE:-rfps}"
+ALLOW_RFPS_CACHED="${ALLOW_RFPS_CACHED:-0}"  # 1 allows legacy cached-rfps runs
+if [[ "${PT_SAMPLE_MODE}" == "rfps_cached" && "${ALLOW_RFPS_CACHED}" != "1" ]]; then
+  echo "WARN: PT_SAMPLE_MODE=rfps_cached requested, policy defaults to non-cached RFPS; overriding to PT_SAMPLE_MODE=rfps." | tee -a "${LOG_PATH}"
+  PT_SAMPLE_MODE="rfps"
+fi
+
 echo "=== PATCH-NEPA PRETRAIN (single-node helper, RAY DEFAULT) ===" | tee "${LOG_PATH}"
 echo "root=${ROOT_DIR}" | tee -a "${LOG_PATH}"
 echo "mix_config=${MIX_CFG}" | tee -a "${LOG_PATH}"
@@ -75,12 +82,14 @@ python -u -m nepa3d.train.pretrain_patch_nepa \
   --pt_xyz_key "${PT_XYZ_KEY:-pt_xyz_pool}" \
   --pt_dist_key "${PT_DIST_KEY:-pt_dist_pool}" \
   --ablate_point_dist "${ABLATE_POINT_DIST:-0}" \
-  --pt_sample_mode "${PT_SAMPLE_MODE:-rfps_cached}" \
+  --pt_sample_mode "${PT_SAMPLE_MODE}" \
   --pt_fps_key "${PT_FPS_KEY:-auto}" \
   --pt_rfps_key "${PT_RFPS_KEY:-pt_rfps_order_bank}" \
   --pt_rfps_m "${PT_RFPS_M:-4096}" \
   --point_order_mode "${POINT_ORDER_MODE:-morton}" \
   --patch_embed "${PATCH_EMBED:-fps_knn}" \
+  --patch_local_encoder "${PATCH_LOCAL_ENCODER:-mlp}" \
+  --patch_fps_random_start "${PATCH_FPS_RANDOM_START:-0}" \
   --group_size "${GROUP_SIZE:-32}" \
   --num_groups "${NUM_GROUPS:-64}" \
   --serial_order "${SERIAL_ORDER:-morton}" \

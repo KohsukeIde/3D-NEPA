@@ -58,6 +58,8 @@ def _model_from_ckpt_args(a: Dict[str, Any]) -> PatchTransformerNepa:
     serial_bits = int(a.get("serial_bits", a.get("morton_bits", 10)))
     return PatchTransformerNepa(
         patch_embed=str(a.get("patch_embed", "fps_knn")),
+        patch_local_encoder=str(a.get("patch_local_encoder", "mlp")),
+        patch_fps_random_start=bool(int(a.get("patch_fps_random_start", 0))),
         n_point=int(a.get("n_point", 1024)),
         group_size=int(a.get("group_size", 32)),
         num_groups=int(a.get("num_groups", 64)),

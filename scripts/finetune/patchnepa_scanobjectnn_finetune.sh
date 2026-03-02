@@ -24,10 +24,11 @@ export POOLING="${POOLING:-cls_max}"
 export HEAD_MODE="${HEAD_MODE:-pointmae_mlp}"
 export PATCHNEPA_CLS_TOKEN_SOURCE="${PATCHNEPA_CLS_TOKEN_SOURCE:-last_q}"
 export PATCHNEPA_FREEZE_PATCH_EMBED="${PATCHNEPA_FREEZE_PATCH_EMBED:-1}"
+export PATCH_ORDER_MODE="${PATCH_ORDER_MODE:-}"
+export PATCH_ORDER_SCHEDULE="${PATCH_ORDER_SCHEDULE:-fixed}"
 export LLRD_START="${LLRD_START:-1.0}"
 export LLRD_END="${LLRD_END:-1.0}"
 export LLRD_SCHEDULER="${LLRD_SCHEDULER:-static}"
 export LLRD_MODE="${LLRD_MODE:-linear}"
 
 exec "${ROOT_DIR}/scripts/finetune/patchcls_scanobjectnn_scratch.sh"
-

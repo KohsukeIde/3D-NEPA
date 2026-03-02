@@ -21,7 +21,7 @@ from .causal_transformer import CausalTransformer
 from .encdec_transformer import EncoderDecoderTransformer
 from .bound_ray_patch_embed import BoundRayPatchEmbed
 from .point_patch_embed import PointPatchEmbed
-from .serial_patch_embed import SerialPatchEmbed
+from .serial_patch_embed import SerialPatchEmbed, morton3d_codes, serialize_indices
 from ..token.tokenizer import (
     TYPE_A_POINT,
     TYPE_A_RAY,
@@ -108,12 +108,15 @@ class PatchTransformerNepa(nn.Module):
         *,
         # patchify
         patch_embed: str = "fps_knn",
+        patch_local_encoder: str = "mlp",  # mlp | pointmae_conv
+        patch_fps_random_start: bool = False,
         n_point: int = 1024,
         group_size: int = 32,
         num_groups: Optional[int] = 64,
         serial_order: str = "morton",
         serial_bits: int = 10,
         serial_shuffle_within_patch: int = 0,
+        patch_order_mode: str = "none",  # none|...|sample:<m1,m2,...> (rev_/_rev wrappers supported)
         use_normals: bool = False,
         # transformer
         d_model: int = 384,
@@ -169,7 +172,8 @@ class PatchTransformerNepa(nn.Module):
             raise ValueError(f"qa_layout must be interleave/split, got {qa_layout}")
         if str(q_mask_mode) not in ("mask_token", "zero"):
             raise ValueError(f"q_mask_mode must be mask_token/zero, got {q_mask_mode}")
-
+        if str(backbone_mode) not in ("nepa2d", "vanilla", "pointmae"):
+            raise ValueError(f"backbone_mode must be nepa2d/vanilla/pointmae, got {backbone_mode}")
         self.d_model = int(d_model)
         self.use_normals = bool(use_normals)
         self.qa_tokens = int(qa_tokens)
@@ -177,6 +181,7 @@ class PatchTransformerNepa(nn.Module):
         self.qa_sep_token = bool(qa_sep_token)
         self.qa_fuse = str(qa_fuse)
         self.q_mask_mode = str(q_mask_mode)
+        self.patch_order_mode = str(patch_order_mode)
         self.nepa2d_pos = bool(nepa2d_pos)
         self.type_specific_pos = bool(type_specific_pos)
         self.type_pos_max_len = int(type_pos_max_len)
@@ -185,7 +190,10 @@ class PatchTransformerNepa(nn.Module):
         self.use_pt_dist = bool(use_pt_dist)
         self.use_pt_grad = bool(use_pt_grad)
         self.backbone_mode = str(backbone_mode)
+        self.pointmae_backbone = self.backbone_mode == "pointmae"
         self.use_ray_patch = bool(use_ray_patch)
+        if self.encdec_arch and self.pointmae_backbone:
+            raise ValueError("backbone_mode='pointmae' requires encdec_arch=0")
 
         if num_groups is None:
             num_groups = max(1, int(round(float(n_point) / float(group_size))))
@@ -206,6 +214,8 @@ class PatchTransformerNepa(nn.Module):
                 group_size=int(group_size),
                 embed_dim=self.d_model,
                 use_normals=self.use_normals,
+                local_encoder=str(patch_local_encoder),
+                fps_random_start=bool(patch_fps_random_start),
             )
         else:
             raise ValueError(f"unknown patch_embed={patch_embed}")
@@ -255,21 +265,29 @@ class PatchTransformerNepa(nn.Module):
         nn.init.trunc_normal_(self.sep_token, std=0.02)
         nn.init.trunc_normal_(self.q_mask_token, std=0.02)
 
-        self.type_emb = nn.Embedding(int(TYPE_VOCAB_SIZE), self.d_model)
+        self.type_emb: Optional[nn.Embedding]
+        if self.pointmae_backbone:
+            self.type_emb = None
+        else:
+            self.type_emb = nn.Embedding(int(TYPE_VOCAB_SIZE), self.d_model)
 
         self.pos_emb = nn.Parameter(torch.zeros(1, int(max_len), self.d_model))
         nn.init.trunc_normal_(self.pos_emb, std=0.02)
-        if self.nepa2d_pos:
+        if self.nepa2d_pos and (not self.pointmae_backbone):
             with torch.no_grad():
                 self.pos_emb.zero_()
 
-        if self.type_specific_pos:
+        if self.type_specific_pos and (not self.pointmae_backbone):
             self.type_pos_emb = nn.Embedding(int(TYPE_VOCAB_SIZE) * int(self.type_pos_max_len), self.d_model)
             nn.init.trunc_normal_(self.type_pos_emb.weight, std=0.02)
         else:
             self.type_pos_emb = None
 
-        if self.pos_mode == "center_mlp":
+        if self.pointmae_backbone:
+            # Point-MAE parity path: absolute positional embedding is injected
+            # per block via CausalTransformer(pos=...), not center-MLP.
+            self.center_mlp = None
+        elif self.pos_mode == "center_mlp":
             self.center_mlp = nn.Sequential(
                 nn.Linear(3, self.d_model),
                 nn.GELU(),
@@ -292,6 +310,12 @@ class PatchTransformerNepa(nn.Module):
                 src_causal=False,
             )
         else:
+            if self.backbone_mode == "vanilla":
+                backbone_impl = "legacy"
+            elif self.backbone_mode == "pointmae":
+                backbone_impl = "pointmae"
+            else:
+                backbone_impl = "nepa2d"
             self.backbone = CausalTransformer(
                 d_model=self.d_model,
                 nhead=int(n_heads),
@@ -299,6 +323,7 @@ class PatchTransformerNepa(nn.Module):
                 mlp_ratio=float(mlp_ratio),
                 dropout=float(dropout),
                 drop_path=float(drop_path_rate),
+                qkv_bias=(not self.pointmae_backbone),
                 qk_norm=bool(qk_norm),
                 qk_norm_affine=bool(qk_norm_affine),
                 qk_norm_bias=bool(qk_norm_bias),
@@ -306,7 +331,7 @@ class PatchTransformerNepa(nn.Module):
                 rope_theta=float(rope_theta),
                 use_gated_mlp=bool(use_gated_mlp),
                 hidden_act=str(hidden_act),
-                backbone_impl="legacy" if self.backbone_mode == "vanilla" else "nepa2d",
+                backbone_impl=backbone_impl,
             )
 
         self.pred_head = nn.Sequential(nn.LayerNorm(self.d_model), nn.Linear(self.d_model, self.d_model))
@@ -334,7 +359,11 @@ class PatchTransformerNepa(nn.Module):
         type_id: torch.Tensor,
         centers_seq: Optional[torch.Tensor],
     ) -> torch.Tensor:
+        if self.pointmae_backbone:
+            return tokens + self._pointmae_pos(tokens.size(1))
         B, T, _ = tokens.shape
+        if self.type_emb is None:
+            raise RuntimeError("type_emb is None in non-pointmae embedding path")
         out = tokens + self.type_emb(type_id)
         if T > self.pos_emb.shape[1]:
             raise ValueError(f"T={T} exceeds max_len={self.pos_emb.shape[1]}")
@@ -347,6 +376,25 @@ class PatchTransformerNepa(nn.Module):
             cen = cen.masked_fill(special.unsqueeze(-1), 0.0)
             out = out + cen
         return out
+
+    def _pointmae_pos(self, t: int) -> torch.Tensor:
+        if int(t) > int(self.pos_emb.shape[1]):
+            raise ValueError(f"T={t} exceeds max_len={self.pos_emb.shape[1]}")
+        return self.pos_emb[:, : int(t), :]
+
+    def _prepare_backbone_inputs(
+        self,
+        tokens: torch.Tensor,
+        type_id: torch.Tensor,
+        centers_seq: Optional[torch.Tensor],
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor], torch.Tensor]:
+        """Build backbone input / optional per-block positional tensor / NEPA target `z`."""
+        if self.pointmae_backbone:
+            pos = self._pointmae_pos(tokens.size(1))
+            z = tokens + pos
+            return tokens, pos, z
+        z = self._add_embeddings(tokens, type_id, centers_seq)
+        return z, None, z
 
     def _apply_query_mask(
         self,
@@ -385,6 +433,120 @@ class PatchTransformerNepa(nn.Module):
         else:
             raise RuntimeError(f"invalid q_mask_mode={self.q_mask_mode}")
         return out, keep_ratio
+
+    @staticmethod
+    def _gather_by_perm(x: torch.Tensor, perm: torch.Tensor) -> torch.Tensor:
+        """Gather x along dim=1 using a per-batch patch permutation perm=(B,P)."""
+        if x.dim() == 2:
+            return x.gather(1, perm)
+        if x.dim() == 3:
+            return x.gather(1, perm.unsqueeze(-1).expand(-1, -1, x.size(-1)))
+        raise ValueError(f"unsupported tensor rank for patch gather: {tuple(x.shape)}")
+
+    def set_patch_order_mode(self, mode: str) -> None:
+        """Update patch-order mode at runtime (for epoch/batch schedule switching)."""
+        self.patch_order_mode = str(mode)
+
+    @staticmethod
+    def _normalize_patch_mode_token(token: str) -> tuple[str, bool]:
+        mode = str(token).strip().lower().replace("-", "_")
+        rev = False
+        while mode.startswith("rev_"):
+            rev = not rev
+            mode = mode[len("rev_") :]
+        while mode.endswith("_rev"):
+            rev = not rev
+            mode = mode[: -len("_rev")]
+        return mode, rev
+
+    def _compute_patch_order_perm_base(self, centers_xyz: torch.Tensor, mode: str) -> torch.Tensor:
+        if centers_xyz.dim() != 3 or centers_xyz.size(-1) != 3:
+            raise ValueError(f"centers_xyz must be (B,P,3), got {tuple(centers_xyz.shape)}")
+
+        B, P, _ = centers_xyz.shape
+        device = centers_xyz.device
+        bits = 10
+
+        if mode in {"none", "original", "as_is", "fps", "identity", "native"}:
+            return torch.arange(P, device=device).view(1, P).expand(B, P)
+        if mode in {"reverse", "rev"}:
+            return torch.arange(P - 1, -1, -1, device=device).view(1, P).expand(B, P)
+        if mode in {"random", "shuffle", "rfps"}:
+            return torch.argsort(torch.rand(B, P, device=device), dim=1)
+        if mode == "random_sweep":
+            d = torch.randn((B, 3), device=device, dtype=torch.float32)
+            d = F.normalize(d, dim=-1, eps=1e-6).to(dtype=centers_xyz.dtype)
+            score = (centers_xyz * d[:, None, :]).sum(dim=-1)
+            return torch.argsort(score, dim=1)
+        if mode in {"morton", "z", "morton_xyz"}:
+            return serialize_indices(centers_xyz, order="morton", bits=bits)
+        if mode in {"morton_trans", "z_trans", "morton_xy_swap"}:
+            return serialize_indices(centers_xyz, order="morton_trans", bits=bits)
+
+        # morton axis permutation aliases: morton_yzx, morton_zxy, morton_xzy, ...
+        if mode.startswith("morton_"):
+            perm_str = mode[len("morton_") :]
+            if len(perm_str) == 3 and len(set(perm_str)) == 3 and set(perm_str) == {"x", "y", "z"}:
+                axis_map = {"x": 0, "y": 1, "z": 2}
+                xyz = centers_xyz[..., [axis_map[c] for c in perm_str]]
+                codes = morton3d_codes(xyz, bits=bits)
+                return torch.argsort(codes, dim=1)
+
+        raise ValueError(
+            f"unknown patch_order_mode token={mode} "
+            "(supported: none|reverse|random|random_sweep|morton|morton_trans|morton_<perm>)"
+        )
+
+    def _compute_patch_order_perm(self, centers_xyz: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+        """Return per-sample patch permutation (B,P), or None to keep original order."""
+        if centers_xyz is None:
+            return None
+        if centers_xyz.dim() != 3 or centers_xyz.size(-1) != 3:
+            raise ValueError(f"centers_xyz must be (B,P,3), got {tuple(centers_xyz.shape)}")
+        if centers_xyz.size(1) <= 1:
+            return None
+
+        raw_mode = str(self.patch_order_mode or "none")
+        mode0, rev0 = self._normalize_patch_mode_token(raw_mode)
+        if mode0 in {"none", "original", "as_is", "fps", "identity", "native"} and (not rev0):
+            return None
+
+        B, P, _ = centers_xyz.shape
+        if mode0.startswith("sample:"):
+            pool_txt = mode0[len("sample:") :]
+            pool_raw = [m.strip() for m in pool_txt.split(",") if m.strip()]
+            if not pool_raw:
+                raise ValueError(f"sample patch_order_mode requires non-empty pool: {self.patch_order_mode}")
+
+            parsed: list[tuple[str, bool]] = []
+            for m in pool_raw:
+                m_i, rev_i = self._normalize_patch_mode_token(m)
+                parsed.append((m_i, bool(rev0) ^ bool(rev_i)))
+
+            choice = torch.randint(0, len(parsed), (B,), device=centers_xyz.device)
+            rows: list[torch.Tensor] = []
+            for bi in range(B):
+                m_i, rev_i = parsed[int(choice[bi].item())]
+                perm_b = self._compute_patch_order_perm_base(centers_xyz[bi : bi + 1], m_i)
+                if rev_i:
+                    perm_b = torch.flip(perm_b, dims=[1])
+                rows.append(perm_b[0])
+            return torch.stack(rows, dim=0)
+
+        perm = self._compute_patch_order_perm_base(centers_xyz, mode0)
+        if rev0:
+            perm = torch.flip(perm, dims=[1])
+        return perm
+
+    def _maybe_reorder_patch_embed_output(self, patch_out):
+        """Reorder PatchEmbedOutput by patch_order_mode; preserve aligned tensors."""
+        perm = self._compute_patch_order_perm(getattr(patch_out, "centers_xyz", None))
+        if perm is None:
+            return patch_out
+        tokens = self._gather_by_perm(patch_out.tokens, perm)
+        centers_xyz = self._gather_by_perm(patch_out.centers_xyz, perm)
+        group_idx = self._gather_by_perm(patch_out.group_idx, perm)
+        return patch_out.__class__(tokens=tokens, centers_xyz=centers_xyz, group_idx=group_idx)
 
     def _build_seq_qa0(
         self,
@@ -632,6 +794,7 @@ class PatchTransformerNepa(nn.Module):
             raise ValueError("pt_xyz/points_xyz is required")
 
         patch_out = self.patch_embed(pt_xyz, pt_n if self.use_normals else None)
+        patch_out = self._maybe_reorder_patch_embed_output(patch_out)
         q_tok = patch_out.tokens
         centers_xyz = patch_out.centers_xyz
         group_idx = patch_out.group_idx
@@ -717,7 +880,7 @@ class PatchTransformerNepa(nn.Module):
         # Keep q_mask_token connected even when q_mask_prob=0 to avoid DDP unused-parameter errors.
         tokens = tokens + (self.q_mask_token.sum() * 0.0)
         tokens, q_keep_ratio = self._apply_query_mask(tokens, type_id, float(q_mask_prob))
-        z = self._add_embeddings(tokens, type_id, centers_seq)
+        backbone_in, backbone_pos, z = self._prepare_backbone_inputs(tokens, type_id, centers_seq)
 
         if isinstance(self.backbone, EncoderDecoderTransformer):
             if self.qa_tokens != 1 or self.qa_layout != "split":
@@ -727,15 +890,16 @@ class PatchTransformerNepa(nn.Module):
                 sep = int(sep_pos[0].item())
             else:
                 sep = 1 + q_tok.shape[1]
-            enc = z[:, :sep, :]
-            dec = z[:, sep:, :]
+            enc = backbone_in[:, :sep, :]
+            dec = backbone_in[:, sep:, :]
             enc_out, dec_out = self.backbone(enc, dec, enc_xyz=None)
             h = torch.cat([enc_out, dec_out], dim=1)
         else:
             h = self.backbone(
-                z,
+                backbone_in,
                 is_causal=bool(is_causal),
                 type_id=type_id,
+                pos=backbone_pos,
                 dual_mask_near=float(dual_mask_near),
                 dual_mask_far=float(dual_mask_far),
                 dual_mask_window=int(dual_mask_window),
@@ -809,6 +973,7 @@ class PatchTransformerNepaClassifier(nn.Module):
         num_classes: int,
         *,
         pooling: str = "cls_max",  # mean/mean_q | cls | cls_max
+        pool_mode: Optional[str] = None,  # alias of pooling
         cls_token_source: str = "last_q",  # bos | last_q | eos
         head_mode: str = "pointmae_mlp",  # linear | pointmae_mlp
         head_hidden_dim: int = 256,
@@ -818,7 +983,9 @@ class PatchTransformerNepaClassifier(nn.Module):
         **nepa_kwargs,
     ) -> None:
         super().__init__()
-        assert pooling in {"mean", "mean_q", "cls", "cls_max"}
+        if pool_mode is not None:
+            pooling = str(pool_mode)
+        assert pooling in {"mean", "mean_q", "cls", "cls_max", "sep"}
         assert cls_token_source in {"bos", "last_q", "eos"}
         assert head_mode in {"linear", "pointmae_mlp"}
         assert ft_sequence_mode in {"qa_zeroa", "q_only"}
@@ -896,7 +1063,21 @@ class PatchTransformerNepaClassifier(nn.Module):
         )
         return torch.where(has_any, mask, fallback)
 
+    @staticmethod
+    def _select_sep_feat(h: torch.Tensor, type_id: torch.Tensor) -> torch.Tensor:
+        b, _, _ = h.shape
+        dev = h.device
+        sep_mask = type_id == int(TYPE_SEP)
+        if not bool(torch.all(sep_mask.any(dim=1))):
+            raise ValueError(
+                "pooling='sep' requires TYPE_SEP in sequence (set qa_layout='split_sep' and ft_sequence_mode='qa_zeroa')."
+            )
+        sep_idx = sep_mask.to(dtype=torch.float32).argmax(dim=1)
+        return h[torch.arange(b, device=dev), sep_idx]
+
     def _pool_features(self, h: torch.Tensor, type_id: torch.Tensor) -> torch.Tensor:
+        if self.pooling == "sep":
+            return self._select_sep_feat(h, type_id)
         cls_feat = self._select_cls_feat(h, type_id)
         q_mask = self._query_token_mask(type_id)
 
@@ -926,6 +1107,7 @@ class PatchTransformerNepaClassifier(nn.Module):
         ray_d: Optional[torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         patch_out = self.core.patch_embed(xyz, normals if self.core.use_normals else None)
+        patch_out = self.core._maybe_reorder_patch_embed_output(patch_out)
         q_tok = patch_out.tokens
         centers_xyz = patch_out.centers_xyz
         B, P, D = q_tok.shape
@@ -994,19 +1176,20 @@ class PatchTransformerNepaClassifier(nn.Module):
                 ray_o=ray_o,
                 ray_d=ray_d,
             )
-            z = self.core._add_embeddings(tokens, type_id, centers_seq)
+            backbone_in, backbone_pos, z = self.core._prepare_backbone_inputs(tokens, type_id, centers_seq)
             if isinstance(self.core.backbone, EncoderDecoderTransformer):
                 # Encoder-only inference in q_only mode; keep EOS as a 1-token decoder stub.
-                enc = z[:, :-1, :]
-                dec = z[:, -1:, :]
+                enc = backbone_in[:, :-1, :]
+                dec = backbone_in[:, -1:, :]
                 enc_out, _ = self.core.backbone(enc, dec, enc_xyz=None)
                 h = enc_out
                 type_for_pool = type_id[:, :-1]
             else:
                 h = self.core.backbone(
-                    z,
+                    backbone_in,
                     is_causal=self.is_causal,
                     type_id=type_id,
+                    pos=backbone_pos,
                     dual_mask_near=0.0,
                     dual_mask_far=0.0,
                     dual_mask_window=0,

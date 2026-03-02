@@ -43,6 +43,8 @@ N_POINT="${N_POINT:-1024}"
 NUM_GROUPS="${NUM_GROUPS:-64}"
 GROUP_SIZE="${GROUP_SIZE:-32}"
 PATCH_EMBED="${PATCH_EMBED:-fps_knn}"  # fps_knn | serial
+PATCH_LOCAL_ENCODER="${PATCH_LOCAL_ENCODER:-mlp}"  # mlp | pointmae_conv
+PATCH_FPS_RANDOM_START="${PATCH_FPS_RANDOM_START:-0}"  # 0 | 1
 MODEL_SOURCE="${MODEL_SOURCE:-patchcls}"  # patchcls | pointmae | patchnepa
 USE_RAY_PATCH="${USE_RAY_PATCH:-0}"       # 0 | 1
 N_RAY="${N_RAY:-256}"
@@ -85,6 +87,8 @@ IS_CAUSAL="${IS_CAUSAL:-0}"  # 0 | 1
 PATCHNEPA_FT_MODE="${PATCHNEPA_FT_MODE:-qa_zeroa}"  # qa_zeroa | q_only
 PATCHNEPA_CLS_TOKEN_SOURCE="${PATCHNEPA_CLS_TOKEN_SOURCE:-last_q}"  # bos | last_q | eos
 PATCHNEPA_FREEZE_PATCH_EMBED="${PATCHNEPA_FREEZE_PATCH_EMBED:-1}"   # 0 | 1
+PATCH_ORDER_MODE="${PATCH_ORDER_MODE:-}"
+PATCH_ORDER_SCHEDULE="${PATCH_ORDER_SCHEDULE:-fixed}"
 LLRD_START="${LLRD_START:-1.0}"
 LLRD_END="${LLRD_END:-1.0}"
 LLRD_SCHEDULER="${LLRD_SCHEDULER:-static}"  # static | llrd_cosine | llrd_cosine_warmup
@@ -158,6 +162,8 @@ ARGS=(
   --ray_hit_threshold "${RAY_HIT_THRESHOLD}"
   --model_source "${MODEL_SOURCE}"
   --patch_embed "${PATCH_EMBED}"
+  --patch_local_encoder "${PATCH_LOCAL_ENCODER}"
+  --patch_fps_random_start "${PATCH_FPS_RANDOM_START}"
   --pt_sample_mode_train "${PT_SAMPLE_MODE_TRAIN}"
   --pt_sample_mode_eval "${PT_SAMPLE_MODE_EVAL}"
   --serial_order "${SERIAL_ORDER}"
@@ -192,6 +198,8 @@ ARGS=(
   --patchnepa_ft_mode "${PATCHNEPA_FT_MODE}"
   --patchnepa_cls_token_source "${PATCHNEPA_CLS_TOKEN_SOURCE}"
   --patchnepa_freeze_patch_embed "${PATCHNEPA_FREEZE_PATCH_EMBED}"
+  --patch_order_mode "${PATCH_ORDER_MODE}"
+  --patch_order_schedule "${PATCH_ORDER_SCHEDULE}"
   --llrd_start "${LLRD_START}"
   --llrd_end "${LLRD_END}"
   --llrd_scheduler "${LLRD_SCHEDULER}"
@@ -201,6 +209,7 @@ ARGS=(
 
 echo "[patchcls] data_format=${DATA_FORMAT} variant=${SCAN_VARIANT} run_name=${RUN_NAME}"
 echo "[patchcls] nproc_per_node=${NPROC_PER_NODE} batch=${BATCH} batch_mode=${BATCH_MODE} aug_eval=${AUG_EVAL} mc_test=${MC_EVAL_K_TEST}"
+echo "[patchcls] patch_order_mode=${PATCH_ORDER_MODE:-<ckpt/default>} patch_order_schedule=${PATCH_ORDER_SCHEDULE}"
 echo "[patchcls] wandb use=${USE_WANDB} project=${WANDB_PROJECT} entity=${WANDB_ENTITY:-none} run=${WANDB_RUN_NAME} group=${WANDB_GROUP} mode=${WANDB_MODE}"
 
 if [[ "${NPROC_PER_NODE}" -gt 1 ]]; then

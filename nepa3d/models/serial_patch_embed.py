@@ -9,7 +9,7 @@ Patch grouping strategy:
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -45,25 +45,92 @@ def morton3d_codes(xyz: torch.Tensor, bits: int = 10, eps: float = 1e-6) -> torc
     return x | (y << 1) | (z << 2)
 
 
-def serialize_indices(
+def _normalize_order_token(token: str) -> tuple[str, bool]:
+    mode = str(token).strip().lower().replace("-", "_")
+    rev = False
+    while mode.startswith("rev_"):
+        rev = not rev
+        mode = mode[len("rev_") :]
+    while mode.endswith("_rev"):
+        rev = not rev
+        mode = mode[: -len("_rev")]
+    return mode, rev
+
+
+def _serialize_indices_base(
     xyz: torch.Tensor,
-    order: Literal["morton", "morton_trans", "z", "z-trans", "random", "identity"] = "morton",
-    bits: int = 10,
-) -> torch.Tensor:
-    """Return serialized indices (B,N)."""
+    mode: str,
+    bits: int,
+) -> Optional[torch.Tensor]:
     b, n, _ = xyz.shape
     device = xyz.device
-    if order in {"morton", "z"}:
-        return torch.argsort(morton3d_codes(xyz, bits=bits), dim=1)
-    if order in {"morton_trans", "z-trans"}:
-        # PTv3-style "trans" variant: swap X/Y before serialization.
-        xyz_t = xyz[..., [1, 0, 2]]
-        return torch.argsort(morton3d_codes(xyz_t, bits=bits), dim=1)
-    if order == "random":
-        return torch.argsort(torch.rand((b, n), device=device), dim=1)
-    if order == "identity":
+
+    if mode in {"none", "original", "as_is", "fps", "identity", "native"}:
         return torch.arange(n, device=device).view(1, n).expand(b, n)
-    raise ValueError(f"unknown serial order: {order}")
+    if mode in {"reverse", "rev"}:
+        return torch.arange(n - 1, -1, -1, device=device).view(1, n).expand(b, n)
+    if mode in {"random", "shuffle", "rfps"}:
+        return torch.argsort(torch.rand((b, n), device=device), dim=1)
+    if mode in {"morton", "z", "morton_xyz"}:
+        return torch.argsort(morton3d_codes(xyz, bits=bits), dim=1)
+    if mode in {"morton_trans", "z_trans"}:
+        # Keep existing project convention: cyclic axis shift (y,z,x).
+        xyz_t = xyz[..., [1, 2, 0]]
+        return torch.argsort(morton3d_codes(xyz_t, bits=bits), dim=1)
+    if mode.startswith("morton_"):
+        perm = mode[len("morton_") :]
+        if len(perm) == 3 and set(perm) == {"x", "y", "z"}:
+            axis = {"x": 0, "y": 1, "z": 2}
+            xyz_t = xyz[..., [axis[c] for c in perm]]
+            return torch.argsort(morton3d_codes(xyz_t, bits=bits), dim=1)
+    raise ValueError(
+        f"unknown serial order: {mode} "
+        "(supported: morton/morton_<perm>/morton_trans/random/identity/reverse + rev wrappers)"
+    )
+
+
+def serialize_indices(
+    xyz: torch.Tensor,
+    order: str = "morton",
+    bits: int = 10,
+) -> torch.Tensor:
+    """Return serialized indices (B,N), with optional sample-wise mixed order.
+
+    Supported wrappers:
+      - `rev_<mode>` or `<mode>_rev`
+      - `sample:<mode1>,<mode2>,...` (select one mode per sample in batch)
+    """
+    b, n, _ = xyz.shape
+    mode0, rev0 = _normalize_order_token(order)
+
+    if mode0.startswith("sample:"):
+        pool_txt = mode0[len("sample:") :]
+        pool_items = [p.strip() for p in pool_txt.split(",") if p.strip()]
+        if not pool_items:
+            raise ValueError(f"sample order requires non-empty pool: {order}")
+        parsed: list[tuple[str, bool]] = []
+        for item in pool_items:
+            m_i, rev_i = _normalize_order_token(item)
+            parsed.append((m_i, bool(rev0) ^ bool(rev_i)))
+
+        choice = torch.randint(0, len(parsed), (b,), device=xyz.device)
+        rows: list[torch.Tensor] = []
+        for bi in range(b):
+            m_i, r_i = parsed[int(choice[bi].item())]
+            perm_b = _serialize_indices_base(xyz[bi : bi + 1], m_i, bits)
+            if perm_b is None:
+                perm_b = torch.arange(n, device=xyz.device).view(1, n)
+            if r_i:
+                perm_b = torch.flip(perm_b, dims=[1])
+            rows.append(perm_b[0])
+        return torch.stack(rows, dim=0)
+
+    perm = _serialize_indices_base(xyz, mode0, bits)
+    if perm is None:
+        perm = torch.arange(n, device=xyz.device).view(1, n).expand(b, n)
+    if rev0:
+        perm = torch.flip(perm, dims=[1])
+    return perm
 
 
 class SerialPatchEmbed(nn.Module):
@@ -73,7 +140,7 @@ class SerialPatchEmbed(nn.Module):
         self,
         embed_dim: int,
         group_size: int = 16,
-        order: Literal["morton", "morton_trans", "z", "z-trans", "random", "identity"] = "morton",
+        order: str = "morton",
         bits: int = 10,
         shuffle_within_patch: bool = False,
         use_normals: bool = False,

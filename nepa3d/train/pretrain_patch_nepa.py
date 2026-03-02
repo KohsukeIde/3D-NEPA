@@ -61,20 +61,50 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--pt_xyz_key", type=str, default="pt_xyz_pool")
     p.add_argument("--pt_dist_key", type=str, default="pt_dist_pool")
     p.add_argument("--ablate_point_dist", type=int, default=0, choices=[0, 1])
-    p.add_argument("--pt_sample_mode", type=str, default="random", choices=["random", "fps", "rfps", "rfps_cached", "grid"])
+    p.add_argument("--pt_sample_mode", type=str, default="rfps", choices=["random", "fps", "rfps", "rfps_cached", "grid"])
     p.add_argument("--pt_fps_key", type=str, default="auto")
     p.add_argument("--pt_rfps_key", type=str, default="auto")
     p.add_argument("--pt_rfps_m", type=int, default=4096)
-    p.add_argument("--point_order_mode", type=str, default="morton", choices=["morton", "fps", "random"])
+    p.add_argument("--point_order_mode", type=str, default="morton")
 
     # Model (patching)
     p.add_argument("--patch_embed", type=str, default="fps_knn", choices=["serial", "pointgpt", "fps_knn"])
+    p.add_argument(
+        "--patch_local_encoder",
+        type=str,
+        default="mlp",
+        choices=["mlp", "pointmae_conv"],
+        help="Local patch encoder for fps_knn/pointgpt patch embed.",
+    )
+    p.add_argument(
+        "--patch_fps_random_start",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Use random FPS start (Point-MAE style) for fps_knn/pointgpt patch embed.",
+    )
     p.add_argument("--group_size", type=int, default=32)
     p.add_argument("--num_groups", type=int, default=64)
-    p.add_argument("--serial_order", type=str, default="morton",
-                   choices=["morton", "morton_trans", "z", "z-trans", "random", "identity"])
+    p.add_argument("--serial_order", type=str, default="morton")
     p.add_argument("--serial_bits", type=int, default=10)
     p.add_argument("--serial_shuffle_within_patch", type=int, default=0, choices=[0, 1])
+    p.add_argument(
+        "--patch_order_mode",
+        type=str,
+        default="none",
+        help=(
+            "Patch order mode(s). Comma-separated list allowed. "
+            "Examples: none | morton | morton_yzx | random_sweep | reverse | "
+            "morton,morton_yzx,morton_zxy,reverse"
+        ),
+    )
+    p.add_argument(
+        "--patch_order_schedule",
+        type=str,
+        default="fixed",
+        choices=["fixed", "epoch", "batch", "batch_random", "sample"],
+        help="How to switch patch_order_mode when multiple modes are provided.",
+    )
     p.add_argument("--morton_bits", type=int, default=10, help="Backward-compat alias; used when --serial_bits is omitted.")
     p.add_argument("--scale_morton", type=float, default=1.0, help="Compatibility arg (unused).")
     p.add_argument("--use_normals", type=int, default=0, choices=[0, 1])
@@ -93,7 +123,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--rope_theta", type=float, default=100.0)
     p.add_argument("--use_gated_mlp", type=int, default=0)
     p.add_argument("--hidden_act", type=str, default="gelu")
-    p.add_argument("--backbone_mode", type=str, default="nepa2d", choices=["nepa2d", "vanilla"])
+    p.add_argument("--backbone_mode", type=str, default="nepa2d", choices=["nepa2d", "vanilla", "pointmae"])
 
     # Positional embedding
     p.add_argument("--pos_mode", type=str, default="center_mlp", choices=["center_mlp", "none"])
@@ -275,6 +305,41 @@ def _parse_skip_k_list(args: argparse.Namespace) -> list[int]:
     return ks
 
 
+def _parse_patch_order_modes(raw: str) -> list[str]:
+    txt = str(raw or "").strip()
+    if not txt:
+        return ["none"]
+    if txt.lower().replace("-", "_").startswith("sample:"):
+        return [txt]
+    modes = [m.strip() for m in txt.split(",") if m.strip()]
+    return modes if modes else ["none"]
+
+
+def _select_patch_order_mode(
+    modes: list[str],
+    schedule: str,
+    *,
+    epoch: int,
+    global_step: int,
+    seed: int,
+) -> str:
+    sched = str(schedule).strip().lower()
+    if len(modes) == 1 or sched == "fixed":
+        return modes[0]
+    if sched == "sample":
+        if len(modes) == 1 and str(modes[0]).lower().replace("-", "_").startswith("sample:"):
+            return modes[0]
+        return "sample:" + ",".join(modes)
+    if sched == "epoch":
+        return modes[int(epoch) % len(modes)]
+    if sched == "batch":
+        return modes[int(global_step) % len(modes)]
+    if sched == "batch_random":
+        rng = random.Random(int(seed) + int(global_step))
+        return modes[int(rng.randrange(len(modes)))]
+    raise ValueError(f"unknown patch_order_schedule={schedule}")
+
+
 def _nepa_target_mask(type_id: torch.Tensor | None, k: int) -> torch.Tensor | None:
     if type_id is None:
         return None
@@ -385,6 +450,15 @@ def _init_wandb(args: argparse.Namespace, accelerator: Accelerator) -> Any:
 
 def main() -> None:
     args = parse_args()
+    patch_order_modes = _parse_patch_order_modes(str(args.patch_order_mode))
+    patch_order_schedule = str(args.patch_order_schedule).strip().lower()
+    initial_patch_order_mode = _select_patch_order_mode(
+        patch_order_modes,
+        patch_order_schedule,
+        epoch=0,
+        global_step=0,
+        seed=int(args.seed),
+    )
     if bool(int(args.use_ray_patch)) and str(args.ray_assign_mode) == "independent_fps_knn":
         # Missing-ray handling in fixed-length independent ray patching relies on
         # type-aware masking to keep missing tokens out of effective K/V context.
@@ -452,12 +526,15 @@ def main() -> None:
 
     model = PatchTransformerNepa(
         patch_embed=args.patch_embed,
+        patch_local_encoder=str(args.patch_local_encoder),
+        patch_fps_random_start=bool(int(args.patch_fps_random_start)),
         n_point=int(args.n_point),
         group_size=int(args.group_size),
         num_groups=args.num_groups,
         serial_order=str(args.serial_order),
         serial_bits=serial_bits,
         serial_shuffle_within_patch=int(args.serial_shuffle_within_patch),
+        patch_order_mode=str(initial_patch_order_mode),
         use_normals=bool(args.use_normals),
         d_model=int(args.d_model),
         n_layers=int(args.n_layers),
@@ -508,6 +585,11 @@ def main() -> None:
         scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda ep: _scheduler_scale(ep, args))
 
     model_raw = accelerator.unwrap_model(model)
+    active_patch_order_mode = str(initial_patch_order_mode)
+    if hasattr(model_raw, "set_patch_order_mode"):
+        model_raw.set_patch_order_mode(active_patch_order_mode)
+    else:
+        setattr(model_raw, "patch_order_mode", active_patch_order_mode)
     ema_model: torch.nn.Module | None = None
     if bool(int(args.use_ema)):
         ema_model = _init_ema_model(model_raw)
@@ -518,12 +600,18 @@ def main() -> None:
     diag_every = max(1, int(args.diag_every))
     wandb_log_every = max(1, int(args.wandb_log_every))
     wandb_run = _init_wandb(args, accelerator)
+    if bool(getattr(model_raw, "pointmae_backbone", False)):
+        z_semantics = "tokens+abs_pos (type_emb excluded; pos injected per block)"
+    else:
+        z_semantics = "tokens+type_emb+pos (+type_pos/center_mlp when enabled)"
     mprint(
         "[patch_nepa_pretrain] "
         f"num_processes={accelerator.num_processes} "
         f"mixed_precision={accelerator.mixed_precision} "
         f"patch_embed={args.patch_embed} "
+        f"patch_local_encoder={str(args.patch_local_encoder)} patch_fps_random_start={int(args.patch_fps_random_start)} "
         f"group_size={int(args.group_size)} num_groups={int(args.num_groups)} "
+        f"patch_order_mode={','.join(patch_order_modes)} patch_order_schedule={patch_order_schedule} "
         f"n_point={int(args.n_point)} n_ray={int(args.n_ray)} use_ray_patch={int(bool(args.use_ray_patch))} "
         f"ray_assign={str(args.ray_assign_mode)} ray_pool={str(args.ray_pool_mode)} ray_groups={int(args.ray_num_groups)} ray_group_size={int(args.ray_group_size)} "
         f"ray_use_origin={int(args.ray_use_origin)} include_ray_unc={int(args.include_ray_unc)} "
@@ -532,7 +620,7 @@ def main() -> None:
         f"point_order_mode={str(args.point_order_mode)} "
         f"qa_tokens={int(args.qa_tokens)} qa_layout={str(args.qa_layout)} qa_sep={int(args.qa_sep_token)} "
         f"qa_fuse={str(args.qa_fuse)} use_pt_dist={int(args.use_pt_dist)} use_pt_grad={int(args.use_pt_grad)} skip_k={skip_k_list} "
-        f"loss_target_mode={str(args.loss_target_mode)} "
+        f"loss_target_mode={str(args.loss_target_mode)} z_semantics='{z_semantics}' "
         f"q_mask_prob={float(args.q_mask_prob):.3f} q_mask_warmup_epochs={float(args.q_mask_warmup_epochs):.2f} q_mask_mode={str(args.q_mask_mode)} "
         f"type_specific_pos={int(args.type_specific_pos)} "
         f"dual_mask=({float(args.dual_mask_near):.2f},{float(args.dual_mask_far):.2f},w={int(args.dual_mask_window)},type_aware={int(args.dual_mask_type_aware)}) "
@@ -578,12 +666,36 @@ def main() -> None:
     try:
         for epoch in range(start_epoch, int(args.epochs)):
             model.train()
+            if patch_order_schedule == "epoch":
+                active_patch_order_mode = _select_patch_order_mode(
+                    patch_order_modes,
+                    patch_order_schedule,
+                    epoch=epoch,
+                    global_step=global_step,
+                    seed=int(args.seed),
+                )
+                if hasattr(model_raw, "set_patch_order_mode"):
+                    model_raw.set_patch_order_mode(active_patch_order_mode)
+                else:
+                    setattr(model_raw, "patch_order_mode", active_patch_order_mode)
             sampler_obj = getattr(train_loader, "sampler", None)
             if sampler_obj is not None and hasattr(sampler_obj, "set_epoch"):
                 sampler_obj.set_epoch(epoch)
 
             for batch in train_loader:
                 with accelerator.accumulate(model):
+                    if patch_order_schedule in {"batch", "batch_random"}:
+                        active_patch_order_mode = _select_patch_order_mode(
+                            patch_order_modes,
+                            patch_order_schedule,
+                            epoch=epoch,
+                            global_step=global_step,
+                            seed=int(args.seed),
+                        )
+                        if hasattr(model_raw, "set_patch_order_mode"):
+                            model_raw.set_patch_order_mode(active_patch_order_mode)
+                        else:
+                            setattr(model_raw, "patch_order_mode", active_patch_order_mode)
                     ramp = 1.0
                     if warmup_steps > 0:
                         ramp = min(float(global_step) / float(warmup_steps), 1.0)
@@ -679,6 +791,7 @@ def main() -> None:
                         print(
                             f"[epoch {epoch:03d} step {global_step:06d}] "
                             f"loss={loss_val:.8e} loss2d={loss_2d_equiv:.8e} lr={lr:.2e} "
+                            f"po={active_patch_order_mode} "
                             f"dm=({dm_near:.2f},{dm_far:.2f},ramp={ramp:.2f}) "
                             f"qmask=({q_mask_prob_eff:.2f},ramp={q_mask_ramp:.2f},keep={_fmt_diag(q_keep)})"
                             f"{diag_msg}"
@@ -696,6 +809,10 @@ def main() -> None:
                                 "train/q_mask_prob": float(q_mask_prob_eff),
                                 "train/q_mask_ramp": float(q_mask_ramp),
                             }
+                            if active_patch_order_mode in patch_order_modes:
+                                wb["train/patch_order_mode_idx"] = float(patch_order_modes.index(active_patch_order_mode))
+                            elif patch_order_modes:
+                                wb["train/patch_order_mode_idx"] = -1.0
                             if q_keep == q_keep:
                                 wb["train/q_keep_ratio"] = float(q_keep)
                             if diag is not None:

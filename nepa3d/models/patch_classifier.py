@@ -32,6 +32,8 @@ class PatchTransformerClassifier(nn.Module):
         *,
         # patch embed
         patch_embed: str = "fps_knn",  # fps_knn | serial
+        patch_local_encoder: str = "mlp",  # mlp | pointmae_conv
+        patch_fps_random_start: bool = False,
         num_groups: int = 64,
         group_size: int = 32,
         use_normals: bool = False,
@@ -46,7 +48,7 @@ class PatchTransformerClassifier(nn.Module):
         mlp_ratio: float = 4.0,
         dropout: float = 0.0,
         drop_path_rate: float = 0.1,
-        backbone_mode: str = "nepa2d",  # nepa2d | vanilla
+        backbone_mode: str = "nepa2d",  # nepa2d | vanilla | pointmae
         qk_norm: bool = True,
         qk_norm_affine: bool = False,
         qk_norm_bias: bool = False,
@@ -80,14 +82,17 @@ class PatchTransformerClassifier(nn.Module):
         assert ray_fuse_mode in {"concat", "add"}
         assert head_mode in {"auto", "linear", "pointmae_mlp"}
         assert init_mode in {"default", "pointmae"}
-        assert backbone_mode in {"nepa2d", "vanilla"}
+        assert backbone_mode in {"nepa2d", "vanilla", "pointmae"}
         assert patch_embed in {"fps_knn", "serial"}
+        assert patch_local_encoder in {"mlp", "pointmae_conv"}
         self.pooling = pooling
         self.pos_mode = pos_mode
         self.head_mode = head_mode
         self.init_mode = init_mode
         self.backbone_mode = backbone_mode
         self.patch_embed_mode = patch_embed
+        self.patch_local_encoder = str(patch_local_encoder)
+        self.patch_fps_random_start = bool(patch_fps_random_start)
         self.head_hidden_dim = int(head_hidden_dim)
         self.head_dropout = float(head_dropout)
         self.is_causal = bool(is_causal)
@@ -105,6 +110,8 @@ class PatchTransformerClassifier(nn.Module):
                 embed_dim=d_model,
                 use_normals=use_normals,
                 center_mode=center_mode,
+                local_encoder=self.patch_local_encoder,
+                fps_random_start=self.patch_fps_random_start,
             )
         else:
             self.patch_embed = SerialPatchEmbed(
@@ -122,10 +129,10 @@ class PatchTransformerClassifier(nn.Module):
         else:
             self.cls_token = None
 
-        # Positional branch is only used on vanilla backbone.
+        # Positional branch is used on vanilla/pointmae backbones.
         # On nepa2d path, positional handling is internal (RoPE), so we avoid
         # registering unused pos parameters to keep DDP stable.
-        if self.backbone_mode == "vanilla":
+        if self.backbone_mode in {"vanilla", "pointmae"}:
             if self.pos_mode == "learned":
                 max_len = num_groups + (1 if self.use_cls else 0)
                 self.pos_emb = nn.Parameter(torch.zeros(1, max_len, d_model))
@@ -150,6 +157,12 @@ class PatchTransformerClassifier(nn.Module):
         if self.cls_pos is not None:
             nn.init.trunc_normal_(self.cls_pos, std=0.02)
 
+        if self.backbone_mode == "vanilla":
+            backbone_impl = "legacy"
+        elif self.backbone_mode == "pointmae":
+            backbone_impl = "pointmae"
+        else:
+            backbone_impl = "nepa2d"
         self.backbone = CausalTransformer(
             d_model=d_model,
             nhead=n_heads,
@@ -157,6 +170,7 @@ class PatchTransformerClassifier(nn.Module):
             mlp_ratio=mlp_ratio,
             dropout=dropout,
             drop_path=drop_path_rate,
+            qkv_bias=(self.backbone_mode != "pointmae"),
             qk_norm=bool(qk_norm),
             qk_norm_affine=bool(qk_norm_affine),
             qk_norm_bias=bool(qk_norm_bias),
@@ -165,8 +179,7 @@ class PatchTransformerClassifier(nn.Module):
             rope_prefix_tokens=int(rope_prefix_tokens),
             use_gated_mlp=bool(use_gated_mlp),
             hidden_act=str(hidden_act),
-            # vanilla -> Point-MAE-like TransformerEncoder path (no RoPE/QK-Norm/LayerScale)
-            backbone_impl="legacy" if self.backbone_mode == "vanilla" else "nepa2d",
+            backbone_impl=backbone_impl,
         )
         self.norm = nn.LayerNorm(d_model)
 
@@ -331,9 +344,9 @@ class PatchTransformerClassifier(nn.Module):
                 x = torch.cat([cls, x], dim=1)
 
         # Positional injection mode:
-        # - vanilla: explicit pos tensor is added at each block input.
+        # - vanilla/pointmae: explicit pos tensor is added at each block input.
         # - nepa2d: positional handling is internal (RoPE in attention), so no x+pos add here.
-        if self.backbone_mode == "vanilla":
+        if self.backbone_mode in {"vanilla", "pointmae"}:
             if self.pos_mode == "learned":
                 # Learned positional embedding (slice to sequence length).
                 pos = self.pos_emb[:, : x.size(1), :]

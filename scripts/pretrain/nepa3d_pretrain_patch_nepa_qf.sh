@@ -44,16 +44,21 @@ WANDB_MODE="${WANDB_MODE:-online}"
 WANDB_LOG_EVERY="${WANDB_LOG_EVERY:-50}"
 
 PATCH_EMBED="${PATCH_EMBED:-fps_knn}"
+PATCH_LOCAL_ENCODER="${PATCH_LOCAL_ENCODER:-mlp}"   # mlp | pointmae_conv
+PATCH_FPS_RANDOM_START="${PATCH_FPS_RANDOM_START:-0}" # 0 | 1
 GROUP_SIZE="${GROUP_SIZE:-32}"
 NUM_GROUPS="${NUM_GROUPS:-64}"
 SERIAL_ORDER="${SERIAL_ORDER:-morton}"
 SERIAL_BITS="${SERIAL_BITS:-10}"
 SERIAL_SHUFFLE_WITHIN_PATCH="${SERIAL_SHUFFLE_WITHIN_PATCH:-0}"
+PATCH_ORDER_MODE="${PATCH_ORDER_MODE:-none}"
+PATCH_ORDER_SCHEDULE="${PATCH_ORDER_SCHEDULE:-fixed}"
 
 PT_XYZ_KEY="${PT_XYZ_KEY:-pt_xyz_pool}"
 PT_DIST_KEY="${PT_DIST_KEY:-pt_dist_pool}"
 ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-0}"
-PT_SAMPLE_MODE="${PT_SAMPLE_MODE:-rfps_cached}"
+PT_SAMPLE_MODE="${PT_SAMPLE_MODE:-rfps}"
+ALLOW_RFPS_CACHED="${ALLOW_RFPS_CACHED:-0}"  # 1 allows legacy cached-rfps runs
 PT_FPS_KEY="${PT_FPS_KEY:-auto}"
 PT_RFPS_KEY="${PT_RFPS_KEY:-pt_rfps_order_bank}"
 PT_RFPS_M="${PT_RFPS_M:-4096}"
@@ -213,6 +218,11 @@ if [[ "${STAGE2_REQUIRE_GLOBAL_BATCH128}" == "1" ]]; then
   fi
 fi
 
+if [[ "${PT_SAMPLE_MODE}" == "rfps_cached" && "${ALLOW_RFPS_CACHED}" != "1" ]]; then
+  echo "WARN: PT_SAMPLE_MODE=rfps_cached requested, policy defaults to non-cached RFPS; overriding to PT_SAMPLE_MODE=rfps." | tee -a "${LOG_PATH}"
+  PT_SAMPLE_MODE="rfps"
+fi
+
 
 if [[ "${SKIPK_DISABLE_DUAL_MASK}" == "1" ]]; then
   if [[ "${NEPA_MULTI_K}" != "" || "${NEPA_SKIP_K}" != "1" ]]; then
@@ -232,7 +242,7 @@ echo "run_tag=${RUN_TAG}" | tee -a "${LOG_PATH}"
 echo "mix_config=${MIX_CONFIG}" | tee -a "${LOG_PATH}"
 echo "save_dir=${SAVE_DIR}" | tee -a "${LOG_PATH}"
 echo "n_point=${N_POINT} n_ray=${N_RAY} use_ray_patch=${USE_RAY_PATCH} ray_assign=${RAY_ASSIGN_MODE} ray_pool=${RAY_POOL_MODE} ray_num_groups=${RAY_NUM_GROUPS} ray_group_size=${RAY_GROUP_SIZE} include_ray_unc=${INCLUDE_RAY_UNC}" | tee -a "${LOG_PATH}"
-echo "patch_embed=${PATCH_EMBED} group_size=${GROUP_SIZE} num_groups=${NUM_GROUPS} serial_order=${SERIAL_ORDER}" | tee -a "${LOG_PATH}"
+echo "patch_embed=${PATCH_EMBED} patch_local_encoder=${PATCH_LOCAL_ENCODER} patch_fps_random_start=${PATCH_FPS_RANDOM_START} group_size=${GROUP_SIZE} num_groups=${NUM_GROUPS} serial_order=${SERIAL_ORDER} patch_order_mode=${PATCH_ORDER_MODE} patch_order_schedule=${PATCH_ORDER_SCHEDULE}" | tee -a "${LOG_PATH}"
 echo "pt_xyz_key=${PT_XYZ_KEY} pt_dist_key=${PT_DIST_KEY} ablate_point_dist=${ABLATE_POINT_DIST} pt_sample_mode=${PT_SAMPLE_MODE} pt_fps_key=${PT_FPS_KEY} pt_rfps_key=${PT_RFPS_KEY} pt_rfps_m=${PT_RFPS_M} point_order_mode=${POINT_ORDER_MODE}" | tee -a "${LOG_PATH}"
 echo "qa: tokens=${QA_TOKENS} layout=${QA_LAYOUT} sep=${QA_SEP_TOKEN} fuse=${QA_FUSE} encdec_arch=${ENCDEC_ARCH} use_pt_dist=${USE_PT_DIST} use_pt_grad=${USE_PT_GRAD} nepa_skip_k=${NEPA_SKIP_K} nepa_multi_k=${NEPA_MULTI_K:-none}" | tee -a "${LOG_PATH}"
 echo "loss_target_mode=${LOSS_TARGET_MODE}" | tee -a "${LOG_PATH}"
@@ -289,11 +299,15 @@ TRAIN_ARGS=(
   --type_pos_max_len "${TYPE_POS_MAX_LEN}"
   --max_len "${MAX_LEN}"
   --patch_embed "${PATCH_EMBED}"
+  --patch_local_encoder "${PATCH_LOCAL_ENCODER}"
+  --patch_fps_random_start "${PATCH_FPS_RANDOM_START}"
   --group_size "${GROUP_SIZE}"
   --num_groups "${NUM_GROUPS}"
   --serial_order "${SERIAL_ORDER}"
   --serial_bits "${SERIAL_BITS}"
   --serial_shuffle_within_patch "${SERIAL_SHUFFLE_WITHIN_PATCH}"
+  --patch_order_mode "${PATCH_ORDER_MODE}"
+  --patch_order_schedule "${PATCH_ORDER_SCHEDULE}"
   --use_ray_patch "${USE_RAY_PATCH}"
   --include_ray_unc "${INCLUDE_RAY_UNC}"
   --ray_pool_mode "${RAY_POOL_MODE}"

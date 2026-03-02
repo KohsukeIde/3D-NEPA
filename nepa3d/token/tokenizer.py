@@ -272,7 +272,7 @@ def _order_point_tokens(
     *,
     rng=None,
     point_order_mode: str = "morton",
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """Apply an explicit order for point tokens after sampling.
 
     Supported modes:
@@ -283,20 +283,74 @@ def _order_point_tokens(
     if int(pt_xyz_s.shape[0]) <= 0:
         return pt_xyz_s, pt_dist_s
 
-    mode = str(point_order_mode).lower()
-    if mode == "morton":
-        order = np.argsort(morton3d(pt_xyz_s))
-    elif mode == "fps":
-        order = None
-    elif mode == "random":
+    def _normalize_mode_token(token: str) -> tuple[str, bool]:
+        m = str(token).strip().lower().replace("-", "_")
+        rev = False
+        while m.startswith("rev_"):
+            rev = not rev
+            m = m[len("rev_") :]
+        while m.endswith("_rev"):
+            rev = not rev
+            m = m[: -len("_rev")]
+        return m, rev
+
+    def _sample_choice(n: int) -> int:
         if rng is None:
-            rng = np.random
+            return int(np.random.randint(0, int(n)))
+        if hasattr(rng, "integers"):
+            return int(rng.integers(0, int(n)))
+        if hasattr(rng, "randint"):
+            return int(rng.randint(0, int(n)))
+        return int(np.random.randint(0, int(n)))
+
+    def _rand_perm(n: int) -> np.ndarray:
+        if rng is None:
+            return np.random.permutation(int(n)).astype(np.int64, copy=False)
         if hasattr(rng, "permutation"):
-            order = np.asarray(rng.permutation(pt_xyz_s.shape[0]), dtype=np.int64)
+            return np.asarray(rng.permutation(int(n)), dtype=np.int64)
+        return np.random.permutation(int(n)).astype(np.int64, copy=False)
+
+    def _base_perm(mode: str) -> np.ndarray | None:
+        n = int(pt_xyz_s.shape[0])
+        if mode in {"none", "original", "as_is", "identity", "fps", "native"}:
+            return None
+        if mode in {"reverse", "rev"}:
+            return np.arange(n - 1, -1, -1, dtype=np.int64)
+        if mode in {"random", "shuffle", "rfps"}:
+            return _rand_perm(n)
+        if mode in {"morton", "z", "morton_xyz"}:
+            return np.argsort(morton3d(pt_xyz_s)).astype(np.int64, copy=False)
+        if mode in {"morton_trans", "z_trans"}:
+            xyz_t = pt_xyz_s[:, [1, 2, 0]]
+            return np.argsort(morton3d(xyz_t)).astype(np.int64, copy=False)
+        if mode.startswith("morton_"):
+            perm = mode[len("morton_") :]
+            if len(perm) == 3 and set(perm) == {"x", "y", "z"}:
+                axis = {"x": 0, "y": 1, "z": 2}
+                xyz_t = pt_xyz_s[:, [axis[c] for c in perm]]
+                return np.argsort(morton3d(xyz_t)).astype(np.int64, copy=False)
+        raise ValueError(
+            f"unknown point_order_mode: {point_order_mode} "
+            "(supported: morton/morton_<perm>/morton_trans/fps/random/identity + sample:... + rev wrappers)"
+        )
+
+    mode0, rev0 = _normalize_mode_token(point_order_mode)
+    if mode0.startswith("sample:"):
+        pool_txt = mode0[len("sample:") :]
+        pool = [p.strip() for p in pool_txt.split(",") if p.strip()]
+        if not pool:
+            raise ValueError(f"sample point_order_mode requires non-empty pool: {point_order_mode}")
+        picked = pool[_sample_choice(len(pool))]
+        m_i, rev_i = _normalize_mode_token(picked)
+        mode0 = m_i
+        rev0 = bool(rev0) ^ bool(rev_i)
+
+    order = _base_perm(mode0)
+    if rev0:
+        if order is None:
+            order = np.arange(pt_xyz_s.shape[0] - 1, -1, -1, dtype=np.int64)
         else:
-            order = np.random.permutation(pt_xyz_s.shape[0]).astype(np.int64, copy=False)
-    else:
-        raise ValueError(f"unknown point_order_mode: {point_order_mode}")
+            order = order[::-1].copy()
 
     if order is None:
         return pt_xyz_s, pt_dist_s, None

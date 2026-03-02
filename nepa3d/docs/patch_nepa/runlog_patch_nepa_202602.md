@@ -4174,3 +4174,643 @@ Quick read:
 
 - `qmask60v2` is mostly neutral/slightly worse, but improved on `pb_t50_rs`.
 - `qmask80v2` underperformed baseline on all three variants, with the largest drop on `obj_only`.
+
+## 100. 2x2 content-token run: merged-log root cause, kill, and clean re-submit (2026-03-02)
+
+Observed issue:
+
+- the two pretrain jobs from Section 2x2 submission (`101289`, `101290`) wrote into the same default run/log:
+  - `logs/patch_nepa_pretrain/patchnepa_rayqa_20260302_183441.mr0.log`
+- node-local logs showed defaults were used (not wrapper values), e.g.:
+  - `run_tag=patchnepa_rayqa_20260302_183441`
+  - `loss_target_mode=full_z`
+  - `use_ray_patch=1`, `n_ray=1024`
+
+Root cause:
+
+- in `scripts/pretrain/nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`, per-node `pbsdsh` launch path did not reliably propagate wrapper env vars (`RUN_TAG`, `SAVE_DIR`, `PT_SAMPLE_MODE`, `LOSS_TARGET_MODE`, etc.).
+- node entry therefore fell back to launch-script defaults.
+
+Fix applied:
+
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`
+  - added explicit `PROPAGATE_VARS` list and persisted values into `${RUN_DIR}/env.conf`
+  - node entry now uses `set -a; source env.conf; set +a` to export all persisted vars.
+
+Operational action:
+
+- killed wrong chain:
+  - pretrain: `101289`, `101290`
+  - dependent FT holds: `101291`..`101296`
+- re-submitted pretrain:
+  - `101297.qjcm` (`pn_rfpsc`, `pt_sample_mode=rfps_cached`)
+  - `101298.qjcm` (`pn_rfps`, `pt_sample_mode=rfps`)
+- re-submitted dependent FT x6 (`afterok`):
+  - `101299` (`rfpsc`, `obj_bg`)
+  - `101300` (`rfps`, `obj_bg`)
+  - `101301` (`rfpsc`, `obj_only`)
+  - `101302` (`rfps`, `obj_only`)
+  - `101303` (`rfpsc`, `pb_t50_rs`)
+  - `101304` (`rfps`, `pb_t50_rs`)
+
+Verification (node logs, startup):
+
+- `101297` (`qh076.patchnepa.log`):
+  - `run_tag=r_patchnepa_content_2x2_20260302_183413_rfpsc`
+  - `save_dir=runs/patchnepa_rayqa/patchnepa_content_2x2_20260302_183413_pt_rfpsc`
+  - `pt_sample_mode=rfps_cached`
+  - `loss_target_mode=content_tokens`
+- `101298` (`qh164.patchnepa.log`):
+  - `run_tag=r_patchnepa_content_2x2_20260302_183413_rfps`
+  - `save_dir=runs/patchnepa_rayqa/patchnepa_content_2x2_20260302_183413_pt_rfps`
+  - `pt_sample_mode=rfps`
+  - `loss_target_mode=content_tokens`
+
+Submission record:
+
+- `logs/sanity/patchnepa_submit/patchnepa_content_2x2_20260302_183413/submitted_jobs_resub_20260302_184319.txt`
+
+## 101. Patch-order diversity support (`fps_knn`) + sweep comparison submit (2026-03-02)
+
+Issue raised:
+
+- `point_order_mode=morton` reorders sampled points, but in `patch_embed=fps_knn` the
+  patch-token sequence order remained the FPS center-selection order.
+- no patch-level reorder hook existed in `PatchTransformerNepa.forward()`.
+
+Code changes:
+
+- `nepa3d/models/patch_nepa.py`
+  - added `patch_order_mode` to `PatchTransformerNepa`:
+    - `native` (default, old behavior)
+    - `morton_xyz`, `morton_xyz_rev`
+    - `morton_yzx`, `morton_yzx_rev`
+    - `morton_zxy`, `morton_zxy_rev`
+    - `random_sweep`, `random_sweep_rev`
+  - implemented `_build_patch_perm(centers_xyz)` and `_apply_patch_perm(...)`.
+  - applies patch permutation right after patch embedding (reorders `q_tok`,
+    `centers_xyz`, `group_idx` coherently).
+  - q-only classifier path now applies the same core patch-order logic.
+- `nepa3d/train/pretrain_patch_nepa.py`
+  - added CLI arg `--patch_order_mode` and passed it into `PatchTransformerNepa`.
+  - startup summary now prints `patch_order_mode`.
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh`
+  - added env `PATCH_ORDER_MODE` (default `native`), log print, and CLI forwarding.
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`
+  - added `PATCH_ORDER_MODE` to propagated env list.
+
+Sanity:
+
+- local forward sanity (venv) confirmed for modes:
+  - `native`, `morton_xyz`, `morton_yzx_rev`, `random_sweep`, `random_sweep_rev`
+  - output tensor shapes matched baseline.
+
+Comparison submission (best recipe + patch-order sweep):
+
+- submit root:
+  - `logs/sanity/patchnepa_submit/patchnepa_patchorder_sweepcmp_20260302_195955`
+- pretrain:
+  - `101312.qjcm` (`pn_patchord_swpt`)
+  - recipe parity with best content-target point-only run:
+    - `loss_target_mode=content_tokens`
+    - `pt_sample_mode=random`
+    - `qa_tokens=1`, `qa_layout=split_sep`
+    - `use_ray_patch=0`, `n_ray=0`
+    - only delta: `PATCH_ORDER_MODE=random_sweep`
+- dependent FT (afterok:101312):
+  - `101313.qjcm` (`obj_bg`)
+  - `101314.qjcm` (`obj_only`)
+  - `101315.qjcm` (`pb_t50_rs`)
+
+Submission record:
+
+- `logs/sanity/patchnepa_submit/patchnepa_patchorder_sweepcmp_20260302_195955/submitted_jobs.txt`
+
+## 102. 2x2 launch: SEP presence x patch-order mode (2026-03-02)
+
+Goal:
+
+- jointly test two axes under otherwise identical recipe:
+  - axis A (SEP): `qa_layout=split` + `qa_sep_token=0` vs `qa_layout=split_sep` + `qa_sep_token=1`
+  - axis B (patch-order): `patch_order_mode=morton` vs `patch_order_mode=random_sweep`
+
+Design (2x2):
+
+- `lS_poM`: `qa_layout=split`, `qa_sep_token=0`, `patch_order_mode=morton`
+- `lS_poR`: `qa_layout=split`, `qa_sep_token=0`, `patch_order_mode=random_sweep`
+- `lSS_poM`: `qa_layout=split_sep`, `qa_sep_token=1`, `patch_order_mode=morton`
+- `lSS_poR`: `qa_layout=split_sep`, `qa_sep_token=1`, `patch_order_mode=random_sweep`
+
+Common pretrain recipe:
+
+- `loss_target_mode=content_tokens`
+- `pt_sample_mode=random`
+- `point_order_mode=morton`
+- `patch_embed=fps_knn`
+- `use_ray_patch=0`
+- `dual_mask=(near=0.5, far=0.1, window=32, type_aware=1)`
+- `epochs=100`, `batch=8/proc`, DDP16
+
+Submission root:
+
+- `logs/sanity/patchnepa_submit/patchnepa_sep_patchorder_2x2_20260302_203259`
+
+Submitted jobs:
+
+- pretrain:
+  - `101318.qjcm` (`lS_poM`)
+  - `101322.qjcm` (`lS_poR`)
+  - `101326.qjcm` (`lSS_poM`)
+  - `101330.qjcm` (`lSS_poR`)
+- dependent FT x 12 (`obj_bg`, `obj_only`, `pb_t50_rs` per arm):
+  - from `101318`: `101319`, `101320`, `101321`
+  - from `101322`: `101323`, `101324`, `101325`
+  - from `101326`: `101327`, `101328`, `101329`
+  - from `101330`: `101331`, `101332`, `101333`
+
+Runtime status at submit:
+
+- pretrains `R`, dependent FTs `H` (afterok dependency)
+
+Record file:
+
+- `logs/sanity/patchnepa_submit/patchnepa_sep_patchorder_2x2_20260302_203259/submitted_jobs.txt`
+
+### 102.1 Added FT extension: `pooling=sep` on split-sep arms (2026-03-02)
+
+Reason:
+
+- to explicitly evaluate SEP-token pooling effect in the same 2x2 context.
+- `pooling=sep` is valid only when sequence contains `TYPE_SEP`.
+
+Scope:
+
+- added only on split-sep arms:
+  - `lSS_poM` (depends on pretrain `101326`)
+  - `lSS_poR` (depends on pretrain `101330`)
+- variants: `obj_bg`, `obj_only`, `pb_t50_rs` (total +6 FT jobs)
+
+Submitted pool-sep FT jobs:
+
+- from `101326` (`lSS_poM`):
+  - `101335` (`obj_bg`)
+  - `101336` (`obj_only`)
+  - `101337` (`pb_t50_rs`)
+- from `101330` (`lSS_poR`):
+  - `101338` (`obj_bg`)
+  - `101339` (`obj_only`)
+  - `101340` (`pb_t50_rs`)
+
+Wrapper diff note:
+
+- `POOLING=sep`
+- `PATCHNEPA_FT_MODE=qa_zeroa` (kept)
+- `HEAD_MODE=linear` (explicit for sep pooling stability/consistency)
+
+Record:
+
+- appended into `logs/sanity/patchnepa_submit/patchnepa_sep_patchorder_2x2_20260302_203259/submitted_jobs.txt`
+
+## 103. `content_tokens` 2x2 resub completion (`101297`-`101304`) (2026-03-02)
+
+Completion status:
+
+- pretrain:
+  - `101297` (`rfps_cached`) -> `F / Exit_status=0` (completed)
+  - `101298` (`rfps`) -> `F / Exit_status=0` (completed)
+- dependent FT x6:
+  - `101299`..`101304` all `F / Exit_status=0` (completed)
+
+Pretrain end snapshot (from `.mr0.log` run summary):
+
+- `rfps_cached` (`101297`):
+  - `diag/cos_prev=0.97214`
+  - `diag/cos_tgt=0.99932`
+  - `diag/gap=0.02717`
+  - `diag/copy_win=0.04297`
+- `rfps` (`101298`):
+  - `diag/cos_prev=0.97154`
+  - `diag/cos_tgt=0.99924`
+  - `diag/gap=0.02770`
+  - `diag/copy_win=0.04883`
+
+FT final TEST metrics:
+
+- `rfps_cached` branch:
+  - `101299` (`obj_bg`): `TEST acc=0.8193` (`loss=0.7996`)
+  - `101301` (`obj_only`): `TEST acc=0.8348` (`loss=0.7227`)
+  - `101303` (`pb_t50_rs`): `TEST acc=0.7665` (`loss=1.2742`)
+- `rfps` branch:
+  - `101300` (`obj_bg`): `TEST acc=0.8262` (`loss=0.7542`)
+  - `101302` (`obj_only`): `TEST acc=0.8417` (`loss=0.6907`)
+  - `101304` (`pb_t50_rs`): `TEST acc=0.7845` (`loss=1.2720`)
+
+Result read:
+
+- this resub confirms the same ranking trend as earlier:
+  - `rfps` > `rfps_cached` on all three downstream variants in this setting.
+- current top in this pair remains:
+  - `obj_only=0.8417` (`101302`, `rfps`)
+
+Source logs:
+
+- pretrain summaries:
+  - `logs/patch_nepa_pretrain/patchnepa_content_2x2_20260302_183413_pt_rfpsc/r_patchnepa_content_2x2_20260302_183413_rfpsc.mr0.log`
+  - `logs/patch_nepa_pretrain/patchnepa_content_2x2_20260302_183413_pt_rfps/r_patchnepa_content_2x2_20260302_183413_rfps.mr0.log`
+- FT qsub logs:
+  - `logs/sanity/patchnepa_submit/patchnepa_content_2x2_20260302_183413/qsub_logs/ft_rfpsc_obj_bg_resub.out`
+  - `logs/sanity/patchnepa_submit/patchnepa_content_2x2_20260302_183413/qsub_logs/ft_rfps_obj_bg_resub.out`
+  - `logs/sanity/patchnepa_submit/patchnepa_content_2x2_20260302_183413/qsub_logs/ft_rfpsc_obj_only_resub.out`
+  - `logs/sanity/patchnepa_submit/patchnepa_content_2x2_20260302_183413/qsub_logs/ft_rfps_obj_only_resub.out`
+  - `logs/sanity/patchnepa_submit/patchnepa_content_2x2_20260302_183413/qsub_logs/ft_rfpsc_pb_t50_rs_resub.out`
+  - `logs/sanity/patchnepa_submit/patchnepa_content_2x2_20260302_183413/qsub_logs/ft_rfps_pb_t50_rs_resub.out`
+
+## 104. Patch-order sweep pretrain completed (`101312`), dependent FT running (`101313`-`101315`) (2026-03-02)
+
+Pretrain status:
+
+- `101312` (`patch_order_mode=random_sweep`) -> `F / Exit_status=0` (completed)
+
+Pretrain end snapshot:
+
+- `diag/cos_prev=0.9713`
+- `diag/cos_tgt=0.99968`
+- `diag/gap=0.02838`
+- `diag/copy_win=0.03516`
+- checkpoint:
+  - `runs/patchnepa_rayqa/patchnepa_patchorder_sweepcmp_20260302_195955_pt_sweep`
+
+Dependent FT status (currently running):
+
+- `101313` (`obj_bg`): `R`
+- `101314` (`obj_only`): `R`
+- `101315` (`pb_t50_rs`): `R`
+
+Source logs:
+
+- `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_101312.qjcm_r_patchnepa_patchorder_sweepcmp_20260302_195955_sweep/logs/qh137.patchnepa.log`
+- `logs/sanity/patchnepa_submit/patchnepa_patchorder_sweepcmp_20260302_195955/qsub_logs/pretrain_sweep.out`
+
+## 105. `sep x patch_order` 2x2: split(without SEP) arms failed by policy gate (2026-03-02)
+
+Observed:
+
+- `101318` (`lS_poM`) -> `F / Exit_status=97`
+- `101322` (`lS_poR`) -> `F / Exit_status=97`
+- immediate error in node logs:
+  - `ERROR: Stage-2 policy requires QA_SEP_TOKEN=1 (got 0)`
+
+Impact on dependent jobs:
+
+- from `101318`: `101319`/`101320`/`101321` -> `F` (dependency chain failed)
+- from `101322`: `101323`/`101324`/`101325` -> `F` (dependency chain failed)
+
+Current unaffected split-sep arms:
+
+- pretrains still running:
+  - `101326` (`lSS_poM`) -> `R`
+  - `101330` (`lSS_poR`) -> `R`
+- their dependent FT jobs (`101327`..`101333`, `101335`..`101340`) remain `H` (`afterok` wait).
+
+Source logs:
+
+- `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_101318.qjcm_r_patchnepa_sep_patchorder_2x2_20260302_203259_lS_poM/logs/qh141.patchnepa.log`
+- `logs/ddp_patch_nepa_pretrain/ddp_patchnepa_101322.qjcm_r_patchnepa_sep_patchorder_2x2_20260302_203259_lS_poR/logs/qh002.patchnepa.log`
+
+## 106. Submitted: `pt_sample_mode x patch_order_mode` 2x2 (`random` vs `rfps`) (2026-03-02)
+
+Reason:
+
+- explicit request to validate:
+  - `pt_sample_mode=rfps` + `patch_order_mode=morton`
+  - against matched `random` arms under the same recipe.
+- previous patch-order sweep jobs were `PT_SAMPLE_MODE=random` only.
+
+Design (2x2):
+
+- `r_poM`: `pt_sample_mode=random`, `patch_order_mode=morton`
+- `r_poR`: `pt_sample_mode=random`, `patch_order_mode=random_sweep`
+- `f_poM`: `pt_sample_mode=rfps`, `patch_order_mode=morton`
+- `f_poR`: `pt_sample_mode=rfps`, `patch_order_mode=random_sweep`
+
+Common controls:
+
+- `loss_target_mode=content_tokens`
+- `qa_layout=split_sep`, `qa_sep_token=1` (policy-compliant)
+- `use_ray_patch=0`, `n_ray=0`
+- `point_order_mode=morton`, `patch_embed=fps_knn`
+- `epochs=100`, DDP16 (`rt_QF=4`, `batch=8/proc`)
+- dependent FT x3 per arm (`obj_bg`, `obj_only`, `pb_t50_rs`) with `afterok`.
+
+Submitted jobs:
+
+- pretrain:
+  - `101348` (`r_poM`)
+  - `101352` (`r_poR`)
+  - `101356` (`f_poM`)
+  - `101360` (`f_poR`)
+- dependent FT:
+  - from `101348`: `101349`, `101350`, `101351`
+  - from `101352`: `101353`, `101354`, `101355`
+  - from `101356`: `101357`, `101358`, `101359`
+  - from `101360`: `101361`, `101362`, `101363`
+
+Queue snapshot right after submit:
+
+- pretrains: `R`
+- dependent FTs: `H` (`afterok` wait)
+
+Record:
+
+- root:
+  - `logs/sanity/patchnepa_submit/patchnepa_rfps_patchorder_2x2_20260302_205849`
+- submit script:
+  - `logs/sanity/patchnepa_submit/patchnepa_rfps_patchorder_2x2_20260302_205849/submit.sh`
+- job list:
+  - `logs/sanity/patchnepa_submit/patchnepa_rfps_patchorder_2x2_20260302_205849/submitted_jobs.txt`
+
+## 107. Confirmed results update (`sweep` + `sep x patch_order`) and 2D-NEPA stop request (2026-03-02)
+
+Confirmed final FT metrics from available `test_metrics.json`:
+
+- `patch_order_sweepcmp` FT (`101313`-`101315` lineage):
+  - `obj_bg`: `acc=0.8365` (`loss=0.7865`)
+  - `obj_only`: `acc=0.8262` (`loss=0.7935`)
+  - `pb_t50_rs`: `acc=0.8064` (`loss=1.1250`)
+- `sep x patch_order` (`split_sep`, `pooling=cls_max`) `lSS_poM`:
+  - `obj_bg`: `acc=0.8090` (`loss=0.8239`)
+  - `obj_only`: `acc=0.8158` (`loss=0.8616`)
+  - `pb_t50_rs`: `acc=0.7738` (`loss=1.2827`)
+- `sep x patch_order` (`split_sep`, `pooling=cls_max`) `lSS_poR`:
+  - `obj_bg`: `acc=0.8365` (`loss=0.7865`)
+  - `obj_only`: `acc=0.8262` (`loss=0.7935`)
+  - `pb_t50_rs`: `acc=0.8064` (`loss=1.1250`)
+- `sep x patch_order` + `pooling=sep` `lSS_poM_poolsep`:
+  - `obj_bg`: `acc=0.7642` (`loss=1.0268`)
+  - `obj_only`: `acc=0.7780` (`loss=1.2165`)
+  - `pb_t50_rs`: `acc=0.7491` (`loss=1.5934`)
+- `sep x patch_order` + `pooling=sep` `lSS_poR_poolsep`:
+  - `obj_bg`: `acc=0.8055` (`loss=0.9226`)
+  - `obj_only`: `acc=0.8176` (`loss=0.9576`)
+  - `pb_t50_rs`: `acc=0.7793` (`loss=1.3367`)
+
+Readout:
+
+- In this recipe, `patch_order_mode=poR` outperforms `poM` across all three variants.
+- `pooling=sep` underperforms `pooling=cls_max` for both `poM` and `poR`.
+- Overall best remains unchanged: `obj_only=0.8417` (content-target `rfps` branch, prior run).
+
+Job control:
+
+- `101258.qjcm` (`nepa2d_bdiag`) received delete request and is now removed from current queue listing.
+
+## 108. `pt_sample_mode x patch_order_mode` 2x2 (`101348`-`101363`) final status: failed before training (2026-03-02)
+
+Summary:
+
+- All jobs are now finished (`qstat` empty), but this sweep did **not** produce valid experiment metrics.
+- Root cause was pretrain rendezvous failure on all 4 pretrain arms:
+  - `101348` (`r_poM`), `101352` (`r_poR`), `101356` (`f_poM`), `101360` (`f_poR`)
+  - all `job_state=F`, `Exit_status=1`
+  - common error:
+    - `torch.distributed.DistStoreError: Timed out after 901 seconds waiting for clients. 1/4 clients joined.`
+  - source:
+    - `logs/patch_nepa_pretrain/patchnepa_rfps_patchorder_2x2_20260302_205849_pt_*/r_*.mr0.log`
+
+Impact on dependent FT jobs:
+
+- `101349`..`101351`, `101353`..`101355`, `101357`..`101359`, `101361`..`101363`
+- all ended as `job_state=F` with dependency hold/finalized state (not successful FT execution)
+- therefore no `test_metrics.json` generated for this sweep.
+
+Notes:
+
+- W&B was enabled (`use=1`, `project=patchnepa-pretrain`) in all four pretrain wrappers.
+- this batch should be treated as infrastructure failure (multi-node rendezvous), not a model comparison result.
+
+## 109. Re-submit of `pt_sample_mode x patch_order_mode` 2x2 with single-node DDP (`101420`-`101435`) (2026-03-02)
+
+Reason:
+
+- retry the exact 2x2 comparison after `DistStoreError` in multi-node launch.
+- launcher changed to `nepa3d_pretrain_patch_nepa_qf.sh` with explicit single-node DDP:
+  - `NUM_PROCESSES=4`, `NUM_MACHINES=1`, `MACHINE_RANK=0`, `MAIN_PROCESS_IP=127.0.0.1`
+
+Design (same 2x2 factors):
+
+- `r_poM`: `pt_sample_mode=random`, `patch_order_mode=morton`
+- `r_poR`: `pt_sample_mode=random`, `patch_order_mode=random_sweep`
+- `f_poM`: `pt_sample_mode=rfps`, `patch_order_mode=morton`
+- `f_poR`: `pt_sample_mode=rfps`, `patch_order_mode=random_sweep`
+
+Common controls:
+
+- `loss_target_mode=content_tokens`
+- `qa_layout=split_sep`, `qa_sep_token=1`
+- `use_ray_patch=0`, `n_ray=0`
+- `point_order_mode=morton`, `patch_embed=fps_knn`
+- effective global batch kept at 128 (`batch=8`, `grad_accum=4`, `num_processes=4`)
+- W&B on: `patchnepa-pretrain` / `patchnepa-finetune`
+
+Submitted jobs:
+
+- pretrain:
+  - `101420` (`r_poM`)
+  - `101424` (`r_poR`)
+  - `101428` (`f_poM`)
+  - `101432` (`f_poR`)
+- dependent FT:
+  - from `101420`: `101421`, `101422`, `101423`
+  - from `101424`: `101425`, `101426`, `101427`
+  - from `101428`: `101429`, `101430`, `101431`
+  - from `101432`: `101433`, `101434`, `101435`
+
+Submission record:
+
+- `logs/sanity/patchnepa_submit/patchnepa_rfps_patchorder_2x2_retry_20260302_223332/submitted_jobs.txt`
+- `logs/sanity/patchnepa_submit/patchnepa_rfps_patchorder_2x2_retry_20260302_223332/submit.sh`
+
+Outcome update:
+
+- this retry also failed immediately on all 4 pretrains (`101420`,`101424`,`101428`,`101432`), each `job_state=F`, `Exit_status=1`, `walltime=00:00:01`.
+- direct error:
+  - `tee: logs/patch_nepa_pretrain/... .mr0.log: No such file or directory`
+- root cause:
+  - `nepa3d_pretrain_patch_nepa_qf.sh` creates `LOG_ROOT` before `cd ${WORKDIR}`.
+  - wrapper had relative `LOG_ROOT` / `SAVE_DIR`, so runtime `tee` path was unresolved after `cd`.
+  - fix is to pass absolute paths.
+
+## 110. Re-re-submit with absolute `LOG_ROOT`/`SAVE_DIR` (`101436`-`101451`) (2026-03-02)
+
+Fix applied:
+
+- keep same 2x2 experiment design and hyper-parameters.
+- wrapper changed to absolute paths:
+  - `SAVE_DIR=/groups/qgah50055/ide/VGI/3D-NEPA/runs/...`
+  - `LOG_ROOT=/groups/qgah50055/ide/VGI/3D-NEPA/logs/...`
+- launcher remains single-node DDP (`NUM_PROCESSES=4`, `NUM_MACHINES=1`).
+
+Submitted jobs:
+
+- pretrain:
+  - `101436` (`r_poM`: random + morton)
+  - `101440` (`r_poR`: random + random_sweep)
+  - `101444` (`f_poM`: rfps + morton)
+  - `101448` (`f_poR`: rfps + random_sweep)
+- dependent FT:
+  - from `101436`: `101437`, `101438`, `101439`
+  - from `101440`: `101441`, `101442`, `101443`
+  - from `101444`: `101445`, `101446`, `101447`
+  - from `101448`: `101449`, `101450`, `101451`
+
+Startup sanity (confirmed in `pretrain_r_poM.out`):
+
+- run header is emitted normally (no missing log-path error).
+- W&B line present:
+  - `wandb: use=1 project=patchnepa-pretrain ...`
+
+Submission record:
+
+- `logs/sanity/patchnepa_submit/patchnepa_rfps_patchorder_2x2_retry2_20260302_224950/submit.sh`
+- `logs/sanity/patchnepa_submit/patchnepa_rfps_patchorder_2x2_retry2_20260302_224950/submitted_jobs.txt`
+
+## 111. Best-recipe backbone swap submit (`pointmae_conv + fps_random_start=1`) (2026-03-03)
+
+Purpose:
+
+- keep the current best PatchNEPA recipe family fixed (`content_tokens + rfps + point-only + split_sep`),
+- swap only local patch backbone path to Point-MAE-style:
+  - `PATCH_LOCAL_ENCODER=pointmae_conv`
+  - `PATCH_FPS_RANDOM_START=1`
+
+Recipe controls (kept aligned with best branch):
+
+- pretrain:
+  - `MIX_CONFIG=pretrain_mixed_shapenet_pointcloud_only_onepass.yaml`
+  - `pt_sample_mode=rfps`, `loss_target_mode=content_tokens`
+  - `patch_embed=fps_knn`, `patch_order_mode=none`
+  - `use_ray_patch=0`, `n_ray=0`
+  - single-node DDP4 (`NUM_PROCESSES=4`, `GRAD_ACCUM=4`, effective global batch 128)
+- finetune:
+  - direct PatchNEPA FT (`model_source=patchnepa`)
+  - `qa_zeroa`, `pooling=cls_max`, `head=pointmae_mlp`, strict eval (`file + TTA10`)
+  - variants: `obj_bg`, `obj_only`, `pb_t50_rs`
+
+Submitted jobs:
+
+- pretrain:
+  - `101468.qjcm` (`pnpmcv_pt`)
+- dependent FT:
+  - `101469.qjcm` (`pnpmcv_obj_bg`, `afterok:101468`)
+  - `101470.qjcm` (`pnpmcv_obj_only`, `afterok:101468`)
+  - `101471.qjcm` (`pnpmcv_pb_t50_rs`, `afterok:101468`)
+
+Queue snapshot right after submit:
+
+- `101468`: `R`
+- `101469`/`101470`/`101471`: `H` (dependency wait)
+
+Submission record:
+
+- `logs/sanity/patchnepa_submit/patchnepa_backbone_pmconv_frombest_20260303_000550/submit.sh`
+- `logs/sanity/patchnepa_submit/patchnepa_backbone_pmconv_frombest_20260303_000550/submitted_jobs.txt`
+
+## 112. Local-encoder strict control arm submitted (`mlp`, same recipe as 111) (2026-03-03)
+
+Reason:
+
+- to complete strict A/B where only local patch encoder differs.
+- arm 111 (`101468`) used:
+  - `PATCH_LOCAL_ENCODER=pointmae_conv`
+  - `PATCH_FPS_RANDOM_START=1`
+- this control arm uses:
+  - `PATCH_LOCAL_ENCODER=mlp`
+  - `PATCH_FPS_RANDOM_START=1`
+- all other settings are matched to section 111 (`content_tokens + rfps + point-only + split_sep`).
+
+Submitted jobs:
+
+- pretrain:
+  - `101472.qjcm` (`pnmlpc_pt`)
+- dependent FT:
+  - `101473.qjcm` (`pnmlpc_obj_bg`, `afterok:101472`)
+  - `101474.qjcm` (`pnmlpc_obj_only`, `afterok:101472`)
+  - `101475.qjcm` (`pnmlpc_pb_t50_rs`, `afterok:101472`)
+
+Queue snapshot right after submit:
+
+- `101472`: `R`
+- `101473`/`101474`/`101475`: `H` (dependency wait)
+
+Submission record:
+
+- `logs/sanity/patchnepa_submit/patchnepa_backbone_localenc_ctrl_20260303_000834/submit.sh`
+- `logs/sanity/patchnepa_submit/patchnepa_backbone_localenc_ctrl_20260303_000834/submitted_jobs.txt`
+
+## TODO. Point-MAE-parity path handling policy (2026-03-03)
+
+Decision note:
+
+- `backbone_mode=pointmae` / Point-MAE-parity path is currently treated as an experimental control route only.
+- It should not be used as the main PatchNEPA recipe for headline conclusions, because it drifts from PatchNEPA's original design intent.
+
+TODO (owner: user-side follow-up):
+
+- review and refine/rollback Point-MAE-parity wiring as needed.
+- keep core comparisons and mainline reporting on PatchNEPA-native settings.
+
+## 112. Point-order sample diversity compare submit (6-view vs 12-view, point-order only) (2026-03-03)
+
+User request:
+
+- keep `serial_order` axis out of scope for this compare.
+- compare only `point_order_mode` diversity against existing best-recipe family.
+- two requested settings:
+  - 6-view Morton axis permutations
+  - 12-view (6-view + reverse variants)
+
+Comparator baseline (existing best in this recipe family):
+
+- from Section 103 (`content_tokens`, point-only, `pt_sample_mode=rfps`, `point_order_mode=morton`)
+  - `obj_bg=0.8262`
+  - `obj_only=0.8417`
+  - `pb_t50_rs=0.7845`
+
+Design submitted here:
+
+- fixed recipe (same family as baseline):
+  - pretrain: `content_tokens`, point-only, `pt_sample_mode=rfps`, `use_ema=1`
+  - `patch_embed=fps_knn`
+  - `patch_order_mode=none` (held fixed; not a comparison axis)
+  - `qa_layout=split_sep`, `dual_mask=(0.5,0.1,w=32,type_aware=1)`
+  - single-node DDP4 with `grad_accum=4` (effective global batch 128)
+- only changed axis: `point_order_mode`
+
+Arms:
+
+1) `po6`
+- `point_order_mode=sample:morton_xyz,morton_xzy,morton_yxz,morton_yzx,morton_zxy,morton_zyx`
+
+2) `po12`
+- `point_order_mode=sample:morton_xyz,morton_xzy,morton_yxz,morton_yzx,morton_zxy,morton_zyx,rev_morton_xyz,rev_morton_xzy,rev_morton_yxz,rev_morton_yzx,rev_morton_zxy,rev_morton_zyx`
+
+Submitted jobs:
+
+- pretrain:
+  - `101484.qjcm` (`po6`)
+  - `101488.qjcm` (`po12`)
+- dependent FT (`afterok`, direct PatchNEPA FT, 3 variants each):
+  - from `101484`: `101485` (`obj_bg`), `101486` (`obj_only`), `101487` (`pb_t50_rs`)
+  - from `101488`: `101489` (`obj_bg`), `101490` (`obj_only`), `101491` (`pb_t50_rs`)
+
+Submission root:
+
+- `logs/sanity/patchnepa_submit/patchnepa_pointorder_samplecmp_20260303_011204`
+  - `submit.sh`
+  - `submitted_jobs.txt`
+  - `qsub_logs/`
+
+Runtime snapshot right after submit:
+
+- pretrain `101484`/`101488`: `R`
+- dependent FT `101485`-`101487`, `101489`-`101491`: `H` (`afterok` wait)

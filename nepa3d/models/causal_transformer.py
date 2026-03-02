@@ -21,6 +21,134 @@ def _drop_path(x: torch.Tensor, drop_prob: float, training: bool) -> torch.Tenso
     return x.div(keep_prob) * rnd
 
 
+class DropPath(nn.Module):
+    def __init__(self, drop_prob: float = 0.0) -> None:
+        super().__init__()
+        self.drop_prob = float(drop_prob)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return _drop_path(x, self.drop_prob, self.training)
+
+
+class _PointMAEMlp(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        hidden_features: int,
+        out_features: int,
+        *,
+        drop: float,
+    ) -> None:
+        super().__init__()
+        self.fc1 = nn.Linear(int(in_features), int(hidden_features))
+        self.act = nn.GELU()
+        self.fc2 = nn.Linear(int(hidden_features), int(out_features))
+        self.drop = nn.Dropout(float(drop))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
+
+
+class _PointMAESelfAttention(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int,
+        *,
+        qkv_bias: bool,
+        attn_drop: float,
+        proj_drop: float,
+    ) -> None:
+        super().__init__()
+        self.num_heads = int(num_heads)
+        self.dim = int(dim)
+        if self.dim % self.num_heads != 0:
+            raise ValueError(f"dim={self.dim} must be divisible by num_heads={self.num_heads}")
+        self.head_dim = self.dim // self.num_heads
+        self.scale = self.head_dim**-0.5
+        self.qkv = nn.Linear(self.dim, self.dim * 3, bias=bool(qkv_bias))
+        self.attn_drop = nn.Dropout(float(attn_drop))
+        self.proj = nn.Linear(self.dim, self.dim)
+        self.proj_drop = nn.Dropout(float(proj_drop))
+
+    def forward(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor]) -> torch.Tensor:
+        b, t, c = x.shape
+        qkv = (
+            self.qkv(x)
+            .reshape(b, t, 3, self.num_heads, c // self.num_heads)
+            .permute(2, 0, 3, 1, 4)
+        )
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        scores = (q @ k.transpose(-2, -1)) * self.scale
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                min_val = torch.finfo(scores.dtype).min
+                if attn_mask.dim() == 2:
+                    scores = scores.masked_fill(attn_mask[None, None, :, :], min_val)
+                elif attn_mask.dim() == 3:
+                    scores = scores.masked_fill(attn_mask[:, None, :, :], min_val)
+                else:
+                    raise ValueError(f"attn_mask(bool) must be 2D/3D, got {tuple(attn_mask.shape)}")
+            else:
+                if attn_mask.dim() == 2:
+                    scores = scores + attn_mask[None, None, :, :]
+                elif attn_mask.dim() == 3:
+                    scores = scores + attn_mask[:, None, :, :]
+                else:
+                    raise ValueError(f"attn_mask(additive) must be 2D/3D, got {tuple(attn_mask.shape)}")
+
+        attn = scores.softmax(dim=-1)
+        attn = self.attn_drop(attn)
+
+        x = (attn @ v).transpose(1, 2).reshape(b, t, c)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
+
+class _PointMAEBlock(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int,
+        *,
+        mlp_ratio: float,
+        qkv_bias: bool,
+        drop: float,
+        attn_drop: float,
+        drop_path: float,
+    ) -> None:
+        super().__init__()
+        self.norm1 = nn.LayerNorm(int(dim))
+        self.attn = _PointMAESelfAttention(
+            int(dim),
+            int(num_heads),
+            qkv_bias=bool(qkv_bias),
+            attn_drop=float(attn_drop),
+            proj_drop=float(drop),
+        )
+        self.drop_path = DropPath(float(drop_path)) if float(drop_path) > 0.0 else nn.Identity()
+        self.norm2 = nn.LayerNorm(int(dim))
+        mlp_hidden_dim = int(int(dim) * float(mlp_ratio))
+        self.mlp = _PointMAEMlp(
+            in_features=int(dim),
+            hidden_features=mlp_hidden_dim,
+            out_features=int(dim),
+            drop=float(drop),
+        )
+
+    def forward(self, x: torch.Tensor, attn_mask: Optional[torch.Tensor]) -> torch.Tensor:
+        x = x + self.drop_path(self.attn(self.norm1(x), attn_mask=attn_mask))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x
+
+
 class _QKNorm(nn.Module):
     def __init__(
         self,
@@ -352,6 +480,21 @@ class CausalTransformer(nn.Module):
                     for _ in range(int(num_layers))
                 ]
             )
+        elif self.backbone_impl == "pointmae":
+            self.layers = nn.ModuleList(
+                [
+                    _PointMAEBlock(
+                        dim=int(d_model),
+                        num_heads=int(nhead),
+                        mlp_ratio=float(mlp_ratio),
+                        qkv_bias=bool(qkv_bias),
+                        drop=float(dropout),
+                        attn_drop=float(dropout),
+                        drop_path=float(self.drop_path_rates[i]),
+                    )
+                    for i in range(int(num_layers))
+                ]
+            )
         elif self.backbone_impl == "nepa2d":
             self.blocks = nn.ModuleList(
                 [
@@ -378,7 +521,7 @@ class CausalTransformer(nn.Module):
             )
             self.final_ln = nn.LayerNorm(int(d_model), eps=float(layer_norm_eps)) if bool(final_layernorm) else nn.Identity()
         else:
-            raise ValueError(f"Unknown backbone_impl={self.backbone_impl}; use legacy|nepa2d")
+            raise ValueError(f"Unknown backbone_impl={self.backbone_impl}; use legacy|pointmae|nepa2d")
 
     @staticmethod
     def _clamp01(x: float) -> float:
@@ -500,6 +643,13 @@ class CausalTransformer(nn.Module):
                 x_in = x + pos if pos is not None else x
                 x_next = layer(x_in, src_mask=attn_mask)
                 x = self._apply_drop_path(x, x_next, self.drop_path_rates[li], self.training)
+            return x
+
+        if self.backbone_impl == "pointmae":
+            for layer in self.layers:
+                # Point-MAE convention: inject absolute positional embedding per block.
+                x_in = x + pos if pos is not None else x
+                x = layer(x_in, attn_mask=attn_mask)
             return x
 
         for block in self.blocks:
