@@ -240,6 +240,8 @@ class ModelNet40QueryDataset(Dataset):
         self.pt_fps_key = str(pt_fps_key)
         self.pt_rfps_key = str(pt_rfps_key)
         self._warned_missing_rfps_order = False
+        self._warned_ray_meta_missing = False
+        self._warned_ray_pool_missing = False
         self.pt_rfps_m = int(pt_rfps_m)
         self.point_order_mode = str(point_order_mode)
 
@@ -350,7 +352,26 @@ class ModelNet40QueryDataset(Dataset):
             if pt_dist_pool.ndim == 1:
                 pt_dist_pool = pt_dist_pool.reshape(-1, 1)
 
-        ray_available = bool(pools.get("ray_available", True))
+        ray_req_keys = ("ray_o_pool", "ray_d_pool", "ray_hit_pool", "ray_t_pool", "ray_n_pool")
+        has_ray_pools = all((k in pools) and (pools.get(k) is not None) for k in ray_req_keys)
+        if "ray_available" in pools:
+            ray_available = bool(pools.get("ray_available", False))
+            if ray_available and (not has_ray_pools):
+                if not self._warned_ray_meta_missing:
+                    warnings.warn(
+                        f"ray_available=True but ray pools are missing (path={path}); "
+                        "treating as missing-ray sample."
+                    )
+                    self._warned_ray_meta_missing = True
+                ray_available = False
+        else:
+            if not has_ray_pools and not self._warned_ray_meta_missing:
+                warnings.warn(
+                    f"ray_available key is missing and ray pools are absent (path={path}); "
+                    "treating as missing-ray sample."
+                )
+                self._warned_ray_meta_missing = True
+            ray_available = bool(has_ray_pools)
         if self.force_missing_ray:
             ray_available = False
 
@@ -525,8 +546,15 @@ class ModelNet40QueryDataset(Dataset):
                         ray_n = local_pools.get("ray_n_pool", None)
                         ray_unc = local_pools.get("ray_unc_pool", None)
                         if ray_o is None or ray_d is None or ray_hit is None or ray_t is None or ray_n is None:
-                            raise ValueError("ray pools are required when n_ray > 0 and ray is available")
+                            if not self._warned_ray_pool_missing:
+                                warnings.warn(
+                                    f"ray pools are missing while ray is marked available (path={path}); "
+                                    "falling back to missing-ray dummy tensors."
+                                )
+                                self._warned_ray_pool_missing = True
+                            ray_ok = False
 
+                    if ray_ok:
                         ray_o = np.asarray(ray_o)
                         ray_d = np.asarray(ray_d)
                         ray_hit = np.asarray(ray_hit).reshape(-1)
@@ -535,6 +563,16 @@ class ModelNet40QueryDataset(Dataset):
                         if ray_unc is not None:
                             ray_unc = np.asarray(ray_unc).reshape(-1)
 
+                        if int(ray_o.shape[0]) <= 0:
+                            if not self._warned_ray_pool_missing:
+                                warnings.warn(
+                                    f"ray pools are empty while ray is marked available (path={path}); "
+                                    "falling back to missing-ray dummy tensors."
+                                )
+                                self._warned_ray_pool_missing = True
+                            ray_ok = False
+
+                    if ray_ok:
                         r_idx = _choice(ray_o.shape[0], self.n_ray, rng=rng)
                         ray_o_s = ray_o[r_idx].astype(np.float32, copy=False)
                         ray_d_s = ray_d[r_idx].astype(np.float32, copy=False)

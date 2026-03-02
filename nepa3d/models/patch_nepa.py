@@ -826,7 +826,25 @@ class PatchTransformerNepa(nn.Module):
             if self.ray_patch_embed is None:
                 raise RuntimeError("use_ray_patch=True but ray_patch_embed is None")
             if ray_o is None or ray_d is None:
-                raise ValueError("use_ray_patch=True requires ray_o and ray_d")
+                # Mixed datasets may include samples with no ray modality (e.g., UDF).
+                # Keep training stable by providing dummy rays and disabling them via ray_available.
+                B = int(pt_xyz.shape[0])
+                dev = pt_xyz.device
+                dt = pt_xyz.dtype
+                cand_r = []
+                for t in (ray_t, ray_hit, ray_n, ray_unc):
+                    if t is None or t.dim() < 2:
+                        continue
+                    cand_r.append(int(t.shape[1]))
+                R = max(cand_r) if cand_r else 1
+                if ray_o is None:
+                    ray_o = torch.zeros((B, R, 3), device=dev, dtype=dt)
+                if ray_d is None:
+                    ray_d = torch.zeros((B, R, 3), device=dev, dtype=dt)
+                if ray_available is None:
+                    ray_available = torch.zeros((B,), device=dev, dtype=torch.long)
+                else:
+                    ray_available = torch.zeros_like(ray_available.to(device=dev)).view(B)
             ray_out = self.ray_patch_embed(
                 centers_xyz=centers_xyz,
                 ray_o=ray_o,

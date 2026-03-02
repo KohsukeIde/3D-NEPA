@@ -29,10 +29,14 @@ class UDFGridBackend:
             # use the mesh-derived distances if present.
             pt_dist = self.d["pt_dist_pool"].astype(np.float32, copy=False)
 
-        # Rays are present only to keep the Query->Answer API shape-compatible.
-        # They will be ignored by tokenizer when ray_available=False.
-        ray_o = self.d["ray_o_pool"].astype(np.float32, copy=False)
-        ray_d = self.d["ray_d_pool"].astype(np.float32, copy=False)
+        # Rays are optional for UDF samples. When absent, provide a 1-ray dummy
+        # pool so tokenizer sampling remains shape-safe even if n_ray > 0.
+        if "ray_o_pool" in self.d and "ray_d_pool" in self.d:
+            ray_o = self.d["ray_o_pool"].astype(np.float32, copy=False)
+            ray_d = self.d["ray_d_pool"].astype(np.float32, copy=False)
+        else:
+            ray_o = np.zeros((1, 3), dtype=np.float32)
+            ray_d = np.zeros((1, 3), dtype=np.float32)
 
         # Provide zeros for answers (safe even if original pools exist).
         m = ray_o.shape[0]
