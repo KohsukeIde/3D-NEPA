@@ -353,3 +353,78 @@ Default mini-CPAC profile in the chain:
 - `N_CTX_POINTS=1024`
 - `N_QUERY=1024`
 - `CHUNK_N_QUERY=1024`
+
+## 15. Applied Now: Strict Surf-Answer Regeneration (UDF-Grid Sphere Tracing, No-Ray, 16-shard)
+
+Decision:
+
+- Do **append update** on `shapenet_cache_v2_20260303` (not full rewrite).
+- Keep existing v2 keys, add surf-aligned primitive-native answer keys.
+- No ray recomputation (`N_RAYS=0` in this run); existing ray arrays remain but are not used.
+- UDF strict features are computed by sphere tracing on an unsigned distance grid from normalized surface occupancy.
+
+Code changes:
+
+- `nepa3d/data/preprocess_shapenet_v2.py`
+  - Added strict surf-answer features:
+    - `mesh_surf_n`, `mesh_surf_curv`
+    - `udf_surf_t_in`, `udf_surf_t_out`, `udf_surf_hit_out`, `udf_surf_thickness`
+    - `pc_n`, `pc_density` (full context-aligned arrays)
+  - Added append mode:
+    - `--augment_existing` updates existing NPZ in place.
+    - `--skip_existing` now skips only when required surf keys already exist.
+  - Added strict UDF-grid controls:
+    - `--strict_udf_surface`
+    - `--surf_udf_grid`, `--surf_udf_dilate`
+    - `--surf_udf_max_t`, `--surf_udf_eps`
+    - `--surf_udf_steps`, `--surf_udf_tol`, `--surf_udf_min_step`
+  - Ray generation now safely supports `n_rays=0`.
+
+- `nepa3d/data/dataset_v2.py`
+  - Added queryless-aligned answer path:
+    - `return_pt_ans`, `pt_answer_prefix`, `pt_answer_key`
+    - Emits `pt_xyz` and `pt_ans_feat` aligned by the same sampled indices.
+
+- `nepa3d/data/mixed_pretrain.py`
+  - Added v2 routing knobs:
+    - `return_pt_ans`, `pt_answer_prefix`, `pt_answer_key`
+    - per-dataset override support via mix config extras.
+
+- `scripts/preprocess/preprocess_shapenet_v2.sh`
+- `scripts/preprocess/submit_preprocess_shapenet_v2_qf.sh`
+  - Added env passthrough for strict surf-answer append run.
+
+Submitted jobs (active chain, 2026-03-03):
+
+- preprocess 16-shard append run:
+  - `102118` .. `102133` (`shpv2g_s00` .. `shpv2g_s15`)
+- dependency chain:
+  - split: `102134` (afterok on all 16 preprocess jobs)
+  - materialize: `102135` (afterok:`102134`)
+
+## 16. Applied Now: Primitive-Conditioned Q/A Type IDs (default on)
+
+Motivation:
+
+- In mixed pretrain, `mesh` and `udf` can share similar surface context (`surf_xyz`) but require different answer spaces.
+- Added explicit primitive signal in `type_id` to avoid ambiguous supervision.
+
+Changes:
+
+- New token types appended in `nepa3d/token/tokenizer.py`:
+  - `TYPE_Q_POINT_MESH=10`, `TYPE_A_POINT_MESH=11`
+  - `TYPE_Q_POINT_UDF=12`, `TYPE_A_POINT_UDF=13`
+  - `TYPE_Q_POINT_PC=14`, `TYPE_A_POINT_PC=15`
+  - `TYPE_VOCAB_SIZE=16`
+- `PatchTransformerNepa.forward(..., primitive=...)` now maps per-sample primitive label to Q/A point types.
+- `build_mixed_pretrain()` now sets `V2SurfaceQueryDataset(primitive_label=<backend>)`, so batch primitive labels are reliable (`pc/mesh/udf`).
+- `pretrain_patch_nepa.py` now passes `primitive=batch['primitive']` into model forward.
+- Masks were extended so new types are treated consistently:
+  - query masks (`q_mask`, pooling/query selection),
+  - NEPA loss answer/context masks,
+  - causal dual-mask type-aware query-like mask.
+
+Compatibility:
+
+- Legacy ids (`TYPE_Q_POINT`, `TYPE_A_POINT`, etc.) remain unchanged.
+- Existing checkpoints remain loadable with `strict=False` adaptation path already used in this codebase.

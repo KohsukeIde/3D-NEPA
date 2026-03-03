@@ -5234,3 +5234,45 @@ Re-submitted smoke jobs with diag-enabled code:
   - `patchnepa_v2tok_mix33_smoke_diag_20260303_194716`
 - `102046` (`pntok_m50u50_d`)
   - `patchnepa_v2tok_mesh50udf50_smoke_diag_20260303_194716`
+
+## 119. Strict Surf-Answer Dataset Regeneration (Append, UDF-Grid Sphere Tracing, No-Ray) (2026-03-03)
+
+Purpose:
+
+- Move to strict surf-aligned Answer features for queryless v1-style PatchNEPA pretrain.
+- Avoid full cache rewrite by appending required keys into existing v2 NPZs.
+
+Applied code paths:
+
+- `nepa3d/data/preprocess_shapenet_v2.py`
+  - New surf-aligned keys:
+    - `mesh_surf_n`, `mesh_surf_curv`
+    - `udf_surf_t_in`, `udf_surf_t_out`, `udf_surf_hit_out`, `udf_surf_thickness`
+    - `pc_n`, `pc_density`
+  - Added append/update mode (`--augment_existing`) with skip-if-already-enriched.
+  - Strict UDF-grid controls:
+    - `--strict_udf_surface`
+    - `--surf_udf_grid`, `--surf_udf_dilate`
+    - `--surf_udf_max_t`, `--surf_udf_eps`
+    - `--surf_udf_steps`, `--surf_udf_tol`, `--surf_udf_min_step`
+  - UDF strict features are produced by sphere tracing on occupancy-derived UDF grid.
+  - `n_rays=0` safe path.
+- `nepa3d/data/dataset_v2.py`
+  - Added `pt_xyz` / `pt_ans_feat` aligned output path.
+- `nepa3d/data/mixed_pretrain.py`
+  - Added `return_pt_ans`, `pt_answer_prefix`, `pt_answer_key` routing.
+- preprocess launcher wiring:
+  - `scripts/preprocess/preprocess_shapenet_v2.sh`
+  - `scripts/preprocess/submit_preprocess_shapenet_v2_qf.sh`
+
+Submitted jobs (active chain):
+
+- preprocess (16 shards, append to `data/shapenet_cache_v2_20260303`, no-ray):
+  - `102118` `102119` `102120` `102121` `102122` `102123` `102124` `102125`
+  - `102126` `102127` `102128` `102129` `102130` `102131` `102132` `102133`
+- dependent post-process:
+  - split job: `102134` (`afterok` on all preprocess shards)
+  - materialize job: `102135` (`afterok:102134`)
+  - outputs:
+    - split json: `data/shapenet_unpaired_splits_v2_20260303_strictgrid.json`
+    - materialized root: `data/shapenet_unpaired_cache_v2_20260303_strictgrid`

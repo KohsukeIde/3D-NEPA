@@ -38,8 +38,17 @@ TYPE_SEP = 9
 TYPE_SEP_CTX = TYPE_SEP
 TYPE_SEP_QA = TYPE_SEP
 
+# Primitive-aware Q/A point types (optional extension for mixed pretrain).
+# These are intentionally appended to keep legacy ids stable.
+TYPE_Q_POINT_MESH = 10
+TYPE_A_POINT_MESH = 11
+TYPE_Q_POINT_UDF = 12
+TYPE_A_POINT_UDF = 13
+TYPE_Q_POINT_PC = 14
+TYPE_A_POINT_PC = 15
+
 # Size of the type-id vocabulary.
-TYPE_VOCAB_SIZE = TYPE_SEP + 1
+TYPE_VOCAB_SIZE = TYPE_A_POINT_PC + 1
 
 
 

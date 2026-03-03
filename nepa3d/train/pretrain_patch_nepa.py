@@ -22,12 +22,18 @@ from nepa3d.data.mixed_pretrain import build_mixed_pretrain
 from nepa3d.models.patch_nepa import PatchTransformerNepa
 from nepa3d.token.tokenizer import (
     TYPE_A_POINT,
+    TYPE_A_POINT_MESH,
+    TYPE_A_POINT_PC,
+    TYPE_A_POINT_UDF,
     TYPE_A_RAY,
     TYPE_BOS,
     TYPE_EOS,
     TYPE_MISSING_RAY,
     TYPE_POINT,
     TYPE_Q_POINT,
+    TYPE_Q_POINT_MESH,
+    TYPE_Q_POINT_PC,
+    TYPE_Q_POINT_UDF,
     TYPE_Q_RAY,
     TYPE_RAY,
     TYPE_SEP,
@@ -350,12 +356,15 @@ def _nepa_target_mask(type_id: torch.Tensor | None, k: int) -> torch.Tensor | No
     if type_id is None:
         return None
     tgt_ty = type_id[:, k:]
-    has_answer = bool((tgt_ty == int(TYPE_A_POINT)).any() or (tgt_ty == int(TYPE_A_RAY)).any())
+    is_answer_point = (
+        (tgt_ty == int(TYPE_A_POINT))
+        | (tgt_ty == int(TYPE_A_POINT_MESH))
+        | (tgt_ty == int(TYPE_A_POINT_UDF))
+        | (tgt_ty == int(TYPE_A_POINT_PC))
+    )
+    has_answer = bool(is_answer_point.any() or (tgt_ty == int(TYPE_A_RAY)).any())
     if has_answer:
-        return (
-            ((tgt_ty == int(TYPE_A_POINT)) | (tgt_ty == int(TYPE_A_RAY)))
-            & (tgt_ty != int(TYPE_MISSING_RAY))
-        )
+        return ((is_answer_point | (tgt_ty == int(TYPE_A_RAY))) & (tgt_ty != int(TYPE_MISSING_RAY)))
     return (
         (tgt_ty != int(TYPE_BOS))
         & (tgt_ty != int(TYPE_SEP))
@@ -751,6 +760,7 @@ def main() -> None:
                         pt_dist=batch.get("pt_dist", None),
                         pt_grad=batch.get("pt_grad", None),
                         pt_ans_feat=pt_ans_feat_b,
+                        primitive=batch.get("primitive", None),
                         ray_o=batch.get("ray_o", None),
                         ray_d=batch.get("ray_d", None),
                         ray_t=batch.get("ray_t", None),
@@ -774,6 +784,12 @@ def main() -> None:
                             ("RAY", TYPE_RAY),
                             ("Q_POINT", TYPE_Q_POINT),
                             ("A_POINT", TYPE_A_POINT),
+                            ("Q_POINT_MESH", TYPE_Q_POINT_MESH),
+                            ("A_POINT_MESH", TYPE_A_POINT_MESH),
+                            ("Q_POINT_UDF", TYPE_Q_POINT_UDF),
+                            ("A_POINT_UDF", TYPE_A_POINT_UDF),
+                            ("Q_POINT_PC", TYPE_Q_POINT_PC),
+                            ("A_POINT_PC", TYPE_A_POINT_PC),
                             ("Q_RAY", TYPE_Q_RAY),
                             ("A_RAY", TYPE_A_RAY),
                             ("SEP", TYPE_SEP),

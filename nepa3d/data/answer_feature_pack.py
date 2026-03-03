@@ -42,6 +42,11 @@ FEATURE_DIMS: Dict[str, int] = {
     "grad_udf": 3,
     "occ": 1,
     "near": 1,
+    # surface-anchored strict UDF clearance features
+    "t_in": 1,
+    "t_out": 1,
+    "hit_out": 1,
+    "thickness": 1,
     # pointcloud-like
     "density": 1,
 }
@@ -56,6 +61,10 @@ FEATURE_KEY_ALIASES: Dict[str, List[str]] = {
     "density": ["density", "dens"],
     "occ": ["occ", "occupancy"],
     "near": ["near", "near_surface"],
+    "t_in": ["t_in", "tin", "clear_in"],
+    "t_out": ["t_out", "tout", "clear_out"],
+    "hit_out": ["hit_out", "hout"],
+    "thickness": ["thickness", "thick"],
 }
 
 
@@ -154,4 +163,3 @@ class V2AnswerFeaturePacker:
 
         feat = np.concatenate(feats, axis=1) if len(feats) > 0 else np.zeros((n_rows, 0), dtype=np.float32)
         return PackedFeatures(feat=feat, schema=list(self.schema), dims=dims, keys_used=keys_used)
-

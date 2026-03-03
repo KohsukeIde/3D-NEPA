@@ -24,6 +24,9 @@ from .point_patch_embed import PointPatchEmbed
 from .serial_patch_embed import SerialPatchEmbed, morton3d_codes, serialize_indices
 from ..token.tokenizer import (
     TYPE_A_POINT,
+    TYPE_A_POINT_MESH,
+    TYPE_A_POINT_PC,
+    TYPE_A_POINT_UDF,
     TYPE_A_RAY,
     TYPE_BOS,
     TYPE_EOS,
@@ -31,10 +34,27 @@ from ..token.tokenizer import (
     TYPE_RAY,
     TYPE_MISSING_RAY,
     TYPE_Q_POINT,
+    TYPE_Q_POINT_MESH,
+    TYPE_Q_POINT_PC,
+    TYPE_Q_POINT_UDF,
     TYPE_Q_RAY,
     TYPE_SEP_CTX,
     TYPE_SEP_QA,
     TYPE_VOCAB_SIZE,
+)
+
+
+TYPE_Q_POINT_ALL = (
+    int(TYPE_Q_POINT),
+    int(TYPE_Q_POINT_MESH),
+    int(TYPE_Q_POINT_UDF),
+    int(TYPE_Q_POINT_PC),
+)
+TYPE_A_POINT_ALL = (
+    int(TYPE_A_POINT),
+    int(TYPE_A_POINT_MESH),
+    int(TYPE_A_POINT_UDF),
+    int(TYPE_A_POINT_PC),
 )
 
 
@@ -425,6 +445,9 @@ class PatchTransformerNepa(nn.Module):
 
         q_mask = (
             (type_id == int(TYPE_Q_POINT))
+            | (type_id == int(TYPE_Q_POINT_MESH))
+            | (type_id == int(TYPE_Q_POINT_UDF))
+            | (type_id == int(TYPE_Q_POINT_PC))
             | (type_id == int(TYPE_Q_RAY))
             | (type_id == int(TYPE_POINT))
             | (type_id == int(TYPE_RAY))
@@ -449,6 +472,55 @@ class PatchTransformerNepa(nn.Module):
         else:
             raise RuntimeError(f"invalid q_mask_mode={self.q_mask_mode}")
         return out, keep_ratio
+
+    @staticmethod
+    def _primitive_to_point_type_pair(name: str) -> Tuple[int, int]:
+        s = str(name).strip().lower()
+        if ("mesh" in s) or (s == "m"):
+            return int(TYPE_Q_POINT_MESH), int(TYPE_A_POINT_MESH)
+        if ("udf" in s) or (s == "u"):
+            return int(TYPE_Q_POINT_UDF), int(TYPE_A_POINT_UDF)
+        if ("pc" in s) or ("point" in s) or (s == "p"):
+            return int(TYPE_Q_POINT_PC), int(TYPE_A_POINT_PC)
+        # Fallback: legacy generic Q/A point types.
+        return int(TYPE_Q_POINT), int(TYPE_A_POINT)
+
+    def _resolve_primitive_point_types(
+        self,
+        primitive: Optional[torch.Tensor | list | tuple | str],
+        *,
+        batch_size: int,
+        device: torch.device,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Resolve per-sample point token type ids from primitive labels."""
+        q_default = int(TYPE_Q_POINT)
+        a_default = int(TYPE_A_POINT)
+        q = torch.full((int(batch_size),), q_default, device=device, dtype=torch.long)
+        a = torch.full((int(batch_size),), a_default, device=device, dtype=torch.long)
+        if primitive is None:
+            return q, a
+
+        if torch.is_tensor(primitive):
+            vals = primitive.detach().cpu().tolist()
+        elif isinstance(primitive, (list, tuple)):
+            vals = list(primitive)
+        else:
+            vals = [primitive] * int(batch_size)
+
+        if len(vals) < int(batch_size):
+            vals = vals + ([vals[-1]] * (int(batch_size) - len(vals))) if len(vals) > 0 else ([""] * int(batch_size))
+        if len(vals) > int(batch_size):
+            vals = vals[: int(batch_size)]
+
+        q_list: list[int] = []
+        a_list: list[int] = []
+        for v in vals:
+            qv, av = self._primitive_to_point_type_pair(str(v))
+            q_list.append(int(qv))
+            a_list.append(int(av))
+        q = torch.tensor(q_list, device=device, dtype=torch.long)
+        a = torch.tensor(a_list, device=device, dtype=torch.long)
+        return q, a
 
     @staticmethod
     def _gather_by_perm(x: torch.Tensor, perm: torch.Tensor) -> torch.Tensor:
@@ -638,6 +710,8 @@ class PatchTransformerNepa(nn.Module):
         q_tok: torch.Tensor,
         a_tok: torch.Tensor,
         centers_xyz: torch.Tensor,
+        q_point_types: Optional[torch.Tensor] = None,
+        a_point_types: Optional[torch.Tensor] = None,
         q_ray_tok: Optional[torch.Tensor] = None,
         a_ray_tok: Optional[torch.Tensor] = None,
         ray_has: Optional[torch.Tensor] = None,
@@ -645,14 +719,20 @@ class PatchTransformerNepa(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         B, P, D = q_tok.shape
         qa = torch.stack([q_tok, a_tok], dim=2).reshape(B, 2 * P, D)
+        if q_point_types is None:
+            q_point_types = torch.full((B,), int(TYPE_Q_POINT), device=q_tok.device, dtype=torch.long)
+        if a_point_types is None:
+            a_point_types = torch.full((B,), int(TYPE_A_POINT), device=q_tok.device, dtype=torch.long)
+        q_pt = q_point_types.view(B, 1).expand(B, P)
+        a_pt = a_point_types.view(B, 1).expand(B, P)
 
         parts: list[torch.Tensor] = [self.bos_token.expand(B, 1, D), qa]
         types: list[torch.Tensor] = [
             torch.full((B, 1), int(TYPE_BOS), device=q_tok.device, dtype=torch.long),
             torch.stack(
                 [
-                    torch.full((B, P), int(TYPE_Q_POINT), device=q_tok.device, dtype=torch.long),
-                    torch.full((B, P), int(TYPE_A_POINT), device=q_tok.device, dtype=torch.long),
+                    q_pt,
+                    a_pt,
                 ],
                 dim=2,
             ).reshape(B, 2 * P),
@@ -703,16 +783,24 @@ class PatchTransformerNepa(nn.Module):
         q_tok: torch.Tensor,
         a_tok: torch.Tensor,
         centers_xyz: torch.Tensor,
+        q_point_types: Optional[torch.Tensor] = None,
+        a_point_types: Optional[torch.Tensor] = None,
         q_ray_tok: Optional[torch.Tensor] = None,
         a_ray_tok: Optional[torch.Tensor] = None,
         ray_has: Optional[torch.Tensor] = None,
         ray_centers_xyz: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         B, P, D = q_tok.shape
+        if q_point_types is None:
+            q_point_types = torch.full((B,), int(TYPE_Q_POINT), device=q_tok.device, dtype=torch.long)
+        if a_point_types is None:
+            a_point_types = torch.full((B,), int(TYPE_A_POINT), device=q_tok.device, dtype=torch.long)
+        q_pt = q_point_types.view(B, 1).expand(B, P)
+        a_pt = a_point_types.view(B, 1).expand(B, P)
         parts: list[torch.Tensor] = [self.bos_token.expand(B, 1, D), q_tok]
         types: list[torch.Tensor] = [
             torch.full((B, 1), int(TYPE_BOS), device=q_tok.device, dtype=torch.long),
-            torch.full((B, P), int(TYPE_Q_POINT), device=q_tok.device, dtype=torch.long),
+            q_pt,
         ]
         centers_parts: list[torch.Tensor] = [
             torch.zeros((B, 1, 3), device=q_tok.device, dtype=centers_xyz.dtype),
@@ -747,7 +835,7 @@ class PatchTransformerNepa(nn.Module):
             centers_parts.append(torch.zeros((B, 1, 3), device=q_tok.device, dtype=centers_xyz.dtype))
 
         parts.append(a_tok)
-        types.append(torch.full((B, P), int(TYPE_A_POINT), device=q_tok.device, dtype=torch.long))
+        types.append(a_pt)
         centers_parts.append(centers_xyz)
 
         if a_ray_tok is not None:
@@ -788,6 +876,7 @@ class PatchTransformerNepa(nn.Module):
         points_dist: Optional[torch.Tensor] = None,
         points_grad: Optional[torch.Tensor] = None,
         points_ans_feat: Optional[torch.Tensor] = None,
+        primitive: Optional[torch.Tensor | list | tuple | str] = None,
         ray_o: Optional[torch.Tensor] = None,
         ray_d: Optional[torch.Tensor] = None,
         ray_t: Optional[torch.Tensor] = None,
@@ -911,11 +1000,18 @@ class PatchTransformerNepa(nn.Module):
                 ray_centers_xyz=ray_centers_xyz,
             )
         else:
+            q_point_types, a_point_types = self._resolve_primitive_point_types(
+                primitive,
+                batch_size=int(q_tok.shape[0]),
+                device=q_tok.device,
+            )
             if self.qa_layout == "interleave":
                 tokens, type_id, centers_seq = self._build_seq_qa1_interleave(
                     q_tok,
                     a_tok,
                     centers_xyz,
+                    q_point_types=q_point_types,
+                    a_point_types=a_point_types,
                     q_ray_tok=q_ray_tok,
                     a_ray_tok=a_ray_tok,
                     ray_has=ray_has,
@@ -926,6 +1022,8 @@ class PatchTransformerNepa(nn.Module):
                     q_tok,
                     a_tok,
                     centers_xyz,
+                    q_point_types=q_point_types,
+                    a_point_types=a_point_types,
                     q_ray_tok=q_ray_tok,
                     a_ray_tok=a_ray_tok,
                     ray_has=ray_has,
@@ -1253,9 +1351,15 @@ class PatchTransformerNepa(nn.Module):
         else:
             tgt_ty = type_id[:, k:]
             mode = str(loss_mask_mode)
-            has_answer = bool((tgt_ty == int(TYPE_A_POINT)).any() or (tgt_ty == int(TYPE_A_RAY)).any())
-            is_answer = (tgt_ty == int(TYPE_A_POINT)) | (tgt_ty == int(TYPE_A_RAY))
-            is_point_context = (tgt_ty == int(TYPE_POINT)) | (tgt_ty == int(TYPE_RAY))
+            is_answer_point = torch.zeros_like(tgt_ty, dtype=torch.bool)
+            is_query_point = torch.zeros_like(tgt_ty, dtype=torch.bool)
+            for ty in TYPE_A_POINT_ALL:
+                is_answer_point = is_answer_point | (tgt_ty == int(ty))
+            for ty in TYPE_Q_POINT_ALL:
+                is_query_point = is_query_point | (tgt_ty == int(ty))
+            has_answer = bool(is_answer_point.any() or (tgt_ty == int(TYPE_A_RAY)).any())
+            is_answer = is_answer_point | (tgt_ty == int(TYPE_A_RAY))
+            is_point_context = is_query_point | (tgt_ty == int(TYPE_POINT)) | (tgt_ty == int(TYPE_RAY))
             non_special = (
                 (tgt_ty != int(TYPE_BOS))
                 & (tgt_ty != int(TYPE_SEP_CTX))
@@ -1269,8 +1373,8 @@ class PatchTransformerNepa(nn.Module):
                 else:
                     mask = non_special
             elif mode == "answer_and_point_context":
-                # Token-v2 default: keep classic answer supervision and add direct
-                # context-token prediction for TYPE_POINT/TYPE_RAY only.
+                # Keep answer supervision and add direct context-token prediction
+                # for query-like point/ray tokens.
                 if has_answer:
                     mask = is_answer | is_point_context
                 else:
@@ -1374,6 +1478,9 @@ class PatchTransformerNepaClassifier(nn.Module):
         # Primary query-token mask for both qa_tokens=1 and qa_tokens=0 cases.
         mask = (
             (type_id == int(TYPE_Q_POINT))
+            | (type_id == int(TYPE_Q_POINT_MESH))
+            | (type_id == int(TYPE_Q_POINT_UDF))
+            | (type_id == int(TYPE_Q_POINT_PC))
             | (type_id == int(TYPE_Q_RAY))
             | (type_id == int(TYPE_POINT))
             | (type_id == int(TYPE_RAY))
@@ -1386,6 +1493,9 @@ class PatchTransformerNepaClassifier(nn.Module):
             & (type_id != int(TYPE_SEP_CTX))
             & (type_id != int(TYPE_SEP_QA))
             & (type_id != int(TYPE_A_POINT))
+            & (type_id != int(TYPE_A_POINT_MESH))
+            & (type_id != int(TYPE_A_POINT_UDF))
+            & (type_id != int(TYPE_A_POINT_PC))
             & (type_id != int(TYPE_A_RAY))
             & (type_id != int(TYPE_MISSING_RAY))
         )

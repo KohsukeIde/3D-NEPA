@@ -125,9 +125,12 @@ class V2SurfaceQueryDataset(Dataset):
         seed: int = 0,
         return_qry: bool = True,
         return_rays: bool = False,
+        return_pt_ans: bool = False,
         surf_xyz_key: str = "surf_xyz",
         qry_xyz_key: str = "qry_xyz",
         answer_prefix: Optional[str] = None,
+        pt_answer_prefix: Optional[str] = None,
+        pt_answer_key: Optional[str] = None,
         mode: str = "train",
         pointmae_pc_norm: bool = False,
         pointmae_scale_translate: bool = False,
@@ -135,6 +138,7 @@ class V2SurfaceQueryDataset(Dataset):
         pointmae_scale_high: float = (3.0 / 2.0),
         pointmae_translate: float = 0.2,
         transform_answers: bool = True,
+        primitive_label: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.paths = list(paths)
@@ -144,6 +148,7 @@ class V2SurfaceQueryDataset(Dataset):
         self.seed = int(seed)
         self.return_qry = bool(return_qry)
         self.return_rays = bool(return_rays)
+        self.return_pt_ans = bool(return_pt_ans)
         self.surf_xyz_key = str(surf_xyz_key)
         self.qry_xyz_key = str(qry_xyz_key)
         self.answer_prefix = (
@@ -151,6 +156,12 @@ class V2SurfaceQueryDataset(Dataset):
             if answer_prefix is not None
             else _infer_prefix_from_xyz_key(self.qry_xyz_key)
         )
+        self.pt_answer_prefix = (
+            str(pt_answer_prefix)
+            if pt_answer_prefix is not None
+            else self.surf_xyz_key
+        )
+        self.pt_answer_key = None if pt_answer_key is None else str(pt_answer_key)
         self.answer_packer = V2AnswerFeaturePacker(answer_schema)
         self.answer_schema_slices = _schema_slices(self.answer_packer.schema)
         self.mode = str(mode)
@@ -160,6 +171,7 @@ class V2SurfaceQueryDataset(Dataset):
         self.pointmae_scale_high = float(pointmae_scale_high)
         self.pointmae_translate = float(pointmae_translate)
         self.transform_answers = bool(transform_answers)
+        self.primitive_label = None if primitive_label is None else str(primitive_label)
 
     def __len__(self) -> int:
         return len(self.paths)
@@ -171,12 +183,13 @@ class V2SurfaceQueryDataset(Dataset):
         with np.load(path, allow_pickle=False) as npz:
             if self.surf_xyz_key not in npz:
                 raise KeyError(f"v2 NPZ missing {self.surf_xyz_key}: {path}")
-            surf_xyz = np.asarray(npz[self.surf_xyz_key], dtype=np.float32)
-            surf_idx = _choice(int(surf_xyz.shape[0]), self.n_surf, rng)
-            surf_xyz = surf_xyz[surf_idx]
+            surf_xyz_all = np.asarray(npz[self.surf_xyz_key], dtype=np.float32)
+            n_surf_all = int(surf_xyz_all.shape[0])
+            surf_idx = _choice(n_surf_all, self.n_surf, rng)
+            surf_xyz = surf_xyz_all[surf_idx]
 
-            prim = None
-            if "primitive" in npz:
+            prim = self.primitive_label
+            if prim is None and ("primitive" in npz):
                 prim_val = npz["primitive"]
                 if isinstance(prim_val, np.ndarray) and prim_val.shape == ():
                     prim_val = prim_val.item()
@@ -186,11 +199,27 @@ class V2SurfaceQueryDataset(Dataset):
 
             qry_xyz_np: Optional[np.ndarray] = None
             ans_feat_np: Optional[np.ndarray] = None
+            pt_ans_feat_np: Optional[np.ndarray] = None
             ray_o_np: Optional[np.ndarray] = None
             ray_d_np: Optional[np.ndarray] = None
             ray_t_np: Optional[np.ndarray] = None
             ray_hit_np: Optional[np.ndarray] = None
             ray_n_np: Optional[np.ndarray] = None
+
+            if self.return_pt_ans:
+                if self.pt_answer_key is not None:
+                    if self.pt_answer_key not in npz:
+                        raise KeyError(f"v2 NPZ missing {self.pt_answer_key}: {path}")
+                    pt_full = np.asarray(npz[self.pt_answer_key], dtype=np.float32)
+                    if int(pt_full.shape[0]) != n_surf_all:
+                        raise ValueError(
+                            f"pt_answer_key rows mismatch: key={self.pt_answer_key} "
+                            f"rows={int(pt_full.shape[0])} surf_rows={n_surf_all} path={path}"
+                        )
+                else:
+                    packed_pt = self.answer_packer.pack(npz, prefix=self.pt_answer_prefix, n_rows=n_surf_all)
+                    pt_full = packed_pt.feat
+                pt_ans_feat_np = pt_full[surf_idx]
 
             if self.return_qry:
                 if self.qry_xyz_key in npz:
@@ -250,6 +279,13 @@ class V2SurfaceQueryDataset(Dataset):
                         norm_radius=radius,
                         aug_scales_xyz=None,
                     )
+                if pt_ans_feat_np is not None and self.transform_answers:
+                    pt_ans_feat_np = _apply_answer_scale_rules(
+                        pt_ans_feat_np,
+                        self.answer_schema_slices,
+                        norm_radius=radius,
+                        aug_scales_xyz=None,
+                    )
 
             # Optional Point-MAE style train-time scale+translate.
             if self.pointmae_scale_translate and self.mode == "train":
@@ -287,8 +323,23 @@ class V2SurfaceQueryDataset(Dataset):
                         norm_radius=None,
                         aug_scales_xyz=sc.reshape(3),
                     )
+                if pt_ans_feat_np is not None and self.transform_answers:
+                    pt_ans_feat_np = _apply_answer_scale_rules(
+                        pt_ans_feat_np,
+                        self.answer_schema_slices,
+                        norm_radius=None,
+                        aug_scales_xyz=sc.reshape(3),
+                    )
 
-            out: Dict[str, Any] = {"surf_xyz": _np_to_torch_f32(surf_xyz), "primitive": prim, "path": path}
+            out: Dict[str, Any] = {
+                "surf_xyz": _np_to_torch_f32(surf_xyz),
+                "pt_xyz": _np_to_torch_f32(surf_xyz),
+                "primitive": prim,
+                "path": path,
+            }
+
+            if self.return_pt_ans:
+                out["pt_ans_feat"] = None if pt_ans_feat_np is None else _np_to_torch_f32(pt_ans_feat_np)
 
             if self.return_qry:
                 if qry_xyz_np is None:
@@ -319,8 +370,14 @@ def v2_collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Collate for v2 dict batches."""
     out: Dict[str, Any] = {}
     out["surf_xyz"] = torch.stack([b["surf_xyz"] for b in batch], dim=0)
+    out["pt_xyz"] = torch.stack([b["pt_xyz"] for b in batch], dim=0)
     out["primitive"] = [b.get("primitive") for b in batch]
     out["path"] = [b.get("path") for b in batch]
+
+    if batch[0].get("pt_ans_feat") is None:
+        out["pt_ans_feat"] = None
+    else:
+        out["pt_ans_feat"] = torch.stack([b["pt_ans_feat"] for b in batch], dim=0)
 
     if batch[0].get("qry_xyz") is None:
         out["qry_xyz"] = None

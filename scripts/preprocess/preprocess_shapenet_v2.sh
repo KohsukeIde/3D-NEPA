@@ -47,6 +47,15 @@ CURVATURE_KNN="${CURVATURE_KNN:-20}"
 PCA_KNN="${PCA_KNN:-20}"
 RAY_RADIUS="${RAY_RADIUS:-2.5}"
 RAY_JITTER_STD="${RAY_JITTER_STD:-0.05}"
+STRICT_UDF_SURFACE="${STRICT_UDF_SURFACE:-1}"
+SURF_UDF_GRID="${SURF_UDF_GRID:-128}"
+SURF_UDF_DILATE="${SURF_UDF_DILATE:-1}"
+SURF_UDF_MAX_T="${SURF_UDF_MAX_T:-2.0}"
+SURF_UDF_EPS="${SURF_UDF_EPS:-1e-4}"
+SURF_UDF_STEPS="${SURF_UDF_STEPS:-64}"
+SURF_UDF_TOL="${SURF_UDF_TOL:-1e-4}"
+SURF_UDF_MIN_STEP="${SURF_UDF_MIN_STEP:-1e-4}"
+AUGMENT_EXISTING="${AUGMENT_EXISTING:-0}"
 
 if [[ ! -x "${PYTHON_BIN}" ]]; then
   echo "[error] python not found: ${PYTHON_BIN}"
@@ -67,6 +76,9 @@ if [[ "${SKIP_EXISTING}" == "1" ]]; then
 fi
 if [[ "${MISSING_ONLY}" == "1" ]]; then
   EXTRA_ARGS+=( --missing_only )
+fi
+if [[ "${AUGMENT_EXISTING}" == "1" ]]; then
+  EXTRA_ARGS+=( --augment_existing )
 fi
 
 set -x
@@ -93,4 +105,12 @@ set -x
   --pca_knn "${PCA_KNN}" \
   --ray_radius "${RAY_RADIUS}" \
   --ray_jitter_std "${RAY_JITTER_STD}" \
+  --strict_udf_surface "${STRICT_UDF_SURFACE}" \
+  --surf_udf_grid "${SURF_UDF_GRID}" \
+  --surf_udf_dilate "${SURF_UDF_DILATE}" \
+  --surf_udf_max_t "${SURF_UDF_MAX_T}" \
+  --surf_udf_eps "${SURF_UDF_EPS}" \
+  --surf_udf_steps "${SURF_UDF_STEPS}" \
+  --surf_udf_tol "${SURF_UDF_TOL}" \
+  --surf_udf_min_step "${SURF_UDF_MIN_STEP}" \
   "${EXTRA_ARGS[@]}"

@@ -7,7 +7,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..token.tokenizer import TYPE_MISSING_RAY, TYPE_POINT, TYPE_Q_POINT, TYPE_Q_RAY, TYPE_RAY
+from ..token.tokenizer import (
+    TYPE_MISSING_RAY,
+    TYPE_POINT,
+    TYPE_Q_POINT,
+    TYPE_Q_POINT_MESH,
+    TYPE_Q_POINT_UDF,
+    TYPE_Q_POINT_PC,
+    TYPE_Q_RAY,
+    TYPE_RAY,
+)
 
 
 def _drop_path(x: torch.Tensor, drop_prob: float, training: bool) -> torch.Tensor:
@@ -587,6 +596,9 @@ class CausalTransformer(nn.Module):
                         tid = tid.unsqueeze(0)
                     is_query_like = (
                         (tid == TYPE_Q_POINT)
+                        | (tid == TYPE_Q_POINT_MESH)
+                        | (tid == TYPE_Q_POINT_UDF)
+                        | (tid == TYPE_Q_POINT_PC)
                         | (tid == TYPE_Q_RAY)
                         | (tid == TYPE_POINT)
                         | (tid == TYPE_RAY)

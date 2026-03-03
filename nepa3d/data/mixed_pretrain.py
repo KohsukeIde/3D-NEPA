@@ -263,6 +263,9 @@ def build_mixed_pretrain(
     v2_n_qry: Optional[int] = None,
     v2_return_qry: bool = True,
     v2_return_rays: bool = False,
+    v2_return_pt_ans: bool = False,
+    v2_pt_answer_prefix: Optional[str] = None,
+    v2_pt_answer_key: Optional[str] = None,
     v2_answer_schema: Optional[Sequence[str]] = None,
     v2_pointmae_pc_norm: bool = False,
     v2_pointmae_scale_translate: bool = False,
@@ -291,6 +294,11 @@ def build_mixed_pretrain(
     return_rays_default = _as_bool(
         cfg.get("return_rays", cfg.get("return_ray", cfg_v2.get("return_rays", v2_return_rays)))
     )
+    return_pt_ans_default = _as_bool(
+        cfg.get("return_pt_ans", cfg_v2.get("return_pt_ans", v2_return_pt_ans))
+    )
+    pt_answer_prefix_default = cfg.get("pt_answer_prefix", cfg_v2.get("pt_answer_prefix", v2_pt_answer_prefix))
+    pt_answer_key_default = cfg.get("pt_answer_key", cfg_v2.get("pt_answer_key", v2_pt_answer_key))
     pm_pc_norm_default = _as_bool(
         cfg.get("pointmae_pc_norm", cfg_v2.get("pointmae_pc_norm", v2_pointmae_pc_norm))
     )
@@ -333,11 +341,21 @@ def build_mixed_pretrain(
                     s.extra.get("return_ray", return_rays_default),
                 )
             )
+            return_pt_ans = _as_bool(s.extra.get("return_pt_ans", return_pt_ans_default))
             surf_xyz_key = str(s.extra.get("surf_xyz_key", v2_surf_xyz_key))
             qry_xyz_key = str(s.extra.get("qry_xyz_key", v2_qry_xyz_key))
             answer_prefix = s.extra.get("answer_prefix", v2_answer_prefix)
             if answer_prefix is not None:
                 answer_prefix = str(answer_prefix)
+            pt_answer_prefix = s.extra.get("pt_answer_prefix", pt_answer_prefix_default)
+            if pt_answer_prefix is not None:
+                pt_answer_prefix = str(pt_answer_prefix)
+            pt_answer_key = s.extra.get("pt_answer_key", pt_answer_key_default)
+            if pt_answer_key is not None:
+                pt_answer_key = str(pt_answer_key)
+            primitive_label = s.extra.get("primitive_label", s.backend)
+            if primitive_label is not None:
+                primitive_label = str(primitive_label)
             pm_pc_norm = _as_bool(s.extra.get("pointmae_pc_norm", pm_pc_norm_default))
             pm_st = _as_bool(s.extra.get("pointmae_scale_translate", pm_st_default))
             pm_scale_low = float(s.extra.get("pointmae_scale_low", pm_scale_low_default))
@@ -354,9 +372,12 @@ def build_mixed_pretrain(
                 seed=int(eval_seed),
                 return_qry=bool(return_qry),
                 return_rays=bool(return_rays),
+                return_pt_ans=bool(return_pt_ans),
                 surf_xyz_key=surf_xyz_key,
                 qry_xyz_key=qry_xyz_key,
                 answer_prefix=answer_prefix,
+                pt_answer_prefix=pt_answer_prefix,
+                pt_answer_key=pt_answer_key,
                 mode=str(mode),
                 pointmae_pc_norm=bool(pm_pc_norm),
                 pointmae_scale_translate=bool(pm_st),
@@ -364,6 +385,7 @@ def build_mixed_pretrain(
                 pointmae_scale_high=float(pm_scale_high),
                 pointmae_translate=float(pm_translate),
                 transform_answers=bool(pm_ans_tf),
+                primitive_label=primitive_label,
             )
         else:
             ds = ModelNet40QueryDataset(
