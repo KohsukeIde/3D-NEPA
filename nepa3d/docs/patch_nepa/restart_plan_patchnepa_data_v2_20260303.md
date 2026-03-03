@@ -428,3 +428,30 @@ Compatibility:
 
 - Legacy ids (`TYPE_Q_POINT`, `TYPE_A_POINT`, etc.) remain unchanged.
 - Existing checkpoints remain loadable with `strict=False` adaptation path already used in this codebase.
+
+## 17. Applied Now: Split/Materialize from Current Cache (Drop 1 Missing Sample)
+
+Reason:
+
+- One pathological mesh remained missing in strict regen (`04530566/c79c87dcf17a40f698501ff072a5cd78`).
+- To unblock training, split/materialize were generated from current cache contents (existing files only).
+
+Execution (2026-03-03):
+
+- Stopped remaining strict single-item retry job (`102320`, then finished as `F`).
+- Built split JSON:
+  - `data/shapenet_unpaired_splits_v2_20260303_drop1.json`
+- Materialized unpaired cache:
+  - `data/shapenet_unpaired_cache_v2_20260303_drop1`
+  - link mode: `symlink`, overwrite: enabled
+
+Observed output:
+
+- split counts:
+  - `train_mesh=16127`
+  - `train_pc=15655`
+  - `train_udf=15663`
+  - `eval=5357`
+- materialize:
+  - `created=52802`
+  - `missing=0` (the missing sample is excluded at split stage because source NPZ does not exist)

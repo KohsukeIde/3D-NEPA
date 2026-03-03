@@ -35,7 +35,7 @@ MIN_LR="${MIN_LR:-1e-6}"
 N_SURF="${N_SURF:-2048}"
 N_QRY="${N_QRY:-1024}"
 N_RAY="${N_RAY:-0}"
-TOKEN_QA_LAYOUT="${TOKEN_QA_LAYOUT:-interleave}"  # interleave|split|split_sep
+TOKEN_QA_LAYOUT="${TOKEN_QA_LAYOUT:-split}"  # interleave|split|split_sep
 
 PM_PC_NORM="${PM_PC_NORM:-1}"
 PM_SCALE_TRANSLATE="${PM_SCALE_TRANSLATE:-1}"

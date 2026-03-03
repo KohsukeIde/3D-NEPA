@@ -548,10 +548,15 @@ def main() -> None:
             probe_feat = None
             if isinstance(probe, dict):
                 probe_feat = probe.get("pt_ans_feat", None)
-                if probe_feat is None:
-                    probe_feat = probe.get("ans_feat", None)
+                if probe_feat is None and probe.get("ans_feat", None) is not None:
+                    raise RuntimeError(
+                        "queryless v1-style pretrain forbids ans_feat fallback. "
+                        "Provide pt_ans_feat aligned to pt_xyz (set return_pt_ans=true in v2 config)."
+                    )
             if probe_feat is not None and hasattr(probe_feat, "shape") and len(probe_feat.shape) >= 2:
                 answer_in_dim_override = int(probe_feat.shape[-1])
+        except RuntimeError:
+            raise
         except Exception:
             answer_in_dim_override = None
 
@@ -743,7 +748,13 @@ def main() -> None:
                     pt_xyz_b = batch.get("pt_xyz", batch.get("surf_xyz", None))
                     if pt_xyz_b is None:
                         raise RuntimeError("batch missing pt_xyz/surf_xyz")
-                    pt_ans_feat_b = batch.get("pt_ans_feat", batch.get("ans_feat", None))
+                    pt_ans_feat_b = batch.get("pt_ans_feat", None)
+                    if pt_ans_feat_b is None and batch.get("ans_feat", None) is not None:
+                        raise RuntimeError(
+                            "queryless v1-style pretrain forbids ans_feat fallback. "
+                            "Received ans_feat without pt_ans_feat. "
+                            "Set return_pt_ans=true and provide pt_ans_feat aligned to pt_xyz."
+                        )
                     if (
                         pt_ans_feat_b is not None
                         and int(pt_ans_feat_b.shape[1]) != int(pt_xyz_b.shape[1])

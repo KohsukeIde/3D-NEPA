@@ -554,7 +554,35 @@ def _select_patch_order_mode(
     raise ValueError(f"unknown patch_order_schedule={schedule}")
 
 
-def _patchnepa_kwargs_from_ckpt(ckpt_args: Dict[str, object], args: argparse.Namespace) -> Dict[str, object]:
+def _infer_answer_in_dim_from_state(state: Optional[Dict[str, torch.Tensor]]) -> Optional[int]:
+    if not isinstance(state, dict):
+        return None
+    first_layers: list[tuple[int, int]] = []
+    for k, v in state.items():
+        if (not torch.is_tensor(v)) or v.ndim != 2 or (not k.endswith(".weight")):
+            continue
+        if "answer_embed.mlp." not in k:
+            continue
+        tail = k.split("answer_embed.mlp.", 1)[1]
+        layer_tok = tail.split(".", 1)[0]
+        try:
+            layer_idx = int(layer_tok)
+        except Exception:
+            continue
+        # Linear weight shape is [out_dim, in_dim].
+        first_layers.append((layer_idx, int(v.shape[1])))
+    if not first_layers:
+        return None
+    first_layers.sort(key=lambda x: x[0])
+    in_dim = int(first_layers[0][1])
+    return in_dim if in_dim > 0 else None
+
+
+def _patchnepa_kwargs_from_ckpt(
+    ckpt_args: Dict[str, object],
+    args: argparse.Namespace,
+    pretrain_state: Optional[Dict[str, torch.Tensor]] = None,
+) -> Dict[str, object]:
     """Build PatchTransformerNepa kwargs from pretrain ckpt args, with safe fallbacks."""
     c = ckpt_args or {}
     kw: Dict[str, object] = {
@@ -610,6 +638,17 @@ def _patchnepa_kwargs_from_ckpt(ckpt_args: Dict[str, object], args: argparse.Nam
         "ray_proxy_radius_scale": float(c.get("ray_proxy_radius_scale", 1.05)),
         "ray_pool_mode": str(c.get("ray_pool_mode", "amax")),
     }
+    # Keep answer feature dimensionality consistent with pretrain.
+    try:
+        ckpt_answer_in_dim = int(c.get("answer_in_dim", 0) or 0)
+    except Exception:
+        ckpt_answer_in_dim = 0
+    if ckpt_answer_in_dim > 0:
+        kw["answer_in_dim"] = ckpt_answer_in_dim
+    else:
+        inferred_answer_in_dim = _infer_answer_in_dim_from_state(pretrain_state)
+        if inferred_answer_in_dim is not None:
+            kw["answer_in_dim"] = int(inferred_answer_in_dim)
     # FT-time override for ray usage is allowed.
     kw["use_ray_patch"] = bool(args.use_ray_patch)
     # Optional FT-time override for patch order mode.
@@ -1167,7 +1206,7 @@ def main() -> None:
     elif args.model_source == "patchnepa":
         # Allow strict A/B with identical FT recipe by supporting patchnepa scratch init
         # when --ckpt is omitted.
-        nepa_kwargs = _patchnepa_kwargs_from_ckpt(pretrain_args, args)
+        nepa_kwargs = _patchnepa_kwargs_from_ckpt(pretrain_args, args, pretrain_state)
         head_mode = args.head_mode if args.head_mode != "auto" else ("pointmae_mlp" if effective_pooling == "cls_max" else "linear")
         model = PatchTransformerNepaClassifier(
             num_classes=num_classes,

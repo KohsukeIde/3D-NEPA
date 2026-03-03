@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--token_qa_layout",
         type=str,
-        default="interleave",
+        default="split",
         choices=["interleave", "split", "split_sep"],
         help=(
             "Q/A layout inside forward_tokens query segment: "
@@ -153,7 +153,7 @@ def build_qa_sequence(
     qry_xyz: torch.Tensor,
     ans_feat: torch.Tensor,
     *,
-    token_qa_layout: str = "interleave",
+    token_qa_layout: str = "split",
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Build [tokens, type_id, centers_xyz] for forward_tokens()."""
     b = surf_xyz.shape[0]
@@ -473,6 +473,13 @@ def main() -> None:
 
     model, optimizer, dl = accelerator.prepare(model, optimizer, dl)
     model_raw = accelerator.unwrap_model(model)
+    try:
+        steps_per_epoch = max(1, int(len(dl)))
+    except Exception:
+        # Fallback for dataloader wrappers without __len__.
+        est_samples = int(info.get("num_samples", 0))
+        est_batch = max(1, int(args.batch_size))
+        steps_per_epoch = max(1, est_samples // est_batch)
     warmup_steps = max(0, _resolve_warmup_steps(args))
     scheduler: optim.lr_scheduler.LambdaLR | None = None
     if str(args.lr_scheduler) == "cosine":
@@ -499,6 +506,7 @@ def main() -> None:
             f"scheduler={str(args.lr_scheduler)} warmup_steps={int(warmup_steps)} "
             f"warmup_ratio={float(args.warmup_ratio):.4f} min_lr={float(args.min_lr):.2e}"
         )
+        accelerator.print(f"[token_pretrain] steps_per_epoch={int(steps_per_epoch)}")
     wandb_run = _init_wandb(args, accelerator)
     wandb_log_every = max(1, int(args.wandb_log_every))
     diag_every = max(1, int(args.diag_every))
@@ -558,21 +566,29 @@ def main() -> None:
         if accelerator.sync_gradients:
             step += 1
             if accelerator.is_main_process:
+                loss_val = float(loss.item())
+                # 2D ViT-NEPA reports pretrain objective as -cos.
+                # PatchNEPA uses (1-cos), so convert by subtracting 1 for axis parity.
+                loss_2d_equiv = loss_val - 1.0
                 pbar.update(1)
-                pbar.set_description(f"loss={loss.item():.4f}")
+                pbar.set_description(f"loss={loss_val:.4f}")
                 if (step % diag_every == 0) and (diag is not None):
                     accelerator.print(
                         f"[step {step:06d}] "
-                        f"loss={float(loss.item()):.6f} "
+                        f"loss={loss_val:.6f} "
+                        f"loss2d={loss_2d_equiv:.6f} "
                         f"cos_tgt={_fmt_diag(float(diag['cos_tgt']))} "
                         f"cos_prev={_fmt_diag(float(diag['cos_prev']))} "
                         f"gap={_fmt_diag(float(diag['gap']))} "
                         f"copy_win={_fmt_diag(float(diag['copy_win']))}"
                     )
                 if wandb_run is not None and (step % wandb_log_every == 0):
+                    epoch_float = float(step - 1) / float(max(1, steps_per_epoch))
                     wb = {
-                        "train/loss": float(loss.item()),
+                        "train/loss": loss_val,
+                        "train/loss_2d_equiv": loss_2d_equiv,
                         "train/step": int(step),
+                        "train/epoch": epoch_float,
                     }
                     if len(optimizer.param_groups) > 0 and "lr" in optimizer.param_groups[0]:
                         wb["train/lr"] = float(optimizer.param_groups[0]["lr"])

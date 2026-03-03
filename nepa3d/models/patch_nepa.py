@@ -1637,11 +1637,23 @@ class PatchTransformerNepaClassifier(nn.Module):
             h = self.core.pred_head[0](h)
             return self._pool_features(h, type_for_pool)
 
-        pt_dist = torch.zeros((xyz.shape[0], xyz.shape[1], 1), dtype=xyz.dtype, device=xyz.device)
+        pt_dist: Optional[torch.Tensor]
+        pt_ans_feat: Optional[torch.Tensor]
+        if self.core.answer_embed is None:
+            pt_dist = torch.zeros((xyz.shape[0], xyz.shape[1], 1), dtype=xyz.dtype, device=xyz.device)
+            pt_ans_feat = None
+        else:
+            pt_dist = None
+            pt_ans_feat = torch.zeros(
+                (xyz.shape[0], xyz.shape[1], int(self.core.answer_in_dim)),
+                dtype=xyz.dtype,
+                device=xyz.device,
+            )
         out = self.core(
             pt_xyz=xyz,
             pt_n=normals,
             pt_dist=pt_dist,
+            pt_ans_feat=pt_ans_feat,
             ray_o=ray_o,
             ray_d=ray_d,
             ray_t=None,
