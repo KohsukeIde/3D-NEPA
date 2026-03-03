@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT="${SCRIPT_DIR}/preprocess_shapenet_v2.sh"
+WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+
+GROUP_LIST="${GROUP_LIST:-qgah50055}"
+RT_QF="${RT_QF:-1}"
+WALLTIME="${WALLTIME:-72:00:00}"
+
+RUN_TAG="${RUN_TAG:-shapenet_v2_$(date +%Y%m%d_%H%M%S)}"
+JOB_PREFIX="${JOB_PREFIX:-shpv2}"
+NUM_SHARDS="${NUM_SHARDS:-8}"
+LOG_DIR="${LOG_DIR:-${WORKDIR}/logs/preprocess/shapenet_v2/${RUN_TAG}}"
+mkdir -p "${LOG_DIR}"
+
+SHAPENET_ROOT="${SHAPENET_ROOT:-data/ShapeNetCore.v2}"
+OUT_ROOT="${OUT_ROOT:-data/shapenet_cache_v2}"
+SYNSETS="${SYNSETS:-}"
+TRAIN_RATIO="${TRAIN_RATIO:-0.9}"
+SEED="${SEED:-0}"
+WORKERS="${WORKERS:-32}"
+SKIP_EXISTING="${SKIP_EXISTING:-1}"
+
+N_SURF="${N_SURF:-8192}"
+N_MESH_QRY="${N_MESH_QRY:-2048}"
+N_UDF_QRY="${N_UDF_QRY:-8192}"
+N_PC="${N_PC:-2048}"
+N_PC_QRY="${N_PC_QRY:-1024}"
+N_RAYS="${N_RAYS:-4096}"
+PC_VIEW_CROP="${PC_VIEW_CROP:-0.5}"
+PC_NOISE_STD="${PC_NOISE_STD:-0.005}"
+PC_DROPOUT="${PC_DROPOUT:-0.1}"
+UDF_NEAR_RATIO="${UDF_NEAR_RATIO:-0.5}"
+UDF_NEAR_STD="${UDF_NEAR_STD:-0.05}"
+CURVATURE_KNN="${CURVATURE_KNN:-20}"
+PCA_KNN="${PCA_KNN:-20}"
+RAY_RADIUS="${RAY_RADIUS:-2.5}"
+RAY_JITTER_STD="${RAY_JITTER_STD:-0.05}"
+
+if ! command -v qsub >/dev/null 2>&1; then
+  echo "[error] qsub not found"
+  exit 1
+fi
+
+SUBMIT_LOG="${LOG_DIR}/submit.log"
+touch "${SUBMIT_LOG}"
+
+echo "[run_tag] ${RUN_TAG}" | tee -a "${SUBMIT_LOG}"
+echo "[out_root] ${OUT_ROOT}" | tee -a "${SUBMIT_LOG}"
+echo "[num_shards] ${NUM_SHARDS}" | tee -a "${SUBMIT_LOG}"
+echo "[workers/job] ${WORKERS}" | tee -a "${SUBMIT_LOG}"
+echo "[resource] rt_QF=${RT_QF} walltime=${WALLTIME}" | tee -a "${SUBMIT_LOG}"
+
+for ((sid=0; sid<NUM_SHARDS; sid++)); do
+  job_name="$(printf "%s_s%02d" "${JOB_PREFIX}" "${sid}")"
+  qvars=(
+    "WORKDIR=${WORKDIR}"
+    "SHAPENET_ROOT=${SHAPENET_ROOT}"
+    "OUT_ROOT=${OUT_ROOT}"
+    "SYNSETS=${SYNSETS}"
+    "TRAIN_RATIO=${TRAIN_RATIO}"
+    "SEED=${SEED}"
+    "WORKERS=${WORKERS}"
+    "NUM_SHARDS=${NUM_SHARDS}"
+    "SHARD_ID=${sid}"
+    "SKIP_EXISTING=${SKIP_EXISTING}"
+    "N_SURF=${N_SURF}"
+    "N_MESH_QRY=${N_MESH_QRY}"
+    "N_UDF_QRY=${N_UDF_QRY}"
+    "N_PC=${N_PC}"
+    "N_PC_QRY=${N_PC_QRY}"
+    "N_RAYS=${N_RAYS}"
+    "PC_VIEW_CROP=${PC_VIEW_CROP}"
+    "PC_NOISE_STD=${PC_NOISE_STD}"
+    "PC_DROPOUT=${PC_DROPOUT}"
+    "UDF_NEAR_RATIO=${UDF_NEAR_RATIO}"
+    "UDF_NEAR_STD=${UDF_NEAR_STD}"
+    "CURVATURE_KNN=${CURVATURE_KNN}"
+    "PCA_KNN=${PCA_KNN}"
+    "RAY_RADIUS=${RAY_RADIUS}"
+    "RAY_JITTER_STD=${RAY_JITTER_STD}"
+  )
+  QVARS="$(IFS=,; echo "${qvars[*]}")"
+
+  cmd=(
+    qsub
+    -l "rt_QF=${RT_QF}"
+    -l "walltime=${WALLTIME}"
+    -W "group_list=${GROUP_LIST}"
+    -N "${job_name}"
+    -o "${LOG_DIR}/${job_name}.out"
+    -e "${LOG_DIR}/${job_name}.err"
+    -v "${QVARS}"
+    "${SCRIPT}"
+  )
+  jid="$("${cmd[@]}")"
+  echo "[submitted] shard=${sid} job=${jid} name=${job_name}" | tee -a "${SUBMIT_LOG}"
+done
+
+echo "[done] logs: ${LOG_DIR}" | tee -a "${SUBMIT_LOG}"
+

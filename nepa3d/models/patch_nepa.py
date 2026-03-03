@@ -11,7 +11,7 @@ restoring QueryNEPA-side behaviors that were previously bypassed:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -64,6 +64,7 @@ class AnswerPatchEmbed(nn.Module):
         super().__init__()
         assert in_dim > 0
         assert n_layers >= 1
+        self.in_dim = int(in_dim)
         hidden = int(hidden_dim or d_model)
 
         layers: list[nn.Module] = []
@@ -142,6 +143,7 @@ class PatchTransformerNepa(nn.Module):
         use_pt_grad: bool = False,
         answer_mlp_layers: int = 2,
         answer_pool: str = "max",
+        answer_in_dim: Optional[int] = None,  # explicit answer feature dim override
         q_mask_mode: str = "mask_token",  # mask_token|zero
         # embeddings / arch
         max_len: int = 4096,
@@ -189,6 +191,7 @@ class PatchTransformerNepa(nn.Module):
         self.encdec_arch = bool(encdec_arch)
         self.use_pt_dist = bool(use_pt_dist)
         self.use_pt_grad = bool(use_pt_grad)
+        self.answer_in_dim_override = None if answer_in_dim is None else int(answer_in_dim)
         self.backbone_mode = str(backbone_mode)
         self.pointmae_backbone = self.backbone_mode == "pointmae"
         self.use_ray_patch = bool(use_ray_patch)
@@ -221,7 +224,11 @@ class PatchTransformerNepa(nn.Module):
             raise ValueError(f"unknown patch_embed={patch_embed}")
 
         # Patch answer embedding from {dist, grad}.
-        ans_in = (1 if self.use_pt_dist else 0) + (3 if self.use_pt_grad else 0)
+        ans_in_auto = (1 if self.use_pt_dist else 0) + (3 if self.use_pt_grad else 0)
+        ans_in = int(ans_in_auto if self.answer_in_dim_override is None else self.answer_in_dim_override)
+        if ans_in < 0:
+            raise ValueError(f"answer_in_dim must be >=0, got {ans_in}")
+        self.answer_in_dim = int(ans_in)
         self.answer_embed: Optional[AnswerPatchEmbed]
         if ans_in > 0:
             self.answer_embed = AnswerPatchEmbed(
@@ -815,7 +822,14 @@ class PatchTransformerNepa(nn.Module):
                 if pt_grad.dim() != 3 or pt_grad.size(-1) != 3:
                     raise ValueError(f"pt_grad must be (B,N,3), got {tuple(pt_grad.shape)}")
                 feats.append(pt_grad)
-            ans_feat = torch.cat(feats, dim=-1) if len(feats) > 1 else feats[0]
+            if len(feats) == 0:
+                ans_feat = torch.zeros(
+                    (pt_xyz.shape[0], pt_xyz.shape[1], int(self.answer_in_dim)),
+                    device=pt_xyz.device,
+                    dtype=pt_xyz.dtype,
+                )
+            else:
+                ans_feat = torch.cat(feats, dim=-1) if len(feats) > 1 else feats[0]
             a_tok = self.answer_embed(ans_feat, group_idx)
 
         q_ray_tok: Optional[torch.Tensor] = None
@@ -933,6 +947,252 @@ class PatchTransformerNepa(nn.Module):
             type_id=type_id,
             centers_xyz=centers_xyz,
             group_idx=group_idx,
+            q_keep_ratio=q_keep_ratio,
+        )
+
+    # ---------------------------------------------------------------------
+    # Token-level API (v2 / CPAC support)
+    # ---------------------------------------------------------------------
+    def encode_patches(
+        self,
+        pt_xyz: torch.Tensor,
+        pt_n: Optional[torch.Tensor] = None,
+        *,
+        patch_order_mode: Optional[str] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Encode surface points into patch tokens.
+
+        Returns:
+            tokens: [B, P, D]
+            centers_xyz: [B, P, 3]
+            group_idx: [B, P, K]
+        """
+        if (pt_n is not None) and (not self.use_normals):
+            pt_n = None
+        patch_out = self.patch_embed(pt_xyz, pt_n)
+        if patch_order_mode is None:
+            patch_out = self._maybe_reorder_patch_embed_output(patch_out)
+        else:
+            prev = str(self.patch_order_mode)
+            try:
+                if str(patch_order_mode) != prev:
+                    self.set_patch_order_mode(str(patch_order_mode))
+                patch_out = self._maybe_reorder_patch_embed_output(patch_out)
+            finally:
+                if str(self.patch_order_mode) != prev:
+                    self.set_patch_order_mode(prev)
+        return patch_out.tokens, patch_out.centers_xyz, patch_out.group_idx
+
+    @staticmethod
+    def _identity_group_idx(batch_size: int, n: int, device: torch.device) -> torch.Tensor:
+        """Build [B,N,1] identity groups (one token per point)."""
+        base = torch.arange(int(n), device=device, dtype=torch.long).view(1, int(n), 1)
+        return base.repeat(int(batch_size), 1, 1)
+
+    def encode_point_queries(
+        self,
+        qry_xyz: torch.Tensor,
+        *,
+        token_value: float = 0.0,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Encode arbitrary 3D coordinates as query tokens."""
+        if qry_xyz.dim() != 3 or qry_xyz.size(-1) != 3:
+            raise ValueError(f"qry_xyz must be (B,N,3), got {tuple(qry_xyz.shape)}")
+        b, n, _ = qry_xyz.shape
+        tokens = torch.full(
+            (b, n, int(self.d_model)),
+            float(token_value),
+            device=qry_xyz.device,
+            dtype=qry_xyz.dtype,
+        )
+        return tokens, qry_xyz
+
+    def encode_point_answers(
+        self,
+        ans_feat: torch.Tensor,
+        ans_xyz: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Encode per-point answer features (1 point -> 1 token)."""
+        if self.answer_embed is None:
+            raise RuntimeError(
+                "encode_point_answers() requires answer_embed. "
+                "Enable use_pt_dist and/or use_pt_grad."
+            )
+        if ans_xyz.dim() != 3 or ans_xyz.size(-1) != 3:
+            raise ValueError(f"ans_xyz must be (B,N,3), got {tuple(ans_xyz.shape)}")
+        if ans_feat.dim() != 3 or ans_feat.size(0) != ans_xyz.size(0) or ans_feat.size(1) != ans_xyz.size(1):
+            raise ValueError(
+                f"ans_feat must be (B,N,F) aligned with ans_xyz; got feat={tuple(ans_feat.shape)} xyz={tuple(ans_xyz.shape)}"
+            )
+        if ans_feat.size(-1) != int(self.answer_embed.in_dim):
+            raise ValueError(
+                f"ans_feat last-dim must match answer_embed.in_dim={int(self.answer_embed.in_dim)}, got {ans_feat.size(-1)}"
+            )
+        b, n, _ = ans_xyz.shape
+        group_idx = self._identity_group_idx(b, n, ans_xyz.device)
+        tokens = self.answer_embed(ans_feat, group_idx)
+        return tokens, ans_xyz
+
+    def encode_rays(
+        self,
+        ray_o: torch.Tensor,
+        ray_d: torch.Tensor,
+        ray_t: torch.Tensor,
+        ray_hit: torch.Tensor,
+        ray_n: Optional[torch.Tensor] = None,
+        ray_unc: Optional[torch.Tensor] = None,
+        ray_available: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Encode rays as 1-ray/1-token query+answer streams.
+
+        Returns:
+            q_tok: [B, R, D]
+            a_tok: [B, R, D]
+            centers_xyz: [B, R, 3] (x_anchor)
+        """
+        if self.ray_patch_embed is None:
+            raise RuntimeError("encode_rays() requires use_ray_patch=True")
+
+        if ray_o.dim() != 3 or ray_o.size(-1) != 3:
+            raise ValueError(f"ray_o must be (B,R,3), got {tuple(ray_o.shape)}")
+        if ray_d.dim() != 3 or ray_d.size(-1) != 3:
+            raise ValueError(f"ray_d must be (B,R,3), got {tuple(ray_d.shape)}")
+        if ray_t.dim() == 2:
+            ray_t = ray_t.unsqueeze(-1)
+        if ray_hit.dim() == 2:
+            ray_hit = ray_hit.unsqueeze(-1)
+        if ray_t.dim() != 3 or ray_t.size(-1) != 1:
+            raise ValueError(f"ray_t must be (B,R,1), got {tuple(ray_t.shape)}")
+        if ray_hit.dim() != 3 or ray_hit.size(-1) != 1:
+            raise ValueError(f"ray_hit must be (B,R,1), got {tuple(ray_hit.shape)}")
+        if ray_o.shape[:2] != ray_d.shape[:2] or ray_o.shape[:2] != ray_t.shape[:2] or ray_o.shape[:2] != ray_hit.shape[:2]:
+            raise ValueError(
+                "ray tensors first two dims must match: "
+                f"o={tuple(ray_o.shape)} d={tuple(ray_d.shape)} t={tuple(ray_t.shape)} hit={tuple(ray_hit.shape)}"
+            )
+        b, r, _ = ray_o.shape
+        x_anchor = ray_o + ray_t * ray_d
+        rel_anchor = torch.zeros_like(ray_d)
+
+        rel_o = None
+        if self.ray_patch_embed.use_ray_origin:
+            rel_o = ray_o - x_anchor
+
+        q_parts = [rel_anchor, ray_d]
+        if rel_o is not None:
+            q_parts.append(rel_o)
+        q_tok = self.ray_patch_embed.mlp_q(torch.cat(q_parts, dim=-1))
+
+        a_parts = [rel_anchor, ray_d, ray_hit, ray_t]
+        if self.ray_patch_embed.include_ray_normal:
+            if ray_n is None:
+                ray_n = torch.zeros_like(ray_d)
+            elif ray_n.dim() != 3 or ray_n.shape != ray_d.shape:
+                raise ValueError(f"ray_n must be (B,R,3), got {tuple(ray_n.shape)}")
+            a_parts.append(ray_n)
+        if self.ray_patch_embed.include_ray_unc:
+            if ray_unc is None:
+                ray_unc = torch.zeros((b, r, 1), device=ray_o.device, dtype=ray_o.dtype)
+            elif ray_unc.dim() == 2:
+                ray_unc = ray_unc.unsqueeze(-1)
+            if ray_unc.dim() != 3 or ray_unc.size(-1) != 1 or ray_unc.shape[:2] != (b, r):
+                raise ValueError(f"ray_unc must be (B,R,1), got {tuple(ray_unc.shape)}")
+            a_parts.append(ray_unc)
+        if rel_o is not None:
+            a_parts.append(rel_o)
+        a_tok = self.ray_patch_embed.mlp_a(torch.cat(a_parts, dim=-1))
+
+        if ray_available is not None:
+            if ray_available.dim() == 2:
+                ray_available = ray_available.unsqueeze(-1)
+            if ray_available.dim() != 3 or ray_available.shape[:2] != (b, r) or ray_available.size(-1) != 1:
+                raise ValueError(f"ray_available must be (B,R,1) or (B,R), got {tuple(ray_available.shape)}")
+            mask = ray_available.to(device=ray_o.device, dtype=q_tok.dtype)
+            q_tok = q_tok * mask
+            a_tok = a_tok * mask
+
+        return q_tok, a_tok, x_anchor
+
+    def forward_tokens(
+        self,
+        tokens: torch.Tensor,
+        type_id: torch.Tensor,
+        centers_xyz: Optional[torch.Tensor] = None,
+        *,
+        is_causal: bool = True,
+        q_mask_prob: float = 0.0,
+        dual_mask_near: float = 0.0,
+        dual_mask_far: float = 0.0,
+        dual_mask_window: int = 0,
+        dual_mask_seed: Optional[int] = None,
+        dual_mask_type_aware: bool = False,
+    ) -> PatchNepaOutput:
+        """Forward pass from pre-tokenized streams.
+
+        Args:
+            tokens: [B,L,D] content tokens before type/pos/center embeddings.
+            type_id: [B,L] TYPE_* ids.
+            centers_xyz: [B,L,3] per-token centers for center_mlp.
+        """
+        if tokens.dim() != 3:
+            raise ValueError(f"forward_tokens(): expected tokens [B,L,D], got {tuple(tokens.shape)}")
+        if type_id.dim() != 2:
+            raise ValueError(f"forward_tokens(): expected type_id [B,L], got {tuple(type_id.shape)}")
+
+        b, l, d = tokens.shape
+        if d != int(self.d_model):
+            raise ValueError(f"forward_tokens(): tokens dim mismatch model d_model={int(self.d_model)} got {d}")
+        if type_id.shape != (b, l):
+            raise ValueError(f"forward_tokens(): type_id shape must be {(b, l)}, got {tuple(type_id.shape)}")
+
+        if centers_xyz is None:
+            centers_xyz = torch.zeros((b, l, 3), device=tokens.device, dtype=tokens.dtype)
+        elif centers_xyz.shape != (b, l, 3):
+            raise ValueError(f"forward_tokens(): centers_xyz must be {(b, l, 3)}, got {tuple(centers_xyz.shape)}")
+
+        # Keep special parameters connected to avoid DDP unused-parameter issues.
+        tokens = tokens + (self.sep_token.sum() * 0.0)
+        tokens = tokens + (self.q_mask_token.sum() * 0.0)
+        tokens, q_keep_ratio = self._apply_query_mask(tokens, type_id, float(q_mask_prob))
+        backbone_in, backbone_pos, z = self._prepare_backbone_inputs(tokens, type_id, centers_xyz)
+
+        if isinstance(self.backbone, EncoderDecoderTransformer):
+            sep_mask = type_id == int(TYPE_SEP)
+            if bool(sep_mask.any()):
+                sep_pos = sep_mask.int().argmax(dim=1)
+                if bool((sep_pos != sep_pos[0]).any()):
+                    raise ValueError("forward_tokens(): encdec mode requires a consistent SEP index across batch")
+                sep = int(sep_pos[0].item())
+                sep = min(max(sep, 1), l - 1)
+                enc = backbone_in[:, :sep, :]
+                dec = backbone_in[:, sep:, :]
+            else:
+                enc = backbone_in[:, :-1, :]
+                dec = backbone_in[:, -1:, :]
+            enc_out, dec_out = self.backbone(enc, dec, enc_xyz=None)
+            h = torch.cat([enc_out, dec_out], dim=1)
+        else:
+            h = self.backbone(
+                backbone_in,
+                is_causal=bool(is_causal),
+                type_id=type_id,
+                pos=backbone_pos,
+                dual_mask_near=float(dual_mask_near),
+                dual_mask_far=float(dual_mask_far),
+                dual_mask_window=int(dual_mask_window),
+                dual_mask_seed=(int(dual_mask_seed) if dual_mask_seed is not None else None),
+                dual_mask_type_aware=int(bool(dual_mask_type_aware)),
+            )
+
+        z_hat = self.pred_head(h)
+        return PatchNepaOutput(
+            tokens=tokens,
+            z=z,
+            h=h,
+            z_hat=z_hat,
+            type_id=type_id,
+            centers_xyz=centers_xyz,
+            group_idx=None,
             q_keep_ratio=q_keep_ratio,
         )
 

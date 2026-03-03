@@ -14,6 +14,7 @@ except Exception:
     yaml = None
 
 from .dataset import ModelNet40QueryDataset
+from .dataset_v2 import V2SurfaceQueryDataset
 from .modelnet40_index import list_npz
 
 
@@ -256,9 +257,61 @@ def build_mixed_pretrain(
     aug_jitter_sigma: float = 0.0,
     aug_jitter_clip: float = 0.0,
     aug_recompute_dist: bool = False,
+    v2_surf_xyz_key: str = "surf_xyz",
+    v2_qry_xyz_key: str = "qry_xyz",
+    v2_answer_prefix: Optional[str] = None,
+    v2_n_qry: Optional[int] = None,
+    v2_return_qry: bool = True,
+    v2_return_rays: bool = False,
+    v2_answer_schema: Optional[Sequence[str]] = None,
+    v2_pointmae_pc_norm: bool = False,
+    v2_pointmae_scale_translate: bool = False,
+    v2_pointmae_scale_low: float = (2.0 / 3.0),
+    v2_pointmae_scale_high: float = (3.0 / 2.0),
+    v2_pointmae_translate: float = 0.2,
+    v2_transform_answers: bool = True,
 ) -> Tuple[MixedPretrainDataset, MixtureSampler, Dict[str, Any]]:
     """Build (dataset, sampler) for mixed pretraining from a YAML config."""
     specs, cfg = load_mix_config(mix_config_path)
+
+    dataset_version = str(cfg.get("dataset_version", cfg.get("data_version", "v1"))).strip().lower()
+    use_v2_raw = (dataset_version == "v2") and bool(return_raw)
+    cfg_v2 = cfg.get("v2", {}) if isinstance(cfg.get("v2", {}), dict) else {}
+    schema_default = (
+        v2_answer_schema
+        if v2_answer_schema is not None
+        else cfg.get("answer_schema", cfg_v2.get("answer_schema", None))
+    )
+    n_qry_default = (
+        v2_n_qry
+        if v2_n_qry is not None
+        else cfg.get("n_qry", cfg_v2.get("n_qry", None))
+    )
+    return_qry_default = _as_bool(cfg.get("return_qry", cfg_v2.get("return_qry", v2_return_qry)))
+    return_rays_default = _as_bool(
+        cfg.get("return_rays", cfg.get("return_ray", cfg_v2.get("return_rays", v2_return_rays)))
+    )
+    pm_pc_norm_default = _as_bool(
+        cfg.get("pointmae_pc_norm", cfg_v2.get("pointmae_pc_norm", v2_pointmae_pc_norm))
+    )
+    pm_st_default = _as_bool(
+        cfg.get(
+            "pointmae_scale_translate",
+            cfg_v2.get("pointmae_scale_translate", v2_pointmae_scale_translate),
+        )
+    )
+    pm_scale_low_default = float(
+        cfg.get("pointmae_scale_low", cfg_v2.get("pointmae_scale_low", v2_pointmae_scale_low))
+    )
+    pm_scale_high_default = float(
+        cfg.get("pointmae_scale_high", cfg_v2.get("pointmae_scale_high", v2_pointmae_scale_high))
+    )
+    pm_translate_default = float(
+        cfg.get("pointmae_translate", cfg_v2.get("pointmae_translate", v2_pointmae_translate))
+    )
+    pm_ans_tf_default = _as_bool(
+        cfg.get("transform_answers", cfg_v2.get("transform_answers", v2_transform_answers))
+    )
 
     datasets: List[Dataset] = []
     names: List[str] = []
@@ -268,53 +321,98 @@ def build_mixed_pretrain(
         if len(paths) == 0:
             raise FileNotFoundError(f"no npz found: cache_root={s.cache_root} split={s.split}")
 
-        ds = ModelNet40QueryDataset(
-            paths,
-            backend=s.backend,
-            n_point=n_point,
-            n_ray=n_ray,
-            mode=mode,
-            eval_seed=eval_seed,
-            mc_eval_k=mc_eval_k,
-            drop_ray_prob=float(drop_ray_prob if s.drop_ray_prob is None else s.drop_ray_prob),
-            force_missing_ray=bool(force_missing_ray if s.force_missing_ray is None else s.force_missing_ray),
-            add_eos=bool(add_eos if s.add_eos is None else s.add_eos),
-            qa_tokens=bool(qa_tokens),
-            qa_layout=str(qa_layout),
-            sequence_mode=str(sequence_mode),
-            event_order_mode=str(event_order_mode),
-            ray_order_mode=str(ray_order_mode),
-            ray_anchor_miss_t=float(ray_anchor_miss_t),
-            ray_view_tol=float(ray_view_tol),
-            include_pt_grad=bool(include_pt_grad),
-            pt_grad_mode=str(pt_grad_mode),
-            pt_grad_eps=float(pt_grad_eps),
-            pt_grad_clip=float(pt_grad_clip),
-            pt_grad_orient=str(pt_grad_orient),
-            include_ray_unc=bool(include_ray_unc),
-            ray_unc_k=int(ray_unc_k),
-            ray_unc_mode=str(ray_unc_mode),
-            voxel_grid=int(voxel_grid if s.voxel_grid is None else s.voxel_grid),
-            voxel_dilate=int(voxel_dilate if s.voxel_dilate is None else s.voxel_dilate),
-            voxel_max_steps=int(voxel_max_steps if s.voxel_max_steps is None else s.voxel_max_steps),
-            pt_xyz_key=str(pt_xyz_key),
-            pt_dist_key=None if pt_dist_key is None else str(pt_dist_key),
-            ablate_point_dist=bool(ablate_point_dist),
-            pt_sample_mode=str(pt_sample_mode),
-            pt_fps_key=str(pt_fps_key),
-            pt_rfps_key=str(pt_rfps_key),
-            pt_rfps_m=int(pt_rfps_m),
-            point_order_mode=str(point_order_mode),
-            aug_rotate_z=bool(aug_rotate_z),
-            aug_scale_min=float(aug_scale_min),
-            aug_scale_max=float(aug_scale_max),
-            aug_translate=float(aug_translate),
-            aug_jitter_sigma=float(aug_jitter_sigma),
-            aug_jitter_clip=float(aug_jitter_clip),
-            aug_recompute_dist=bool(aug_recompute_dist),
-            return_label=False,
-            return_raw=bool(return_raw),
-        )
+        if use_v2_raw:
+            schema = s.extra.get("answer_schema", schema_default)
+            n_surf = int(s.extra.get("n_surf", cfg.get("n_surf", n_point)))
+            n_qry_spec = s.extra.get("n_qry", n_qry_default)
+            n_ray_spec = s.extra.get("n_ray", cfg.get("n_ray", n_ray))
+            return_qry = _as_bool(s.extra.get("return_qry", return_qry_default))
+            return_rays = _as_bool(
+                s.extra.get(
+                    "return_rays",
+                    s.extra.get("return_ray", return_rays_default),
+                )
+            )
+            surf_xyz_key = str(s.extra.get("surf_xyz_key", v2_surf_xyz_key))
+            qry_xyz_key = str(s.extra.get("qry_xyz_key", v2_qry_xyz_key))
+            answer_prefix = s.extra.get("answer_prefix", v2_answer_prefix)
+            if answer_prefix is not None:
+                answer_prefix = str(answer_prefix)
+            pm_pc_norm = _as_bool(s.extra.get("pointmae_pc_norm", pm_pc_norm_default))
+            pm_st = _as_bool(s.extra.get("pointmae_scale_translate", pm_st_default))
+            pm_scale_low = float(s.extra.get("pointmae_scale_low", pm_scale_low_default))
+            pm_scale_high = float(s.extra.get("pointmae_scale_high", pm_scale_high_default))
+            pm_translate = float(s.extra.get("pointmae_translate", pm_translate_default))
+            pm_ans_tf = _as_bool(s.extra.get("transform_answers", pm_ans_tf_default))
+
+            ds = V2SurfaceQueryDataset(
+                paths,
+                n_surf=n_surf,
+                n_qry=(None if n_qry_spec is None else int(n_qry_spec)),
+                n_ray=(None if n_ray_spec is None else int(n_ray_spec)),
+                answer_schema=schema,
+                seed=int(eval_seed),
+                return_qry=bool(return_qry),
+                return_rays=bool(return_rays),
+                surf_xyz_key=surf_xyz_key,
+                qry_xyz_key=qry_xyz_key,
+                answer_prefix=answer_prefix,
+                mode=str(mode),
+                pointmae_pc_norm=bool(pm_pc_norm),
+                pointmae_scale_translate=bool(pm_st),
+                pointmae_scale_low=float(pm_scale_low),
+                pointmae_scale_high=float(pm_scale_high),
+                pointmae_translate=float(pm_translate),
+                transform_answers=bool(pm_ans_tf),
+            )
+        else:
+            ds = ModelNet40QueryDataset(
+                paths,
+                backend=s.backend,
+                n_point=n_point,
+                n_ray=n_ray,
+                mode=mode,
+                eval_seed=eval_seed,
+                mc_eval_k=mc_eval_k,
+                drop_ray_prob=float(drop_ray_prob if s.drop_ray_prob is None else s.drop_ray_prob),
+                force_missing_ray=bool(force_missing_ray if s.force_missing_ray is None else s.force_missing_ray),
+                add_eos=bool(add_eos if s.add_eos is None else s.add_eos),
+                qa_tokens=bool(qa_tokens),
+                qa_layout=str(qa_layout),
+                sequence_mode=str(sequence_mode),
+                event_order_mode=str(event_order_mode),
+                ray_order_mode=str(ray_order_mode),
+                ray_anchor_miss_t=float(ray_anchor_miss_t),
+                ray_view_tol=float(ray_view_tol),
+                include_pt_grad=bool(include_pt_grad),
+                pt_grad_mode=str(pt_grad_mode),
+                pt_grad_eps=float(pt_grad_eps),
+                pt_grad_clip=float(pt_grad_clip),
+                pt_grad_orient=str(pt_grad_orient),
+                include_ray_unc=bool(include_ray_unc),
+                ray_unc_k=int(ray_unc_k),
+                ray_unc_mode=str(ray_unc_mode),
+                voxel_grid=int(voxel_grid if s.voxel_grid is None else s.voxel_grid),
+                voxel_dilate=int(voxel_dilate if s.voxel_dilate is None else s.voxel_dilate),
+                voxel_max_steps=int(voxel_max_steps if s.voxel_max_steps is None else s.voxel_max_steps),
+                pt_xyz_key=str(pt_xyz_key),
+                pt_dist_key=None if pt_dist_key is None else str(pt_dist_key),
+                ablate_point_dist=bool(ablate_point_dist),
+                pt_sample_mode=str(pt_sample_mode),
+                pt_fps_key=str(pt_fps_key),
+                pt_rfps_key=str(pt_rfps_key),
+                pt_rfps_m=int(pt_rfps_m),
+                point_order_mode=str(point_order_mode),
+                aug_rotate_z=bool(aug_rotate_z),
+                aug_scale_min=float(aug_scale_min),
+                aug_scale_max=float(aug_scale_max),
+                aug_translate=float(aug_translate),
+                aug_jitter_sigma=float(aug_jitter_sigma),
+                aug_jitter_clip=float(aug_jitter_clip),
+                aug_recompute_dist=bool(aug_recompute_dist),
+                return_label=False,
+                return_raw=bool(return_raw),
+            )
         datasets.append(ds)
         names.append(s.name)
         weights.append(s.weight)

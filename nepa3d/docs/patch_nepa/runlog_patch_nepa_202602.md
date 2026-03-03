@@ -1,12 +1,18 @@
 # Patch-NEPA Runlog (2026-02)
 
-Last updated: 2026-03-02
+Last updated: 2026-03-03
 
 Track note:
 
 - This file is dedicated to Patch-NEPA Stage-2 runs only.
 - Historical Query-NEPA/pre-Stage-2 run history stays in:
   - `nepa3d/docs/query_nepa/runlog_202602.md`
+
+Restart policy note (2026-03-03):
+
+- Data semantics restart memo is tracked in:
+  - `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
+- New mainline comparisons should be recorded as data-v2 runs only.
 
 ## 0. Execution Rule Update (2026-02-28, mandatory)
 
@@ -4814,3 +4820,170 @@ Runtime snapshot right after submit:
 
 - pretrain `101484`/`101488`: `R`
 - dependent FT `101485`-`101487`, `101489`-`101491`: `H` (`afterok` wait)
+
+## 113. `101444`-`101451` completion audit (2026-03-03)
+
+Checked jobs:
+
+- pretrain: `101444` (`f_poM`), `101448` (`f_poR`)
+- dependent FT: `101445`-`101447`, `101449`-`101451`
+
+Final status:
+
+- `101444`: `job_state=F`, `Exit_status=2`
+- `101448`: `job_state=F`, `Exit_status=2`
+- `101445`-`101447`, `101449`-`101451`: `job_state=F`, `Hold_Types=s` (dependency unsatisfied, not executed)
+
+Important nuance:
+
+- Both pretrain logs reached epoch end and wrote checkpoints:
+  - `runs/patchnepa_rayqa/patchnepa_rfps_patchorder_2x2_retry2_20260302_224950_pt_f_poM/ckpt_latest.pt`
+  - `runs/patchnepa_rayqa/patchnepa_rfps_patchorder_2x2_retry2_20260302_224950_pt_f_poR/ckpt_latest.pt`
+- W&B summaries were also emitted:
+  - `f_poM`: `diag/cos_prev=0.97037`, `diag/gap=0.02968`, `copy_win=0.05859`
+  - `f_poR`: `diag/cos_prev=0.97682`, `diag/gap=0.02250`, `copy_win=0.07617`
+
+Failure cause recorded in stderr (`pretrain_f_poM.err`, `pretrain_f_poR.err`):
+
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_qf.sh: line 420: unexpected EOF while looking for matching \"`
+
+Impact:
+
+- This batch produced valid pretrain checkpoints but no dependent FT results.
+- No new `obj_bg/obj_only/pb_t50_rs` test metrics were generated for jobs `101445`-`101451`.
+
+## 114. FT-only relaunch from recovered checkpoints (`101509`-`101514`) (2026-03-03)
+
+Why relaunch:
+
+- `101444`/`101448` pretrains produced valid `ckpt_latest.pt`, but `Exit_status=2` blocked all `afterok` FT jobs.
+- To avoid re-running expensive pretrain, FT was relaunched directly from those recovered checkpoints.
+
+Relaunch root:
+
+- `logs/sanity/patchnepa_submit/patchnepa_rfps_patchorder_2x2_retry2_ftonly_relaunch_20260303_033658`
+  - `submitted_jobs.txt`
+  - `qsub_logs/`
+
+Submitted FT jobs (no dependency hold):
+
+- from `f_poM` checkpoint:
+  - `101509.qjcm` (`obj_bg`)
+  - `101510.qjcm` (`obj_only`)
+  - `101511.qjcm` (`pb_t50_rs`)
+- from `f_poR` checkpoint:
+  - `101512.qjcm` (`obj_bg`)
+  - `101513.qjcm` (`obj_only`)
+  - `101514.qjcm` (`pb_t50_rs`)
+
+Checkpoint sources:
+
+- `runs/patchnepa_rayqa/patchnepa_rfps_patchorder_2x2_retry2_20260302_224950_pt_f_poM/ckpt_latest.pt`
+- `runs/patchnepa_rayqa/patchnepa_rfps_patchorder_2x2_retry2_20260302_224950_pt_f_poR/ckpt_latest.pt`
+
+## 115. Data-v2 token pipeline integration note (`ans_feat` fixed-dim vs additive) (2026-03-03)
+
+Decision recorded:
+
+- The "fixed `ans_feat` dimension" requirement and "additive modality embedding" are not contradictory.
+- In the current pipeline, fixed dim is mandatory for batch collation (`[B,Nq,C]`), so `answer_in_dim` was introduced as the model-side contract.
+- Additive modality embedding remains a next-step model improvement and should be implemented on top of the same fixed-schema data contract.
+
+Applied code baseline in this repo:
+
+- `nepa3d/models/patch_nepa.py`
+  - `forward_tokens()` token stream path
+  - `answer_in_dim` support (for v2 packed answer features)
+- `nepa3d/data/mixed_pretrain.py`
+  - `dataset_version=v2` routing to `V2SurfaceQueryDataset`
+- New v2 stack files:
+  - `nepa3d/data/answer_feature_pack.py`
+  - `nepa3d/data/dataset_v2.py`
+  - `nepa3d/data/preprocess_shapenet_v2.py`
+  - `nepa3d/data/convert_npz_to_v2.py`
+  - `nepa3d/train/pretrain_patch_nepa_tokens.py`
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_tokens.yaml`
+
+Operational rule:
+
+- Keep fixed-schema v2 training as mainline bring-up.
+- Add additive embedding as an isolated ablation/upgrade after data-v2 run is stable.
+
+## 116. ShapeNet v2 rebuild (multi-shard qsub) started (`101714`-`101721`) (2026-03-03)
+
+Objective:
+
+- Rebuild ShapeNet cache with v2 schema using parallel shard jobs (multi-node via multi-job sharding).
+
+Code/runtime updates applied before submit:
+
+- `nepa3d/data/preprocess_shapenet_v2.py`
+  - Added `--num_shards/--shard_id` shard filtering.
+  - Added `--skip_existing` for restart-safe reruns.
+  - Changed manifest output for shard runs to:
+    - `v2_manifest.shard{shard_id}of{num_shards}.json`
+    - (prevents overwrite races in concurrent shard runs).
+- Added launch wrappers:
+  - `scripts/preprocess/preprocess_shapenet_v2.sh`
+  - `scripts/preprocess/submit_preprocess_shapenet_v2_qf.sh`
+
+Submitted command profile:
+
+- `OUT_ROOT=data/shapenet_cache_v2_20260303`
+- `NUM_SHARDS=8`
+- `WORKERS=24` (per shard)
+- `RT_QF=1`, `WALLTIME=72:00:00`
+- logs root:
+  - `logs/preprocess/shapenet_v2/shapenet_v2_rebuild_20260303_151147`
+
+Submitted jobs:
+
+- `101714.qjcm` (`shpv2_s00`)
+- `101715.qjcm` (`shpv2_s01`)
+- `101716.qjcm` (`shpv2_s02`)
+- `101717.qjcm` (`shpv2_s03`)
+- `101718.qjcm` (`shpv2_s04`)
+- `101719.qjcm` (`shpv2_s05`)
+- `101720.qjcm` (`shpv2_s06`)
+- `101721.qjcm` (`shpv2_s07`)
+
+Initial status at submit check:
+
+- all 8 jobs in `R` state on `abciq`.
+
+## 117. Auto dependent submit for unpaired split/materialize (`101730`,`101731`) (2026-03-03)
+
+Requested operation:
+
+- Automatically run unpaired split/materialize only after all ShapeNet v2 shard jobs complete successfully.
+
+Logic validation and fixes made:
+
+- Existing helper scripts had hard-coded legacy paths/project assumptions (`/groups/gag...`) and were updated to dynamic `ROOT_DIR` + `.venv` activation.
+- Added dependency submit wrapper:
+  - `scripts/preprocess/submit_shapenet_unpaired_post_qf.sh`
+  - Inputs:
+    - `PREPROC_JOB_IDS` (required)
+    - `CACHE_ROOT`, `OUT_JSON`, `OUT_ROOT`, `RATIOS`, `SPLITS`, etc.
+  - Behavior:
+    1. submit split job with `depend=afterok:<all preprocess shard jobs>`
+    2. submit materialize job with `depend=afterok:<split job>`
+- Corrected PBS `-v` transport edge case:
+  - values with spaces/commas break environment passing;
+  - switched to `:`-delimited strings:
+    - `RATIOS=0.34:0.33:0.33`
+    - `SPLITS=train_mesh:train_pc:train_udf:eval`
+  - runner scripts convert `:` -> whitespace before Python argparse.
+
+Submitted jobs:
+
+- `101730.qjcm` (`shpv2_split`)
+  - `depend=afterok:101714:101715:101716:101717:101718:101719:101720:101721`
+- `101731.qjcm` (`shpv2_mat`)
+  - `depend=afterok:101730`
+
+Status at submit check:
+
+- `101730`, `101731` are `H` (`Hold_Types=s`) as expected until dependencies are satisfied.
+- submit logs:
+  - `logs/preprocess/shapenet_unpaired/shapenet_v2_post_20260303_151731/`
