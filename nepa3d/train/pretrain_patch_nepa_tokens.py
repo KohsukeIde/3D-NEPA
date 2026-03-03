@@ -84,7 +84,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--serial_order", type=str, default="morton")
     p.add_argument("--serial_bits", type=int, default=10)
     p.add_argument("--serial_shuffle_within_patch", type=int, default=0, choices=[0, 1])
-    p.add_argument("--patch_order_mode", type=str, default="none")
+    p.add_argument("--patch_order_mode", type=str, default="morton")
 
     p.add_argument("--d_model", type=int, default=384)
     p.add_argument("--n_layers", type=int, default=12)
@@ -105,6 +105,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--answer_mlp_layers", type=int, default=2)
     p.add_argument("--answer_pool", type=str, default="max", choices=["max", "mean"])
     p.add_argument("--loss_target_mode", type=str, default="content_tokens", choices=["full_z", "content_tokens"])
+    p.add_argument(
+        "--loss_mask_mode",
+        type=str,
+        default="answer_and_point_context",
+        choices=["answer_only_if_present", "answer_and_point_context", "non_special"],
+        help=(
+            "Token loss mask mode: "
+            "answer_only_if_present (legacy), "
+            "answer_and_point_context (A + TYPE_POINT/TYPE_RAY), "
+            "non_special (all non-special tokens)."
+        ),
+    )
     p.add_argument("--skip_k", type=int, default=1)
 
     p.add_argument("--max_steps", type=int, default=10000)
@@ -481,6 +493,7 @@ def main() -> None:
             f"transform_answers={bool(int(args.pm_transform_answers))}"
         )
         accelerator.print(f"[token_pretrain] token_qa_layout={str(args.token_qa_layout)}")
+        accelerator.print(f"[token_pretrain] loss_mask_mode={str(args.loss_mask_mode)}")
         accelerator.print(
             f"[token_pretrain] optimizer lr={float(args.lr):.3e} wd={float(args.weight_decay):.3f} "
             f"scheduler={str(args.lr_scheduler)} warmup_steps={int(warmup_steps)} "
@@ -531,6 +544,7 @@ def main() -> None:
                 out.type_id,
                 skip_k=int(args.skip_k),
                 target=target,
+                loss_mask_mode=str(args.loss_mask_mode),
             )
             diag = _compute_copy_diag(target, out.z_hat, out.type_id, int(args.skip_k))
             accelerator.backward(loss)

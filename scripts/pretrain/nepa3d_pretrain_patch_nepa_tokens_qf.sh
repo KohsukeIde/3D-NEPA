@@ -49,7 +49,7 @@ PATCH_LOCAL_ENCODER="${PATCH_LOCAL_ENCODER:-pointmae_conv}"
 PATCH_FPS_RANDOM_START="${PATCH_FPS_RANDOM_START:-1}"
 GROUP_SIZE="${GROUP_SIZE:-32}"
 NUM_GROUPS="${NUM_GROUPS:-64}"
-PATCH_ORDER_MODE="${PATCH_ORDER_MODE:-none}"
+PATCH_ORDER_MODE="${PATCH_ORDER_MODE:-morton}"
 
 D_MODEL="${D_MODEL:-384}"
 N_LAYERS="${N_LAYERS:-12}"
@@ -67,6 +67,7 @@ ANSWER_IN_DIM="${ANSWER_IN_DIM:-0}"
 ANSWER_MLP_LAYERS="${ANSWER_MLP_LAYERS:-2}"
 ANSWER_POOL="${ANSWER_POOL:-max}"
 LOSS_TARGET_MODE="${LOSS_TARGET_MODE:-content_tokens}"   # full_z|content_tokens
+LOSS_MASK_MODE="${LOSS_MASK_MODE:-answer_and_point_context}"  # answer_only_if_present|answer_and_point_context|non_special
 SKIP_K="${SKIP_K:-1}"
 
 Q_MASK_PROB="${Q_MASK_PROB:-0.0}"
@@ -113,6 +114,7 @@ echo "optimizer: wd=${WEIGHT_DECAY} lr_scheduler=${LR_SCHEDULER} warmup_steps=${
 echo "patch: embed=${PATCH_EMBED} local_encoder=${PATCH_LOCAL_ENCODER} fps_random_start=${PATCH_FPS_RANDOM_START} group_size=${GROUP_SIZE} num_groups=${NUM_GROUPS}" | tee -a "${LOG_PATH}"
 echo "pm_compat: pc_norm=${PM_PC_NORM} scale_translate=${PM_SCALE_TRANSLATE} scale=[${PM_SCALE_LOW},${PM_SCALE_HIGH}] translate=${PM_TRANSLATE} transform_answers=${PM_TRANSFORM_ANSWERS}" | tee -a "${LOG_PATH}"
 echo "diag: enabled=1 diag_every=${DIAG_EVERY}" | tee -a "${LOG_PATH}"
+echo "loss: target_mode=${LOSS_TARGET_MODE} mask_mode=${LOSS_MASK_MODE}" | tee -a "${LOG_PATH}"
 echo "wandb: use=${USE_WANDB} project=${WANDB_PROJECT} run=${WANDB_RUN_NAME} group=${WANDB_GROUP} mode=${WANDB_MODE}" | tee -a "${LOG_PATH}"
 echo | tee -a "${LOG_PATH}"
 
@@ -154,6 +156,7 @@ python -u -m nepa3d.train.pretrain_patch_nepa_tokens \
   --answer_mlp_layers "${ANSWER_MLP_LAYERS}" \
   --answer_pool "${ANSWER_POOL}" \
   --loss_target_mode "${LOSS_TARGET_MODE}" \
+  --loss_mask_mode "${LOSS_MASK_MODE}" \
   --skip_k "${SKIP_K}" \
   --max_steps "${MAX_STEPS}" \
   --lr "${LR}" \

@@ -91,7 +91,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--patch_order_mode",
         type=str,
-        default="none",
+        default="morton",
         help=(
             "Patch order mode(s). Comma-separated list allowed. "
             "Examples: none | morton | morton_yzx | random_sweep | reverse | "

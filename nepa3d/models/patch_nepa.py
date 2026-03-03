@@ -118,7 +118,7 @@ class PatchTransformerNepa(nn.Module):
         serial_order: str = "morton",
         serial_bits: int = 10,
         serial_shuffle_within_patch: int = 0,
-        patch_order_mode: str = "none",  # none|...|sample:<m1,m2,...> (rev_/_rev wrappers supported)
+        patch_order_mode: str = "morton",  # none|...|sample:<m1,m2,...> (rev_/_rev wrappers supported)
         use_normals: bool = False,
         # transformer
         d_model: int = 384,
@@ -1215,6 +1215,7 @@ class PatchTransformerNepa(nn.Module):
         *,
         skip_k: int = 1,
         target: Optional[torch.Tensor] = None,
+        loss_mask_mode: str = "answer_only_if_present",
     ) -> torch.Tensor:
         k = int(skip_k)
         if k < 1:
@@ -1234,16 +1235,35 @@ class PatchTransformerNepa(nn.Module):
             mask = torch.ones(pred.shape[:2], device=z.device, dtype=torch.bool)
         else:
             tgt_ty = type_id[:, k:]
+            mode = str(loss_mask_mode)
             has_answer = bool((tgt_ty == int(TYPE_A_POINT)).any() or (tgt_ty == int(TYPE_A_RAY)).any())
-            if has_answer:
-                mask = (tgt_ty == int(TYPE_A_POINT)) | (tgt_ty == int(TYPE_A_RAY))
+            is_answer = (tgt_ty == int(TYPE_A_POINT)) | (tgt_ty == int(TYPE_A_RAY))
+            is_point_context = (tgt_ty == int(TYPE_POINT)) | (tgt_ty == int(TYPE_RAY))
+            non_special = (
+                (tgt_ty != int(TYPE_BOS))
+                & (tgt_ty != int(TYPE_SEP_CTX))
+                & (tgt_ty != int(TYPE_SEP_QA))
+                & (tgt_ty != int(TYPE_EOS))
+                & (tgt_ty != int(TYPE_MISSING_RAY))
+            )
+            if mode == "answer_only_if_present":
+                if has_answer:
+                    mask = is_answer
+                else:
+                    mask = non_special
+            elif mode == "answer_and_point_context":
+                # Token-v2 default: keep classic answer supervision and add direct
+                # context-token prediction for TYPE_POINT/TYPE_RAY only.
+                if has_answer:
+                    mask = is_answer | is_point_context
+                else:
+                    mask = is_point_context
+            elif mode == "non_special":
+                mask = non_special
             else:
-                mask = (
-                    (tgt_ty != int(TYPE_BOS))
-                    & (tgt_ty != int(TYPE_SEP_CTX))
-                    & (tgt_ty != int(TYPE_SEP_QA))
-                    & (tgt_ty != int(TYPE_EOS))
-                    & (tgt_ty != int(TYPE_MISSING_RAY))
+                raise ValueError(
+                    f"unknown loss_mask_mode={mode}. "
+                    "expected one of: answer_only_if_present, answer_and_point_context, non_special"
                 )
         if not bool(mask.any()):
             return pred.sum() * 0.0
