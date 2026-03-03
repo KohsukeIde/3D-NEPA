@@ -20,6 +20,7 @@ EVAL_SPLIT="${EVAL_SPLIT:-test}"
 OUT_JSON="${OUT_JSON:-data/shapenet_unpaired_splits_v2_20260303.json}"
 SEED="${SEED:-0}"
 RATIOS="${RATIOS:-0.34:0.33:0.33}"
+ALLOW_EMPTY_SPLITS="${ALLOW_EMPTY_SPLITS:-0}"
 
 if [[ ! -x "${PYTHON_BIN}" ]]; then
   echo "[error] python not found: ${PYTHON_BIN}"
@@ -35,4 +36,5 @@ set -x
   --eval_split "${EVAL_SPLIT}" \
   --out_json "${OUT_JSON}" \
   --seed "${SEED}" \
-  --ratios ${RATIO_ARGS}
+  --ratios ${RATIO_ARGS} \
+  --allow_empty_splits "${ALLOW_EMPTY_SPLITS}"

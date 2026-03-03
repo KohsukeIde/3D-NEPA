@@ -51,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--wandb_group", type=str, default="")
     p.add_argument("--wandb_tags", type=str, default="")
     p.add_argument("--wandb_mode", type=str, default="online", choices=["online", "offline", "disabled"])
-    p.add_argument("--wandb_log_every", type=int, default=50)
+    p.add_argument("--wandb_log_every", type=int, default=1)
 
     # Data
     p.add_argument("--mix_config_path", type=str, required=True)
@@ -72,14 +72,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--patch_local_encoder",
         type=str,
-        default="mlp",
+        default="pointmae_conv",
         choices=["mlp", "pointmae_conv"],
         help="Local patch encoder for fps_knn/pointgpt patch embed.",
     )
     p.add_argument(
         "--patch_fps_random_start",
         type=int,
-        default=0,
+        default=1,
         choices=[0, 1],
         help="Use random FPS start (Point-MAE style) for fps_knn/pointgpt patch embed.",
     )
@@ -144,7 +144,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--answer_pool", type=str, default="max", choices=["max", "mean"])
     p.add_argument("--nepa_skip_k", type=int, default=1)
     p.add_argument("--nepa_multi_k", type=str, default="")
-    p.add_argument("--loss_target_mode", type=str, default="full_z", choices=["full_z", "content_tokens"])
+    p.add_argument("--loss_target_mode", type=str, default="content_tokens", choices=["full_z", "content_tokens"])
     p.add_argument("--q_mask_prob", type=float, default=0.0)
     p.add_argument("--q_mask_warmup_epochs", type=float, default=0.0)
     p.add_argument("--q_mask_mode", type=str, default="mask_token", choices=["mask_token", "zero"])
@@ -201,7 +201,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--use_ema", type=int, default=0, choices=[0, 1])
     p.add_argument("--ema_decay", type=float, default=0.9999)
     p.add_argument("--diag_copy", type=int, default=1, choices=[0, 1])
-    p.add_argument("--diag_every", type=int, default=50)
+    p.add_argument("--diag_every", type=int, default=1)
     p.add_argument("--diag_k", type=int, default=1, help="diagnostic k shift; <=0 uses first skip_k")
     return p.parse_args()
 

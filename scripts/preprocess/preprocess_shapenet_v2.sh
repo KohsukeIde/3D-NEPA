@@ -23,6 +23,7 @@ WORKERS="${WORKERS:-32}"
 NUM_SHARDS="${NUM_SHARDS:-1}"
 SHARD_ID="${SHARD_ID:-0}"
 SKIP_EXISTING="${SKIP_EXISTING:-1}"
+MISSING_ONLY="${MISSING_ONLY:-0}"
 
 # Sizes
 N_SURF="${N_SURF:-8192}"
@@ -64,6 +65,9 @@ fi
 if [[ "${SKIP_EXISTING}" == "1" ]]; then
   EXTRA_ARGS+=( --skip_existing )
 fi
+if [[ "${MISSING_ONLY}" == "1" ]]; then
+  EXTRA_ARGS+=( --missing_only )
+fi
 
 set -x
 "${PYTHON_BIN}" -m nepa3d.data.preprocess_shapenet_v2 \
@@ -90,4 +94,3 @@ set -x
   --ray_radius "${RAY_RADIUS}" \
   --ray_jitter_std "${RAY_JITTER_STD}" \
   "${EXTRA_ARGS[@]}"
-

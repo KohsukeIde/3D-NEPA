@@ -14,7 +14,7 @@ def _key_from_path(npz_path: str) -> str:
     return f"{synset}/{inst}"
 
 
-def _stratified_assign(train_paths, ratios, seed):
+def _stratified_assign(train_paths, ratios, seed, allow_empty_splits=False):
     groups = defaultdict(list)
     for p in train_paths:
         synset = p.split(os.sep)[-2]
@@ -42,7 +42,7 @@ def _stratified_assign(train_paths, ratios, seed):
         n1 = min(max(n1, 0), n - n0)
         n2 = n - n0 - n1
 
-        if n >= 3:
+        if (not bool(allow_empty_splits)) and n >= 3:
             counts = [n0, n1, n2]
             for i in range(3):
                 if counts[i] == 0:
@@ -77,6 +77,13 @@ def main():
         metavar=("MESH", "PC", "UDF"),
     )
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument(
+        "--allow_empty_splits",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Allow zero-assignment for some primitive splits per synset (strict ratio mode).",
+    )
     args = ap.parse_args()
 
     cache_root = os.path.abspath(args.cache_root)
@@ -87,7 +94,12 @@ def main():
     if not eval_paths:
         raise RuntimeError(f"no npz under {cache_root}/{args.eval_split}")
 
-    mapping = _stratified_assign(train_paths, args.ratios, args.seed)
+    mapping = _stratified_assign(
+        train_paths,
+        args.ratios,
+        args.seed,
+        allow_empty_splits=bool(int(args.allow_empty_splits)),
+    )
     records = []
 
     for p in sorted(train_paths):
@@ -123,6 +135,7 @@ def main():
             "eval_split": args.eval_split,
             "seed": int(args.seed),
             "ratios_mesh_pc_udf": [float(x) for x in args.ratios],
+            "allow_empty_splits": bool(int(args.allow_empty_splits)),
             "counts": dict(counts),
         },
         "records": records,

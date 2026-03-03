@@ -4987,3 +4987,250 @@ Status at submit check:
 - `101730`, `101731` are `H` (`Hold_Types=s`) as expected until dependencies are satisfied.
 - submit logs:
   - `logs/preprocess/shapenet_unpaired/shapenet_v2_post_20260303_151731/`
+
+## 118. Data-v2 revalidation scope reset (user-locked) (2026-03-03)
+
+This runlog now follows the restart matrix in:
+
+- `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md` (Section 13)
+
+Key lock-ins applied:
+
+1. New ShapeNet v2 cache only.
+2. `loss_target_mode=content_tokens` only.
+3. ScanObjectNN FT protocol fixed to Point-MAE-style:
+- `n_point=2048`
+- `PointcloudScaleAndTranslate` augmentation for `obj_bg/obj_only/pb_t50_rs/hardest`.
+ - patch local encoder default `pointmae_conv`, with `patch_fps_random_start=1`.
+4. Main comparison axes for this round:
+- `qa_layout`: `split_sep` vs `interleave`
+- `point_order_mode`: `morton` vs `random` vs `sample6` vs `sample12`
+- `pt_sample_mode`: `rfps` vs `random` (non-cached)
+
+De-prioritized in this round:
+
+- `full_z` target arm.
+- patch-order schedule (`epoch/batch/sample`) sweep.
+- ModelNet FT.
+
+## 119. Data-distribution arm definition (v2) (2026-03-03)
+
+Distribution baseline decision:
+
+- Baseline is `pc-only (100%)` on rebuilt ShapeNet v2.
+
+Additional required composition arms:
+
+1. `mesh+udf (50/50, no pc)`
+2. `pc+mesh+udf (33/33/33)`
+
+Implementation notes:
+
+- Composition is encoded by split cardinality/materialized cache, not by runtime sampler weights.
+- For these runs, use `replacement=false` one-pass sampling.
+- `shapenet_unpaired_split.py` was updated with:
+  - `--allow_empty_splits {0,1}`
+  - strict composition runs use `--allow_empty_splits 1` to permit true zero-allocation splits.
+
+## 120. ShapeNet v2 missing-only backfill + forced post-process (2026-03-03)
+
+Context:
+
+- After 16-shard rebuild/backfill, generation entered long-tail on a small set of meshes.
+- To avoid waiting for the last hard cases, remaining preprocess jobs were stopped and post-process was advanced.
+
+Code/tooling update:
+
+- Added `--missing_only` to:
+  - `nepa3d/data/preprocess_shapenet_v2.py`
+  - `scripts/preprocess/preprocess_shapenet_v2.sh`
+  - `scripts/preprocess/submit_preprocess_shapenet_v2_qf.sh`
+- Purpose: rerun only currently missing NPZ outputs with standard shard parallelism and logs.
+
+Missing-only submit:
+
+- run tag:
+  - `shapenet_v2_missingonly_20260303_183342`
+- jobs:
+  - `101933`..`101948` (`shpv2m16_s00`..`shpv2m16_s15`)
+- logs:
+  - `logs/preprocess/shapenet_v2/shapenet_v2_missingonly_20260303_183342/`
+- startup summary from shard logs:
+  - `total_missing_now=106`, shard tasks were `7` or `6`.
+
+Forced stop decision:
+
+- Remaining running long-tail jobs were force-stopped:
+  - `101934,101935,101936,101937,101939,101941,101942,101944`
+- cache count at stop time:
+  - `train=47212`, `test=5246`, `total=52458` (vs expected `52472`, missing `14`).
+
+Post-process submit (split/materialize):
+
+- First attempt (failed due wrong `PBS_O_WORKDIR` selecting `/groups/.../VGI`):
+  - split: `102025` (`shpv2_split_now`) failed with
+    - `[error] python not found: /groups/qgah50055/ide/VGI/.venv/bin/python`
+  - materialize dependent job did not run.
+
+- Retry from project root (successful):
+  - split: `102028` (`shpv2_split_now2`)
+  - materialize: `102029` (`shpv2_mat_now2`, depend=afterok:102028)
+  - logs:
+    - `logs/preprocess/shapenet_unpaired/shapenet_v2_post_forced_retry_20260303_191513/`
+
+Final outputs:
+
+- split json:
+  - `data/shapenet_unpaired_splits_v2_20260303.json`
+- split counts (from split log):
+  - `train_mesh=16050`, `train_pc=15579`, `train_udf=15583`, `eval=5246`
+- materialize summary (symlink mode, overwrite on):
+  - `created=52458`, `skipped=0`, `missing=0`
+- materialized cache root:
+  - `data/shapenet_unpaired_cache_v2_20260303`
+
+## 121. Data-v2 sanity check + point-only token pretrain start (2026-03-03)
+
+Preflight sanity check on materialized cache:
+
+- target root:
+  - `data/shapenet_unpaired_cache_v2_20260303`
+- split counts:
+  - `train_mesh=16050`
+  - `train_pc=15579`
+  - `train_udf=15583`
+  - `eval=5246`
+- sampled NPZ checks:
+  - required keys present for each split (`pc_qry_*`, `mesh_qry_*`, `udf_qry_*`)
+  - `np.isfinite` passed on sampled tensors (no NaN/Inf in sampled files)
+
+Point-only first-run (smoke) submission:
+
+- job: `102038.qjcm` (`pntok_pc100_s1`)
+- run set:
+  - `patchnepa_v2tok_pc100_smoke_20260303_193224`
+- run tag:
+  - `pt_pc100_smoke_20260303_193224`
+- save dir:
+  - `runs/patchnepa_tokens/patchnepa_v2tok_pc100_smoke_20260303_193224`
+- logs:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_v2tok_pc100_smoke_20260303_193224/pt_pc100_smoke_20260303_193224.pbs.log`
+
+Recipe snapshot:
+
+- mix config:
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_tokens_pc100.yaml`
+- `token_qa_layout=split_sep`
+- `max_steps=3000`, `batch=8`, `n_surf=2048`, `n_qry=1024`
+- Point-MAE compatibility enabled (`pc_norm=1`, `scale_translate=1`)
+
+W&B status:
+
+- enabled (`use_wandb=1`)
+- project: `patchnepa-pretrain`
+- group: `v2tok_pc100_smoke`
+- run URL (from log):
+  - `https://wandb.ai/ide_koh/patchnepa-pretrain/runs/dakvcpz2`
+
+## 122. Composition smoke bring-up (mesh+udf / 3mix) (2026-03-03)
+
+Initial submit and failure:
+
+- first submit jobs:
+  - `102039` (`pntok_m50u50_s1`)
+  - `102040` (`pntok_mix33_s1`)
+- failure cause (both):
+  - config cache roots did not exist yet:
+    - `data/shapenet_unpaired_cache_v2_mesh50_udf50`
+    - `data/shapenet_unpaired_cache_v2_pc33_mesh33_udf33`
+  - error in logs:
+    - `FileNotFoundError: no npz found: cache_root=...`
+
+Recovery action:
+
+1. Created strict-ratio split/materialized roots from v2 base cache.
+- source cache:
+  - `data/shapenet_cache_v2_20260303`
+- mesh+udf split json:
+  - `data/shapenet_unpaired_splits_v2_mesh50_udf50_20260303.json`
+  - counts: `train_mesh=23605`, `train_udf=23607`, `eval=5246`
+- 3mix split json:
+  - `data/shapenet_unpaired_splits_v2_pc33_mesh33_udf33_20260303.json`
+  - counts: `train_pc=15736`, `train_mesh=15736`, `train_udf=15740`, `eval=5246`
+- materialized roots (symlink, overwrite):
+  - `data/shapenet_unpaired_cache_v2_mesh50_udf50` (`created=52458`, `missing=0`)
+  - `data/shapenet_unpaired_cache_v2_pc33_mesh33_udf33` (`created=52458`, `missing=0`)
+
+2. Resubmitted composition smokes.
+- `102041` (`pntok_m50u50_s1`)
+  - run set: `patchnepa_v2tok_mesh50udf50_smoke_20260303_193742`
+  - W&B run: `https://wandb.ai/ide_koh/patchnepa-pretrain/runs/kb1687a3`
+- `102042` (`pntok_mix33_s1`)
+  - run set: `patchnepa_v2tok_pc33mesh33udf33_smoke_20260303_193742`
+  - W&B run: `https://wandb.ai/ide_koh/patchnepa-pretrain/runs/g58gjkxr`
+
+Current status:
+
+- `102038` (`pc100`), `102041` (`mesh50+udf50`), `102042` (`pc33+mesh33+udf33`) are all running.
+- startup checks passed in all active logs:
+  - `answer_in_dim=9`
+  - expected `mix_info` sizes/counts
+  - W&B online sync
+  - training loss decreasing from step 1.
+
+## 123. Always-on diag logging for token pretrain (2026-03-03)
+
+Request:
+
+- Ensure copy-probe diagnostics are always emitted in token-pretrain runs:
+  - `diag/gap`
+  - `diag/cos_tgt`
+  - `diag/cos_prev` (plus typo alias `diag/cos_precv`)
+  - `diag/copy_win` (plus alias `diag/copy-win`)
+
+Applied code changes:
+
+1. `nepa3d/train/pretrain_patch_nepa_tokens.py`
+- Added copy diagnostics computation (`cos_tgt`, `cos_prev`, `gap`, `copy_win`) using the same mask semantics as pretrain_patch_nepa.
+- Added always-on periodic stdout diagnostic line:
+  - `[step ...] ... cos_tgt=... cos_prev=... gap=... copy_win=...`
+- Added W&B logging for diagnostic keys each log interval.
+- Added CLI arg:
+  - `--diag_every` (default `50`)
+
+2. Launcher wiring:
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_qf.sh`
+  - env `DIAG_EVERY` (default `50`)
+  - forwards `--diag_every`
+- `scripts/pretrain/submit_pretrain_patch_nepa_tokens_qf.sh`
+  - passes `DIAG_EVERY` via `qsub -v`
+
+Validation run:
+
+- job: `102043` (`pntok_diagchk`)
+- run set:
+  - `patchnepa_v2tok_diagcheck_20260303_194438`
+- observed in log:
+  - step diagnostics printed at 20-step interval:
+    - step 20/40/60/80/100/120
+    - includes `cos_tgt`, `cos_prev`, `gap`, `copy_win`
+- W&B summary confirms metric keys:
+  - `diag/cos_tgt`
+  - `diag/cos_prev`
+  - `diag/cos_precv`
+  - `diag/gap`
+  - `diag/copy_win`
+  - `diag/copy-win`
+
+Note:
+
+- Runs started before this patch do not backfill these keys; they need restart/re-submit to carry `diag/*`.
+
+Re-submitted smoke jobs with diag-enabled code:
+
+- `102044` (`pntok_pc100_d`)
+  - `patchnepa_v2tok_pc100_smoke_diag_20260303_194716`
+- `102045` (`pntok_mix33_d`)
+  - `patchnepa_v2tok_mix33_smoke_diag_20260303_194716`
+- `102046` (`pntok_m50u50_d`)
+  - `patchnepa_v2tok_mesh50udf50_smoke_diag_20260303_194716`

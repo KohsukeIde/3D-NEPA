@@ -1,0 +1,25 @@
+dataset_version: v2
+
+answer_schema: [n, curv, dist, grad, density]
+n_qry: 1024
+return_qry: true
+return_ray: false
+
+pointmae_pc_norm: true
+pointmae_scale_translate: true
+pointmae_scale_low: 0.6666667
+pointmae_scale_high: 1.5
+pointmae_translate: 0.2
+transform_answers: true
+
+# One-pass sampling per epoch; composition comes from split materialization.
+replacement: false
+
+datasets:
+  - name: shapenet_pc
+    cache_root: data/shapenet_unpaired_cache_v2_20260303
+    split: train_pc
+    backend: pc
+    weight: 1.0
+    surf_xyz_key: pc_xyz
+    qry_xyz_key: pc_qry_xyz

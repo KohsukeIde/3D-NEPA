@@ -33,6 +33,11 @@ TYPE_A_RAY = 8
 # in split layouts.
 TYPE_SEP = 9
 
+# Named SEP roles.
+# Keep ids shared for backward compatibility with existing checkpoints.
+TYPE_SEP_CTX = TYPE_SEP
+TYPE_SEP_QA = TYPE_SEP
+
 # Size of the type-id vocabulary.
 TYPE_VOCAB_SIZE = TYPE_SEP + 1
 

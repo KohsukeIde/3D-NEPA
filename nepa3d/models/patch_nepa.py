@@ -32,7 +32,8 @@ from ..token.tokenizer import (
     TYPE_MISSING_RAY,
     TYPE_Q_POINT,
     TYPE_Q_RAY,
-    TYPE_SEP,
+    TYPE_SEP_CTX,
+    TYPE_SEP_QA,
     TYPE_VOCAB_SIZE,
 )
 
@@ -265,10 +266,13 @@ class PatchTransformerNepa(nn.Module):
         # Special tokens
         self.bos_token = nn.Parameter(torch.zeros(1, 1, self.d_model))
         self.eos_token = nn.Parameter(torch.zeros(1, 1, self.d_model))
+        # SEP roles: context/query boundary vs query/answer boundary.
+        self.sep_ctx_token = nn.Parameter(torch.zeros(1, 1, self.d_model))
         self.sep_token = nn.Parameter(torch.zeros(1, 1, self.d_model))
         self.q_mask_token = nn.Parameter(torch.zeros(1, 1, self.d_model))
         nn.init.trunc_normal_(self.bos_token, std=0.02)
         nn.init.trunc_normal_(self.eos_token, std=0.02)
+        nn.init.trunc_normal_(self.sep_ctx_token, std=0.02)
         nn.init.trunc_normal_(self.sep_token, std=0.02)
         nn.init.trunc_normal_(self.q_mask_token, std=0.02)
 
@@ -379,7 +383,12 @@ class PatchTransformerNepa(nn.Module):
 
         if self.center_mlp is not None and centers_seq is not None:
             cen = self.center_mlp(centers_seq)
-            special = (type_id == TYPE_BOS) | (type_id == TYPE_EOS) | (type_id == TYPE_SEP)
+            special = (
+                (type_id == TYPE_BOS)
+                | (type_id == TYPE_EOS)
+                | (type_id == TYPE_SEP_CTX)
+                | (type_id == TYPE_SEP_QA)
+            )
             cen = cen.masked_fill(special.unsqueeze(-1), 0.0)
             out = out + cen
         return out
@@ -734,7 +743,7 @@ class PatchTransformerNepa(nn.Module):
 
         if self.qa_sep_token:
             parts.append(self.sep_token.expand(B, 1, D))
-            types.append(torch.full((B, 1), int(TYPE_SEP), device=q_tok.device, dtype=torch.long))
+            types.append(torch.full((B, 1), int(TYPE_SEP_QA), device=q_tok.device, dtype=torch.long))
             centers_parts.append(torch.zeros((B, 1, 3), device=q_tok.device, dtype=centers_xyz.dtype))
 
         parts.append(a_tok)
@@ -908,6 +917,7 @@ class PatchTransformerNepa(nn.Module):
 
         # Keep sep_token connected in all layouts (including interleave without SEP)
         # to avoid DDP unused-parameter errors.
+        tokens = tokens + (self.sep_ctx_token.sum() * 0.0)
         tokens = tokens + (self.sep_token.sum() * 0.0)
         # Keep q_mask_token connected even when q_mask_prob=0 to avoid DDP unused-parameter errors.
         tokens = tokens + (self.q_mask_token.sum() * 0.0)
@@ -918,7 +928,7 @@ class PatchTransformerNepa(nn.Module):
             if self.qa_tokens != 1 or self.qa_layout != "split":
                 raise ValueError("encdec_arch expects qa_tokens=1 and qa_layout='split'")
             if self.qa_sep_token:
-                sep_pos = (type_id == int(TYPE_SEP)).int().argmax(dim=1)
+                sep_pos = (type_id == int(TYPE_SEP_QA)).int().argmax(dim=1)
                 sep = int(sep_pos[0].item())
             else:
                 sep = 1 + q_tok.shape[1]
@@ -1151,13 +1161,14 @@ class PatchTransformerNepa(nn.Module):
             raise ValueError(f"forward_tokens(): centers_xyz must be {(b, l, 3)}, got {tuple(centers_xyz.shape)}")
 
         # Keep special parameters connected to avoid DDP unused-parameter issues.
+        tokens = tokens + (self.sep_ctx_token.sum() * 0.0)
         tokens = tokens + (self.sep_token.sum() * 0.0)
         tokens = tokens + (self.q_mask_token.sum() * 0.0)
         tokens, q_keep_ratio = self._apply_query_mask(tokens, type_id, float(q_mask_prob))
         backbone_in, backbone_pos, z = self._prepare_backbone_inputs(tokens, type_id, centers_xyz)
 
         if isinstance(self.backbone, EncoderDecoderTransformer):
-            sep_mask = type_id == int(TYPE_SEP)
+            sep_mask = type_id == int(TYPE_SEP_QA)
             if bool(sep_mask.any()):
                 sep_pos = sep_mask.int().argmax(dim=1)
                 if bool((sep_pos != sep_pos[0]).any()):
@@ -1229,7 +1240,8 @@ class PatchTransformerNepa(nn.Module):
             else:
                 mask = (
                     (tgt_ty != int(TYPE_BOS))
-                    & (tgt_ty != int(TYPE_SEP))
+                    & (tgt_ty != int(TYPE_SEP_CTX))
+                    & (tgt_ty != int(TYPE_SEP_QA))
                     & (tgt_ty != int(TYPE_EOS))
                     & (tgt_ty != int(TYPE_MISSING_RAY))
                 )
@@ -1334,7 +1346,8 @@ class PatchTransformerNepaClassifier(nn.Module):
         fallback = (
             (type_id != int(TYPE_BOS))
             & (type_id != int(TYPE_EOS))
-            & (type_id != int(TYPE_SEP))
+            & (type_id != int(TYPE_SEP_CTX))
+            & (type_id != int(TYPE_SEP_QA))
             & (type_id != int(TYPE_A_POINT))
             & (type_id != int(TYPE_A_RAY))
             & (type_id != int(TYPE_MISSING_RAY))
@@ -1345,10 +1358,10 @@ class PatchTransformerNepaClassifier(nn.Module):
     def _select_sep_feat(h: torch.Tensor, type_id: torch.Tensor) -> torch.Tensor:
         b, _, _ = h.shape
         dev = h.device
-        sep_mask = type_id == int(TYPE_SEP)
+        sep_mask = (type_id == int(TYPE_SEP_QA)) | (type_id == int(TYPE_SEP_CTX))
         if not bool(torch.all(sep_mask.any(dim=1))):
             raise ValueError(
-                "pooling='sep' requires TYPE_SEP in sequence (set qa_layout='split_sep' and ft_sequence_mode='qa_zeroa')."
+                "pooling='sep' requires SEP token in sequence (set qa_layout='split_sep' and ft_sequence_mode='qa_zeroa')."
             )
         sep_idx = sep_mask.to(dtype=torch.float32).argmax(dim=1)
         return h[torch.arange(b, device=dev), sep_idx]

@@ -203,3 +203,123 @@ Recommended default for v2 token pretrain reruns:
 - `--pm_scale_low 0.6666667 --pm_scale_high 1.5`
 - `--pm_translate 0.2`
 - `--pm_transform_answers 1`
+
+## 13. Re-baseline Matrix (user-locked, data-v2 only) (2026-03-03)
+
+Scope lock:
+
+- All new comparisons use rebuilt ShapeNet v2 cache only.
+- Historical `pt_xyz_pool`-based scores are diagnostic history, not mainline evidence.
+
+Major-change criteria used for revalidation:
+
+1. Data distribution changes.
+2. Learning target changes.
+3. Sequence/ordering changes.
+4. Modality changes (ray/no-ray, assignment strategy).
+5. Evaluation protocol changes (FT head/pooling/augmentation).
+
+Out of scope for this round:
+
+- infra-only fixes (launcher/env/dependency/DDP timeout).
+- `loss_target_mode=full_z` arm.
+- ModelNet FT (deferred; ScanObjectNN first).
+- patch-order schedule (`epoch/batch/sample`) sweep.
+
+Fixed defaults for this round:
+
+1. Pretrain objective:
+- `loss_target_mode=content_tokens` only.
+
+2. Pretrain augmentation and normalization:
+- Point-MAE style path fixed on:
+  - `pc_norm` (centroid shift + max-radius normalize).
+  - `PointcloudScaleAndTranslate` equivalent (`scale=[2/3, 3/2]`, `translate=0.2`).
+  - answer feature transform correction enabled (approximate).
+
+3. Sampling/capacity protocol:
+- 300 epochs.
+- effective global batch 128 (`16 GPU x per-proc batch 8 x grad_accum 1` or equivalent).
+- `pt_sample_mode` non-cached only (`rfps`/`random` arms).
+- local patch encoder default: `patch_local_encoder=pointmae_conv`.
+- randomized patch FPS seed default: `patch_fps_random_start=1`.
+
+4. Finetune protocol (ScanObjectNN):
+- `n_point=2048` fixed.
+- train-time augmentation: `PointcloudScaleAndTranslate` for:
+  - `obj_bg`
+  - `obj_only`
+  - `pb_t50_rs`
+  - `hardest`
+
+5. Logging policy:
+- `USE_WANDB=1` required.
+- pretrain project: `patchnepa-pretrain`
+- finetune project: `patchnepa-finetune`
+
+Revalidation axes (required):
+
+1. `qa_layout`:
+- `split_sep` vs `interleave`.
+
+2. `point_order_mode`:
+- `morton` (fixed)
+- `random`
+- `sample:<6-view morton perms>`
+- `sample:<12-view morton perms + reverse>`
+
+3. `pt_sample_mode`:
+- `rfps` vs `random` (both non-cached).
+
+4. Data distribution composition:
+- `pc-only (100%)`
+- `mesh+udf (50/50, no pc)`
+- `pc+mesh+udf (33/33/33)`
+
+Composition implementation rule:
+
+- For this axis, composition is controlled by split cardinality, not sampler weights.
+- Keep `replacement=false` so each epoch is one-pass over the materialized set.
+- Note: in current `MixtureSampler`, weights are ignored when `replacement=false`; therefore exact ratios must be encoded in split JSON/materialized counts.
+- `shapenet_unpaired_split.py` now supports strict ratio mode via:
+  - `--allow_empty_splits 1`
+  - required for `pc-only` and `mesh+udf` (otherwise per-synset minimum-1 logic injects unwanted splits).
+
+Recommended execution order:
+
+1. Pretrain-only screening (same FT-off protocol, compare by pretrain metrics first):
+- `loss`, `cos_prev`, `cos_pred`, `gap`, `copy_win`.
+
+2. Promote only top arms to full ScanObjectNN FT (all 4 variants above).
+
+3. Run modality/ray-axis checks after ordering/layout baseline is fixed on v2.
+
+## 14. Applied Now: token_qa_layout + mini-CPAC Screening Hooks
+
+Only the two requested operational hooks were added:
+
+1. token_qa_layout experiment injection path
+- New pretrain launcher (token path):
+  - `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_qf.sh`
+- New submit wrapper with env passthrough for `TOKEN_QA_LAYOUT`:
+  - `scripts/pretrain/submit_pretrain_patch_nepa_tokens_qf.sh`
+- Example:
+  - `TOKEN_QA_LAYOUT=interleave bash scripts/pretrain/submit_pretrain_patch_nepa_tokens_qf.sh`
+  - `TOKEN_QA_LAYOUT=split_sep bash scripts/pretrain/submit_pretrain_patch_nepa_tokens_qf.sh`
+
+2. mini-CPAC integration for screening
+- New PatchNEPA CPAC job script (supports mini defaults):
+  - `scripts/analysis/nepa3d_cpac_udf_patchnepa_qf.sh`
+- New chain submitter:
+  - `scripts/sanity/submit_patchnepa_tokens_layout_screen_cpac_qf.sh`
+- The chain submitter does:
+  - submit token pretrain per layout
+  - submit mini-CPAC with `afterok:<pretrain_job>`
+  - write a TSV manifest of pretrain/cpac job IDs and ckpt paths
+
+Default mini-CPAC profile in the chain:
+- `MAX_TRAIN_SHAPES=64`
+- `MAX_EVAL_SHAPES=64`
+- `N_CTX_POINTS=1024`
+- `N_QUERY=1024`
+- `CHUNK_N_QUERY=1024`

@@ -140,14 +140,14 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--patch_local_encoder",
         type=str,
-        default="mlp",
+        default="pointmae_conv",
         choices=["mlp", "pointmae_conv"],
         help="Local patch encoder for fps_knn patch embed.",
     )
     p.add_argument(
         "--patch_fps_random_start",
         type=int,
-        default=0,
+        default=1,
         choices=[0, 1],
         help="Use random FPS start for fps_knn patch embed.",
     )
@@ -560,8 +560,8 @@ def _patchnepa_kwargs_from_ckpt(ckpt_args: Dict[str, object], args: argparse.Nam
     kw: Dict[str, object] = {
         # patchify
         "patch_embed": str(c.get("patch_embed", args.patch_embed)),
-        "patch_local_encoder": str(c.get("patch_local_encoder", "mlp")),
-        "patch_fps_random_start": _as_bool01(c.get("patch_fps_random_start", 0)),
+        "patch_local_encoder": str(c.get("patch_local_encoder", "pointmae_conv")),
+        "patch_fps_random_start": _as_bool01(c.get("patch_fps_random_start", 1)),
         "n_point": int(c.get("n_point", args.n_point)),
         "group_size": int(c.get("group_size", args.group_size)),
         "num_groups": int(c.get("num_groups", args.num_groups)),

@@ -7,11 +7,13 @@ Sequence format:
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 from typing import Dict, Iterator, Tuple
 
 import torch
 import torch.optim as optim
+import torch.nn.functional as F
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 from torch.utils.data import DataLoader
@@ -20,7 +22,17 @@ from tqdm import tqdm
 from nepa3d.data.dataset_v2 import v2_collate_fn
 from nepa3d.data.mixed_pretrain import build_mixed_pretrain
 from nepa3d.models.patch_nepa import PatchTransformerNepa
-from nepa3d.token.tokenizer import TYPE_A_POINT, TYPE_BOS, TYPE_EOS, TYPE_POINT, TYPE_Q_POINT, TYPE_SEP
+from nepa3d.token.tokenizer import (
+    TYPE_A_POINT,
+    TYPE_A_RAY,
+    TYPE_BOS,
+    TYPE_EOS,
+    TYPE_MISSING_RAY,
+    TYPE_POINT,
+    TYPE_Q_POINT,
+    TYPE_SEP_CTX,
+    TYPE_SEP_QA,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,6 +45,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n_surf", type=int, default=2048)
     p.add_argument("--n_qry", type=int, default=1024)
     p.add_argument("--n_ray", type=int, default=0)
+    p.add_argument(
+        "--token_qa_layout",
+        type=str,
+        default="interleave",
+        choices=["interleave", "split", "split_sep"],
+        help=(
+            "Q/A layout inside forward_tokens query segment: "
+            "interleave=[Q1,A1,Q2,A2,...], split=[Q...A...], split_sep=[Q...,SEP_QA,A...]"
+        ),
+    )
     p.add_argument("--batch_size", type=int, default=8)
     p.add_argument("--num_workers", type=int, default=8)
     p.add_argument("--pm_pc_norm", type=int, default=1, choices=[0, 1], help="Apply Point-MAE pc_norm on v2 samples.")
@@ -55,8 +77,8 @@ def parse_args() -> argparse.Namespace:
     )
 
     p.add_argument("--patch_embed", type=str, default="fps_knn", choices=["serial", "pointgpt", "fps_knn"])
-    p.add_argument("--patch_local_encoder", type=str, default="mlp", choices=["mlp", "pointmae_conv"])
-    p.add_argument("--patch_fps_random_start", type=int, default=0, choices=[0, 1])
+    p.add_argument("--patch_local_encoder", type=str, default="pointmae_conv", choices=["mlp", "pointmae_conv"])
+    p.add_argument("--patch_fps_random_start", type=int, default=1, choices=[0, 1])
     p.add_argument("--group_size", type=int, default=32)
     p.add_argument("--num_groups", type=int, default=64)
     p.add_argument("--serial_order", type=str, default="morton")
@@ -87,6 +109,10 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--max_steps", type=int, default=10000)
     p.add_argument("--lr", type=float, default=3e-4)
+    p.add_argument("--lr_scheduler", type=str, default="cosine", choices=["none", "cosine"])
+    p.add_argument("--warmup_steps", type=int, default=-1, help="If >=0, overrides warmup_ratio.")
+    p.add_argument("--warmup_ratio", type=float, default=0.025, help="Warmup ratio over max_steps.")
+    p.add_argument("--min_lr", type=float, default=1e-6)
     p.add_argument("--weight_decay", type=float, default=0.05)
     p.add_argument("--grad_accum", type=int, default=1)
     p.add_argument("--max_grad_norm", type=float, default=0.0)
@@ -97,6 +123,15 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dual_mask_window", type=int, default=0)
     p.add_argument("--dual_mask_type_aware", type=int, default=0, choices=[0, 1])
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--use_wandb", type=int, default=0, choices=[0, 1])
+    p.add_argument("--wandb_project", type=str, default="patchnepa-pretrain")
+    p.add_argument("--wandb_entity", type=str, default="")
+    p.add_argument("--wandb_run_name", type=str, default="")
+    p.add_argument("--wandb_group", type=str, default="")
+    p.add_argument("--wandb_tags", type=str, default="")
+    p.add_argument("--wandb_mode", type=str, default="online", choices=["online", "offline", "disabled"])
+    p.add_argument("--wandb_log_every", type=int, default=1)
+    p.add_argument("--diag_every", type=int, default=1, help="Always-on copy diagnostics logging interval.")
     return p.parse_args()
 
 
@@ -105,6 +140,8 @@ def build_qa_sequence(
     surf_xyz: torch.Tensor,
     qry_xyz: torch.Tensor,
     ans_feat: torch.Tensor,
+    *,
+    token_qa_layout: str = "interleave",
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Build [tokens, type_id, centers_xyz] for forward_tokens()."""
     b = surf_xyz.shape[0]
@@ -116,15 +153,50 @@ def build_qa_sequence(
 
     p = int(ctx_tok.shape[1])
     n = int(q_tok.shape[1])
-    qa_tok = torch.stack([q_tok, a_tok], dim=2).reshape(b, 2 * n, -1)
-    qa_centers = torch.stack([q_centers, a_centers], dim=2).reshape(b, 2 * n, 3)
+    layout = str(token_qa_layout)
+    if layout == "interleave":
+        qa_tok = torch.stack([q_tok, a_tok], dim=2).reshape(b, 2 * n, -1)
+        qa_centers = torch.stack([q_centers, a_centers], dim=2).reshape(b, 2 * n, 3)
+        qa_type = torch.empty((b, 2 * n), device=dev, dtype=torch.long)
+        qa_type[:, 0::2] = int(TYPE_Q_POINT)
+        qa_type[:, 1::2] = int(TYPE_A_POINT)
+    elif layout == "split":
+        qa_tok = torch.cat([q_tok, a_tok], dim=1)
+        qa_centers = torch.cat([q_centers, a_centers], dim=1)
+        qa_type = torch.cat(
+            [
+                torch.full((b, n), int(TYPE_Q_POINT), device=dev, dtype=torch.long),
+                torch.full((b, n), int(TYPE_A_POINT), device=dev, dtype=torch.long),
+            ],
+            dim=1,
+        )
+    elif layout == "split_sep":
+        qa_tok = torch.cat([q_tok, model.sep_token.expand(b, 1, -1), a_tok], dim=1)
+        qa_centers = torch.cat(
+            [
+                q_centers,
+                torch.zeros((b, 1, 3), device=dev, dtype=surf_xyz.dtype),
+                a_centers,
+            ],
+            dim=1,
+        )
+        qa_type = torch.cat(
+            [
+                torch.full((b, n), int(TYPE_Q_POINT), device=dev, dtype=torch.long),
+                torch.full((b, 1), int(TYPE_SEP_QA), device=dev, dtype=torch.long),
+                torch.full((b, n), int(TYPE_A_POINT), device=dev, dtype=torch.long),
+            ],
+            dim=1,
+        )
+    else:
+        raise ValueError(f"unknown token_qa_layout={layout}")
 
     z0 = torch.zeros((b, 1, 3), device=dev, dtype=surf_xyz.dtype)
     tokens = torch.cat(
         [
             model.bos_token.expand(b, 1, -1),
             ctx_tok,
-            model.sep_token.expand(b, 1, -1),
+            model.sep_ctx_token.expand(b, 1, -1),
             qa_tok,
             model.eos_token.expand(b, 1, -1),
         ],
@@ -132,13 +204,16 @@ def build_qa_sequence(
     )
     centers = torch.cat([z0, ctx_centers, z0, qa_centers, z0], dim=1)
 
-    type_id = torch.empty((b, 1 + p + 1 + 2 * n + 1), device=dev, dtype=torch.long)
-    type_id[:, 0] = int(TYPE_BOS)
-    type_id[:, 1 : 1 + p] = int(TYPE_POINT)
-    type_id[:, 1 + p] = int(TYPE_SEP)
-    type_id[:, 1 + p + 1 : -1 : 2] = int(TYPE_Q_POINT)
-    type_id[:, 1 + p + 2 : -1 : 2] = int(TYPE_A_POINT)
-    type_id[:, -1] = int(TYPE_EOS)
+    type_id = torch.cat(
+        [
+            torch.full((b, 1), int(TYPE_BOS), device=dev, dtype=torch.long),
+            torch.full((b, p), int(TYPE_POINT), device=dev, dtype=torch.long),
+            torch.full((b, 1), int(TYPE_SEP_CTX), device=dev, dtype=torch.long),
+            qa_type,
+            torch.full((b, 1), int(TYPE_EOS), device=dev, dtype=torch.long),
+        ],
+        dim=1,
+    )
     return tokens, type_id, centers
 
 
@@ -148,17 +223,158 @@ def _infinite_loader(dl: DataLoader) -> Iterator[Dict[str, torch.Tensor]]:
             yield batch
 
 
-def _save_ckpt(path: Path, model: PatchTransformerNepa, optimizer: optim.Optimizer, step: int, args: argparse.Namespace) -> None:
+def _save_ckpt(
+    path: Path,
+    model: PatchTransformerNepa,
+    optimizer: optim.Optimizer,
+    scheduler: optim.lr_scheduler.LRScheduler | None,
+    step: int,
+    args: argparse.Namespace,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "step": int(step),
+        "args": vars(args),
+    }
+    if scheduler is not None:
+        payload["scheduler"] = scheduler.state_dict()
     torch.save(
-        {
-            "model": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "step": int(step),
-            "args": vars(args),
-        },
+        payload,
         str(path),
     )
+
+
+def _init_wandb(args: argparse.Namespace, accelerator: Accelerator):
+    if int(args.use_wandb) != 1:
+        return None
+    if not accelerator.is_main_process:
+        return None
+    try:
+        import wandb  # type: ignore
+    except Exception as e:
+        accelerator.print(f"[wandb] disabled: import failed ({e})")
+        return None
+    tags = [t.strip() for t in str(args.wandb_tags).split(",") if t.strip()]
+    run_name = str(args.wandb_run_name).strip() or str(args.run_name)
+    group = str(args.wandb_group).strip() or None
+    entity = str(args.wandb_entity).strip() or None
+    mode = str(args.wandb_mode).strip()
+    if mode == "disabled":
+        accelerator.print("[wandb] disabled by mode=disabled")
+        return None
+    try:
+        run = wandb.init(
+            project=str(args.wandb_project),
+            entity=entity,
+            name=run_name,
+            group=group,
+            tags=tags,
+            mode=mode,
+            config=vars(args),
+        )
+        accelerator.print(
+            f"[wandb] enabled project={args.wandb_project} run={run_name} "
+            f"group={group if group else '-'} mode={mode}"
+        )
+        return run
+    except Exception as e:
+        accelerator.print(f"[wandb] disabled: init failed ({e})")
+        return None
+
+
+def _nepa_target_mask(type_id: torch.Tensor | None, k: int) -> torch.Tensor | None:
+    if type_id is None:
+        return None
+    tgt_ty = type_id[:, k:]
+    has_answer = bool((tgt_ty == int(TYPE_A_POINT)).any() or (tgt_ty == int(TYPE_A_RAY)).any())
+    if has_answer:
+        return (
+            ((tgt_ty == int(TYPE_A_POINT)) | (tgt_ty == int(TYPE_A_RAY)))
+            & (tgt_ty != int(TYPE_MISSING_RAY))
+        )
+    return (
+        (tgt_ty != int(TYPE_BOS))
+        & (tgt_ty != int(TYPE_EOS))
+        & (tgt_ty != int(TYPE_SEP_CTX))
+        & (tgt_ty != int(TYPE_SEP_QA))
+        & (tgt_ty != int(TYPE_MISSING_RAY))
+    )
+
+
+def _masked_mean(values: torch.Tensor, mask: torch.Tensor | None) -> float:
+    if mask is None:
+        return float(values.mean().item())
+    if not bool(mask.any()):
+        return float("nan")
+    return float(values[mask].mean().item())
+
+
+def _compute_copy_diag(
+    target_seq: torch.Tensor,
+    z_hat: torch.Tensor,
+    type_id: torch.Tensor | None,
+    k: int,
+) -> dict[str, float] | None:
+    k = max(1, int(k))
+    if target_seq.size(1) <= k or z_hat.size(1) <= k:
+        return None
+
+    pred = z_hat[:, :-k, :].detach()
+    tgt = target_seq[:, k:, :].detach()
+    prev = target_seq[:, :-k, :].detach()
+
+    mask = _nepa_target_mask(type_id, k)
+    cos_tgt = F.cosine_similarity(pred, tgt, dim=-1)
+    cos_prev = F.cosine_similarity(pred, prev, dim=-1)
+
+    cos_tgt_m = _masked_mean(cos_tgt, mask)
+    cos_prev_m = _masked_mean(cos_prev, mask)
+
+    if mask is None:
+        cmp = cos_prev >= cos_tgt
+    else:
+        if not bool(mask.any()):
+            cmp = None
+        else:
+            cmp = (cos_prev >= cos_tgt)[mask]
+    copy_win = float(cmp.float().mean().item()) if cmp is not None else float("nan")
+
+    return {
+        "k": float(k),
+        "cos_tgt": cos_tgt_m,
+        "cos_prev": cos_prev_m,
+        "gap": float(cos_tgt_m - cos_prev_m),
+        "copy_win": copy_win,
+    }
+
+
+def _fmt_diag(x: float) -> str:
+    return "nan" if (x != x) else f"{x:.4f}"
+
+
+def _resolve_warmup_steps(args: argparse.Namespace) -> int:
+    if int(args.warmup_steps) >= 0:
+        return int(args.warmup_steps)
+    ratio = max(0.0, float(args.warmup_ratio))
+    return int(round(float(args.max_steps) * ratio))
+
+
+def _scheduler_scale(step: int, args: argparse.Namespace, warmup_steps: int) -> float:
+    if str(args.lr_scheduler) != "cosine":
+        return 1.0
+    max_steps = max(1, int(args.max_steps))
+    s = min(max(0, int(step)), max_steps)
+    if warmup_steps > 0 and s < warmup_steps:
+        return float(s + 1) / float(max(1, warmup_steps))
+
+    denom = max(1, max_steps - max(0, warmup_steps))
+    t = float(s - max(0, warmup_steps)) / float(denom)
+    t = min(max(t, 0.0), 1.0)
+    min_scale = float(args.min_lr) / float(args.lr)
+    cosv = 0.5 * (1.0 + math.cos(math.pi * t))
+    return min_scale + (1.0 - min_scale) * cosv
 
 
 def main() -> None:
@@ -245,6 +461,13 @@ def main() -> None:
 
     model, optimizer, dl = accelerator.prepare(model, optimizer, dl)
     model_raw = accelerator.unwrap_model(model)
+    warmup_steps = max(0, _resolve_warmup_steps(args))
+    scheduler: optim.lr_scheduler.LambdaLR | None = None
+    if str(args.lr_scheduler) == "cosine":
+        scheduler = optim.lr_scheduler.LambdaLR(
+            optimizer,
+            lr_lambda=lambda st: _scheduler_scale(int(st), args, warmup_steps),
+        )
 
     if accelerator.is_main_process:
         accelerator.print(f"[token_pretrain] answer_in_dim={answer_in_dim}")
@@ -257,6 +480,15 @@ def main() -> None:
             f"translate={float(args.pm_translate):.4f} "
             f"transform_answers={bool(int(args.pm_transform_answers))}"
         )
+        accelerator.print(f"[token_pretrain] token_qa_layout={str(args.token_qa_layout)}")
+        accelerator.print(
+            f"[token_pretrain] optimizer lr={float(args.lr):.3e} wd={float(args.weight_decay):.3f} "
+            f"scheduler={str(args.lr_scheduler)} warmup_steps={int(warmup_steps)} "
+            f"warmup_ratio={float(args.warmup_ratio):.4f} min_lr={float(args.min_lr):.2e}"
+        )
+    wandb_run = _init_wandb(args, accelerator)
+    wandb_log_every = max(1, int(args.wandb_log_every))
+    diag_every = max(1, int(args.diag_every))
 
     data_iter = _infinite_loader(dl)
     model.train()
@@ -274,7 +506,13 @@ def main() -> None:
         ans_feat = ans_feat.to(accelerator.device, non_blocking=True)
 
         with accelerator.accumulate(model):
-            tokens, type_id, centers = build_qa_sequence(model, surf_xyz, qry_xyz, ans_feat)
+            tokens, type_id, centers = build_qa_sequence(
+                model,
+                surf_xyz,
+                qry_xyz,
+                ans_feat,
+                token_qa_layout=str(args.token_qa_layout),
+            )
             out = model.forward_tokens(
                 tokens=tokens,
                 type_id=type_id,
@@ -294,10 +532,13 @@ def main() -> None:
                 skip_k=int(args.skip_k),
                 target=target,
             )
+            diag = _compute_copy_diag(target, out.z_hat, out.type_id, int(args.skip_k))
             accelerator.backward(loss)
             if float(args.max_grad_norm) > 0:
                 accelerator.clip_grad_norm_(model.parameters(), float(args.max_grad_norm))
             optimizer.step()
+            if scheduler is not None and accelerator.sync_gradients:
+                scheduler.step()
             optimizer.zero_grad(set_to_none=True)
 
         if accelerator.sync_gradients:
@@ -305,16 +546,40 @@ def main() -> None:
             if accelerator.is_main_process:
                 pbar.update(1)
                 pbar.set_description(f"loss={loss.item():.4f}")
+                if (step % diag_every == 0) and (diag is not None):
+                    accelerator.print(
+                        f"[step {step:06d}] "
+                        f"loss={float(loss.item()):.6f} "
+                        f"cos_tgt={_fmt_diag(float(diag['cos_tgt']))} "
+                        f"cos_prev={_fmt_diag(float(diag['cos_prev']))} "
+                        f"gap={_fmt_diag(float(diag['gap']))} "
+                        f"copy_win={_fmt_diag(float(diag['copy_win']))}"
+                    )
+                if wandb_run is not None and (step % wandb_log_every == 0):
+                    wb = {
+                        "train/loss": float(loss.item()),
+                        "train/step": int(step),
+                    }
+                    if len(optimizer.param_groups) > 0 and "lr" in optimizer.param_groups[0]:
+                        wb["train/lr"] = float(optimizer.param_groups[0]["lr"])
+                    if diag is not None:
+                        wb["diag/cos_tgt"] = float(diag["cos_tgt"])
+                        wb["diag/cos_prev"] = float(diag["cos_prev"])
+                        wb["diag/gap"] = float(diag["gap"])
+                        wb["diag/copy_win"] = float(diag["copy_win"])
+                    wandb_run.log(wb, step=int(step))
             if int(args.save_every) > 0 and (step % int(args.save_every) == 0):
                 accelerator.wait_for_everyone()
                 if accelerator.is_main_process:
-                    _save_ckpt(save_root / f"ckpt_step{step}.pt", model_raw, optimizer, step, args)
+                    _save_ckpt(save_root / f"ckpt_step{step}.pt", model_raw, optimizer, scheduler, step, args)
     pbar.close()
 
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        _save_ckpt(save_root / "ckpt_final.pt", model_raw, optimizer, step, args)
+        _save_ckpt(save_root / "ckpt_final.pt", model_raw, optimizer, scheduler, step, args)
         accelerator.print(f"[done] saved to {save_root}")
+        if wandb_run is not None:
+            wandb_run.finish()
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ WANDB_RUN_NAME="${WANDB_RUN_NAME:-${RUN_NAME}}"
 WANDB_GROUP="${WANDB_GROUP:-patchnepa-pretrain}"
 WANDB_TAGS="${WANDB_TAGS:-stage2,patchnepa,pretrain}"
 WANDB_MODE="${WANDB_MODE:-online}"
-WANDB_LOG_EVERY="${WANDB_LOG_EVERY:-50}"
+WANDB_LOG_EVERY="${WANDB_LOG_EVERY:-1}"
 
 WARMUP_EPOCHS="${WARMUP_EPOCHS:-}"
 WARMUP_RATIO="${WARMUP_RATIO:-0.025}"
@@ -88,8 +88,8 @@ python -u -m nepa3d.train.pretrain_patch_nepa \
   --pt_rfps_m "${PT_RFPS_M:-4096}" \
   --point_order_mode "${POINT_ORDER_MODE:-morton}" \
   --patch_embed "${PATCH_EMBED:-fps_knn}" \
-  --patch_local_encoder "${PATCH_LOCAL_ENCODER:-mlp}" \
-  --patch_fps_random_start "${PATCH_FPS_RANDOM_START:-0}" \
+  --patch_local_encoder "${PATCH_LOCAL_ENCODER:-pointmae_conv}" \
+  --patch_fps_random_start "${PATCH_FPS_RANDOM_START:-1}" \
   --group_size "${GROUP_SIZE:-32}" \
   --num_groups "${NUM_GROUPS:-64}" \
   --serial_order "${SERIAL_ORDER:-morton}" \

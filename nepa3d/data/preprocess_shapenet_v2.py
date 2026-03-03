@@ -435,6 +435,11 @@ def main() -> None:
     ap.add_argument("--ray_radius", type=float, default=2.5)
     ap.add_argument("--ray_jitter_std", type=float, default=0.05)
     ap.add_argument("--skip_existing", action="store_true", help="skip samples whose output NPZ already exists.")
+    ap.add_argument(
+        "--missing_only",
+        action="store_true",
+        help="process only tasks whose output NPZ is currently missing.",
+    )
 
     args = ap.parse_args()
 
@@ -472,16 +477,29 @@ def main() -> None:
         syn, mid = _infer_synset_model(mesh_path)
         return os.path.join(args.out_root, split, syn, f"{mid}.npz")
 
-    tasks: List[Tuple[str, str, int]] = []
+    tasks_all: List[Tuple[str, str, int]] = []
     for m in train_meshes:
-        tasks.append((m, _out_path(m, "train"), int(args.seed)))
+        tasks_all.append((m, _out_path(m, "train"), int(args.seed)))
     for m in test_meshes:
-        tasks.append((m, _out_path(m, "test"), int(args.seed) + 12345))
-    tasks = _filter_shard(tasks, int(args.num_shards), int(args.shard_id))
+        tasks_all.append((m, _out_path(m, "test"), int(args.seed) + 12345))
+
+    num_tasks_all = len(tasks_all)
+    num_missing_tasks_total = 0
+    if bool(args.missing_only):
+        filtered: List[Tuple[str, str, int]] = []
+        for mesh_path, out_path, base_seed in tasks_all:
+            if not os.path.isfile(out_path):
+                filtered.append((mesh_path, out_path, base_seed))
+        tasks_all = filtered
+        num_missing_tasks_total = len(tasks_all)
+
+    tasks = _filter_shard(tasks_all, int(args.num_shards), int(args.shard_id))
     print(
         f"[shard] num_shards={int(args.num_shards)} shard_id={int(args.shard_id)} "
         f"tasks={len(tasks)}"
     )
+    if bool(args.missing_only):
+        print(f"[missing_only] total_missing_now={num_missing_tasks_total} total_all={num_tasks_all}")
 
     os.makedirs(args.out_root, exist_ok=True)
 
@@ -513,6 +531,9 @@ def main() -> None:
         "num_meshes": len(meshes),
         "num_train": len(train_meshes),
         "num_test": len(test_meshes),
+        "missing_only": bool(args.missing_only),
+        "num_tasks_all": num_tasks_all,
+        "num_missing_tasks_total": num_missing_tasks_total,
         "num_tasks_in_shard": len(tasks),
         "config": asdict(cfg),
         "errors": errors[:100],

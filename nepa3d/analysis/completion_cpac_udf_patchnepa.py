@@ -20,6 +20,7 @@ Notes:
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 from dataclasses import dataclass
@@ -32,7 +33,7 @@ from sklearn.linear_model import Ridge
 from nepa3d.models.patch_nepa import (
     TYPE_BOS,
     TYPE_EOS,
-    TYPE_SEP,
+    TYPE_SEP_CTX,
     TYPE_Q_POINT,
     PatchTransformerNepa,
 )
@@ -267,7 +268,7 @@ def _extract_query_reps(
 
     # Special tokens.
     bos = model.bos_token.expand(1, 1, -1)
-    sep = model.sep_token.expand(1, 1, -1)
+    sep = model.sep_ctx_token.expand(1, 1, -1)
     eos = model.eos_token.expand(1, 1, -1)
     zc = torch.zeros((1, 1, 3), device=device, dtype=torch.float32)
 
@@ -296,7 +297,7 @@ def _extract_query_reps(
                 [
                     torch.full((1, 1), TYPE_BOS, device=device, dtype=torch.long),
                     torch.full((1, ctx_len), TYPE_Q_POINT, device=device, dtype=torch.long),
-                    torch.full((1, 1), TYPE_SEP, device=device, dtype=torch.long),
+                    torch.full((1, 1), TYPE_SEP_CTX, device=device, dtype=torch.long),
                     torch.full((1, q_tok.shape[1]), TYPE_Q_POINT, device=device, dtype=torch.long),
                     torch.full((1, 1), TYPE_EOS, device=device, dtype=torch.long),
                 ],
@@ -390,6 +391,7 @@ def main() -> None:
     p.add_argument("--mesh_fscore_tau", type=float, default=0.01)
     p.add_argument("--mesh_num_samples", type=int, default=10000)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--out_json", type=str, default="", help="Optional path to write aggregated metrics as JSON.")
     args = p.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -537,6 +539,32 @@ def main() -> None:
             print("PatchNEPA CPAC(UDF) mesh metrics:")
             for k in sorted(mesh_avg.keys()):
                 print(f"  {k}: {mesh_avg[k]:.6f}")
+
+    out_json = str(args.out_json).strip()
+    if out_json:
+        report = {
+            "ckpt": str(args.ckpt),
+            "data_root": str(args.data_root),
+            "head_train_split": str(args.head_train_split),
+            "eval_split": str(args.eval_split),
+            "n_ctx_points": int(args.n_ctx_points),
+            "n_query": int(args.n_query),
+            "chunk_n_query": int(args.chunk_n_query),
+            "rep_source": str(args.rep_source),
+            "ridge_alpha": float(args.ridge_alpha),
+            "tau": float(args.tau),
+            "seed": int(args.seed),
+            "max_train_shapes": int(args.max_train_shapes),
+            "max_eval_shapes": int(args.max_eval_shapes),
+            "metrics": metrics_avg,
+        }
+        if bool(args.mesh_eval) and mesh_n > 0:
+            report["mesh_metrics"] = mesh_avg
+            report["mesh_n"] = int(mesh_n)
+        os.makedirs(os.path.dirname(out_json) or ".", exist_ok=True)
+        with open(out_json, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, sort_keys=True)
+        print(f"[saved] out_json={out_json}")
 
 
 if __name__ == "__main__":

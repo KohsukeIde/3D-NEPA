@@ -39,12 +39,12 @@ LR="${LR:-5e-4}"
 WD="${WD:-0.05}"
 WARMUP_EPOCHS="${WARMUP_EPOCHS:-10}"
 
-N_POINT="${N_POINT:-1024}"
+N_POINT="${N_POINT:-2048}"
 NUM_GROUPS="${NUM_GROUPS:-64}"
 GROUP_SIZE="${GROUP_SIZE:-32}"
 PATCH_EMBED="${PATCH_EMBED:-fps_knn}"  # fps_knn | serial
-PATCH_LOCAL_ENCODER="${PATCH_LOCAL_ENCODER:-mlp}"  # mlp | pointmae_conv
-PATCH_FPS_RANDOM_START="${PATCH_FPS_RANDOM_START:-0}"  # 0 | 1
+PATCH_LOCAL_ENCODER="${PATCH_LOCAL_ENCODER:-pointmae_conv}"  # mlp | pointmae_conv
+PATCH_FPS_RANDOM_START="${PATCH_FPS_RANDOM_START:-1}"  # 0 | 1
 MODEL_SOURCE="${MODEL_SOURCE:-patchcls}"  # patchcls | pointmae | patchnepa
 USE_RAY_PATCH="${USE_RAY_PATCH:-0}"       # 0 | 1
 N_RAY="${N_RAY:-256}"

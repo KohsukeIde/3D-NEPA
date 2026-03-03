@@ -27,6 +27,7 @@ EVAL_SPLIT="${EVAL_SPLIT:-test}"
 OUT_JSON="${OUT_JSON:-data/shapenet_unpaired_splits_v2_20260303.json}"
 SEED="${SEED:-0}"
 RATIOS="${RATIOS:-0.34:0.33:0.33}"
+ALLOW_EMPTY_SPLITS="${ALLOW_EMPTY_SPLITS:-0}"
 
 # materialize settings
 SRC_CACHE_ROOT="${SRC_CACHE_ROOT:-${CACHE_ROOT}}"
@@ -63,6 +64,7 @@ split_vars=(
   "OUT_JSON=${OUT_JSON}"
   "SEED=${SEED}"
   "RATIOS=${RATIOS}"
+  "ALLOW_EMPTY_SPLITS=${ALLOW_EMPTY_SPLITS}"
 )
 SPLIT_QVARS="$(IFS=,; echo "${split_vars[*]}")"
 

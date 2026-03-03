@@ -22,6 +22,7 @@ TRAIN_RATIO="${TRAIN_RATIO:-0.9}"
 SEED="${SEED:-0}"
 WORKERS="${WORKERS:-32}"
 SKIP_EXISTING="${SKIP_EXISTING:-1}"
+MISSING_ONLY="${MISSING_ONLY:-0}"
 
 N_SURF="${N_SURF:-8192}"
 N_MESH_QRY="${N_MESH_QRY:-2048}"
@@ -52,6 +53,7 @@ echo "[out_root] ${OUT_ROOT}" | tee -a "${SUBMIT_LOG}"
 echo "[num_shards] ${NUM_SHARDS}" | tee -a "${SUBMIT_LOG}"
 echo "[workers/job] ${WORKERS}" | tee -a "${SUBMIT_LOG}"
 echo "[resource] rt_QF=${RT_QF} walltime=${WALLTIME}" | tee -a "${SUBMIT_LOG}"
+echo "[missing_only] ${MISSING_ONLY}" | tee -a "${SUBMIT_LOG}"
 
 for ((sid=0; sid<NUM_SHARDS; sid++)); do
   job_name="$(printf "%s_s%02d" "${JOB_PREFIX}" "${sid}")"
@@ -66,6 +68,7 @@ for ((sid=0; sid<NUM_SHARDS; sid++)); do
     "NUM_SHARDS=${NUM_SHARDS}"
     "SHARD_ID=${sid}"
     "SKIP_EXISTING=${SKIP_EXISTING}"
+    "MISSING_ONLY=${MISSING_ONLY}"
     "N_SURF=${N_SURF}"
     "N_MESH_QRY=${N_MESH_QRY}"
     "N_UDF_QRY=${N_UDF_QRY}"
@@ -100,4 +103,3 @@ for ((sid=0; sid<NUM_SHARDS; sid++)); do
 done
 
 echo "[done] logs: ${LOG_DIR}" | tee -a "${SUBMIT_LOG}"
-
