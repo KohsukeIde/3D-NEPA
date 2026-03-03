@@ -140,6 +140,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max_len", type=int, default=4096)
     p.add_argument("--use_pt_dist", type=int, default=1, choices=[0, 1])
     p.add_argument("--use_pt_grad", type=int, default=0, choices=[0, 1])
+    p.add_argument(
+        "--answer_in_dim",
+        type=int,
+        default=0,
+        help="Explicit answer feature dim for pt_ans_feat/ans_feat path. 0 => auto (legacy from use_pt_dist/use_pt_grad).",
+    )
     p.add_argument("--answer_mlp_layers", type=int, default=2)
     p.add_argument("--answer_pool", type=str, default="max", choices=["max", "mean"])
     p.add_argument("--nepa_skip_k", type=int, default=1)
@@ -524,6 +530,22 @@ def main() -> None:
         worker_init_fn=_worker_init_fn,
     )
 
+    answer_in_dim_override = None
+    if int(args.answer_in_dim) > 0:
+        answer_in_dim_override = int(args.answer_in_dim)
+    else:
+        try:
+            probe = dataset[0]
+            probe_feat = None
+            if isinstance(probe, dict):
+                probe_feat = probe.get("pt_ans_feat", None)
+                if probe_feat is None:
+                    probe_feat = probe.get("ans_feat", None)
+            if probe_feat is not None and hasattr(probe_feat, "shape") and len(probe_feat.shape) >= 2:
+                answer_in_dim_override = int(probe_feat.shape[-1])
+        except Exception:
+            answer_in_dim_override = None
+
     model = PatchTransformerNepa(
         patch_embed=args.patch_embed,
         patch_local_encoder=str(args.patch_local_encoder),
@@ -556,6 +578,7 @@ def main() -> None:
         qa_fuse=str(args.qa_fuse),
         use_pt_dist=bool(int(args.use_pt_dist)),
         use_pt_grad=bool(int(args.use_pt_grad)),
+        answer_in_dim=answer_in_dim_override,
         answer_mlp_layers=int(args.answer_mlp_layers),
         answer_pool=str(args.answer_pool),
         q_mask_mode=str(args.q_mask_mode),
@@ -619,7 +642,9 @@ def main() -> None:
         f"pt_rfps_key={str(args.pt_rfps_key)} "
         f"point_order_mode={str(args.point_order_mode)} "
         f"qa_tokens={int(args.qa_tokens)} qa_layout={str(args.qa_layout)} qa_sep={int(args.qa_sep_token)} "
-        f"qa_fuse={str(args.qa_fuse)} use_pt_dist={int(args.use_pt_dist)} use_pt_grad={int(args.use_pt_grad)} skip_k={skip_k_list} "
+        f"qa_fuse={str(args.qa_fuse)} use_pt_dist={int(args.use_pt_dist)} use_pt_grad={int(args.use_pt_grad)} "
+        f"answer_in_dim={(int(answer_in_dim_override) if answer_in_dim_override is not None else 'auto')} "
+        f"skip_k={skip_k_list} "
         f"loss_target_mode={str(args.loss_target_mode)} z_semantics='{z_semantics}' "
         f"q_mask_prob={float(args.q_mask_prob):.3f} q_mask_warmup_epochs={float(args.q_mask_warmup_epochs):.2f} q_mask_mode={str(args.q_mask_mode)} "
         f"type_specific_pos={int(args.type_specific_pos)} "
@@ -706,11 +731,26 @@ def main() -> None:
                         q_mask_ramp = min(float(global_step) / float(q_mask_warmup_steps), 1.0)
                     q_mask_prob_eff = float(args.q_mask_prob) * q_mask_ramp
 
+                    pt_xyz_b = batch.get("pt_xyz", batch.get("surf_xyz", None))
+                    if pt_xyz_b is None:
+                        raise RuntimeError("batch missing pt_xyz/surf_xyz")
+                    pt_ans_feat_b = batch.get("pt_ans_feat", batch.get("ans_feat", None))
+                    if (
+                        pt_ans_feat_b is not None
+                        and int(pt_ans_feat_b.shape[1]) != int(pt_xyz_b.shape[1])
+                    ):
+                        raise RuntimeError(
+                            "ans_feat length must match pt_xyz length in queryless v1-style pretrain: "
+                            f"ans={tuple(pt_ans_feat_b.shape)} xyz={tuple(pt_xyz_b.shape)}. "
+                            "Fix dataset keys/sampling so Answer is defined on the same surface-point set."
+                        )
+
                     out = model(
-                        pt_xyz=batch["pt_xyz"],
+                        pt_xyz=pt_xyz_b,
                         pt_n=None,
                         pt_dist=batch.get("pt_dist", None),
                         pt_grad=batch.get("pt_grad", None),
+                        pt_ans_feat=pt_ans_feat_b,
                         ray_o=batch.get("ray_o", None),
                         ray_d=batch.get("ray_d", None),
                         ray_t=batch.get("ray_t", None),

@@ -783,9 +783,11 @@ class PatchTransformerNepa(nn.Module):
         pt_n: Optional[torch.Tensor] = None,
         pt_dist: Optional[torch.Tensor] = None,
         pt_grad: Optional[torch.Tensor] = None,
+        pt_ans_feat: Optional[torch.Tensor] = None,
         points_xyz: Optional[torch.Tensor] = None,
         points_dist: Optional[torch.Tensor] = None,
         points_grad: Optional[torch.Tensor] = None,
+        points_ans_feat: Optional[torch.Tensor] = None,
         ray_o: Optional[torch.Tensor] = None,
         ray_d: Optional[torch.Tensor] = None,
         ray_t: Optional[torch.Tensor] = None,
@@ -806,6 +808,8 @@ class PatchTransformerNepa(nn.Module):
             pt_dist = points_dist
         if pt_grad is None:
             pt_grad = points_grad
+        if pt_ans_feat is None:
+            pt_ans_feat = points_ans_feat
         if pt_xyz is None:
             raise ValueError("pt_xyz/points_xyz is required")
 
@@ -818,27 +822,40 @@ class PatchTransformerNepa(nn.Module):
         if self.answer_embed is None:
             a_tok = q_tok
         else:
-            feats: list[torch.Tensor] = []
-            if self.use_pt_dist:
-                if pt_dist is None:
-                    raise ValueError("use_pt_dist=True but pt_dist is None")
-                if pt_dist.dim() == 2:
-                    pt_dist = pt_dist.unsqueeze(-1)
-                feats.append(pt_dist)
-            if self.use_pt_grad:
-                if pt_grad is None:
-                    raise ValueError("use_pt_grad=True but pt_grad is None")
-                if pt_grad.dim() != 3 or pt_grad.size(-1) != 3:
-                    raise ValueError(f"pt_grad must be (B,N,3), got {tuple(pt_grad.shape)}")
-                feats.append(pt_grad)
-            if len(feats) == 0:
-                ans_feat = torch.zeros(
-                    (pt_xyz.shape[0], pt_xyz.shape[1], int(self.answer_in_dim)),
-                    device=pt_xyz.device,
-                    dtype=pt_xyz.dtype,
-                )
+            if pt_ans_feat is not None:
+                if pt_ans_feat.dim() != 3:
+                    raise ValueError(f"pt_ans_feat must be (B,N,F), got {tuple(pt_ans_feat.shape)}")
+                if pt_ans_feat.shape[:2] != pt_xyz.shape[:2]:
+                    raise ValueError(
+                        f"pt_ans_feat shape mismatch with pt_xyz: ans={tuple(pt_ans_feat.shape)} xyz={tuple(pt_xyz.shape)}"
+                    )
+                ans_feat = pt_ans_feat
             else:
-                ans_feat = torch.cat(feats, dim=-1) if len(feats) > 1 else feats[0]
+                feats: list[torch.Tensor] = []
+                if self.use_pt_dist:
+                    if pt_dist is None:
+                        raise ValueError("use_pt_dist=True but pt_dist is None")
+                    if pt_dist.dim() == 2:
+                        pt_dist = pt_dist.unsqueeze(-1)
+                    feats.append(pt_dist)
+                if self.use_pt_grad:
+                    if pt_grad is None:
+                        raise ValueError("use_pt_grad=True but pt_grad is None")
+                    if pt_grad.dim() != 3 or pt_grad.size(-1) != 3:
+                        raise ValueError(f"pt_grad must be (B,N,3), got {tuple(pt_grad.shape)}")
+                    feats.append(pt_grad)
+                if len(feats) == 0:
+                    ans_feat = torch.zeros(
+                        (pt_xyz.shape[0], pt_xyz.shape[1], int(self.answer_in_dim)),
+                        device=pt_xyz.device,
+                        dtype=pt_xyz.dtype,
+                    )
+                else:
+                    ans_feat = torch.cat(feats, dim=-1) if len(feats) > 1 else feats[0]
+            if ans_feat.size(-1) != int(self.answer_embed.in_dim):
+                raise ValueError(
+                    f"answer feat dim mismatch: expected {int(self.answer_embed.in_dim)}, got {int(ans_feat.size(-1))}"
+                )
             a_tok = self.answer_embed(ans_feat, group_idx)
 
         q_ray_tok: Optional[torch.Tensor] = None

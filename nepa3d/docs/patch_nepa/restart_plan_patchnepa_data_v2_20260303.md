@@ -219,6 +219,36 @@ Major-change criteria used for revalidation:
 4. Modality changes (ray/no-ray, assignment strategy).
 5. Evaluation protocol changes (FT head/pooling/augmentation).
 
+## 14. Architecture Update (Queryless v1-style Path) (2026-03-03)
+
+Decision:
+
+- Keep PatchNEPA v1-style `forward()` as the primary pretrain path.
+- Remove dependency on token-query stream for mainline pretrain.
+- Preserve Q/A index alignment through shared `group_idx` gather.
+
+Applied changes:
+
+1. `PatchTransformerNepa.forward()` now accepts generic per-point Answer features.
+- Added args: `pt_ans_feat` / `points_ans_feat`.
+- If provided, `pt_ans_feat` is used as Answer source (must align to `pt_xyz` shape and `answer_in_dim`).
+- If not provided, legacy path (`pt_dist` / `pt_grad`) remains unchanged.
+- File: `nepa3d/models/patch_nepa.py`
+
+2. `pretrain_patch_nepa.py` now supports this path without breaking legacy jobs.
+- Added CLI arg: `--answer_in_dim` (`0` keeps legacy auto behavior).
+- Auto-probes dataset sample for `ans_feat`/`pt_ans_feat` when `--answer_in_dim=0`.
+- Training loop now forwards:
+  - `pt_xyz` from `batch['pt_xyz']` or `batch['surf_xyz']`.
+  - `pt_ans_feat` from `batch['pt_ans_feat']` or `batch['ans_feat']` when length matches `pt_xyz`.
+- On length mismatch, fails fast (`RuntimeError`) to preserve reproducibility.
+- File: `nepa3d/train/pretrain_patch_nepa.py`
+
+Compatibility note:
+
+- Existing runs/scripts using only `pt_dist`/`pt_grad` are unchanged.
+- New surf-aligned primitive-specific Answer features can be adopted incrementally.
+
 Out of scope for this round:
 
 - infra-only fixes (launcher/env/dependency/DDP timeout).
