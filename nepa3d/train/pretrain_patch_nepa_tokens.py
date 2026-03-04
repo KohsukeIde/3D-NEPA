@@ -9,9 +9,12 @@ from __future__ import annotations
 import argparse
 import math
 from pathlib import Path
-from typing import Dict, Iterator, Tuple
+from dataclasses import dataclass
+from typing import Dict, Iterator, Optional, Tuple
+import sys
 
 import torch
+import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from accelerate import Accelerator
@@ -24,15 +27,98 @@ from nepa3d.data.mixed_pretrain import build_mixed_pretrain
 from nepa3d.models.patch_nepa import PatchTransformerNepa
 from nepa3d.token.tokenizer import (
     TYPE_A_POINT,
+    TYPE_A_POINT_MESH,
+    TYPE_A_POINT_PC,
+    TYPE_A_POINT_UDF,
     TYPE_A_RAY,
     TYPE_BOS,
     TYPE_EOS,
     TYPE_MISSING_RAY,
     TYPE_POINT,
     TYPE_Q_POINT,
+    TYPE_Q_POINT_MESH,
+    TYPE_Q_POINT_PC,
+    TYPE_Q_POINT_UDF,
+    TYPE_RAY,
     TYPE_SEP_CTX,
     TYPE_SEP_QA,
 )
+
+Q_POINT_TYPES = (
+    int(TYPE_Q_POINT),
+    int(TYPE_Q_POINT_MESH),
+    int(TYPE_Q_POINT_UDF),
+    int(TYPE_Q_POINT_PC),
+)
+A_POINT_TYPES = (
+    int(TYPE_A_POINT),
+    int(TYPE_A_POINT_MESH),
+    int(TYPE_A_POINT_UDF),
+    int(TYPE_A_POINT_PC),
+)
+
+
+@dataclass
+class QASequenceBuild:
+    tokens: torch.Tensor
+    type_id: torch.Tensor
+    centers: torch.Tensor
+    ctx_centers: torch.Tensor
+    ctx_group_idx: torch.Tensor
+    n_ctx: int
+    n_qry: int
+    token_qa_layout: str
+
+
+class ReconHeads(nn.Module):
+    """Heads for raw reconstruction objectives."""
+
+    def __init__(self, d_model: int, group_size: int, answer_in_dim: int) -> None:
+        super().__init__()
+        ctx_dim = int(group_size) * 3
+        self.ctx_head = nn.Linear(int(d_model), int(ctx_dim))
+        self.q_head = nn.Linear(int(d_model), 3)
+        self.a_head = nn.Linear(int(d_model), int(answer_in_dim))
+
+
+def _primitive_to_point_type_pair(name: str) -> tuple[int, int]:
+    k = str(name).strip().lower()
+    if k == "mesh":
+        return int(TYPE_Q_POINT_MESH), int(TYPE_A_POINT_MESH)
+    if k == "udf":
+        return int(TYPE_Q_POINT_UDF), int(TYPE_A_POINT_UDF)
+    if k == "pc":
+        return int(TYPE_Q_POINT_PC), int(TYPE_A_POINT_PC)
+    return int(TYPE_Q_POINT), int(TYPE_A_POINT)
+
+
+def _resolve_primitive_point_types(
+    primitive: Optional[torch.Tensor | list | tuple | str],
+    *,
+    batch_size: int,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    q_default = int(TYPE_Q_POINT)
+    a_default = int(TYPE_A_POINT)
+    q = torch.full((int(batch_size),), q_default, device=device, dtype=torch.long)
+    a = torch.full((int(batch_size),), a_default, device=device, dtype=torch.long)
+
+    if primitive is None:
+        return q, a
+
+    if torch.is_tensor(primitive):
+        vals = primitive.detach().cpu().tolist()
+    elif isinstance(primitive, (list, tuple)):
+        vals = list(primitive)
+    else:
+        vals = [primitive] * int(batch_size)
+
+    n = min(int(batch_size), len(vals))
+    for i in range(n):
+        qv, av = _primitive_to_point_type_pair(str(vals[i]))
+        q[i] = int(qv)
+        a[i] = int(av)
+    return q, a
 
 
 def parse_args() -> argparse.Namespace:
@@ -104,7 +190,74 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--answer_in_dim", type=int, default=0, help="0 => infer from first sample ans_feat dim")
     p.add_argument("--answer_mlp_layers", type=int, default=2)
     p.add_argument("--answer_pool", type=str, default="max", choices=["max", "mean"])
-    p.add_argument("--loss_target_mode", type=str, default="content_tokens", choices=["full_z", "content_tokens"])
+    p.add_argument(
+        "--pretrain_objective",
+        type=str,
+        default="nepa_cosine",
+        choices=["nepa_cosine", "recon_mse", "recon_chamfer"],
+        help="Main pretrain objective: latent cosine NEPA or raw reconstruction variants.",
+    )
+    p.add_argument("--recon_ctx_weight", type=float, default=1.0, help="Weight for context patch reconstruction loss.")
+    p.add_argument("--recon_q_weight", type=float, default=1.0, help="Weight for query-point xyz reconstruction loss.")
+    p.add_argument("--recon_a_weight", type=float, default=1.0, help="Weight for answer-feature reconstruction loss.")
+    p.add_argument(
+        "--recon_chamfer_metric",
+        type=str,
+        default="l2",
+        choices=["l1", "l2"],
+        help="Chamfer variant for --pretrain_objective=recon_chamfer.",
+    )
+    p.add_argument(
+        "--loss_target_mode",
+        type=str,
+        default="content_tokens",
+        choices=["full_z", "content_tokens", "content_plus_center"],
+        help="Target mode for NEPA loss: full_z | content_tokens | content_plus_center.",
+    )
+    p.add_argument(
+        "--center_target_alpha",
+        type=float,
+        default=0.5,
+        help="Scale for center_mlp term used by loss_target_mode=content_plus_center.",
+    )
+    p.add_argument(
+        "--reg_var_weight",
+        type=float,
+        default=0.0,
+        help="Weight for variance regularization on selected reg_source embeddings.",
+    )
+    p.add_argument(
+        "--reg_cov_weight",
+        type=float,
+        default=0.0,
+        help="Weight for covariance regularization on selected reg_source embeddings.",
+    )
+    p.add_argument(
+        "--reg_var_gamma",
+        type=float,
+        default=1.0,
+        help="Target std floor for variance regularization.",
+    )
+    p.add_argument(
+        "--reg_var_eps",
+        type=float,
+        default=1e-4,
+        help="Numerical epsilon used in variance regularization.",
+    )
+    p.add_argument(
+        "--reg_scope",
+        type=str,
+        default="intra_shape",
+        choices=["batch", "intra_shape"],
+        help="Scope for var/cov regularization: batch | intra_shape.",
+    )
+    p.add_argument(
+        "--reg_source",
+        type=str,
+        default="target",
+        choices=["target", "hidden"],
+        help="Source embeddings for var/cov regularization: target (legacy) | hidden (out.h).",
+    )
     p.add_argument(
         "--loss_mask_mode",
         type=str,
@@ -120,6 +273,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--skip_k", type=int, default=1)
 
     p.add_argument("--max_steps", type=int, default=10000)
+    p.add_argument(
+        "--epochs",
+        type=int,
+        default=0,
+        help="If >0, override max_steps by epochs * steps_per_epoch after dataloader build.",
+    )
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--lr_scheduler", type=str, default="cosine", choices=["none", "cosine"])
     p.add_argument("--warmup_steps", type=int, default=-1, help="If >=0, overrides warmup_ratio.")
@@ -134,6 +293,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dual_mask_far", type=float, default=0.0)
     p.add_argument("--dual_mask_window", type=int, default=0)
     p.add_argument("--dual_mask_type_aware", type=int, default=0, choices=[0, 1])
+    p.add_argument("--dual_mask_mode", type=str, default="element", choices=["element", "column"])
+    p.add_argument("--dual_mask_keep_prefix", type=int, default=10)
+    p.add_argument(
+        "--dual_mask_warmup_frac",
+        type=float,
+        default=0.0,
+        help="Warmup fraction to linearly ramp dual_mask_near/far from 0 to target.",
+    )
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--use_wandb", type=int, default=0, choices=[0, 1])
     p.add_argument("--wandb_project", type=str, default="patchnepa-pretrain")
@@ -143,7 +310,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--wandb_tags", type=str, default="")
     p.add_argument("--wandb_mode", type=str, default="online", choices=["online", "offline", "disabled"])
     p.add_argument("--wandb_log_every", type=int, default=1)
-    p.add_argument("--diag_every", type=int, default=1, help="Always-on copy diagnostics logging interval.")
+    p.add_argument("--diag_every", type=int, default=1, help="Diagnostics logging interval.")
     return p.parse_args()
 
 
@@ -152,36 +319,38 @@ def build_qa_sequence(
     surf_xyz: torch.Tensor,
     qry_xyz: torch.Tensor,
     ans_feat: torch.Tensor,
+    primitive: Optional[torch.Tensor | list | tuple | str] = None,
     *,
     token_qa_layout: str = "split",
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Build [tokens, type_id, centers_xyz] for forward_tokens()."""
+) -> QASequenceBuild:
+    """Build sequence + metadata for forward_tokens and optional recon losses."""
     b = surf_xyz.shape[0]
     dev = surf_xyz.device
 
-    ctx_tok, ctx_centers, _ = model.encode_patches(surf_xyz)
+    ctx_tok, ctx_centers, ctx_group_idx = model.encode_patches(surf_xyz)
     q_tok, q_centers = model.encode_point_queries(qry_xyz)
     a_tok, a_centers = model.encode_point_answers(ans_feat, qry_xyz)
+    q_point_types, a_point_types = _resolve_primitive_point_types(
+        primitive,
+        batch_size=b,
+        device=dev,
+    )
 
     p = int(ctx_tok.shape[1])
     n = int(q_tok.shape[1])
+    q_pt = q_point_types.unsqueeze(1).expand(-1, n)
+    a_pt = a_point_types.unsqueeze(1).expand(-1, n)
     layout = str(token_qa_layout)
     if layout == "interleave":
         qa_tok = torch.stack([q_tok, a_tok], dim=2).reshape(b, 2 * n, -1)
         qa_centers = torch.stack([q_centers, a_centers], dim=2).reshape(b, 2 * n, 3)
         qa_type = torch.empty((b, 2 * n), device=dev, dtype=torch.long)
-        qa_type[:, 0::2] = int(TYPE_Q_POINT)
-        qa_type[:, 1::2] = int(TYPE_A_POINT)
+        qa_type[:, 0::2] = q_pt
+        qa_type[:, 1::2] = a_pt
     elif layout == "split":
         qa_tok = torch.cat([q_tok, a_tok], dim=1)
         qa_centers = torch.cat([q_centers, a_centers], dim=1)
-        qa_type = torch.cat(
-            [
-                torch.full((b, n), int(TYPE_Q_POINT), device=dev, dtype=torch.long),
-                torch.full((b, n), int(TYPE_A_POINT), device=dev, dtype=torch.long),
-            ],
-            dim=1,
-        )
+        qa_type = torch.cat([q_pt, a_pt], dim=1)
     elif layout == "split_sep":
         qa_tok = torch.cat([q_tok, model.sep_token.expand(b, 1, -1), a_tok], dim=1)
         qa_centers = torch.cat(
@@ -194,9 +363,9 @@ def build_qa_sequence(
         )
         qa_type = torch.cat(
             [
-                torch.full((b, n), int(TYPE_Q_POINT), device=dev, dtype=torch.long),
+                q_pt,
                 torch.full((b, 1), int(TYPE_SEP_QA), device=dev, dtype=torch.long),
-                torch.full((b, n), int(TYPE_A_POINT), device=dev, dtype=torch.long),
+                a_pt,
             ],
             dim=1,
         )
@@ -219,14 +388,298 @@ def build_qa_sequence(
     type_id = torch.cat(
         [
             torch.full((b, 1), int(TYPE_BOS), device=dev, dtype=torch.long),
-            torch.full((b, p), int(TYPE_POINT), device=dev, dtype=torch.long),
+            q_point_types.unsqueeze(1).expand(-1, p),
             torch.full((b, 1), int(TYPE_SEP_CTX), device=dev, dtype=torch.long),
             qa_type,
             torch.full((b, 1), int(TYPE_EOS), device=dev, dtype=torch.long),
         ],
         dim=1,
     )
-    return tokens, type_id, centers
+    return QASequenceBuild(
+        tokens=tokens,
+        type_id=type_id,
+        centers=centers,
+        ctx_centers=ctx_centers,
+        ctx_group_idx=ctx_group_idx,
+        n_ctx=p,
+        n_qry=n,
+        token_qa_layout=layout,
+    )
+
+
+def _forward_tokens_wrapped(
+    model: torch.nn.Module,
+    *,
+    tokens: torch.Tensor,
+    type_id: torch.Tensor,
+    centers_xyz: torch.Tensor,
+    is_causal: bool,
+    q_mask_prob: float,
+    dual_mask_near: float,
+    dual_mask_far: float,
+    dual_mask_window: int,
+    dual_mask_type_aware: bool,
+    dual_mask_mode: str,
+    dual_mask_keep_prefix: int,
+) -> PatchNepaOutput:
+    """Call forward_tokens for raw/accelerate/DDP-wrapped modules."""
+    if hasattr(model, "forward_tokens"):
+        return model.forward_tokens(
+            tokens=tokens,
+            type_id=type_id,
+            centers_xyz=centers_xyz,
+            is_causal=is_causal,
+            q_mask_prob=q_mask_prob,
+            dual_mask_near=dual_mask_near,
+            dual_mask_far=dual_mask_far,
+            dual_mask_window=dual_mask_window,
+            dual_mask_type_aware=dual_mask_type_aware,
+            dual_mask_mode=dual_mask_mode,
+            dual_mask_keep_prefix=dual_mask_keep_prefix,
+        )
+    wrapped = getattr(model, "module", None)
+    if wrapped is not None and hasattr(wrapped, "forward_tokens"):
+        return wrapped.forward_tokens(
+            tokens=tokens,
+            type_id=type_id,
+            centers_xyz=centers_xyz,
+            is_causal=is_causal,
+            q_mask_prob=q_mask_prob,
+            dual_mask_near=dual_mask_near,
+            dual_mask_far=dual_mask_far,
+            dual_mask_window=dual_mask_window,
+            dual_mask_type_aware=dual_mask_type_aware,
+            dual_mask_mode=dual_mask_mode,
+            dual_mask_keep_prefix=dual_mask_keep_prefix,
+        )
+    raise AttributeError("model has no forward_tokens() (wrapped or unwrapped).")
+
+
+def _sequence_absolute_positions(
+    n_ctx: int,
+    n_qry: int,
+    layout: str,
+    *,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Absolute sequence positions for context/Q/A tokens in [BOS,ctx,SEP_CTX,qa...,EOS]."""
+    ctx_abs = torch.arange(1, 1 + int(n_ctx), device=device, dtype=torch.long)
+    qa_start = 1 + int(n_ctx) + 1  # BOS + ctx + SEP_CTX
+    q_idx = torch.arange(int(n_qry), device=device, dtype=torch.long)
+    if str(layout) == "interleave":
+        q_abs = qa_start + (2 * q_idx)
+        a_abs = qa_start + (2 * q_idx) + 1
+    elif str(layout) == "split":
+        q_abs = qa_start + q_idx
+        a_abs = qa_start + int(n_qry) + q_idx
+    elif str(layout) == "split_sep":
+        q_abs = qa_start + q_idx
+        a_abs = qa_start + int(n_qry) + 1 + q_idx
+    else:
+        raise ValueError(f"unknown token_qa_layout={layout}")
+    return ctx_abs, q_abs, a_abs
+
+
+def _gather_rel_xyz_flat(
+    surf_xyz: torch.Tensor,
+    group_idx: torch.Tensor,
+    centers_xyz: torch.Tensor,
+) -> torch.Tensor:
+    """Gather grouped points and return flattened relative xyz [B,P,K*3]."""
+    b, p, k = int(group_idx.shape[0]), int(group_idx.shape[1]), int(group_idx.shape[2])
+    idx = group_idx.unsqueeze(-1).expand(-1, -1, -1, 3)
+    src = surf_xyz.unsqueeze(1).expand(-1, p, -1, 3)
+    grouped = torch.gather(src, dim=2, index=idx)
+    rel = grouped - centers_xyz.unsqueeze(2)
+    return rel.reshape(b, p, k * 3)
+
+
+def _masked_index_loss(
+    pred: torch.Tensor,
+    tgt: torch.Tensor,
+    pred_idx: torch.Tensor,
+    tgt_idx: torch.Tensor,
+    *,
+    fn: str = "mse",
+    group_size: int = 32,
+    chamfer_loss: Optional[nn.Module] = None,
+) -> torch.Tensor:
+    """Compute loss between selected sequence predictions and selected targets."""
+    if int(pred_idx.numel()) == 0:
+        return pred.sum() * 0.0
+    pred_sel = pred[:, pred_idx, :]
+    tgt_sel = tgt[:, tgt_idx, :]
+    if fn == "mse":
+        return F.mse_loss(pred_sel, tgt_sel)
+    if fn == "chamfer":
+        if chamfer_loss is None:
+            raise RuntimeError("recon_chamfer requested but chamfer_loss is None")
+        b, m, _ = pred_sel.shape
+        pred_pts = pred_sel.reshape(b * m, int(group_size), 3)
+        tgt_pts = tgt_sel.reshape(b * m, int(group_size), 3)
+        return chamfer_loss(pred_pts, tgt_pts)
+    raise ValueError(f"unknown loss fn={fn}")
+
+
+def _pair_error_value(
+    pred_sel: torch.Tensor,
+    tgt_sel: torch.Tensor,
+    *,
+    fn: str,
+    group_size: int = 32,
+    chamfer_loss: Optional[nn.Module] = None,
+) -> float:
+    if int(pred_sel.numel()) == 0:
+        return float("nan")
+    if fn == "mse":
+        return float(F.mse_loss(pred_sel, tgt_sel).item())
+    if fn == "chamfer":
+        if chamfer_loss is None:
+            return float("nan")
+        b, m, _ = pred_sel.shape
+        pred_pts = pred_sel.reshape(b * m, int(group_size), 3)
+        tgt_pts = tgt_sel.reshape(b * m, int(group_size), 3)
+        return float(chamfer_loss(pred_pts, tgt_pts).item())
+    return float("nan")
+
+
+def _masked_index_error_value(
+    pred: torch.Tensor,
+    tgt: torch.Tensor,
+    pred_idx: torch.Tensor,
+    tgt_idx: torch.Tensor,
+    *,
+    fn: str,
+    group_size: int = 32,
+    chamfer_loss: Optional[nn.Module] = None,
+) -> float:
+    if int(pred_idx.numel()) == 0:
+        return float("nan")
+    pred_sel = pred[:, pred_idx, :]
+    tgt_sel = tgt[:, tgt_idx, :]
+    return _pair_error_value(
+        pred_sel,
+        tgt_sel,
+        fn=fn,
+        group_size=group_size,
+        chamfer_loss=chamfer_loss,
+    )
+
+
+def _copy_baseline_error_value(
+    tgt: torch.Tensor,
+    tgt_idx: torch.Tensor,
+    *,
+    fn: str,
+    group_size: int = 32,
+    chamfer_loss: Optional[nn.Module] = None,
+) -> float:
+    if int(tgt_idx.numel()) == 0:
+        return float("nan")
+    valid = tgt_idx > 0
+    if not bool(valid.any()):
+        return float("nan")
+    cur_idx = tgt_idx[valid]
+    prev_idx = cur_idx - 1
+    pred_sel = tgt[:, prev_idx, :]
+    tgt_sel = tgt[:, cur_idx, :]
+    return _pair_error_value(
+        pred_sel,
+        tgt_sel,
+        fn=fn,
+        group_size=group_size,
+        chamfer_loss=chamfer_loss,
+    )
+
+
+def _compute_recon_diag(
+    *,
+    objective: str,
+    pred_ctx: torch.Tensor,
+    pred_q: torch.Tensor,
+    pred_a: torch.Tensor,
+    ctx_target: torch.Tensor,
+    qry_target: torch.Tensor,
+    ans_target: torch.Tensor,
+    ctx_pred_idx: torch.Tensor,
+    ctx_tgt_idx: torch.Tensor,
+    q_pred_idx: torch.Tensor,
+    q_tgt_idx: torch.Tensor,
+    a_pred_idx: torch.Tensor,
+    a_tgt_idx: torch.Tensor,
+    group_size: int,
+    chamfer_loss: Optional[nn.Module],
+) -> dict[str, float]:
+    ctx_fn = "chamfer" if str(objective) == "recon_chamfer" else "mse"
+
+    recon_ctx_err = _masked_index_error_value(
+        pred_ctx,
+        ctx_target,
+        ctx_pred_idx,
+        ctx_tgt_idx,
+        fn=ctx_fn,
+        group_size=group_size,
+        chamfer_loss=chamfer_loss,
+    )
+    recon_q_err = _masked_index_error_value(
+        pred_q,
+        qry_target,
+        q_pred_idx,
+        q_tgt_idx,
+        fn="mse",
+    )
+    recon_a_err = _masked_index_error_value(
+        pred_a,
+        ans_target,
+        a_pred_idx,
+        a_tgt_idx,
+        fn="mse",
+    )
+
+    copy_ctx_err = _copy_baseline_error_value(
+        ctx_target,
+        ctx_tgt_idx,
+        fn=ctx_fn,
+        group_size=group_size,
+        chamfer_loss=chamfer_loss,
+    )
+    copy_q_err = _copy_baseline_error_value(qry_target, q_tgt_idx, fn="mse")
+    copy_a_err = _copy_baseline_error_value(ans_target, a_tgt_idx, fn="mse")
+
+    return {
+        "recon_ctx_err": recon_ctx_err,
+        "recon_q_err": recon_q_err,
+        "recon_a_err": recon_a_err,
+        "copy_ctx_err": copy_ctx_err,
+        "copy_q_err": copy_q_err,
+        "copy_a_err": copy_a_err,
+        "lift_ctx": (copy_ctx_err - recon_ctx_err),
+        "lift_q": (copy_q_err - recon_q_err),
+        "lift_a": (copy_a_err - recon_a_err),
+    }
+
+
+def _load_chamfer_module(metric: str) -> nn.Module:
+    """Load Point-MAE chamfer extension (L1 or L2)."""
+    repo_root = Path(__file__).resolve().parents[2]
+    pm_root = repo_root / "Point-MAE"
+    chamfer_dir = pm_root / "extensions" / "chamfer_dist"
+    if str(pm_root) not in sys.path:
+        sys.path.insert(0, str(pm_root))
+    # Point-MAE's chamfer package uses `import chamfer` (absolute import).
+    # Ensure the built extension directory is also on sys.path.
+    if str(chamfer_dir) not in sys.path:
+        sys.path.insert(0, str(chamfer_dir))
+    try:
+        from extensions.chamfer_dist import ChamferDistanceL1, ChamferDistanceL2
+    except Exception as e:
+        raise RuntimeError(
+            "Point-MAE chamfer extension is unavailable. "
+            "Build 3D-NEPA/Point-MAE/extensions/chamfer_dist first."
+        ) from e
+    if str(metric).lower() == "l1":
+        return ChamferDistanceL1()
+    return ChamferDistanceL2()
 
 
 def _infinite_loader(dl: DataLoader) -> Iterator[Dict[str, torch.Tensor]]:
@@ -238,6 +691,7 @@ def _infinite_loader(dl: DataLoader) -> Iterator[Dict[str, torch.Tensor]]:
 def _save_ckpt(
     path: Path,
     model: PatchTransformerNepa,
+    recon_heads: Optional[ReconHeads],
     optimizer: optim.Optimizer,
     scheduler: optim.lr_scheduler.LRScheduler | None,
     step: int,
@@ -250,6 +704,8 @@ def _save_ckpt(
         "step": int(step),
         "args": vars(args),
     }
+    if recon_heads is not None:
+        payload["recon_heads"] = recon_heads.state_dict()
     if scheduler is not None:
         payload["scheduler"] = scheduler.state_dict()
     torch.save(
@@ -296,22 +752,45 @@ def _init_wandb(args: argparse.Namespace, accelerator: Accelerator):
         return None
 
 
-def _nepa_target_mask(type_id: torch.Tensor | None, k: int) -> torch.Tensor | None:
+def _nepa_target_mask(
+    type_id: torch.Tensor | None,
+    k: int,
+    *,
+    loss_mask_mode: str = "answer_and_point_context",
+) -> torch.Tensor | None:
     if type_id is None:
         return None
     tgt_ty = type_id[:, k:]
-    has_answer = bool((tgt_ty == int(TYPE_A_POINT)).any() or (tgt_ty == int(TYPE_A_RAY)).any())
-    if has_answer:
-        return (
-            ((tgt_ty == int(TYPE_A_POINT)) | (tgt_ty == int(TYPE_A_RAY)))
-            & (tgt_ty != int(TYPE_MISSING_RAY))
-        )
-    return (
+    mode = str(loss_mask_mode)
+    is_answer_point = torch.zeros_like(tgt_ty, dtype=torch.bool)
+    is_query_point = torch.zeros_like(tgt_ty, dtype=torch.bool)
+    for ty in A_POINT_TYPES:
+        is_answer_point = is_answer_point | (tgt_ty == int(ty))
+    for ty in Q_POINT_TYPES:
+        is_query_point = is_query_point | (tgt_ty == int(ty))
+    has_answer = bool(is_answer_point.any() or (tgt_ty == int(TYPE_A_RAY)).any())
+    is_answer = is_answer_point | (tgt_ty == int(TYPE_A_RAY))
+    is_point_context = is_query_point | (tgt_ty == int(TYPE_POINT)) | (tgt_ty == int(TYPE_RAY))
+    non_special = (
         (tgt_ty != int(TYPE_BOS))
         & (tgt_ty != int(TYPE_EOS))
         & (tgt_ty != int(TYPE_SEP_CTX))
         & (tgt_ty != int(TYPE_SEP_QA))
         & (tgt_ty != int(TYPE_MISSING_RAY))
+    )
+    if mode == "answer_only_if_present":
+        if has_answer:
+            return is_answer
+        return non_special
+    if mode == "answer_and_point_context":
+        if has_answer:
+            return is_answer | is_point_context
+        return is_point_context
+    if mode == "non_special":
+        return non_special
+    raise ValueError(
+        f"unknown loss_mask_mode={mode}. "
+        "expected one of: answer_only_if_present, answer_and_point_context, non_special"
     )
 
 
@@ -328,6 +807,8 @@ def _compute_copy_diag(
     z_hat: torch.Tensor,
     type_id: torch.Tensor | None,
     k: int,
+    *,
+    loss_mask_mode: str = "answer_and_point_context",
 ) -> dict[str, float] | None:
     k = max(1, int(k))
     if target_seq.size(1) <= k or z_hat.size(1) <= k:
@@ -337,7 +818,7 @@ def _compute_copy_diag(
     tgt = target_seq[:, k:, :].detach()
     prev = target_seq[:, :-k, :].detach()
 
-    mask = _nepa_target_mask(type_id, k)
+    mask = _nepa_target_mask(type_id, k, loss_mask_mode=str(loss_mask_mode))
     cos_tgt = F.cosine_similarity(pred, tgt, dim=-1)
     cos_prev = F.cosine_similarity(pred, prev, dim=-1)
 
@@ -360,6 +841,144 @@ def _compute_copy_diag(
         "gap": float(cos_tgt_m - cos_prev_m),
         "copy_win": copy_win,
     }
+
+
+def _build_target_sequence(
+    model_raw: PatchTransformerNepa,
+    out: PatchNepaOutput,
+    *,
+    loss_target_mode: str,
+    center_target_alpha: float,
+) -> torch.Tensor:
+    mode = str(loss_target_mode)
+    if mode == "full_z":
+        return out.z
+    if mode == "content_tokens":
+        return out.tokens
+    if mode == "content_plus_center":
+        alpha = float(center_target_alpha)
+        if abs(alpha) < 1e-12:
+            return out.tokens
+        center_mlp = getattr(model_raw, "center_mlp", None)
+        if center_mlp is None:
+            raise RuntimeError("loss_target_mode=content_plus_center requires pos_mode=center_mlp.")
+        center_term = center_mlp(out.centers_xyz)
+        return out.tokens + (alpha * center_term)
+    raise ValueError(
+        f"unknown loss_target_mode={mode}. expected one of: full_z, content_tokens, content_plus_center"
+    )
+
+
+def _variance_covariance_loss(
+    z_flat: torch.Tensor,
+    *,
+    gamma: float,
+    eps: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """VICReg-like variance/covariance regularizer over flattened embeddings."""
+    if z_flat.numel() == 0 or int(z_flat.shape[0]) < 2:
+        zero = z_flat.new_zeros(())
+        nan = zero.new_full((), float("nan"))
+        return zero, zero, nan, nan, nan
+
+    z = z_flat.float()
+    z_centered = z - z.mean(dim=0, keepdim=True)
+
+    std = torch.sqrt(z_centered.pow(2).mean(dim=0) + float(eps))
+    var_loss = torch.relu(float(gamma) - std).mean()
+
+    denom = max(1, int(z_centered.shape[0]) - 1)
+    cov = (z_centered.transpose(0, 1) @ z_centered) / float(denom)
+    cov_off = cov - torch.diag_embed(torch.diagonal(cov, dim1=0, dim2=1))
+    cov_loss = cov_off.pow(2).mean()
+
+    std_mean = std.mean().detach()
+    std_min = std.min().detach()
+    cov_offdiag_rms = torch.sqrt(cov_off.pow(2).mean()).detach()
+    return var_loss, cov_loss, std_mean, std_min, cov_offdiag_rms
+
+
+def _variance_covariance_loss_intra_shape(
+    z: torch.Tensor,
+    mask: torch.Tensor | None,
+    *,
+    gamma: float,
+    eps: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """VICReg-like var/cov loss computed per sample across token dimension."""
+    if z.dim() != 3:
+        raise ValueError(f"expected z with shape (B,T,D), got {tuple(z.shape)}")
+    bsz, seq_len, dim = int(z.shape[0]), int(z.shape[1]), int(z.shape[2])
+    if bsz == 0 or seq_len == 0 or dim == 0:
+        zero = z.new_zeros(())
+        nan = zero.new_full((), float("nan"))
+        return zero, zero, nan, nan, nan
+
+    if mask is None:
+        mask = torch.ones((bsz, seq_len), device=z.device, dtype=torch.bool)
+    else:
+        if mask.shape[:2] != (bsz, seq_len):
+            raise ValueError(
+                f"intra-shape reg mask shape mismatch: mask={tuple(mask.shape)} vs z={(bsz, seq_len, dim)}"
+            )
+        mask = mask.to(device=z.device, dtype=torch.bool)
+
+    var_terms: list[torch.Tensor] = []
+    cov_terms: list[torch.Tensor] = []
+    std_mean_terms: list[torch.Tensor] = []
+    std_min_terms: list[torch.Tensor] = []
+    cov_rms_terms: list[torch.Tensor] = []
+
+    for bi in range(bsz):
+        zi = z[bi][mask[bi]]
+        if int(zi.shape[0]) < 2:
+            continue
+        zi = zi.float()
+        zi = zi - zi.mean(dim=0, keepdim=True)
+
+        std = torch.sqrt(zi.pow(2).mean(dim=0) + float(eps))
+        var_terms.append(torch.relu(float(gamma) - std).mean())
+
+        denom = max(1, int(zi.shape[0]) - 1)
+        cov = (zi.transpose(0, 1) @ zi) / float(denom)
+        cov_off = cov - torch.diag_embed(torch.diagonal(cov, dim1=0, dim2=1))
+        cov_terms.append(cov_off.pow(2).mean())
+
+        std_mean_terms.append(std.mean().detach())
+        std_min_terms.append(std.min().detach())
+        cov_rms_terms.append(torch.sqrt(cov_off.pow(2).mean()).detach())
+
+    if len(var_terms) == 0:
+        zero = z.new_zeros(())
+        nan = zero.new_full((), float("nan"))
+        return zero, zero, nan, nan, nan
+
+    var_loss = torch.stack(var_terms).mean()
+    cov_loss = torch.stack(cov_terms).mean()
+    std_mean = torch.stack(std_mean_terms).mean()
+    std_min = torch.stack(std_min_terms).mean()
+    cov_offdiag_rms = torch.stack(cov_rms_terms).mean()
+    return var_loss, cov_loss, std_mean, std_min, cov_offdiag_rms
+
+
+def _regularization_loss(
+    reg_source: torch.Tensor,
+    reg_mask: torch.Tensor | None,
+    *,
+    scope: str,
+    gamma: float,
+    eps: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    mode = str(scope)
+    if mode == "batch":
+        if reg_mask is None:
+            reg_flat = reg_source.reshape(-1, reg_source.shape[-1])
+        else:
+            reg_flat = reg_source[reg_mask]
+        return _variance_covariance_loss(reg_flat, gamma=gamma, eps=eps)
+    if mode == "intra_shape":
+        return _variance_covariance_loss_intra_shape(reg_source, reg_mask, gamma=gamma, eps=eps)
+    raise ValueError(f"unknown reg_scope={mode}. expected one of: batch, intra_shape")
 
 
 def _fmt_diag(x: float) -> str:
@@ -469,9 +1088,28 @@ def main() -> None:
         q_mask_mode=str(args.q_mask_mode),
         use_ray_patch=False,
     )
-    optimizer = optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
-
-    model, optimizer, dl = accelerator.prepare(model, optimizer, dl)
+    objective = str(args.pretrain_objective)
+    chamfer_module: Optional[nn.Module] = None
+    if objective == "recon_chamfer":
+        chamfer_module = _load_chamfer_module(str(args.recon_chamfer_metric))
+    recon_heads: Optional[ReconHeads] = None
+    if objective != "nepa_cosine":
+        recon_heads = ReconHeads(
+            d_model=int(args.d_model),
+            group_size=int(args.group_size),
+            answer_in_dim=int(answer_in_dim),
+        )
+        optimizer = optim.AdamW(
+            list(model.parameters()) + list(recon_heads.parameters()),
+            lr=float(args.lr),
+            weight_decay=float(args.weight_decay),
+        )
+        model, recon_heads, optimizer, dl = accelerator.prepare(model, recon_heads, optimizer, dl)
+        recon_heads_raw: Optional[ReconHeads] = accelerator.unwrap_model(recon_heads)
+    else:
+        optimizer = optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
+        model, optimizer, dl = accelerator.prepare(model, optimizer, dl)
+        recon_heads_raw = None
     model_raw = accelerator.unwrap_model(model)
     try:
         steps_per_epoch = max(1, int(len(dl)))
@@ -480,7 +1118,10 @@ def main() -> None:
         est_samples = int(info.get("num_samples", 0))
         est_batch = max(1, int(args.batch_size))
         steps_per_epoch = max(1, est_samples // est_batch)
+    if int(args.epochs) > 0:
+        args.max_steps = int(max(1, int(args.epochs) * int(steps_per_epoch)))
     warmup_steps = max(0, _resolve_warmup_steps(args))
+    dual_mask_warmup_steps = max(0, int(round(float(args.dual_mask_warmup_frac) * float(args.max_steps))))
     scheduler: optim.lr_scheduler.LambdaLR | None = None
     if str(args.lr_scheduler) == "cosine":
         scheduler = optim.lr_scheduler.LambdaLR(
@@ -490,6 +1131,7 @@ def main() -> None:
 
     if accelerator.is_main_process:
         accelerator.print(f"[token_pretrain] answer_in_dim={answer_in_dim}")
+        accelerator.print(f"[token_pretrain] pretrain_objective={objective}")
         accelerator.print(f"[token_pretrain] mix_info={info}")
         accelerator.print(
             "[token_pretrain] pointmae_compat "
@@ -500,13 +1142,41 @@ def main() -> None:
             f"transform_answers={bool(int(args.pm_transform_answers))}"
         )
         accelerator.print(f"[token_pretrain] token_qa_layout={str(args.token_qa_layout)}")
+        accelerator.print(
+            f"[token_pretrain] loss_target_mode={str(args.loss_target_mode)} "
+            f"center_target_alpha={float(args.center_target_alpha):.4f}"
+        )
+        accelerator.print(
+            f"[token_pretrain] recon weights "
+            f"ctx={float(args.recon_ctx_weight):.3f} "
+            f"q={float(args.recon_q_weight):.3f} "
+            f"a={float(args.recon_a_weight):.3f} "
+            f"chamfer_metric={str(args.recon_chamfer_metric)}"
+        )
+        accelerator.print(
+            f"[token_pretrain] reg var_w={float(args.reg_var_weight):.4f} "
+            f"cov_w={float(args.reg_cov_weight):.4f} "
+            f"gamma={float(args.reg_var_gamma):.4f} eps={float(args.reg_var_eps):.1e} "
+            f"scope={str(args.reg_scope)} source={str(args.reg_source)}"
+        )
         accelerator.print(f"[token_pretrain] loss_mask_mode={str(args.loss_mask_mode)}")
         accelerator.print(
             f"[token_pretrain] optimizer lr={float(args.lr):.3e} wd={float(args.weight_decay):.3f} "
             f"scheduler={str(args.lr_scheduler)} warmup_steps={int(warmup_steps)} "
             f"warmup_ratio={float(args.warmup_ratio):.4f} min_lr={float(args.min_lr):.2e}"
         )
+        accelerator.print(
+            f"[token_pretrain] dual_mask near={float(args.dual_mask_near):.4f} "
+            f"far={float(args.dual_mask_far):.4f} window={int(args.dual_mask_window)} "
+            f"type_aware={bool(int(args.dual_mask_type_aware))} "
+            f"mode={str(args.dual_mask_mode)} keep_prefix={int(args.dual_mask_keep_prefix)} "
+            f"warmup_frac={float(args.dual_mask_warmup_frac):.4f} "
+            f"warmup_steps={int(dual_mask_warmup_steps)}"
+        )
         accelerator.print(f"[token_pretrain] steps_per_epoch={int(steps_per_epoch)}")
+        accelerator.print(
+            f"[token_pretrain] epochs={int(args.epochs)} effective_max_steps={int(args.max_steps)}"
+        )
     wandb_run = _init_wandb(args, accelerator)
     wandb_log_every = max(1, int(args.wandb_log_every))
     diag_every = max(1, int(args.diag_every))
@@ -520,41 +1190,187 @@ def main() -> None:
         surf_xyz = batch["surf_xyz"]
         qry_xyz = batch["qry_xyz"]
         ans_feat = batch["ans_feat"]
+        primitive = batch.get("primitive", None)
         if qry_xyz is None or ans_feat is None:
             raise RuntimeError("batch missing qry_xyz/ans_feat; ensure v2 config uses return_qry=true.")
         surf_xyz = surf_xyz.to(accelerator.device, non_blocking=True)
         qry_xyz = qry_xyz.to(accelerator.device, non_blocking=True)
         ans_feat = ans_feat.to(accelerator.device, non_blocking=True)
+        if dual_mask_warmup_steps > 0:
+            dm_ramp = min(1.0, float(step + 1) / float(max(1, dual_mask_warmup_steps)))
+        else:
+            dm_ramp = 1.0
+        dm_near = float(args.dual_mask_near) * dm_ramp
+        dm_far = float(args.dual_mask_far) * dm_ramp
 
         with accelerator.accumulate(model):
-            tokens, type_id, centers = build_qa_sequence(
-                model,
+            seq = build_qa_sequence(
+                model_raw,
                 surf_xyz,
                 qry_xyz,
                 ans_feat,
+                primitive=primitive,
                 token_qa_layout=str(args.token_qa_layout),
             )
-            out = model.forward_tokens(
-                tokens=tokens,
-                type_id=type_id,
-                centers_xyz=centers,
+            out = _forward_tokens_wrapped(
+                model,
+                tokens=seq.tokens,
+                type_id=seq.type_id,
+                centers_xyz=seq.centers,
                 is_causal=True,
                 q_mask_prob=float(args.q_mask_prob),
-                dual_mask_near=float(args.dual_mask_near),
-                dual_mask_far=float(args.dual_mask_far),
+                dual_mask_near=dm_near,
+                dual_mask_far=dm_far,
                 dual_mask_window=int(args.dual_mask_window),
                 dual_mask_type_aware=bool(int(args.dual_mask_type_aware)),
+                dual_mask_mode=str(args.dual_mask_mode),
+                dual_mask_keep_prefix=int(args.dual_mask_keep_prefix),
             )
-            target = out.z if str(args.loss_target_mode) == "full_z" else out.tokens
-            loss = model_raw.nepa_loss(
-                out.z,
-                out.z_hat,
+            diag = None
+            recon_diag = None
+            target = _build_target_sequence(
+                model_raw,
+                out,
+                loss_target_mode=str(args.loss_target_mode),
+                center_target_alpha=float(args.center_target_alpha),
+            )
+            if objective == "nepa_cosine":
+                loss_nepa = model_raw.nepa_loss(
+                    out.z,
+                    out.z_hat,
+                    out.type_id,
+                    skip_k=int(args.skip_k),
+                    target=target,
+                    loss_mask_mode=str(args.loss_mask_mode),
+                )
+                loss_recon_ctx = loss_nepa.new_zeros(())
+                loss_recon_q = loss_nepa.new_zeros(())
+                loss_recon_a = loss_nepa.new_zeros(())
+                loss_main = loss_nepa
+                diag = _compute_copy_diag(
+                    target,
+                    out.z_hat,
+                    out.type_id,
+                    int(args.skip_k),
+                    loss_mask_mode=str(args.loss_mask_mode),
+                )
+            else:
+                with torch.no_grad():
+                    loss_nepa = model_raw.nepa_loss(
+                        out.z,
+                        out.z_hat,
+                        out.type_id,
+                        skip_k=int(args.skip_k),
+                        target=target,
+                        loss_mask_mode=str(args.loss_mask_mode),
+                    )
+                k = int(args.skip_k)
+                pred_h = out.h[:, :-k, :]
+                ctx_abs, q_abs, a_abs = _sequence_absolute_positions(
+                    seq.n_ctx,
+                    seq.n_qry,
+                    seq.token_qa_layout,
+                    device=pred_h.device,
+                )
+                base_q_idx = torch.arange(seq.n_qry, device=pred_h.device, dtype=torch.long)
+                base_a_idx = torch.arange(seq.n_qry, device=pred_h.device, dtype=torch.long)
+
+                valid_ctx = ctx_abs >= k
+                ctx_pred_idx = (ctx_abs[valid_ctx] - k).long()
+                ctx_tgt_idx = (ctx_abs[valid_ctx] - 1).long()
+
+                valid_q = q_abs >= k
+                q_pred_idx = (q_abs[valid_q] - k).long()
+                q_tgt_idx = base_q_idx[valid_q]
+
+                valid_a = a_abs >= k
+                a_pred_idx = (a_abs[valid_a] - k).long()
+                a_tgt_idx = base_a_idx[valid_a]
+
+                ctx_target = _gather_rel_xyz_flat(surf_xyz, seq.ctx_group_idx, seq.ctx_centers)
+                if recon_heads is None:
+                    raise RuntimeError(
+                        "reconstruction objective requested but recon_heads is None "
+                        "(internal setup error)"
+                    )
+                pred_ctx = recon_heads.ctx_head(pred_h)
+                pred_q = recon_heads.q_head(pred_h)
+                pred_a = recon_heads.a_head(pred_h)
+
+                ctx_loss_fn = "mse"
+                if objective == "recon_chamfer":
+                    ctx_loss_fn = "chamfer"
+                loss_recon_ctx = _masked_index_loss(
+                    pred_ctx,
+                    ctx_target,
+                    ctx_pred_idx,
+                    ctx_tgt_idx,
+                    fn=ctx_loss_fn,
+                    group_size=int(args.group_size),
+                    chamfer_loss=chamfer_module,
+                )
+                loss_recon_q = _masked_index_loss(
+                    pred_q,
+                    qry_xyz,
+                    q_pred_idx,
+                    q_tgt_idx,
+                    fn="mse",
+                )
+                loss_recon_a = _masked_index_loss(
+                    pred_a,
+                    ans_feat,
+                    a_pred_idx,
+                    a_tgt_idx,
+                    fn="mse",
+                )
+                loss_main = (
+                    float(args.recon_ctx_weight) * loss_recon_ctx
+                    + float(args.recon_q_weight) * loss_recon_q
+                    + float(args.recon_a_weight) * loss_recon_a
+                )
+                with torch.no_grad():
+                    recon_diag = _compute_recon_diag(
+                        objective=objective,
+                        pred_ctx=pred_ctx.detach(),
+                        pred_q=pred_q.detach(),
+                        pred_a=pred_a.detach(),
+                        ctx_target=ctx_target.detach(),
+                        qry_target=qry_xyz.detach(),
+                        ans_target=ans_feat.detach(),
+                        ctx_pred_idx=ctx_pred_idx,
+                        ctx_tgt_idx=ctx_tgt_idx,
+                        q_pred_idx=q_pred_idx,
+                        q_tgt_idx=q_tgt_idx,
+                        a_pred_idx=a_pred_idx,
+                        a_tgt_idx=a_tgt_idx,
+                        group_size=int(args.group_size),
+                        chamfer_loss=chamfer_module,
+                    )
+            reg_mask = _nepa_target_mask(
                 out.type_id,
-                skip_k=int(args.skip_k),
-                target=target,
+                int(args.skip_k),
                 loss_mask_mode=str(args.loss_mask_mode),
             )
-            diag = _compute_copy_diag(target, out.z_hat, out.type_id, int(args.skip_k))
+            if str(args.reg_source) == "hidden":
+                reg_source = out.h[:, int(args.skip_k) :, :]
+            elif str(args.reg_source) == "target":
+                reg_source = target[:, int(args.skip_k) :, :]
+            else:
+                raise ValueError(
+                    f"unknown reg_source={args.reg_source}. expected one of: target, hidden"
+                )
+            var_loss, cov_loss, reg_std_mean, reg_std_min, reg_cov_offdiag_rms = _regularization_loss(
+                reg_source,
+                reg_mask,
+                scope=str(args.reg_scope),
+                gamma=float(args.reg_var_gamma),
+                eps=float(args.reg_var_eps),
+            )
+            loss = (
+                loss_main
+                + (float(args.reg_var_weight) * var_loss)
+                + (float(args.reg_cov_weight) * cov_loss)
+            )
             accelerator.backward(loss)
             if float(args.max_grad_norm) > 0:
                 accelerator.clip_grad_norm_(model.parameters(), float(args.max_grad_norm))
@@ -566,47 +1382,119 @@ def main() -> None:
         if accelerator.sync_gradients:
             step += 1
             if accelerator.is_main_process:
+                loss_nepa_val = float(loss_nepa.item())
+                loss_main_val = float(loss_main.item())
+                loss_recon_ctx_val = float(loss_recon_ctx.item())
+                loss_recon_q_val = float(loss_recon_q.item())
+                loss_recon_a_val = float(loss_recon_a.item())
                 loss_val = float(loss.item())
+                var_loss_val = float(var_loss.item())
+                cov_loss_val = float(cov_loss.item())
+                reg_std_mean_val = float(reg_std_mean.item()) if reg_std_mean.dim() == 0 else float("nan")
+                reg_std_min_val = float(reg_std_min.item()) if reg_std_min.dim() == 0 else float("nan")
+                reg_cov_offdiag_rms_val = (
+                    float(reg_cov_offdiag_rms.item()) if reg_cov_offdiag_rms.dim() == 0 else float("nan")
+                )
                 # 2D ViT-NEPA reports pretrain objective as -cos.
                 # PatchNEPA uses (1-cos), so convert by subtracting 1 for axis parity.
-                loss_2d_equiv = loss_val - 1.0
+                loss_2d_equiv = loss_nepa_val - 1.0
                 pbar.update(1)
                 pbar.set_description(f"loss={loss_val:.4f}")
-                if (step % diag_every == 0) and (diag is not None):
-                    accelerator.print(
-                        f"[step {step:06d}] "
-                        f"loss={loss_val:.6f} "
-                        f"loss2d={loss_2d_equiv:.6f} "
-                        f"cos_tgt={_fmt_diag(float(diag['cos_tgt']))} "
-                        f"cos_prev={_fmt_diag(float(diag['cos_prev']))} "
-                        f"gap={_fmt_diag(float(diag['gap']))} "
-                        f"copy_win={_fmt_diag(float(diag['copy_win']))}"
-                    )
+                if (step % diag_every == 0):
+                    if objective == "nepa_cosine" and (diag is not None):
+                        accelerator.print(
+                            f"[step {step:06d}] "
+                            f"loss_total={loss_val:.6f} "
+                            f"loss_main={loss_main_val:.6f} "
+                            f"loss_nepa={loss_nepa_val:.6f} "
+                            f"loss_recon_ctx={loss_recon_ctx_val:.6f} "
+                            f"loss_recon_q={loss_recon_q_val:.6f} "
+                            f"loss_recon_a={loss_recon_a_val:.6f} "
+                            f"loss_var={var_loss_val:.6f} "
+                            f"loss_cov={cov_loss_val:.6f} "
+                            f"loss2d={loss_2d_equiv:.6f} "
+                            f"cos_tgt={_fmt_diag(float(diag['cos_tgt']))} "
+                            f"cos_prev={_fmt_diag(float(diag['cos_prev']))} "
+                            f"gap={_fmt_diag(float(diag['gap']))} "
+                            f"copy_win={_fmt_diag(float(diag['copy_win']))}"
+                        )
+                    elif objective != "nepa_cosine" and (recon_diag is not None):
+                        accelerator.print(
+                            f"[step {step:06d}] "
+                            f"loss_total={loss_val:.6f} "
+                            f"loss_main={loss_main_val:.6f} "
+                            f"loss_nepa={loss_nepa_val:.6f} "
+                            f"loss_recon_ctx={loss_recon_ctx_val:.6f} "
+                            f"loss_recon_q={loss_recon_q_val:.6f} "
+                            f"loss_recon_a={loss_recon_a_val:.6f} "
+                            f"loss_var={var_loss_val:.6f} "
+                            f"loss_cov={cov_loss_val:.6f} "
+                            f"loss2d={loss_2d_equiv:.6f} "
+                            f"copy_ctx={_fmt_diag(float(recon_diag['copy_ctx_err']))} "
+                            f"copy_q={_fmt_diag(float(recon_diag['copy_q_err']))} "
+                            f"copy_a={_fmt_diag(float(recon_diag['copy_a_err']))} "
+                            f"lift_ctx={_fmt_diag(float(recon_diag['lift_ctx']))} "
+                            f"lift_q={_fmt_diag(float(recon_diag['lift_q']))} "
+                            f"lift_a={_fmt_diag(float(recon_diag['lift_a']))}"
+                        )
                 if wandb_run is not None and (step % wandb_log_every == 0):
                     epoch_float = float(step - 1) / float(max(1, steps_per_epoch))
                     wb = {
                         "train/loss": loss_val,
+                        "train/loss_total": loss_val,
+                        "train/loss_main": loss_main_val,
+                        "train/loss_nepa": loss_nepa_val,
+                        "train/loss_recon_ctx": loss_recon_ctx_val,
+                        "train/loss_recon_q": loss_recon_q_val,
+                        "train/loss_recon_a": loss_recon_a_val,
+                        "train/loss_var": var_loss_val,
+                        "train/loss_cov": cov_loss_val,
                         "train/loss_2d_equiv": loss_2d_equiv,
                         "train/step": int(step),
                         "train/epoch": epoch_float,
+                        "train/objective_id": 0.0 if objective == "nepa_cosine" else (1.0 if objective == "recon_mse" else 2.0),
+                        "train/dual_mask_ramp": float(dm_ramp),
+                        "train/dual_mask_near": float(dm_near),
+                        "train/dual_mask_far": float(dm_far),
                     }
                     if len(optimizer.param_groups) > 0 and "lr" in optimizer.param_groups[0]:
                         wb["train/lr"] = float(optimizer.param_groups[0]["lr"])
-                    if diag is not None:
+                    if objective == "nepa_cosine" and (diag is not None):
                         wb["diag/cos_tgt"] = float(diag["cos_tgt"])
                         wb["diag/cos_prev"] = float(diag["cos_prev"])
                         wb["diag/gap"] = float(diag["gap"])
                         wb["diag/copy_win"] = float(diag["copy_win"])
+                    if objective != "nepa_cosine" and (recon_diag is not None):
+                        wb["diag/recon_ctx_err"] = float(recon_diag["recon_ctx_err"])
+                        wb["diag/recon_q_err"] = float(recon_diag["recon_q_err"])
+                        wb["diag/recon_a_err"] = float(recon_diag["recon_a_err"])
+                        wb["diag/copy_ctx_err"] = float(recon_diag["copy_ctx_err"])
+                        wb["diag/copy_q_err"] = float(recon_diag["copy_q_err"])
+                        wb["diag/copy_a_err"] = float(recon_diag["copy_a_err"])
+                        wb["diag/recon_lift_ctx"] = float(recon_diag["lift_ctx"])
+                        wb["diag/recon_lift_q"] = float(recon_diag["lift_q"])
+                        wb["diag/recon_lift_a"] = float(recon_diag["lift_a"])
+                    wb["diag/target_std_mean"] = reg_std_mean_val
+                    wb["diag/target_std_min"] = reg_std_min_val
+                    wb["diag/target_cov_offdiag_rms"] = reg_cov_offdiag_rms_val
                     wandb_run.log(wb, step=int(step))
             if int(args.save_every) > 0 and (step % int(args.save_every) == 0):
                 accelerator.wait_for_everyone()
                 if accelerator.is_main_process:
-                    _save_ckpt(save_root / f"ckpt_step{step}.pt", model_raw, optimizer, scheduler, step, args)
+                    _save_ckpt(
+                        save_root / f"ckpt_step{step}.pt",
+                        model_raw,
+                        recon_heads_raw,
+                        optimizer,
+                        scheduler,
+                        step,
+                        args,
+                    )
     pbar.close()
 
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        _save_ckpt(save_root / "ckpt_final.pt", model_raw, optimizer, scheduler, step, args)
+        _save_ckpt(save_root / "ckpt_final.pt", model_raw, recon_heads_raw, optimizer, scheduler, step, args)
         accelerator.print(f"[done] saved to {save_root}")
         if wandb_run is not None:
             wandb_run.finish()

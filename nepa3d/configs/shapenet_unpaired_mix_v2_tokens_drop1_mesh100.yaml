@@ -12,8 +12,12 @@ pointmae_scale_high: 1.5
 pointmae_translate: 0.2
 transform_answers: true
 
-# One-pass sampling per epoch; composition comes from split materialization.
-replacement: false
+# Default policy: keep total samples per epoch fixed to full ShapeNet-train size
+# regardless of composition ratio.
+# NOTE: 47445 comes from split metadata
+# (train_pc=15655, train_mesh=16127, train_udf=15663).
+replacement: true
+mix_num_samples: 47445
 
 datasets:
   - name: shapenet_mesh

@@ -889,6 +889,8 @@ class PatchTransformerNepa(nn.Module):
         dual_mask_far: float = 0.0,
         dual_mask_window: int = 0,
         dual_mask_type_aware: int | bool = 0,
+        dual_mask_mode: str = "element",
+        dual_mask_keep_prefix: int = 0,
         q_mask_prob: float = 0.0,
     ) -> PatchNepaOutput:
         if pt_xyz is None:
@@ -1061,6 +1063,8 @@ class PatchTransformerNepa(nn.Module):
                 dual_mask_far=float(dual_mask_far),
                 dual_mask_window=int(dual_mask_window),
                 dual_mask_type_aware=int(dual_mask_type_aware),
+                dual_mask_mode=str(dual_mask_mode),
+                dual_mask_keep_prefix=int(dual_mask_keep_prefix),
             )
 
         z_hat = self.pred_head(h)
@@ -1251,6 +1255,8 @@ class PatchTransformerNepa(nn.Module):
         dual_mask_window: int = 0,
         dual_mask_seed: Optional[int] = None,
         dual_mask_type_aware: bool = False,
+        dual_mask_mode: str = "element",
+        dual_mask_keep_prefix: int = 0,
     ) -> PatchNepaOutput:
         """Forward pass from pre-tokenized streams.
 
@@ -1308,6 +1314,8 @@ class PatchTransformerNepa(nn.Module):
                 dual_mask_window=int(dual_mask_window),
                 dual_mask_seed=(int(dual_mask_seed) if dual_mask_seed is not None else None),
                 dual_mask_type_aware=int(bool(dual_mask_type_aware)),
+                dual_mask_mode=str(dual_mask_mode),
+                dual_mask_keep_prefix=int(dual_mask_keep_prefix),
             )
 
         z_hat = self.pred_head(h)

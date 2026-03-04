@@ -558,6 +558,8 @@ class CausalTransformer(nn.Module):
         dual_mask_window: int = 0,
         dual_mask_seed: int | None = None,
         dual_mask_type_aware: int | bool = 0,
+        dual_mask_mode: str = "element",
+        dual_mask_keep_prefix: int = 0,
     ):
         """Causal transformer with optional *dual masking* (PointGPT-style).
 
@@ -570,6 +572,8 @@ class CausalTransformer(nn.Module):
             dual_mask_far: probability to mask past tokens outside the window.
             dual_mask_window: window size in token steps (<=0 disables near/far split).
             dual_mask_seed: optional seed for deterministic dual masking.
+            dual_mask_mode: `element` (edge-wise Bernoulli) or `column` (PointGPT-like key-column drop).
+            dual_mask_keep_prefix: in `column` mode, first K key positions are always visible.
         """
         t = x.size(1)
         attn_mask = None
@@ -621,8 +625,23 @@ class CausalTransformer(nn.Module):
                     gen = torch.Generator(device=x.device)
                     gen.manual_seed(int(dual_mask_seed) & 0xFFFFFFFF)
 
-                u = torch.rand((t, t), device=x.device, generator=gen)
-                extra = eligible & (u < prob)
+                mode = str(dual_mask_mode).lower()
+                if mode not in {"element", "column"}:
+                    raise ValueError(f"dual_mask_mode must be element|column, got {dual_mask_mode}")
+
+                if mode == "element":
+                    u = torch.rand((t, t), device=x.device, generator=gen)
+                    extra = eligible & (u < prob)
+                else:
+                    # PointGPT-like: sample dropped keys once, apply to whole column.
+                    keep_prefix = max(0, min(int(dual_mask_keep_prefix), t))
+                    col_prob = prob.max(dim=0).values
+                    col_eligible = eligible.any(dim=0)
+                    if keep_prefix > 0:
+                        col_eligible[:keep_prefix] = False
+                    u_col = torch.rand((t,), device=x.device, generator=gen)
+                    col_drop = col_eligible & (u_col < col_prob)
+                    extra = eligible & col_drop[None, :]
                 attn_mask = attn_mask | extra
 
         # Missing-ray tokens should not be used as K/V for non-missing queries.

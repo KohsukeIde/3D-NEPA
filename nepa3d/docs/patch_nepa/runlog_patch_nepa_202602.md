@@ -5276,3 +5276,473 @@ Submitted jobs (active chain):
   - outputs:
     - split json: `data/shapenet_unpaired_splits_v2_20260303_strictgrid.json`
     - materialized root: `data/shapenet_unpaired_cache_v2_20260303_strictgrid`
+
+## 124. v2 token pretrain (drop1, morton, split_sep) + short FT result capture (2026-03-04)
+
+Completed pretrain runs (`max_steps=10000`, `loss_mask_mode=answer_and_point_context`):
+
+- run set:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_drop1_20260304_001831/`
+- `pc100` (`tok_drop1_pc100.log`)
+  - final step: `loss=0.753113`, `cos_tgt=0.4521`, `cos_prev=0.4539`, `gap=-0.0018`, `copy_win=0.4965`
+  - last100 mean: `loss=0.746067`, `cos_tgt=0.4663`, `cos_prev=0.4682`, `gap=-0.0019`, `copy_win=0.5016`
+- `mesh50udf50` (`tok_drop1_mesh50udf50.log`)
+  - final step: `loss=0.514475`, `cos_tgt=0.9418`, `cos_prev=0.9411`, `gap=+0.0007`, `copy_win=0.5006`
+  - last100 mean: `loss=0.515127`, `cos_tgt=0.9410`, `cos_prev=0.9403`, `gap=+0.0007`, `copy_win=0.5078`
+- `pc33mesh33udf33` (`tok_drop1_pc33m33u33.log`)
+  - final step: `loss=0.556022`, `cos_tgt=0.8577`, `cos_prev=0.8573`, `gap=+0.0005`, `copy_win=0.5035`
+  - last100 mean: `loss=0.567859`, `cos_tgt=0.8333`, `cos_prev=0.8333`, `gap=+0.0001`, `copy_win=0.5046`
+
+Short FT results (obj_only, Point-MAE aug on, 60 epochs):
+
+- run set:
+  - `logs/sanity/patchnepa_ft/patchnepa_tokens_drop1_ftshort_20260304_002808/`
+- `tokpc100.out`: `TEST acc=0.8365`
+- `tokm50u50.out`: `TEST acc=0.8365`
+- `tokp33.out`: `TEST acc=0.8365`
+
+Note:
+
+- The three FT logs are line-by-line identical in training trace and final score.
+- This block is treated as a reproducibility/control signal; it is not used as evidence of composition gain.
+
+## 125. mask+primitive fix rerun started (morton, split_sep) (2026-03-04)
+
+Code changes applied in `nepa3d/train/pretrain_patch_nepa_tokens.py`:
+
+- `diag` mask now follows the same `loss_mask_mode` logic as training loss.
+- tokens route now assigns primitive-specific point type IDs (`mesh`/`udf`/`pc`) per sample.
+
+Submitted runs:
+
+- `102506` (`tok_m100f`) using `shapenet_unpaired_mix_v2_tokens_drop1_mesh100.yaml`
+- `102507` (`tok_u100f`) using `shapenet_unpaired_mix_v2_tokens_drop1_udf100.yaml`
+- `102508` (`tok_m50f`) using `shapenet_unpaired_mix_v2_tokens_drop1_mesh50_udf50.yaml`
+- run set:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_drop1_tokens_maskprimfix_morton_20260304_014828/`
+
+Current status at logging time:
+
+- all three are `R` and reached around step `~2000` (not final yet).
+
+## 126. Cross-run diag trend / spike comparison (unequal-step aware) (2026-03-04)
+
+Scope:
+
+- compared by same diag family: `loss`, `cos_tgt`, `cos_prev`, `gap`, `copy_win`
+- windows are index-based (`early/mid/late` = first/center/last 10% of available diag records)
+- some runs are partial or running; treated as interim trend only
+
+### A) v2 tokens branch (morton/sample6 + single-primitive checks)
+
+| run | coverage | loss trend (early->mid->late) | cos_tgt_late | cos_prev_late | gap_late | copy_win_late | max loss spike |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `tok_drop1_pc100.log` | step `1..10000` | `0.6061 -> 0.7293 -> 0.7463` | `0.4659` | `0.4684` | `-0.0025` | `0.5020` | `0.0828` @`3836->3837` |
+| `tok_drop1_mesh50udf50.log` | step `1..10000` | `0.5505 -> 0.5161 -> 0.5151` | `0.9412` | `0.9404` | `+0.0008` | `0.5067` | `0.0255` @`401->402` |
+| `tok_drop1_pc33m33u33.log` | step `1..10000` | `0.5565 -> 0.5665 -> 0.5687` | `0.8316` | `0.8315` | `+0.0001` | `0.5049` | `0.0707` @`6704->6705` |
+| `tok_drop1_mesh100.log` *(partial)* | step `1..7391` | `0.5513 -> 0.5700 -> 0.5735` | `0.8218` | `0.8227` | `-0.0009` | `0.5137` | `0.0593` @`7332->7333` |
+| `tok_drop1_udf100.log` *(partial)* | step `1..7408` | `0.5473 -> 0.5090 -> 0.5588` | `0.8519` | `0.8517` | `+0.0002` | `0.5010` | `0.0327` @`7391->7392` |
+| `tok_m50u50_sample6.log` *(partial; patch-order sample6)* | step `1..6103` | `0.5691 -> 0.5174 -> 0.5182` | `0.9364` | `0.9359` | `+0.0005` | `0.5079` | `0.0309` @`338->339` |
+
+### B) v2 mask+primitive-fix rerun (running; early diagnosis only)
+
+| run | coverage | loss trend (early->mid->late) | cos_tgt_late | cos_prev_late | gap_late | copy_win_late | max loss spike |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `tok_m100f.log` | step `1..4217` | `0.5753 -> 0.5581 -> 0.5670` | `0.4330` | `0.4336` | `-0.0006` | `0.7536` | `0.0430` @`2700->2701` |
+| `tok_u100f.log` | step `1..4211` | `0.5744 -> 0.5371 -> 0.5842` | `0.4158` | `0.4161` | `-0.0002` | `0.7466` | `0.0355` @`3361->3362` |
+| `tok_m50f.log` | step `1..4193` | `0.5835 -> 0.5761 -> 0.6090` | `0.3910` | `0.3919` | `-0.0009` | `0.7503` | `0.0724` @`3848->3849` |
+
+### C) historical v1 reference (content-target family)
+
+| run | coverage | loss trend (early->mid->late) | cos_tgt_late | cos_prev_late | gap_late | copy_win_late |
+|---|---:|---:|---:|---:|---:|---:|
+| `...po6.mr0.log` | step `0..107900` | `0.0191 -> 0.0007 -> 0.0006` | `0.9994` | `0.9699` | `+0.0296` | `0.0654` |
+| `...po12.mr0.log` | step `0..107900` | `0.0182 -> 0.0014 -> 0.0003` | `0.9997` | `0.9738` | `+0.0259` | `0.0800` |
+| `...content_2x2...rfps.mr0.log` | step `0..36700` | `0.0390 -> 0.0008 -> 0.0008` | `0.9992` | `0.9719` | `+0.0273` | `0.0563` |
+
+### D) direct interpretation from above
+
+- Current v2 tokens branch: `cos_tgt` and `cos_prev` are almost identical in late phase (`gap` around `-0.003 .. +0.001`, `copy_win` around `0.50`).
+  - This matches the concern: effective lift over prev-copy is near zero.
+- Mask+primitive-fix rerun (current early phase): the overlap remains and `copy_win` is even higher (`~0.75` around step `~4k`).
+  - At current depth this still looks copy-dominated.
+- Historical v1 reference is qualitatively different: stable positive gap (`~+0.026..+0.030`) and low `copy_win` (`~0.06..0.08`).
+  - So the current v2 token behavior is not just a scale shift; the diagnostic regime itself differs.
+- `m50u50` morton vs `m50u50` sample6 (axis-swapped set) are close at current horizon.
+  - Sample6 does not yet show a decisive separation in `gap/copy_win` trend.
+
+### E) patch-order 2x2 note (historical jobs)
+
+- `f_poM` and `r_poR` multi-node attempts failed at rendezvous (`DistStoreError`, timeout before effective train progression), so excluded from trend comparison.
+- `f_poR` single-node retry completed, and W&B summary reports:
+  - `diag/cos_tgt=0.99932`, `diag/cos_prev=0.97682`, `diag/gap=0.0225`, `diag/copy_win=0.07617`
+- This completed `f_poR` profile is consistent with the v1 reference family (non-zero positive gap, low copy_win), and inconsistent with current v2 token profiles.
+
+## 127. patch_order morton -> random switch (all running jobs terminated and relaunched) (2026-03-04)
+
+Request handling:
+
+- terminated currently running `morton` mask+primitive-fix jobs:
+  - `102506` (`tok_m100f`), `102507` (`tok_u100f`), `102508` (`tok_m50f`)
+  - final state: `job_state=F`, `Exit_status=271` (user-terminated)
+
+Code/default changes applied for tokens pretrain path:
+
+- `nepa3d/train/pretrain_patch_nepa_tokens.py`
+  - argparse default `--patch_order_mode`: `morton -> random`
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_qf.sh`
+  - `PATCH_ORDER_MODE` default: `morton -> random`
+- `scripts/pretrain/submit_pretrain_patch_nepa_tokens_qf.sh`
+  - `PATCH_ORDER_MODE` fallback in `qsub -v`: `morton -> random`
+
+Relaunched random-order runs (same drop1/mask+primitive-fix family):
+
+- run set:
+  - `patchnepa_tokens_drop1_tokens_maskprimfix_random_20260304_021637`
+- jobs:
+  - `102512` (`tok_m100r`) with `shapenet_unpaired_mix_v2_tokens_drop1_mesh100.yaml`
+  - `102513` (`tok_u100r`) with `shapenet_unpaired_mix_v2_tokens_drop1_udf100.yaml`
+  - `102514` (`tok_m50r`) with `shapenet_unpaired_mix_v2_tokens_drop1_mesh50_udf50.yaml`
+
+Submission/runtime parameters confirmed in `qstat -fx`:
+
+- `PATCH_ORDER_MODE=random`
+- `TOKEN_QA_LAYOUT=split_sep`
+- `ANSWER_IN_DIM=9`
+- `LOSS_TARGET_MODE=content_tokens`
+- `LOSS_MASK_MODE=answer_and_point_context`
+- W&B group: `drop1_tokens_maskprimfix_random`
+
+## 128. `content_plus_center` target added + relaunch (`mesh50+udf50`, fps) (2026-03-04)
+
+Request handling:
+
+- user requested to stop all currently running token-pretrain jobs before next trial.
+- terminated jobs:
+  - `102512` (`tok_m100r`)
+  - `102513` (`tok_u100r`)
+  - `102514` (`tok_m50r`)
+  - `102515` (`tok_m50fps`)
+- queue state after termination check: no running jobs remained, then new run submitted.
+
+Code changes applied (tokens pretrain path):
+
+- `nepa3d/train/pretrain_patch_nepa_tokens.py`
+  - added new loss target mode: `content_plus_center`
+  - added CLI arg: `--center_target_alpha` (default `0.5`)
+  - target construction logic:
+    - `full_z` -> `out.z`
+    - `content_tokens` -> `out.tokens`
+    - `content_plus_center` -> `out.tokens + alpha * center_mlp(out.centers_xyz)`
+  - startup summary now logs:
+    - `loss_target_mode`
+    - `center_target_alpha`
+
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_qf.sh`
+  - added env var passthrough:
+    - `CENTER_TARGET_ALPHA` (default `0.5`)
+  - logs now include `center_target_alpha`
+  - forwards `--center_target_alpha` to python entrypoint
+
+- `scripts/pretrain/submit_pretrain_patch_nepa_tokens_qf.sh`
+  - added `CENTER_TARGET_ALPHA` to `qsub -v` environment list.
+
+Validation:
+
+- python syntax check passed:
+  - `python -m py_compile nepa3d/train/pretrain_patch_nepa_tokens.py`
+- shell syntax checks passed:
+  - `bash -n scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_qf.sh`
+  - `bash -n scripts/pretrain/submit_pretrain_patch_nepa_tokens_qf.sh`
+
+Submitted run (`mesh50+udf50`, `fps`, `content_plus_center`):
+
+- job: `102516` (`tok_m50fps_cpc`)
+- run set:
+  - `patchnepa_tokens_drop1_m50u50_fps_cpc_20260304_023729`
+- config:
+  - `MIX_CONFIG=nepa3d/configs/shapenet_unpaired_mix_v2_tokens_drop1_mesh50_udf50.yaml`
+  - `PATCH_ORDER_MODE=fps`
+  - `TOKEN_QA_LAYOUT=split_sep`
+  - `ANSWER_IN_DIM=9`
+  - `LOSS_TARGET_MODE=content_plus_center`
+  - `CENTER_TARGET_ALPHA=0.5`
+  - `LOSS_MASK_MODE=answer_and_point_context`
+- logs:
+  - pbs: `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_drop1_m50u50_fps_cpc_20260304_023729/tok_m50fps_cpc.pbs.log`
+
+Initial online signal (very early, not final):
+
+- step `1`: `cos_tgt=-0.0177`, `cos_prev=-0.0195`, `gap=+0.0017`, `copy_win=0.4769`
+- step `20`: `cos_tgt=0.0430`, `cos_prev=0.0418`, `gap=+0.0011`, `copy_win=0.4824`
+- unlike the prior maskprimfix runs (`copy_win~0.74-0.75`), this run starts near `~0.48-0.50` band.
+
+## 129. Latent objective branch recap (`mesh50+udf50`) (2026-03-04 04:00 JST)
+
+This block consolidates the latest latent-diagnostic runs before reconstruction-objective wiring.
+
+| job | run/log | step | late loss | late cos_tgt | late cos_prev | late gap | late copy_win | note |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| `102515` | `tok_m50fps.log` | 1394 | `0.5307` | `0.4693` | `0.4719` | `-0.0025` | `0.7538` | copy-dominant |
+| `102516` | `tok_m50fps_cpc.log` | 3805 | `0.1904` | `0.8096` | `0.8111` | `-0.0015` | `0.5044` | overlap remains |
+| `102517` | `mesh50udf50_fps_splitsep_varcov.log` | 1860 | `0.1275` | `0.8752` | `0.8800` | `-0.0048` | `0.5181` | terminated |
+| `102518` | `mesh50udf50_fps_splitsep_varcov_intra.log` | 10000 | `0.4229` | `0.5788` | `0.5788` | `-0.0000` | `0.5009` | completed |
+| `102519` | `mesh50udf50_fps_splitsep_varcov_intra_dualcol.log` | 8735* | `0.4224` | `0.5793` | `0.5793` | `-0.0000` | `0.5006` | running* |
+| `102521` | `mesh50udf50_fps_splitsep_varcov_intra_hreg.log` | 7365* | `0.3765` | `0.6249` | `0.6111` | `+0.0138` | `0.4739` | best gap so far* |
+| `102522` | `mesh50udf50_fps_splitsep_hreg_dcol_nf03.log` | 3970* | `0.4519` | `0.5509` | `0.5521` | `-0.0011` | `0.5026` | running* |
+
+`*` running at snapshot time.
+
+Interpretation:
+
+- Order-only and target-only adjustments still tended to `cos_tgt ≈ cos_prev` (`gap≈0`).
+- Hidden-source regularization (`102521`) is currently the only branch showing sustained positive gap and sub-0.5 copy-win.
+- Dual-column mask on top of hidden-reg (`102522`) has not yet preserved that gain.
+
+## 130. Reconstruction objective smoke (`recon_mse`) submitted (2026-03-04)
+
+Request: wire-check reconstruction objective path before optional chamfer.
+
+Submitted:
+
+- `102523.qjcm` (`pntok_rms`)
+- run root:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_reconmse_smoke_20260304_040234/`
+- key settings:
+  - `PRETRAIN_OBJECTIVE=recon_mse`
+  - `MIX_CONFIG=...drop1_mesh50_udf50.yaml`
+  - `PATCH_ORDER_MODE=morton`
+  - `MAX_STEPS=2000` (smoke)
+
+Startup confirmation from pbs log:
+
+- objective banner shows `pretrain_objective=recon_mse recon_w=(ctx=1.0,q=1.0,a=1.0)`.
+
+## 131. Recheck: `recon_mse` wiring and full latent snapshot (2026-03-04 04:50 JST)
+
+`qstat` status at recheck:
+
+- `102521` (`pntok_hreg`) running
+- `102522` (`pntok_dcol3`) running
+- `102523` (`pntok_rms`) running
+
+`102523` (`recon_mse`) runtime check:
+
+- pbs log:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_reconmse_smoke_20260304_040234/recon_m50u50_smoke.pbs.log`
+- observed progress: step `954 / 2000`
+- no `Traceback`/`RuntimeError`/`NaN` in log
+- reconstruction channels confirmed active (`loss_recon_ctx`, `loss_recon_q`, `loss_recon_a` all present each step)
+
+All latent diagnostic runs re-indexed into one TSV for full comparison:
+
+- `nepa3d/docs/patch_nepa/latent_diag_snapshot_20260304.tsv`
+
+## 132. Full matrix launch from best latent recipe (`morton` fixed) (2026-03-04 04:28 JST)
+
+Selected pretrain recipe (from latent branch trend):
+
+- `PRETRAIN_OBJECTIVE=nepa_cosine`
+- `LOSS_TARGET_MODE=content_plus_center`
+- `CENTER_TARGET_ALPHA=0.5`
+- `LOSS_MASK_MODE=answer_and_point_context`
+- `REG_VAR_WEIGHT=0.05`
+- `REG_COV_WEIGHT=0.01`
+- `REG_SCOPE=intra_shape`
+- `REG_SOURCE=hidden`
+- `TOKEN_QA_LAYOUT=split_sep`
+- `PATCH_ORDER_MODE=morton`
+- `ANSWER_IN_DIM=9`
+- `PATCH_LOCAL_ENCODER=pointmae_conv`
+- `PATCH_FPS_RANDOM_START=1`
+- `MAX_STEPS=10000`
+
+Pretrain x3:
+
+- `102527.qjcm` (`ptkpc`) `pc100`
+- `102531.qjcm` (`ptkmu`) `mesh50_udf50`
+- `102532.qjcm` (`ptkpm`) `pc33_mesh33_udf33`
+
+FT x9 (`afterok` chained):
+
+- from `102527`: `102528` (`obj_bg`), `102529` (`obj_only`), `102530` (`pb_t50_rs`)
+- from `102531`: `102533` (`obj_bg`), `102534` (`obj_only`), `102535` (`pb_t50_rs`)
+- from `102532`: `102536` (`obj_bg`), `102537` (`obj_only`), `102538` (`pb_t50_rs`)
+
+Submission note:
+
+- `scripts/sanity/submit_patchnepa_finetune_variants_qf.sh` failed on this host with
+  `qsub: cannot send environment with the job`.
+- FT jobs were submitted via direct `qsub` to the same run script with minimal env payload.
+- job list record:
+  `logs/sanity/patchnepa_submit/patchnepa_tokens_fullbest_morton_20260304_042155/submitted_jobs.txt`
+
+## 133. FT chain switched to short protocol (`EPOCHS=60`) for quick TEST check (2026-03-04 04:37 JST)
+
+Pretrain jobs unchanged:
+
+- `102527` (`pc100`)
+- `102531` (`mesh50_udf50`)
+- `102532` (`pc33_mesh33_udf33`)
+
+Old queued FT jobs were cancelled and replaced by short FT (`E60`):
+
+- from `102527`: `102539` (`obj_bg`), `102540` (`obj_only`), `102541` (`pb_t50_rs`)
+- from `102531`: `102542` (`obj_bg`), `102543` (`obj_only`), `102544` (`pb_t50_rs`)
+- from `102532`: `102545` (`obj_bg`), `102546` (`obj_only`), `102547` (`pb_t50_rs`)
+
+Record:
+
+- `logs/sanity/patchnepa_submit/patchnepa_tokens_fullbest_morton_20260304_042155/submitted_jobs_shortft.txt`
+  - generated from all token-pretrain `*.pbs.log` files containing `[step ...]` diagnostic lines
+  - includes tail-window metrics and max loss spike per run
+
+## 132. `recon_chamfer` smoke started (2026-03-04)
+
+Submitted after `recon_mse` wiring verification:
+
+- job: `102524.qjcm` (`pntok_rcf`)
+- run root:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_reconchamfer_smoke_20260304_041040/`
+- pbs log:
+  - `.../reconch_m50u50_smoke.pbs.log`
+
+Key args:
+
+- `PRETRAIN_OBJECTIVE=recon_chamfer`
+- `RECON_CHAMFER_METRIC=l2`
+- `MIX_CONFIG=...drop1_mesh50_udf50.yaml`
+- `TOKEN_QA_LAYOUT=split_sep`
+- `PATCH_ORDER_MODE=morton`
+- `MAX_STEPS=2000`
+
+Startup log confirms objective routing:
+
+- `objective: pretrain_objective=recon_chamfer recon_w=(ctx=1.0,q=1.0,a=1.0) chamfer_metric=l2`
+
+## 133. `recon_chamfer` bring-up fix and re-run (2026-03-04)
+
+Initial submit:
+
+- `102524.qjcm` (`pntok_rcf`)
+- failed at startup:
+  - `ModuleNotFoundError: No module named 'chamfer'`
+
+Fixes applied:
+
+1. Built extension in-place with multi-arch targets:
+   - `Point-MAE/extensions/chamfer_dist`
+   - `TORCH_CUDA_ARCH_LIST=8.0;8.6;8.9;9.0`
+   - `python setup.py build_ext --inplace`
+2. Updated loader path handling:
+   - file: `nepa3d/train/pretrain_patch_nepa_tokens.py`
+   - function: `_load_chamfer_module`
+   - added `Point-MAE/extensions/chamfer_dist` to `sys.path` before import.
+
+Re-submitted:
+
+- `102526.qjcm` (`pntok_rcf`)
+- run root:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_reconchamfer_smoke_20260304_041727/`
+
+Early runtime verification:
+
+- startup succeeded, W&B online
+- step logs progressing (`[step 000001..]`)
+- `loss_recon_ctx` is nonzero and active
+- previous kernel-arch error (`no kernel image is available`) is not observed in `102526`
+
+## 134. Default fix applied: ratio changes keep full ShapeNet total (2026-03-04)
+
+User lock-in: composition ratio can vary, but per-epoch corpus size must remain full ShapeNet.
+
+Applied to drop1 token configs:
+
+- `shapenet_unpaired_mix_v2_tokens_drop1_pc100.yaml`
+- `shapenet_unpaired_mix_v2_tokens_drop1_mesh50_udf50.yaml`
+- `shapenet_unpaired_mix_v2_tokens_drop1_pc33_mesh33_udf33.yaml`
+- `shapenet_unpaired_mix_v2_tokens_drop1_mesh100.yaml`
+- `shapenet_unpaired_mix_v2_tokens_drop1_udf100.yaml`
+
+Each now fixed to:
+
+- `replacement: true`
+- `mix_num_samples: 47445` (drop1 train total)
+
+Compute-matched controls left unchanged by design:
+
+- `*_cm15655.yaml` remain `replacement=false`, `mix_num_samples=15655`.
+
+Launcher defaults aligned:
+
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_qf.sh`
+  - default `MIX_CONFIG` -> `...drop1_pc33_mesh33_udf33.yaml`
+  - default `TOKEN_QA_LAYOUT` -> `split_sep`
+- `scripts/pretrain/submit_pretrain_patch_nepa_tokens_qf.sh`
+  - same default values in qsub env payload
+
+## 135. Reconstruction objective outcomes (recorded) (2026-03-04)
+
+`recon_mse` (`102523`) completed:
+
+- log: `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_reconmse_smoke_20260304_040234/recon_m50u50_smoke.log`
+- final step `2000`:
+  - `loss_total=0.296183`
+  - `loss_recon_ctx=0.003766`
+  - `loss_recon_q=0.173864`
+  - `loss_recon_a=0.118553`
+  - `cos_tgt=-0.0183`, `cos_prev=-0.0186`, `gap=+0.0004`, `copy_win=0.7397`
+
+`recon_chamfer` (`102526`) progressed but no completion marker:
+
+- log: `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_reconchamfer_smoke_20260304_041727/reconch_m50u50_smoke.log`
+- last observed step `969`:
+  - `loss_total=0.287651`
+  - `loss_recon_ctx=0.003372`
+  - `loss_recon_q=0.166045`
+  - `loss_recon_a=0.118234`
+  - `cos_tgt=-0.0053`, `cos_prev=-0.0058`, `gap=+0.0005`, `copy_win=0.7381`
+- `[done]` marker absent in this file.
+
+## 136. Full300 FT outputs currently available (historical, pre-default-fix context)
+
+Source:
+
+- `logs/sanity/patchnepa_submit/patchnepa_tokens_full300_morton_fixddp2_20260304_044851/ft_*.out`
+
+Observed TEST lines:
+
+- `pc100`:
+  - `obj_bg=0.8244`
+  - `obj_only=0.8296`
+  - `pb_t50_rs=0.7946`
+- `mesh50udf50`:
+  - `obj_bg=0.8090`
+  - `obj_only=0.8296`
+  - `pb_t50_rs` not yet observed in current snapshot
+
+Interpretation constraint:
+
+- these came from the run set before "full total per ratio arm" was enforced as default.
+- keep as diagnostic history; re-run under new default for final ratio comparison.
+
+## 137. Recon objective diagnostics corrected (2026-03-04)
+
+Problem fixed:
+
+- `recon_mse/recon_chamfer` runs were previously displaying cosine-space diagnostics
+  (`cos_tgt/cos_prev/copy_win`) that are not objective-aligned.
+
+Current behavior:
+
+- `nepa_cosine`:
+  - logs `diag/cos_tgt`, `diag/cos_prev`, `diag/gap`, `diag/copy_win` (unchanged).
+- `recon_mse` / `recon_chamfer`:
+  - logs reconstruction-space diagnostics:
+    - `diag/recon_ctx_err`, `diag/recon_q_err`, `diag/recon_a_err`
+    - `diag/copy_ctx_err`, `diag/copy_q_err`, `diag/copy_a_err`
+    - `diag/recon_lift_ctx`, `diag/recon_lift_q`, `diag/recon_lift_a`
+
+Interpretation rule:
+
+- `recon_lift_* > 0` means model prediction beats copy-baseline in the same loss space.
