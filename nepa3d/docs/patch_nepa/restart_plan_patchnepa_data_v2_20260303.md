@@ -1579,3 +1579,211 @@ Operational conclusion at this point:
 - apples-to-apples pretrain domain is now aligned (both on ShapeNet family data).
 - with mask parity applied, remaining major differences are objective/task design
   (`PointGPT: reconstruction`, `PatchNEPA smoke here: latent cosine with QA stream).
+
+## 49. Minimal causal test: reconstruction + generator depth sweep (2026-03-05)
+
+Goal:
+
+- test the next causal hypothesis directly:
+  - `fixed-target reconstruction` already removed cone/mean-solution bottleneck.
+  - remaining gap should be tested by adding PointGPT-like generator depth.
+
+Code changes:
+
+- `nepa3d/train/pretrain_patch_nepa_tokens.py`
+  - added `--recon_generator_depth` (default `0`).
+  - for `pretrain_objective in {recon_mse, recon_chamfer}`:
+    - `depth=0`: legacy path (no generator).
+    - `depth>0`: inserts extra `CausalTransformer` before recon heads.
+  - generator parameters are added to optimizer and clipping set.
+  - checkpoint now saves optional `recon_generator` state dict.
+- launchers updated to propagate new flag:
+  - `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_qf.sh`
+  - `scripts/pretrain/submit_pretrain_patch_nepa_tokens_qf.sh`
+  - `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_multinode_pbsdsh.sh`
+
+Submitted short A/B/C (same config except depth):
+
+- run set: `patchnepa_tokens_reconch_genab_20260305_221814`
+- objective: `recon_chamfer` (`l2`)
+- data: `shapenet_unpaired_mix_v2_tokens_drop1_mesh50_udf50`
+- budget: `MAX_STEPS=2000`, `EPOCHS=0`
+- DDP: `rt_QF=4`, `NPROC_PER_NODE=4` (16 GPU)
+- W&B: enabled (`project=patchnepa-pretrain`, group=`patchnepa_tokens_reconch_genab_20260305_221814`)
+
+Jobs:
+
+- `105857.qjcm` (`reconch_m50u50_gend0`)
+- `105858.qjcm` (`reconch_m50u50_gend2`)
+- `105859.qjcm` (`reconch_m50u50_gend4`)
+
+Startup verification (mr0 logs):
+
+- all three runs print expected `recon_generator_depth={0,2,4}`.
+- all three runs are actively training; no startup/runtime error observed in current snapshot.
+
+Primary readout for this sweep:
+
+- objective-aligned diagnostics:
+  - `diag/recon_lift_q`, `diag/recon_lift_a`
+  - `diag/recon_q_err`, `diag/recon_a_err`
+- downstream decision metric (next stage):
+  - FT accuracy vs current `recon + no-generator` baseline.
+
+## 50. Add-on compare run: `gend4` with PointGPT-style column dual-mask (2026-03-05)
+
+Rationale:
+
+- in the first `gend{0,2,4}` sweep, dual-mask was effectively off
+  (`mode=element`, `near/far=0`).
+- for direct compare, add one run with PointGPT-equivalent column mask.
+
+Submitted:
+
+- `105865.qjcm`
+  - run set: `patchnepa_tokens_reconch_gend4_colmask_20260305_223447`
+  - run tag: `reconch_m50u50_gend4_colmask`
+  - objective: `recon_chamfer`
+  - data: `shapenet_unpaired_mix_v2_tokens_drop1_mesh50_udf50`
+  - generator: `recon_generator_depth=4`
+  - dual-mask:
+    - `DUAL_MASK_MODE=column`
+    - `DUAL_MASK_KEEP_PREFIX=10`
+    - `DUAL_MASK_COLUMN_RATIO=0.7`
+    - `DUAL_MASK_NEAR=0.0`, `DUAL_MASK_FAR=0.0`, `DUAL_MASK_WINDOW=0`
+  - budget: `MAX_STEPS=2000`, `EPOCHS=0`
+
+Startup verification:
+
+- run log confirms:
+  - `objective: ... recon_generator_depth=4`
+  - `dual_mask: ... mode=column keep_prefix=10 column_ratio=0.7 ...`
+
+## 51. Reconstruction log cleanup (`cos_*` hidden) (2026-03-05)
+
+Request addressed:
+
+- hide `cos_tgt/cos_prev/gap/copy_win` from reconstruction runs to avoid metric-space mismatch confusion.
+
+Applied in:
+
+- `nepa3d/train/pretrain_patch_nepa_tokens.py`
+
+Behavior after patch:
+
+- console print:
+  - `objective in {recon_mse, recon_chamfer}` prints only objective-aligned recon diagnostics
+    (`copy_*_err`, `recon_lift_*`) and losses.
+  - `cos_*` print remains only for `nepa_cosine` / `infonce`.
+- W&B logging:
+  - `diag/cos_*` and `diag/*_raw` are logged only for `nepa_cosine` / `infonce`.
+  - recon runs keep objective-aligned keys:
+    - `diag/recon_ctx_err`, `diag/recon_q_err`, `diag/recon_a_err`
+    - `diag/copy_ctx_err`, `diag/copy_q_err`, `diag/copy_a_err`
+    - `diag/recon_lift_ctx`, `diag/recon_lift_q`, `diag/recon_lift_a`
+
+Sanity confirmation on new running recon job (`105868`, ShapeNet full):
+
+- log example (`.../qh003.patchnepa_tokens.log`) shows recon print without `cos_*` fields.
+
+## 52. Best recon selection and full300+FT launch (2026-03-05)
+
+Selection basis (completed short sweep, same setup except generator depth):
+
+- run set: `patchnepa_tokens_reconch_genab_20260305_221814`
+- final (`step=2000`) key metrics:
+  - `gend0` (`105857`): `lift_q=0.2626`, `lift_a=0.1196`
+  - `gend2` (`105858`): `lift_q=0.2593`, `lift_a=0.1208`
+  - `gend4` (`105859`): `lift_q=0.2452`, `lift_a=0.1174`
+  - add-on `gend4+column` (`105865`): `lift_q=0.2445`, `lift_a=0.1173`
+
+Operational pick for full run:
+
+- **`recon_chamfer + recon_generator_depth=0`** (best combined lift with simplest path).
+
+Submitted full pretrains (`EPOCHS=300`, ShapeNet full):
+
+- submit root:
+  - `logs/sanity/patchnepa_submit/patchnepa_reconbest_full300_20260305_224714/`
+- jobs:
+  - `105868` : `pc100`
+  - `105869` : `mesh50udf50`
+  - `105870` : `pc33mesh33udf33`
+- record:
+  - `logs/sanity/patchnepa_submit/patchnepa_reconbest_full300_20260305_224714/pretrain_jobs.tsv`
+
+Submitted dependent FT (3 variants × 3 pretrains):
+
+- record:
+  - `logs/sanity/patchnepa_ft/patchnepa_reconbest_full300_20260305_224714/job_ids.tsv`
+- FT job IDs:
+  - from `105868`: `105872`, `105873`, `105874`
+  - from `105869`: `105875`, `105876`, `105877`
+  - from `105870`: `105878`, `105879`, `105880`
+
+Current scheduler state snapshot:
+
+- pretrains `105868/105869/105870`: `R` (running)
+- dependent FT `105872`–`105880`: `H` (dependency hold until pretrain success)
+
+## 53. PointGPT-loss parity controls added for reconstruction branch (2026-03-05)
+
+Issue raised:
+
+- previous recon branch optimized `ctx(chamfer)+q(mse)+a(mse)` composite loss.
+- this is not the same axis as PointGPT pretrain objective (`CD`-only patch reconstruction).
+
+Implemented controls:
+
+- `--recon_loss_mode`
+  - `composite` (legacy): `ctx + q + a` weighted sum.
+  - `pointgpt_ctx_only`: optimize only context reconstruction term (`loss_recon_ctx`).
+- `--recon_chamfer_metric` now supports `l12` in addition to `l1/l2`.
+  - `l12` = `ChamferL1 + ChamferL2` (PointGPT-style cdl12 axis).
+
+Logging updates for analysis:
+
+- recon runs now expose:
+  - `train/loss_pointgpt_equiv` (= `loss_recon_ctx`)
+  - `train/loss_pointgpt_equiv_x1k`
+  - `diag/recon_loss_mode_id` (`0=composite`, `1=pointgpt_ctx_only`)
+
+Q/A split confirmation:
+
+- Q/A are computed on separate token positions and separate heads/losses:
+  - token position split: `_sequence_absolute_positions(...)`
+  - separate indices/losses: `q_pred_idx/q_tgt_idx`, `a_pred_idx/a_tgt_idx`,
+    `loss_recon_q`, `loss_recon_a`.
+
+Operational note:
+
+- already-running jobs keep old launch-time settings.
+- use the new knobs on the next submission for strict PointGPT-axis comparison.
+
+## 54. Strict PointGPT-loss axis run re-submitted (`pc100` only) (2026-03-05)
+
+Intent:
+
+- keep the current 3 full runs as main track.
+- add one strict comparison pretrain run on `pc100` with PointGPT-equivalent loss axis.
+
+Submitted:
+
+- `105884.qjcm`
+- run set:
+  - `patchnepa_recon_pgptctxonly_pc100_full300_20260305_231258`
+- run tag:
+  - `pt_pc100_reconch_ctxonly_l12_e300`
+
+Key config:
+
+- `MIX_CONFIG=nepa3d/configs/shapenet_unpaired_mix_v2_tokens_drop1_pc100.yaml`
+- `PRETRAIN_OBJECTIVE=recon_chamfer`
+- `RECON_LOSS_MODE=pointgpt_ctx_only`
+- `RECON_CHAMFER_METRIC=l12`  (PointGPT cdl12 axis)
+- `RECON_GENERATOR_DEPTH=0`
+- `EPOCHS=300`, `MAX_STEPS=0` (epoch-driven full run)
+
+Queue status at submission check:
+
+- `job_state=R`

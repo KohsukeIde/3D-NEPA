@@ -25,6 +25,7 @@ from tqdm import tqdm
 
 from nepa3d.data.dataset_v2 import v2_collate_fn
 from nepa3d.data.mixed_pretrain import build_mixed_pretrain
+from nepa3d.models.causal_transformer import CausalTransformer
 from nepa3d.models.patch_nepa import PatchTransformerNepa
 from nepa3d.token.tokenizer import (
     TYPE_A_POINT,
@@ -211,10 +212,30 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--recon_q_weight", type=float, default=1.0, help="Weight for query-point xyz reconstruction loss.")
     p.add_argument("--recon_a_weight", type=float, default=1.0, help="Weight for answer-feature reconstruction loss.")
     p.add_argument(
+        "--recon_loss_mode",
+        type=str,
+        default="composite",
+        choices=["composite", "pointgpt_ctx_only"],
+        help=(
+            "Reconstruction loss composition. "
+            "'composite' = ctx+q+a (weighted), "
+            "'pointgpt_ctx_only' = context reconstruction only (PointGPT-equivalent axis)."
+        ),
+    )
+    p.add_argument(
+        "--recon_generator_depth",
+        type=int,
+        default=0,
+        help=(
+            "Extra causal-transformer depth for reconstruction branch only. "
+            "0 disables generator (legacy), >=1 enables generator before recon heads."
+        ),
+    )
+    p.add_argument(
         "--recon_chamfer_metric",
         type=str,
         default="l2",
-        choices=["l1", "l2"],
+        choices=["l1", "l2", "l12"],
         help="Chamfer variant for --pretrain_objective=recon_chamfer.",
     )
     p.add_argument(
@@ -692,7 +713,7 @@ def _compute_recon_diag(
 
 
 def _load_chamfer_module(metric: str) -> nn.Module:
-    """Load Point-MAE chamfer extension (L1 or L2)."""
+    """Load Point-MAE chamfer extension (L1/L2/L1+L2)."""
     repo_root = Path(__file__).resolve().parents[2]
     chamfer_dir = repo_root / "Point-MAE" / "extensions" / "chamfer_dist"
     init_py = chamfer_dir / "__init__.py"
@@ -714,9 +735,23 @@ def _load_chamfer_module(metric: str) -> nn.Module:
             "Point-MAE chamfer extension is unavailable. "
             "Build 3D-NEPA/Point-MAE/extensions/chamfer_dist first."
         ) from e
-    if str(metric).lower() == "l1":
+    m = str(metric).lower()
+    if m == "l1":
         return ChamferDistanceL1()
-    return ChamferDistanceL2()
+    if m == "l2":
+        return ChamferDistanceL2()
+    if m == "l12":
+        class _ChamferL12(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.l1 = ChamferDistanceL1()
+                self.l2 = ChamferDistanceL2()
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                return self.l1(x, y) + self.l2(x, y)
+
+        return _ChamferL12()
+    raise ValueError(f"unknown recon_chamfer_metric={metric}")
 
 
 def _infinite_loader(dl: DataLoader) -> Iterator[Dict[str, torch.Tensor]]:
@@ -729,6 +764,7 @@ def _save_ckpt(
     path: Path,
     model: PatchTransformerNepa,
     recon_heads: Optional[ReconHeads],
+    recon_generator: Optional[CausalTransformer],
     optimizer: optim.Optimizer,
     scheduler: optim.lr_scheduler.LRScheduler | None,
     step: int,
@@ -743,6 +779,8 @@ def _save_ckpt(
     }
     if recon_heads is not None:
         payload["recon_heads"] = recon_heads.state_dict()
+    if recon_generator is not None:
+        payload["recon_generator"] = recon_generator.state_dict()
     if scheduler is not None:
         payload["scheduler"] = scheduler.state_dict()
     torch.save(
@@ -1350,23 +1388,60 @@ def main() -> None:
     if objective == "recon_chamfer":
         chamfer_module = _load_chamfer_module(str(args.recon_chamfer_metric))
     recon_heads: Optional[ReconHeads] = None
+    recon_generator: Optional[CausalTransformer] = None
+    trainable_params = list(model.parameters())
     if objective in {"recon_mse", "recon_chamfer"}:
         recon_heads = ReconHeads(
             d_model=int(args.d_model),
             group_size=int(args.group_size),
             answer_in_dim=int(answer_in_dim),
         )
+        trainable_params += list(recon_heads.parameters())
+        if int(args.recon_generator_depth) > 0:
+            recon_generator = CausalTransformer(
+                d_model=int(args.d_model),
+                nhead=int(args.n_heads),
+                num_layers=int(args.recon_generator_depth),
+                mlp_ratio=float(args.mlp_ratio),
+                dropout=float(args.dropout),
+                drop_path=float(args.drop_path_rate),
+                backbone_impl=str(args.backbone_mode),
+                qk_norm=bool(int(args.qk_norm)),
+                qk_norm_affine=bool(int(args.qk_norm_affine)),
+                qk_norm_bias=bool(int(args.qk_norm_bias)),
+                layerscale_value=float(args.layerscale_value),
+                rope_theta=float(args.rope_theta),
+                hidden_dropout_prob=float(args.dropout),
+                attention_probs_dropout_prob=float(args.dropout),
+                use_gated_mlp=bool(int(args.use_gated_mlp)),
+                hidden_act=str(args.hidden_act),
+                final_layernorm=True,
+            )
+            trainable_params += list(recon_generator.parameters())
         optimizer = optim.AdamW(
-            list(model.parameters()) + list(recon_heads.parameters()),
+            trainable_params,
             lr=float(args.lr),
             weight_decay=float(args.weight_decay),
         )
-        model, recon_heads, optimizer, dl = accelerator.prepare(model, recon_heads, optimizer, dl)
+        if recon_generator is not None:
+            model, recon_heads, recon_generator, optimizer, dl = accelerator.prepare(
+                model, recon_heads, recon_generator, optimizer, dl
+            )
+        else:
+            model, recon_heads, optimizer, dl = accelerator.prepare(model, recon_heads, optimizer, dl)
         recon_heads_raw: Optional[ReconHeads] = accelerator.unwrap_model(recon_heads)
+        recon_generator_raw: Optional[CausalTransformer] = (
+            accelerator.unwrap_model(recon_generator) if recon_generator is not None else None
+        )
+        trainable_params_for_clip = list(model.parameters()) + list(recon_heads.parameters())
+        if recon_generator is not None:
+            trainable_params_for_clip += list(recon_generator.parameters())
     else:
         optimizer = optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
         model, optimizer, dl = accelerator.prepare(model, optimizer, dl)
         recon_heads_raw = None
+        recon_generator_raw = None
+        trainable_params_for_clip = list(model.parameters())
     model_raw = accelerator.unwrap_model(model)
     try:
         steps_per_epoch = max(1, int(len(dl)))
@@ -1409,7 +1484,9 @@ def main() -> None:
             f"ctx={float(args.recon_ctx_weight):.3f} "
             f"q={float(args.recon_q_weight):.3f} "
             f"a={float(args.recon_a_weight):.3f} "
-            f"chamfer_metric={str(args.recon_chamfer_metric)}"
+            f"loss_mode={str(args.recon_loss_mode)} "
+            f"chamfer_metric={str(args.recon_chamfer_metric)} "
+            f"generator_depth={int(args.recon_generator_depth)}"
         )
         if objective == "infonce":
             accelerator.print(f"[token_pretrain] infonce tau={float(args.infonce_tau):.4f}")
@@ -1592,6 +1669,19 @@ def main() -> None:
                         "reconstruction objective requested but recon_heads is None "
                         "(internal setup error)"
                     )
+                if recon_generator is not None:
+                    pred_h = recon_generator(
+                        pred_h,
+                        is_causal=True,
+                        type_id=out.type_id[:, :-k],
+                        dual_mask_near=dm_near,
+                        dual_mask_far=dm_far,
+                        dual_mask_window=int(args.dual_mask_window),
+                        dual_mask_type_aware=bool(int(args.dual_mask_type_aware)),
+                        dual_mask_mode=str(args.dual_mask_mode),
+                        dual_mask_keep_prefix=int(args.dual_mask_keep_prefix),
+                        dual_mask_column_ratio=dm_col,
+                    )
                 pred_ctx, pred_q, pred_a = recon_heads(pred_h)
 
                 ctx_loss_fn = "mse"
@@ -1620,11 +1710,16 @@ def main() -> None:
                     a_tgt_idx,
                     fn="mse",
                 )
-                loss_main = (
-                    float(args.recon_ctx_weight) * loss_recon_ctx
-                    + float(args.recon_q_weight) * loss_recon_q
-                    + float(args.recon_a_weight) * loss_recon_a
-                )
+                recon_loss_mode = str(args.recon_loss_mode)
+                if recon_loss_mode == "pointgpt_ctx_only":
+                    # PointGPT-equivalent axis: optimize only patch-coordinate reconstruction.
+                    loss_main = loss_recon_ctx
+                else:
+                    loss_main = (
+                        float(args.recon_ctx_weight) * loss_recon_ctx
+                        + float(args.recon_q_weight) * loss_recon_q
+                        + float(args.recon_a_weight) * loss_recon_a
+                    )
                 with torch.no_grad():
                     recon_diag = _compute_recon_diag(
                         objective=objective,
@@ -1675,7 +1770,7 @@ def main() -> None:
             )
             accelerator.backward(loss)
             if float(args.max_grad_norm) > 0:
-                accelerator.clip_grad_norm_(model.parameters(), float(args.max_grad_norm))
+                accelerator.clip_grad_norm_(trainable_params_for_clip, float(args.max_grad_norm))
             optimizer.step()
             if scheduler is not None and accelerator.sync_gradients:
                 scheduler.step()
@@ -1701,6 +1796,14 @@ def main() -> None:
                 # 2D ViT-NEPA reports pretrain objective as -cos.
                 # PatchNEPA uses (1-cos), so convert by subtracting 1 for axis parity.
                 loss_2d_equiv = loss_nepa_val - 1.0
+                # PointGPT-equivalent scalar for reconstruction branch:
+                # use context reconstruction term as the nearest objective proxy.
+                if objective in {"recon_mse", "recon_chamfer"}:
+                    loss_pointgpt_equiv = loss_recon_ctx_val
+                    loss_pointgpt_equiv_x1k = loss_recon_ctx_val * 1000.0
+                else:
+                    loss_pointgpt_equiv = float("nan")
+                    loss_pointgpt_equiv_x1k = float("nan")
                 pbar.update(1)
                 pbar.set_description(f"loss={loss_val:.4f}")
                 if (step % diag_every == 0):
@@ -1744,7 +1847,7 @@ def main() -> None:
                             f"gap={_fmt_diag(float(diag['gap']))} "
                             f"copy_win={_fmt_diag(float(diag['copy_win']))}"
                         )
-                    elif objective != "nepa_cosine" and (recon_diag is not None) and (diag is not None):
+                    elif objective in {"recon_mse", "recon_chamfer"} and (recon_diag is not None):
                         accelerator.print(
                             f"[step {step:06d}] "
                             f"loss_total={loss_val:.6f} "
@@ -1756,11 +1859,8 @@ def main() -> None:
                             f"loss_recon_a={loss_recon_a_val:.6f} "
                             f"loss_var={var_loss_val:.6f} "
                             f"loss_cov={cov_loss_val:.6f} "
-                            f"loss2d={loss_2d_equiv:.6f} "
-                            f"cos_tgt={_fmt_diag(float(diag['cos_tgt']))} "
-                            f"cos_prev={_fmt_diag(float(diag['cos_prev']))} "
-                            f"gap={_fmt_diag(float(diag['gap']))} "
-                            f"copy_win={_fmt_diag(float(diag['copy_win']))} "
+                            f"loss_pgpt={loss_pointgpt_equiv:.6f} "
+                            f"loss_pgpt_x1k={loss_pointgpt_equiv_x1k:.3f} "
                             f"copy_ctx={_fmt_diag(float(recon_diag['copy_ctx_err']))} "
                             f"copy_q={_fmt_diag(float(recon_diag['copy_q_err']))} "
                             f"copy_a={_fmt_diag(float(recon_diag['copy_a_err']))} "
@@ -1772,13 +1872,20 @@ def main() -> None:
                     epoch_float = float(step - 1) / float(max(1, steps_per_epoch))
                     wb = {
                         "train/loss": loss_val,
-                        "train/loss_2d_equiv": loss_2d_equiv,
                         "train/step": int(step),
                         "train/epoch": epoch_float,
                     }
+                    if objective in {"nepa_cosine", "infonce"}:
+                        wb["train/loss_2d_equiv"] = loss_2d_equiv
+                    if objective in {"recon_mse", "recon_chamfer"}:
+                        wb["train/loss_pointgpt_equiv"] = loss_pointgpt_equiv
+                        wb["train/loss_pointgpt_equiv_x1k"] = loss_pointgpt_equiv_x1k
+                        wb["diag/recon_loss_mode_id"] = (
+                            1.0 if str(args.recon_loss_mode) == "pointgpt_ctx_only" else 0.0
+                        )
                     if len(optimizer.param_groups) > 0 and "lr" in optimizer.param_groups[0]:
                         wb["train/lr"] = float(optimizer.param_groups[0]["lr"])
-                    if diag is not None:
+                    if objective in {"nepa_cosine", "infonce"} and (diag is not None):
                         wb["diag/cos_tgt"] = float(diag["cos_tgt"])
                         wb["diag/cos_prev"] = float(diag["cos_prev"])
                         wb["diag/gap"] = float(diag["gap"])
@@ -1791,7 +1898,7 @@ def main() -> None:
                                 if str(diag["center_mode"]) == "none"
                                 else (1.0 if str(diag["center_mode"]) == "shape" else 2.0)
                             )
-                    if diag_raw is not None and (diag_raw is not diag):
+                    if objective in {"nepa_cosine", "infonce"} and (diag_raw is not None) and (diag_raw is not diag):
                         wb["diag/cos_tgt_raw"] = float(diag_raw["cos_tgt"])
                         wb["diag/cos_prev_raw"] = float(diag_raw["cos_prev"])
                         wb["diag/gap_raw"] = float(diag_raw["gap"])
@@ -1826,6 +1933,7 @@ def main() -> None:
                         save_root / f"ckpt_step{step}.pt",
                         model_raw,
                         recon_heads_raw,
+                        recon_generator_raw,
                         optimizer,
                         scheduler,
                         step,
@@ -1835,7 +1943,16 @@ def main() -> None:
 
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        _save_ckpt(save_root / "ckpt_final.pt", model_raw, recon_heads_raw, optimizer, scheduler, step, args)
+        _save_ckpt(
+            save_root / "ckpt_final.pt",
+            model_raw,
+            recon_heads_raw,
+            recon_generator_raw,
+            optimizer,
+            scheduler,
+            step,
+            args,
+        )
         accelerator.print(f"[done] saved to {save_root}")
         if wandb_run is not None:
             wandb_run.finish()

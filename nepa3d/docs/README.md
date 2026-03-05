@@ -1,11 +1,17 @@
 # NEPA3D Docs Hub
 
-Last updated: 2026-02-28
+Last updated: 2026-03-06
 
 ## Start Here (Current)
 
 - Track split index (Query vs Patch):
   - `nepa3d/docs/patch_nepa/nepa_tracks_index.md`
+- Patch-NEPA folder guide:
+  - `nepa3d/docs/patch_nepa/README.md`
+- QueryNEPA -> PatchNEPA -> external baseline storyline:
+  - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
+- Patch-NEPA hypothesis matrix:
+  - `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
 - Patch-NEPA Stage-2 active plan:
   - `nepa3d/docs/patch_nepa/patch_nepa_stage2_active.md`
 - Patch-NEPA Stage-2 runlog:
@@ -26,8 +32,8 @@ Last updated: 2026-02-28
 
 ## Folder Map
 
-- `nepa3d/docs/query_nepa/`: Query-NEPA (token-level) historical ledgers and runlog
-- `nepa3d/docs/patch_nepa/`: Patch-NEPA active plan/runlog/benchmark
+- `nepa3d/docs/query_nepa/`: Query-NEPA historical ledgers, runlog, and folder guide
+- `nepa3d/docs/patch_nepa/`: Patch-NEPA active plan/runlog plus synthesis docs
 - `nepa3d/docs/classification/`: ScanObjectNN / ModelNet result ledgers
 - `nepa3d/docs/completion/`: CPAC/UCPR/completion ledgers and planning
 - `nepa3d/docs/history/`: cross-era timeline/memos/legacy consolidated history
@@ -37,6 +43,8 @@ Last updated: 2026-02-28
 
 - Put headline benchmark numbers only in `patch_nepa/benchmark_scanobjectnn_variant.md`.
 - Put Patch-NEPA Stage-2 job history in `patch_nepa/runlog_patch_nepa_202602.md`.
+- Put cross-line conclusions in `patch_nepa/storyline_query_to_patch_v2_active.md`.
+- Put active hypothesis status in `patch_nepa/hypothesis_matrix_active.md`.
 - Keep Query-NEPA historical job history in `query_nepa/runlog_202602.md`.
 - Keep `test_acc` as headline metric for ScanObjectNN benchmark tables.
 - Keep `best_val` and `best_ep` as diagnostics (not headline).

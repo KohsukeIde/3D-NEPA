@@ -71,7 +71,9 @@ INFONCE_TAU="${INFONCE_TAU:-0.07}"
 RECON_CTX_WEIGHT="${RECON_CTX_WEIGHT:-1.0}"
 RECON_Q_WEIGHT="${RECON_Q_WEIGHT:-1.0}"
 RECON_A_WEIGHT="${RECON_A_WEIGHT:-1.0}"
-RECON_CHAMFER_METRIC="${RECON_CHAMFER_METRIC:-l2}"       # l1|l2
+RECON_LOSS_MODE="${RECON_LOSS_MODE:-composite}"            # composite|pointgpt_ctx_only
+RECON_GENERATOR_DEPTH="${RECON_GENERATOR_DEPTH:-0}"
+RECON_CHAMFER_METRIC="${RECON_CHAMFER_METRIC:-l2}"       # l1|l2|l12
 LOSS_TARGET_MODE="${LOSS_TARGET_MODE:-content_tokens}"   # full_z|content_tokens|content_plus_center
 CENTER_TARGET_ALPHA="${CENTER_TARGET_ALPHA:-0.5}"
 REG_VAR_WEIGHT="${REG_VAR_WEIGHT:-0.0}"
@@ -148,7 +150,7 @@ echo "optimizer: wd=${WEIGHT_DECAY} lr_scheduler=${LR_SCHEDULER} warmup_steps=${
 echo "patch: embed=${PATCH_EMBED} local_encoder=${PATCH_LOCAL_ENCODER} fps_random_start=${PATCH_FPS_RANDOM_START} group_size=${GROUP_SIZE} num_groups=${NUM_GROUPS}" | tee -a "${LOG_PATH}"
 echo "pm_compat: pc_norm=${PM_PC_NORM} scale_translate=${PM_SCALE_TRANSLATE} scale=[${PM_SCALE_LOW},${PM_SCALE_HIGH}] translate=${PM_TRANSLATE} transform_answers=${PM_TRANSFORM_ANSWERS}" | tee -a "${LOG_PATH}"
 echo "diag: enabled=1 diag_every=${DIAG_EVERY}" | tee -a "${LOG_PATH}"
-echo "objective: pretrain_objective=${PRETRAIN_OBJECTIVE} recon_w=(ctx=${RECON_CTX_WEIGHT},q=${RECON_Q_WEIGHT},a=${RECON_A_WEIGHT}) chamfer_metric=${RECON_CHAMFER_METRIC}" | tee -a "${LOG_PATH}"
+echo "objective: pretrain_objective=${PRETRAIN_OBJECTIVE} recon_w=(ctx=${RECON_CTX_WEIGHT},q=${RECON_Q_WEIGHT},a=${RECON_A_WEIGHT}) recon_loss_mode=${RECON_LOSS_MODE} recon_generator_depth=${RECON_GENERATOR_DEPTH} chamfer_metric=${RECON_CHAMFER_METRIC}" | tee -a "${LOG_PATH}"
 echo "objective_extra: infonce_tau=${INFONCE_TAU}" | tee -a "${LOG_PATH}"
 echo "loss: target_mode=${LOSS_TARGET_MODE} center_target_alpha=${CENTER_TARGET_ALPHA} mask_mode=${LOSS_MASK_MODE} nepa_center_mode=${NEPA_CENTER_MODE} nepa_center_warmup_frac=${NEPA_CENTER_WARMUP_FRAC}" | tee -a "${LOG_PATH}"
 echo "reg: var_w=${REG_VAR_WEIGHT} cov_w=${REG_COV_WEIGHT} var_gamma=${REG_VAR_GAMMA} var_eps=${REG_VAR_EPS} scope=${REG_SCOPE} source=${REG_SOURCE}" | tee -a "${LOG_PATH}"
@@ -199,6 +201,8 @@ TRAIN_ARGS=(
   --recon_ctx_weight "${RECON_CTX_WEIGHT}"
   --recon_q_weight "${RECON_Q_WEIGHT}"
   --recon_a_weight "${RECON_A_WEIGHT}"
+  --recon_loss_mode "${RECON_LOSS_MODE}"
+  --recon_generator_depth "${RECON_GENERATOR_DEPTH}"
   --recon_chamfer_metric "${RECON_CHAMFER_METRIC}"
   --loss_target_mode "${LOSS_TARGET_MODE}"
   --center_target_alpha "${CENTER_TARGET_ALPHA}"

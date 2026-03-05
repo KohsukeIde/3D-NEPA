@@ -1,6 +1,6 @@
 # NEPA Tracks Index
 
-Last updated: 2026-03-01
+Last updated: 2026-03-06
 
 ## 1. Purpose
 
@@ -11,6 +11,9 @@ This file separates documentation by model line to avoid mixing conclusions:
 
 ## 2. Active Line (Patch-NEPA)
 
+- Folder guide: `nepa3d/docs/patch_nepa/README.md`
+- Cross-line storyline: `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
+- Hypothesis matrix: `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
 - Plan: `nepa3d/docs/patch_nepa/patch_nepa_stage2_active.md`
 - Runlog: `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`
 - Gap audit: `nepa3d/docs/patch_nepa/gap_audit_query_to_patch_active.md`
@@ -20,6 +23,7 @@ This file separates documentation by model line to avoid mixing conclusions:
 
 ## 3. Legacy Line (Query-NEPA)
 
+- Folder guide: `nepa3d/docs/query_nepa/README.md`
 - Historical ledger:
   - `nepa3d/docs/query_nepa/pretrain_abcd_1024_multinode_active.md`
   - `nepa3d/docs/query_nepa/pretrain_abcd_1024_variant_reval_active.md`
@@ -50,6 +54,8 @@ Current Patch-NEPA mainline recipe uses:
 
 - Do not merge Query-NEPA and Patch-NEPA run records into one active document.
 - Add new Stage-2 runs only to `runlog_patch_nepa_202602.md`.
+- Add cross-line conclusions only to `storyline_query_to_patch_v2_active.md`.
+- Add hypothesis-status updates only to `hypothesis_matrix_active.md`.
 - Keep comparisons explicit as cross-line ablations in benchmark tables.
 - Stage-2 pretrain mainline must use 16 GPUs (`4 nodes x 4 GPU/node`) via
   `nepa3d_pretrain_patch_nepa_multinode_pbsdsh.sh`.

@@ -6,9 +6,13 @@ Use this index to avoid mixing canonical active benchmark docs with legacy ledge
 
 - Docs hub: `README.md`
 - Query/Patch track split index: `patch_nepa/nepa_tracks_index.md`
+- Patch-NEPA folder guide: `patch_nepa/README.md`
+- QueryNEPA -> PatchNEPA storyline: `patch_nepa/storyline_query_to_patch_v2_active.md`
+- Patch-NEPA hypothesis matrix: `patch_nepa/hypothesis_matrix_active.md`
 - Patch-NEPA Stage-2 active plan: `patch_nepa/patch_nepa_stage2_active.md`
 - Patch-NEPA Stage-2 runlog: `patch_nepa/runlog_patch_nepa_202602.md`
 - ScanObjectNN canonical benchmark: `patch_nepa/benchmark_scanobjectnn_variant.md`
+- Query-NEPA folder guide: `query_nepa/README.md`
 - Query-NEPA historical runlog (job history): `query_nepa/runlog_202602.md`
 - Non-retrieval results master index: `active/results_master_nonretrieval.md`
 
@@ -34,5 +38,7 @@ Use this index to avoid mixing canonical active benchmark docs with legacy ledge
 
 - Headline benchmark numbers are maintained only in `patch_nepa/benchmark_scanobjectnn_variant.md`.
 - Patch-NEPA Stage-2 job updates are maintained in `patch_nepa/runlog_patch_nepa_202602.md`.
+- Cross-line interpretation is maintained in `patch_nepa/storyline_query_to_patch_v2_active.md`.
+- Hypothesis status is maintained in `patch_nepa/hypothesis_matrix_active.md`.
 - Query-NEPA historical job updates are maintained in `query_nepa/runlog_202602.md`.
 - Legacy ledgers are kept for traceability and should not be used as primary benchmark source.
