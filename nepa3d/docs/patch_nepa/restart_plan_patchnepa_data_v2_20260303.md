@@ -1024,3 +1024,507 @@ Definition:
 
 - `copy_*_err` = error of "previous target copied as current prediction".
 - `recon_lift_* = copy_*_err - recon_*_err` (positive means better than copy baseline).
+
+## 32. Short re-run (`recon_mse` / `recon_chamfer`) with diagfix (2026-03-04)
+
+Submitted:
+
+- `105287.qjcm` (`reconmse_m50u50_short_fix`)
+- `105288.qjcm` (`reconchamfer_m50u50_short_fix`)
+
+Run roots:
+
+- `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_reconmse_diagfix_20260304_1835/`
+- `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_reconchamfer_diagfix_20260304_1835/`
+
+Status:
+
+- both completed to `step=2000` with `[done]` marker.
+
+Result summary (from mr0 logs / W&B summary):
+
+- `recon_mse`
+  - final: `diag/recon_lift_q=0.2626`, `diag/recon_lift_a=0.1196`
+  - final: `diag/recon_q_err=0.2600`, `diag/recon_a_err=0.1200`
+  - final: `diag/copy_q_err=0.5226`, `diag/copy_a_err=0.2396`
+  - window trend (first100 -> last100):
+    - `lift_q: 0.1280 -> 0.2028`
+    - `lift_a: 0.0261 -> 0.1180`
+- `recon_chamfer`
+  - final: `diag/recon_lift_q=0.2626`, `diag/recon_lift_a=0.1196`
+  - final: `diag/recon_q_err=0.2599`, `diag/recon_a_err=0.1200`
+  - final: `diag/copy_q_err=0.5226`, `diag/copy_a_err=0.2396`
+  - window trend (first100 -> last100):
+    - `lift_q: 0.1273 -> 0.2028`
+    - `lift_a: 0.0260 -> 0.1180`
+
+Interpretation:
+
+- both objectives show the same qualitative behavior:
+  - `recon_lift_q/a` move from near-zero (or negative early) to stable positive.
+  - prediction is consistently better than copy-baseline at the end.
+- in this setup, `recon_mse` and `recon_chamfer` are almost numerically equivalent
+  on the tracked diagnostics.
+
+## 33. Full FT launched from short recon checkpoints (2026-03-04)
+
+Rationale:
+
+- tail behavior at 2000 steps is plateau-like; proceed to downstream FT for decision.
+
+Submitted jobs:
+
+- `105297.qjcm` (`reconmse`, `obj_bg`)
+- `105298.qjcm` (`reconmse`, `obj_only`)
+- `105299.qjcm` (`reconmse`, `pb_t50_rs`)
+- `105300.qjcm` (`reconchamfer`, `obj_bg`)
+- `105301.qjcm` (`reconchamfer`, `obj_only`)
+- `105302.qjcm` (`reconchamfer`, `pb_t50_rs`)
+
+Common FT setup:
+
+- `EPOCHS=300`, `N_POINT=2048`, `BATCH=64(global)`
+- `patchnepa_ft_mode=qa_zeroa`
+- `pooling=cls_max`, `head_mode=pointmae_mlp`
+- `AUG_PRESET=pointmae`, `AUG_EVAL=1`, `MC_EVAL_K_TEST=10`
+- W&B enabled (`patchnepa-finetune`)
+
+Submit log:
+
+- `logs/sanity/patchnepa_ft/ft_recon_full_20260304_190412/job_ids.txt`
+
+## 34. Centered-cosine branch tracking added (2026-03-04)
+
+Goal:
+
+- keep `nepa_cosine` path but test residualized cosine via centering before cosine objective.
+
+Added control knobs:
+
+- `NEPA_CENTER_MODE`: `none | shape | segment`
+- `NEPA_CENTER_WARMUP_FRAC`: ramp fraction for center contribution
+
+Propagation confirmed in launchers:
+
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_qf.sh`
+- `scripts/pretrain/submit_pretrain_patch_nepa_tokens_qf.sh`
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_multinode_pbsdsh.sh`
+
+Smoke jobs launched (same config except centering mode):
+
+- `105310` (`none`, baseline) -> done (`Exit_status=0`)
+- `105319` (`segment`) -> done (`Exit_status=0`)
+- `105320` (`shape`) -> done (`Exit_status=0`)
+
+Log roots:
+
+- baseline: `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_smoke_20260304_192014/`
+- segment: `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_smoke_20260304_193732/`
+- shape: `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_smoke_20260304_193922/`
+
+Current readout policy:
+
+- keep `runlog_patch_nepa_202602.md` as canonical detailed record (final values + diagnostics).
+- keep this restart plan focused on branch structure and job topology.
+
+Observed branch shape:
+
+- `segment` with warmup ends in `cos_prev > cos_tgt` (negative gap regime).
+- `shape` converges to near-trivial high cosine (`cos_tgt≈cos_prev≈0.975`) and does not improve copy margin.
+
+## 35. `skip_k` short sweep submitted (2026-03-04)
+
+Purpose:
+
+- minimal horizon test for `skip_k` effectiveness under the current token NEPA setup.
+
+Configuration lock:
+
+- objective/layout/order/mask fixed:
+  - `nepa_cosine`, `split_sep`, `morton`, `answer_and_point_context`, `nepa_center_mode=none`
+- data fixed:
+  - `drop1_mesh50_udf50`
+- budget fixed:
+  - `MAX_STEPS=2000`
+
+Sweep axis:
+
+- `SKIP_K ∈ {1,2,4}`
+
+Submitted jobs:
+
+- `105324` (`skipk1_m50u50_smoke`)
+- `105325` (`skipk2_m50u50_smoke`)
+- `105326` (`skipk4_m50u50_smoke`)
+
+Common logs:
+
+- `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_skipk124_smoke_20260304_200306/`
+
+Completion:
+
+- all three (`105324/105325/105326`) finished with `Exit_status=0`.
+- end metrics are almost identical across `k=1,2,4` (`gap≈+0.0005`).
+- decision: keep `skip_k=1` as default; no evidence that longer horizon fixes the core diag collapse.
+
+## 36. Center warmup isolate (`segment`, 200-step no-warmup) (2026-03-04)
+
+Purpose:
+
+- isolate whether the step~100 spike in centerseg is caused by warmup schedules.
+
+Job:
+
+- `105328` (`ptokcs0`) with
+  - `NEPA_CENTER_MODE=segment`
+  - `NEPA_CENTER_WARMUP_FRAC=0.0`
+  - `MAX_STEPS=200`, `EPOCHS=0`
+  - other settings matched to centerseg smoke branch.
+
+Outcome:
+
+- job finished (`Exit_status=0`).
+- removing center warmup removes the abrupt mid-early transient seen in warmup=0.05 run.
+- but convergence quality is worse (`cos_prev` stays above `cos_tgt`, more negative gap).
+
+Operational takeaway:
+
+- the early spike was warmup-coupled.
+- warmup is not the root cause of `cos_tgt≈cos_prev`; that issue persists with and without center warmup.
+
+## 37. Backfill for previously unrecorded run roots (2026-03-04)
+
+Objective:
+
+- close documentation gaps so every generated token pretrain root is classified as:
+  - valid evidence,
+  - superseded failure,
+  - or non-materialized artifact.
+
+Backfilled classes:
+
+- non-materialized empty roots:
+  - examples: `patchnepa_tokens_20260304_005229`, `patchnepa_tokens_drop1_20260304_001817`, `patchnepa_tokens_dualcol_20260304_032435`
+- pbs-only early failures (no `mr0`):
+  - examples: `patchnepa_tokens_varcov_20260304_025805`, `patchnepa_tokens_hreg_20260304_033023`, `patchnepa_tokens_reconchamfer_smoke_20260304_041358`
+- explicit failed chains with logs:
+  - `patchnepa_tokens_full300_morton_20260304_044214` (`102560/102561/102562`, `Exit_status=97`)
+  - `patchnepa_tokens_full300_morton_fixddp_20260304_044633` (`102572/102573/102574`, `Exit_status=97`)
+  - `patchnepa_tokens_full300_morton_cm15655_20260304_102805` (`102828`, partial then stop, `Exit_status=271`)
+  - `patchnepa_tokens_reconmse_diag_20260304_181957` (`105285`, fail) and `patchnepa_tokens_reconchamfer_diag_20260304_181957` (`105286`, fail), both superseded by diagfix runs (`105287/105288`).
+
+Operational rule:
+
+- for analysis and decision making, only use validated branches already recorded in sections 32-36 and the canonical runlog sections 138+.
+
+## 38. InfoNCE / Residual summary (as of 2026-03-04)
+
+InfoNCE:
+
+- objective codepath exists in `pretrain_patch_nepa_tokens.py`, but no completed run in this branch has been executed with `pretrain_objective=nepa_infonce`.
+- observed recent runs show `loss_infonce=0.0` across all steps (inactive).
+
+Residual (centered-cosine):
+
+- `center_mode=none` (`105310`): low cosine, near-zero negative gap.
+- `center_mode=segment` (`105319`): better cosine than baseline, but stable `cos_prev > cos_tgt`.
+- `center_mode=shape` (`105320`): very high cosine (`~0.975`) but gap remains near zero.
+- `segment` no-warmup isolate (`105328`, 200 steps): removes early warmup transient but worsens negative gap.
+
+Decision at this checkpoint:
+
+- residual branch alone is not sufficient to solve the `cos_tgt≈cos_prev` issue.
+- InfoNCE remains an untested branch and should be treated as pending, not failed.
+
+## 39. InfoNCE short smoke launched (2026-03-04)
+
+Job:
+
+- `105332.qjcm` (`pntok_nce`)
+- run set: `patchnepa_tokens_infonce_smoke_20260304_205108`
+- run tag: `infonce_m50u50_smoke`
+
+Locked configuration:
+
+- `pretrain_objective=infonce`, `infonce_tau=0.07`
+- `mix_config=drop1_mesh50_udf50`
+- `morton`, `split_sep`, `answer_and_point_context`, `skip_k=1`
+- `nepa_center_mode=none`
+- `max_steps=2000`
+
+Runtime check:
+
+- state entered `R` and DDP node logs show `objective: pretrain_objective=infonce` (no fallback).
+
+Logs:
+
+- `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_infonce_smoke_20260304_205108/infonce_m50u50_smoke.pbs.log`
+- `logs/ddp_patch_nepa_tokens_pretrain/ddp_patchnepa_tokens_105332.qjcm_infonce_m50u50_smoke/`
+
+## 40. Cross-branch insights (interim, 2026-03-04)
+
+1. `skip_k` insight:
+- `k=1/2/4` produced near-identical end state (`gap≈+0.0005`, similar loss/copy_win).
+- implication: current collapse/copy issue is not horizon-length limited; increasing skip distance alone is insufficient.
+
+2. residual-centering insight:
+- `segment` improves absolute cosine but trends to negative gap (`cos_prev > cos_tgt`).
+- `shape` reaches very high cosine (`~0.975`) with near-zero gap, indicating trivialized similarity scaling rather than improved predictiveness.
+- implication: centering changes optimization geometry but does not reliably improve copy-risk margin.
+
+3. warmup isolate insight:
+- removing center warmup removes the early transient spike.
+- but stable-region quality is not improved (gap worsens in segment no-warmup short run).
+- implication: warmup explains transient behavior, not the core `cos_tgt≈cos_prev` pathology.
+
+4. InfoNCE interim insight (`105332`, in progress):
+- positives/negatives are separated (`pos_cos ~0.306`, `neg_cos ~-0.033`, `margin ~0.339` at tail100).
+- yet `cos_tgt≈cos_prev` remains near-zero-gap at current progress.
+- implication: discrimination in objective space is happening, but it has not yet translated into better copy-risk diagnostics.
+
+## 41. InfoNCE smoke completed (`105332`) and final readout (2026-03-05)
+
+Updated status:
+
+- `105332` (`infonce_m50u50_smoke`) finished to `step=2000` with `[done]`.
+- this supersedes section 38/40's "in progress" interpretation.
+
+Paths:
+
+- `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_infonce_smoke_20260304_205108/infonce_m50u50_smoke.mr0.log`
+- `logs/ddp_patch_nepa_tokens_pretrain/ddp_patchnepa_tokens_105332.qjcm_infonce_m50u50_smoke/pretrain_done.marker`
+
+Final metrics (`step=2000`):
+
+- `loss_total=6.825081`
+- `loss_infonce=6.825081`
+- `loss_nepa=0.694207` (diagnostic reference)
+- `pos_cos=0.3058`
+- `neg_cos=-0.0345`
+- `margin=0.3403`
+- `r1=0.0041`
+- `cos_tgt=0.3058`
+- `cos_prev=0.3051`
+- `gap=+0.0007`
+- `copy_win=0.7301`
+
+Interpretation update:
+
+- InfoNCE objective is active and stable (`margin > 0`, `neg_cos < 0`).
+- but copy-risk proxy remains unresolved (`cos_tgt≈cos_prev`, high `copy_win`).
+- therefore InfoNCE alone did not break the current near-copy regime in this short setup.
+
+## 42. Recon full FT (`105297`-`105302`) completed and test summary (2026-03-05)
+
+Updated status:
+
+- all six FT jobs launched in section 33 completed with `TEST acc`.
+
+Path:
+
+- `logs/sanity/patchnepa_ft/ft_recon_full_20260304_190412/`
+
+Final TEST:
+
+- `recon_mse`
+  - `obj_bg=0.7900` (`reconmse_obj_bg_fullft_20260304_190412.out`)
+  - `obj_only=0.7814` (`reconmse_obj_only_fullft_20260304_190412.out`)
+  - `pb_t50_rs=0.7620` (`reconmse_pb_t50_rs_fullft_20260304_190412.out`)
+- `recon_chamfer`
+  - `obj_bg=0.8124` (`reconchamfer_obj_bg_fullft_20260304_190412.out`)
+  - `obj_only=0.8313` (`reconchamfer_obj_only_fullft_20260304_190412.out`)
+  - `pb_t50_rs=0.7765` (`reconchamfer_pb_t50_rs_fullft_20260304_190412.out`)
+
+Comparison against prior v1-family baseline (`obj_bg=0.8262`, `obj_only=0.8417`, `pb_t50_rs=0.7845`):
+
+- `recon_mse`: `-0.0362 / -0.0603 / -0.0225`
+- `recon_chamfer`: `-0.0138 / -0.0104 / -0.0080`
+
+Interpretation update:
+
+- `recon_chamfer` is consistently better than `recon_mse` on all three FT variants.
+- however, both remain below the prior v1-family baseline.
+- reconstruction-space lift is valid, but current downstream transfer is still insufficient.
+
+## 43. PointMAE-style path vs PointGPT-style path: practical delta (2026-03-05)
+
+Conclusion:
+
+- high-level frame is similar (grouped point patches, causal transformer, geometric reconstruction),
+  but implementation objective is not equivalent yet.
+
+Main differences (current branch vs `PointGPT`):
+
+1. Prediction target:
+- current branch:
+  - latent path: cosine/InfoNCE over token embeddings
+  - recon path: `ctx` uses Chamfer (patch xyz), `q/a` use MSE
+- PointGPT:
+  - point-patch reconstruction in xyz space as primary objective (Chamfer family)
+
+2. Sequence/task structure:
+- current branch:
+  - Q/A split and primitive-specific answer stream (`pc/mesh/udf`)
+- PointGPT:
+  - single point stream (no primitive-conditioned answer channel)
+
+3. Dual-mask semantics:
+- current branch:
+  - dual mask is configurable (`dual_mask_mode=column`, `keep_prefix`, warmup),
+  - but many recent runs used `dual_mask_near/far=0` (effectively no additional mask pressure)
+- PointGPT:
+  - causal mask + additional column-wise mask is part of the core path
+  - first `keep_attend=10` tokens are protected, remainder masked by ratio (`mask_ratio` in config)
+
+4. Ordering/grouping prior:
+- current branch:
+  - order controlled by `patch_order_mode` (morton/fps/random/sample)
+- PointGPT:
+  - grouping + order heuristics are tightly integrated in its `Group`/transformer path
+
+Actionable implication:
+
+- "dual mask + chamfer exists" is true, but not yet "same training regime as PointGPT".
+- if moving to PointGPT-style reference, prioritize:
+  - stronger effective column masking (non-zero mask pressure),
+  - xyz reconstruction as the dominant objective on the main path,
+  - then re-measure downstream FT under the same full-data protocol.
+
+## 44. PointGPT pretrain diag alignment for PatchNEPA comparison (2026-03-05)
+
+Purpose:
+
+- align PointGPT logs with PatchNEPA recon diagnostics (`recon/copy/lift`) for fair trend comparison.
+
+Code updates:
+
+- `PointGPT/models/PointGPT.py`
+  - `forward(..., return_metrics=True)` path added.
+  - logs objective-aligned chamfer diagnostics (valid positions = tokens `1..G-1`):
+    - `recon_cd_l1`, `recon_cd_l2`
+    - `copy_cd_l1`, `copy_cd_l2`  (copy baseline: previous patch -> current patch)
+    - `recon_lift_cd_l1`, `recon_lift_cd_l2` (`copy - recon`)
+- `PointGPT/tools/runner_pretrain.py`
+  - calls model with `return_metrics=True`.
+  - sends `diag/*` metrics to W&B every train step.
+- `PointGPT/main.py`
+  - keep W&B active with explicit `wandb.log` path (`sync_tensorboard=False`) to avoid step conflicts.
+
+Relaunched run:
+
+- `105848.qjcm`
+- run tag: `pointgpt_pretrain_scan_20260305_202253_diagcmp`
+- W&B run: `https://wandb.ai/ide_koh/pointgpt-pretrain/runs/plstb5ht`
+- log: `logs/sanity/pointgpt_pretrain_scan/pointgpt_pretrain_scan_20260305_202253_diagcmp.out`
+
+Verification:
+
+- local W&B run file includes:
+  - `train/loss`
+  - `diag/recon_cd_l1`, `diag/recon_cd_l2`
+  - `diag/copy_cd_l1`, `diag/copy_cd_l2`
+  - `diag/recon_lift_cd_l1`, `diag/recon_lift_cd_l2`
+
+Note:
+
+- `cos_tgt/cos_prev` are not native PointGPT objective metrics; primary comparison should be done in reconstruction-aligned space (`recon/copy/lift`).
+
+## 45. Latent-space comparison axis added for PointGPT vs PatchNEPA (2026-03-05)
+
+Motivation:
+
+- user-requested latent comparison in addition to objective-space reconstruction diagnostics.
+
+Added PointGPT latent diagnostics (`diag/*`):
+
+- `diag/latent_z_cos_prev` : adjacent-token cosine on encoder tokens (`z_in`)
+- `diag/latent_h_cos_prev` : adjacent-token cosine on transformer context tokens (`h_ctx`)
+- `diag/latent_z_cos_far`  : far-offset token cosine on `z_in`
+- `diag/latent_h_cos_far`  : far-offset token cosine on `h_ctx`
+- `diag/latent_z_std_mean`, `diag/latent_z_std_min`
+- `diag/latent_h_std_mean`, `diag/latent_h_std_min`
+
+Interpretation mapping to PatchNEPA:
+
+- PointGPT `latent_*_cos_prev` ↔ PatchNEPA `diag/cos_prev` (local copy risk / token similarity pressure)
+- PointGPT `latent_*_std_*` ↔ PatchNEPA `diag/target_std_*` family (token spread / collapse risk)
+- Primary objective comparison remains:
+  - PointGPT: `diag/recon_cd_*`, `diag/copy_cd_*`, `diag/recon_lift_cd_*`
+  - PatchNEPA: `diag/recon_*_err`, `diag/copy_*_err`, `diag/recon_lift_*`
+
+Run with latent diagnostics enabled:
+
+- `105849.qjcm`
+- W&B: `https://wandb.ai/ide_koh/pointgpt-pretrain/runs/mayuu2rc`
+- log: `logs/sanity/pointgpt_pretrain_scan/pointgpt_pretrain_scan_20260305_202739_diagcmp_latent.out`
+
+Verification:
+
+- local W&B run file contains `diag/latent_*` keys and `diag/recon_lift_cd_*` keys.
+
+## 46. PatchNEPA dual-mask parity update vs PointGPT (2026-03-05)
+
+Goal:
+
+- make `dual_mask_mode=column` behavior match PointGPT core semantics:
+  - keep first `keep_prefix` tokens always visible
+  - apply column-wise drop by fixed `mask_ratio` even when `near/far=0`
+
+Code changes:
+
+- `nepa3d/models/causal_transformer.py`
+  - added `dual_mask_column_ratio`.
+  - `column` mode now supports fixed-count column drop (`round(num_eligible * ratio)`), matching PointGPT-style column masking.
+  - backward-compatible path kept:
+    - when `dual_mask_column_ratio=0`, column drop falls back to near/far Bernoulli logic.
+- `nepa3d/models/patch_nepa.py`
+  - propagated `dual_mask_column_ratio` through `forward` / `forward_tokens`.
+- `nepa3d/train/pretrain_patch_nepa_tokens.py`
+  - added CLI `--dual_mask_column_ratio` (default `0.7`).
+  - warmup now ramps `dual_mask_near/far/column_ratio`.
+  - launch log line now prints `column_ratio=...`.
+- launchers:
+  - `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_qf.sh`
+  - `scripts/pretrain/submit_pretrain_patch_nepa_tokens_qf.sh`
+  - `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_multinode_pbsdsh.sh`
+  - all propagate/pass `DUAL_MASK_COLUMN_RATIO`.
+
+Operational note:
+
+- with `dual_mask_mode=column`, `keep_prefix=10`, `dual_mask_column_ratio=0.7`,
+  additional column masking is active even under `dual_mask_near=0`, `dual_mask_far=0`.
+
+## 47. PointGPT ShapeNet re-run (apples-to-apples pretrain domain) (2026-03-05)
+
+Request addressed:
+
+- rerun PointGPT pretrain on ShapeNet (not ScanObjectNN) with W&B tracking.
+
+Prep updates:
+
+- `PointGPT/datasets/io.py`
+  - added `.npz` support (`pc_xyz` preferred key).
+- `PointGPT/datasets/ShapeNet55Dataset.py`
+  - robust path parsing for non-legacy list formats (`train/<tax>/<id>.npz`).
+  - random sampler made point-count robust (works with 2048-point caches while sampling 1024).
+- new submit path:
+  - `scripts/sanity/pointgpt_pretrain_shapenet_qf.sh`
+  - `scripts/sanity/submit_pointgpt_pretrain_shapenet_qf.sh`
+
+Data wiring used:
+
+- source cache: `data/shapenet_cache_v2_20260303`
+- generated list files:
+  - `PointGPT/data/ShapeNet55-34/ShapeNet-55/train.txt` (`47445`)
+  - `PointGPT/data/ShapeNet55-34/ShapeNet-55/test.txt` (`5357`)
+- point path symlink:
+  - `PointGPT/data/ShapeNet55-34/shapenet_pc -> data/shapenet_cache_v2_20260303`
+
+Submitted runs:
+
+- `105851.qjcm`: PointGPT ShapeNet pretrain (300-epoch config)
+  - run tag: `pointgpt_shapenet_300_20260305_213137`
+  - W&B run started and syncing (`project=pointgpt-pretrain`, group `pointgpt_shapenet_pretrain`).
+- `105852.qjcm`: PatchNEPA parity smoke (`column+keep_prefix=10+column_ratio=0.7`, `near/far=0`)
+  - run tag: `ptok_column_pgpt_equiv_smoke_20260305_213144`
+  - confirms new dual-mask settings are active in startup log.

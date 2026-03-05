@@ -24,6 +24,7 @@ viz_output/
 
 # Local virtual environments
 .venv/
+.venv-pointgpt/
 
 # Experiment logs and checkpoints
 logs/
@@ -41,3 +42,4 @@ logs/pretrain/m1/runner_gpu0.log
 # Cluster / job outputs
 *.err
 *.out
+PointGPT/

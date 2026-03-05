@@ -7,6 +7,7 @@ Sequence format:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import math
 from pathlib import Path
 from dataclasses import dataclass
@@ -79,6 +80,9 @@ class ReconHeads(nn.Module):
         self.ctx_head = nn.Linear(int(d_model), int(ctx_dim))
         self.q_head = nn.Linear(int(d_model), 3)
         self.a_head = nn.Linear(int(d_model), int(answer_in_dim))
+
+    def forward(self, h: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return self.ctx_head(h), self.q_head(h), self.a_head(h)
 
 
 def _primitive_to_point_type_pair(name: str) -> tuple[int, int]:
@@ -194,8 +198,14 @@ def parse_args() -> argparse.Namespace:
         "--pretrain_objective",
         type=str,
         default="nepa_cosine",
-        choices=["nepa_cosine", "recon_mse", "recon_chamfer"],
+        choices=["nepa_cosine", "infonce", "recon_mse", "recon_chamfer"],
         help="Main pretrain objective: latent cosine NEPA or raw reconstruction variants.",
+    )
+    p.add_argument(
+        "--infonce_tau",
+        type=float,
+        default=0.07,
+        help="Temperature for --pretrain_objective=infonce.",
     )
     p.add_argument("--recon_ctx_weight", type=float, default=1.0, help="Weight for context patch reconstruction loss.")
     p.add_argument("--recon_q_weight", type=float, default=1.0, help="Weight for query-point xyz reconstruction loss.")
@@ -271,6 +281,19 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument("--skip_k", type=int, default=1)
+    p.add_argument(
+        "--nepa_center_mode",
+        type=str,
+        default="none",
+        choices=["none", "shape", "segment"],
+        help="Centering mode for nepa_cosine objective: none | shape | segment(Q/A-wise).",
+    )
+    p.add_argument(
+        "--nepa_center_warmup_frac",
+        type=float,
+        default=0.0,
+        help="Warmup fraction for centered-cosine strength (0->1 ramp over max_steps).",
+    )
 
     p.add_argument("--max_steps", type=int, default=10000)
     p.add_argument(
@@ -296,10 +319,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dual_mask_mode", type=str, default="element", choices=["element", "column"])
     p.add_argument("--dual_mask_keep_prefix", type=int, default=10)
     p.add_argument(
+        "--dual_mask_column_ratio",
+        type=float,
+        default=0.7,
+        help="PointGPT-like column drop ratio used when dual_mask_mode=column.",
+    )
+    p.add_argument(
         "--dual_mask_warmup_frac",
         type=float,
         default=0.0,
-        help="Warmup fraction to linearly ramp dual_mask_near/far from 0 to target.",
+        help="Warmup fraction to linearly ramp dual_mask_near/far/column_ratio from 0 to target.",
     )
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--use_wandb", type=int, default=0, choices=[0, 1])
@@ -421,6 +450,7 @@ def _forward_tokens_wrapped(
     dual_mask_type_aware: bool,
     dual_mask_mode: str,
     dual_mask_keep_prefix: int,
+    dual_mask_column_ratio: float,
 ) -> PatchNepaOutput:
     """Call forward_tokens for raw/accelerate/DDP-wrapped modules."""
     if hasattr(model, "forward_tokens"):
@@ -436,6 +466,7 @@ def _forward_tokens_wrapped(
             dual_mask_type_aware=dual_mask_type_aware,
             dual_mask_mode=dual_mask_mode,
             dual_mask_keep_prefix=dual_mask_keep_prefix,
+            dual_mask_column_ratio=dual_mask_column_ratio,
         )
     wrapped = getattr(model, "module", None)
     if wrapped is not None and hasattr(wrapped, "forward_tokens"):
@@ -451,6 +482,7 @@ def _forward_tokens_wrapped(
             dual_mask_type_aware=dual_mask_type_aware,
             dual_mask_mode=dual_mask_mode,
             dual_mask_keep_prefix=dual_mask_keep_prefix,
+            dual_mask_column_ratio=dual_mask_column_ratio,
         )
     raise AttributeError("model has no forward_tokens() (wrapped or unwrapped).")
 
@@ -662,16 +694,21 @@ def _compute_recon_diag(
 def _load_chamfer_module(metric: str) -> nn.Module:
     """Load Point-MAE chamfer extension (L1 or L2)."""
     repo_root = Path(__file__).resolve().parents[2]
-    pm_root = repo_root / "Point-MAE"
-    chamfer_dir = pm_root / "extensions" / "chamfer_dist"
-    if str(pm_root) not in sys.path:
-        sys.path.insert(0, str(pm_root))
+    chamfer_dir = repo_root / "Point-MAE" / "extensions" / "chamfer_dist"
+    init_py = chamfer_dir / "__init__.py"
     # Point-MAE's chamfer package uses `import chamfer` (absolute import).
-    # Ensure the built extension directory is also on sys.path.
-    if str(chamfer_dir) not in sys.path:
-        sys.path.insert(0, str(chamfer_dir))
+    # Add only the extension directory to avoid shadowing HuggingFace `datasets`.
+    chamfer_path = str(chamfer_dir)
+    if chamfer_path not in sys.path:
+        sys.path.insert(0, chamfer_path)
     try:
-        from extensions.chamfer_dist import ChamferDistanceL1, ChamferDistanceL2
+        spec = importlib.util.spec_from_file_location("pointmae_chamfer_dist", str(init_py))
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"failed to create import spec for {init_py}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        ChamferDistanceL1 = getattr(module, "ChamferDistanceL1")
+        ChamferDistanceL2 = getattr(module, "ChamferDistanceL2")
     except Exception as e:
         raise RuntimeError(
             "Point-MAE chamfer extension is unavailable. "
@@ -840,6 +877,226 @@ def _compute_copy_diag(
         "cos_prev": cos_prev_m,
         "gap": float(cos_tgt_m - cos_prev_m),
         "copy_win": copy_win,
+    }
+
+
+def _center_triplet_for_nepa(
+    pred: torch.Tensor,
+    tgt: torch.Tensor,
+    prev: torch.Tensor,
+    type_id: torch.Tensor | None,
+    k: int,
+    mask: torch.Tensor | None,
+    *,
+    center_mode: str,
+    center_alpha: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    mode = str(center_mode)
+    alpha = float(center_alpha)
+    if mode == "none" or alpha <= 0.0:
+        return pred, tgt, prev
+
+    bsz, tlen, dim = pred.shape
+    if tlen <= 0:
+        return pred, tgt, prev
+    if mask is None:
+        row_mask = torch.ones((bsz, tlen), device=pred.device, dtype=torch.bool)
+    else:
+        row_mask = mask.to(device=pred.device, dtype=torch.bool)
+
+    w = row_mask.to(dtype=tgt.dtype).unsqueeze(-1)
+    denom = w.sum(dim=1, keepdim=True).clamp(min=1.0)
+    mu_shape = (tgt * w).sum(dim=1, keepdim=True) / denom  # (B,1,D)
+    mu_tok = mu_shape.expand(-1, tlen, -1)
+
+    if mode == "segment" and type_id is not None:
+        tgt_ty = type_id[:, k:].to(device=pred.device, dtype=torch.long)
+        is_answer_point = torch.zeros_like(tgt_ty, dtype=torch.bool)
+        is_query_point = torch.zeros_like(tgt_ty, dtype=torch.bool)
+        for ty in A_POINT_TYPES:
+            is_answer_point = is_answer_point | (tgt_ty == int(ty))
+        for ty in Q_POINT_TYPES:
+            is_query_point = is_query_point | (tgt_ty == int(ty))
+        is_answer = is_answer_point | (tgt_ty == int(TYPE_A_RAY))
+        is_query = is_query_point | (tgt_ty == int(TYPE_POINT)) | (tgt_ty == int(TYPE_RAY))
+        is_query = is_query & row_mask
+        is_answer = is_answer & row_mask
+
+        q_w = is_query.to(dtype=tgt.dtype).unsqueeze(-1)
+        q_den = q_w.sum(dim=1, keepdim=True).clamp(min=1.0)
+        mu_q = (tgt * q_w).sum(dim=1, keepdim=True) / q_den
+        a_w = is_answer.to(dtype=tgt.dtype).unsqueeze(-1)
+        a_den = a_w.sum(dim=1, keepdim=True).clamp(min=1.0)
+        mu_a = (tgt * a_w).sum(dim=1, keepdim=True) / a_den
+
+        mu_tok = torch.where(
+            is_query.unsqueeze(-1),
+            mu_q.expand(-1, tlen, -1),
+            mu_tok,
+        )
+        mu_tok = torch.where(
+            is_answer.unsqueeze(-1),
+            mu_a.expand(-1, tlen, -1),
+            mu_tok,
+        )
+
+    mu_tok = alpha * mu_tok.detach()
+    return pred - mu_tok, tgt - mu_tok, prev - mu_tok
+
+
+def _compute_nepa_cosine_loss_and_diag(
+    target_seq: torch.Tensor,
+    z_hat: torch.Tensor,
+    type_id: torch.Tensor | None,
+    k: int,
+    *,
+    loss_mask_mode: str = "answer_and_point_context",
+    center_mode: str = "none",
+    center_alpha: float = 1.0,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    k = max(1, int(k))
+    if target_seq.size(1) <= k or z_hat.size(1) <= k:
+        zero = z_hat.sum() * 0.0
+        nan = float("nan")
+        return zero, {
+            "k": float(k),
+            "cos_tgt": nan,
+            "cos_prev": nan,
+            "gap": nan,
+            "copy_win": nan,
+            "center_mode": str(center_mode),
+            "center_alpha": float(center_alpha),
+        }
+
+    pred = z_hat[:, :-k, :]
+    tgt = target_seq[:, k:, :].detach()
+    prev = target_seq[:, :-k, :].detach()
+    mask = _nepa_target_mask(type_id, k, loss_mask_mode=str(loss_mask_mode))
+    pred_u, tgt_u, prev_u = _center_triplet_for_nepa(
+        pred,
+        tgt,
+        prev,
+        type_id,
+        k,
+        mask,
+        center_mode=str(center_mode),
+        center_alpha=float(center_alpha),
+    )
+
+    cos_tgt = F.cosine_similarity(pred_u, tgt_u, dim=-1)
+    if mask is None:
+        loss = 1.0 - cos_tgt.mean()
+    elif bool(mask.any()):
+        loss = 1.0 - cos_tgt[mask].mean()
+    else:
+        loss = pred.sum() * 0.0
+
+    cos_prev = F.cosine_similarity(pred_u, prev_u, dim=-1)
+    cos_tgt_m = _masked_mean(cos_tgt, mask)
+    cos_prev_m = _masked_mean(cos_prev, mask)
+    if mask is None:
+        cmp = cos_prev >= cos_tgt
+    elif bool(mask.any()):
+        cmp = (cos_prev >= cos_tgt)[mask]
+    else:
+        cmp = None
+    copy_win = float(cmp.float().mean().item()) if cmp is not None else float("nan")
+
+    return loss, {
+        "k": float(k),
+        "cos_tgt": float(cos_tgt_m),
+        "cos_prev": float(cos_prev_m),
+        "gap": float(cos_tgt_m - cos_prev_m),
+        "copy_win": float(copy_win),
+        "center_mode": str(center_mode),
+        "center_alpha": float(center_alpha),
+    }
+
+
+def _compute_infonce_loss_and_diag(
+    z_hat: torch.Tensor,
+    target_seq: torch.Tensor,
+    type_id: torch.Tensor | None,
+    k: int,
+    *,
+    tau: float,
+    loss_mask_mode: str = "answer_and_point_context",
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """NEPA-style k-step InfoNCE over target tokens in each sample."""
+    k = max(1, int(k))
+    if target_seq.size(1) <= k or z_hat.size(1) <= k:
+        zero = z_hat.sum() * 0.0
+        nan = float("nan")
+        return zero, {
+            "tau": float(tau),
+            "pos_cos": nan,
+            "neg_cos": nan,
+            "margin": nan,
+            "pos_logit": nan,
+            "neg_logit": nan,
+            "r1": nan,
+            "n_valid": 0.0,
+        }
+
+    pred = z_hat[:, :-k, :]
+    tgt = target_seq[:, k:, :].detach()
+    bsz, tlen, _ = pred.shape
+
+    row_mask = _nepa_target_mask(type_id, k, loss_mask_mode=str(loss_mask_mode))
+    if row_mask is None:
+        row_mask = torch.ones((bsz, tlen), device=pred.device, dtype=torch.bool)
+    else:
+        row_mask = row_mask.to(device=pred.device, dtype=torch.bool)
+    col_mask = row_mask
+
+    pred_n = F.normalize(pred.float(), dim=-1)
+    tgt_n = F.normalize(tgt.float(), dim=-1)
+    sim = torch.bmm(pred_n, tgt_n.transpose(1, 2))  # (B,T,T), cosine logits before temperature
+    logits = sim / float(tau)
+    neg_inf = torch.finfo(logits.dtype).min
+    logits = logits.masked_fill(~col_mask.unsqueeze(1), neg_inf)
+
+    labels = torch.arange(tlen, device=pred.device, dtype=torch.long).unsqueeze(0).expand(bsz, -1)
+
+    if bool(row_mask.any()):
+        loss = F.cross_entropy(logits[row_mask], labels[row_mask])
+    else:
+        loss = pred.sum() * 0.0
+
+    pos_cos = _masked_mean(sim.diagonal(dim1=1, dim2=2), row_mask)
+    pos_logit = _masked_mean(logits.diagonal(dim1=1, dim2=2), row_mask)
+
+    eye = torch.eye(tlen, device=pred.device, dtype=torch.bool).unsqueeze(0)
+    neg_mask = (~eye) & col_mask.unsqueeze(1) & row_mask.unsqueeze(-1)
+    if bool(neg_mask.any()):
+        neg_cos = float(sim[neg_mask].mean().item())
+        neg_logit = float(logits[neg_mask].mean().item())
+    else:
+        neg_cos = float("nan")
+        neg_logit = float("nan")
+
+    if (pos_cos == pos_cos) and (neg_cos == neg_cos):
+        margin = float(pos_cos - neg_cos)
+    else:
+        margin = float("nan")
+
+    top1 = logits.argmax(dim=-1)
+    if bool(row_mask.any()):
+        r1 = float((top1[row_mask] == labels[row_mask]).float().mean().item())
+        n_valid = float(int(row_mask.sum().item()))
+    else:
+        r1 = float("nan")
+        n_valid = 0.0
+
+    return loss, {
+        "tau": float(tau),
+        "pos_cos": float(pos_cos),
+        "neg_cos": float(neg_cos),
+        "margin": float(margin),
+        "pos_logit": float(pos_logit),
+        "neg_logit": float(neg_logit),
+        "r1": float(r1),
+        "n_valid": float(n_valid),
     }
 
 
@@ -1093,7 +1350,7 @@ def main() -> None:
     if objective == "recon_chamfer":
         chamfer_module = _load_chamfer_module(str(args.recon_chamfer_metric))
     recon_heads: Optional[ReconHeads] = None
-    if objective != "nepa_cosine":
+    if objective in {"recon_mse", "recon_chamfer"}:
         recon_heads = ReconHeads(
             d_model=int(args.d_model),
             group_size=int(args.group_size),
@@ -1122,6 +1379,7 @@ def main() -> None:
         args.max_steps = int(max(1, int(args.epochs) * int(steps_per_epoch)))
     warmup_steps = max(0, _resolve_warmup_steps(args))
     dual_mask_warmup_steps = max(0, int(round(float(args.dual_mask_warmup_frac) * float(args.max_steps))))
+    center_warmup_steps = max(0, int(round(float(args.nepa_center_warmup_frac) * float(args.max_steps))))
     scheduler: optim.lr_scheduler.LambdaLR | None = None
     if str(args.lr_scheduler) == "cosine":
         scheduler = optim.lr_scheduler.LambdaLR(
@@ -1153,6 +1411,8 @@ def main() -> None:
             f"a={float(args.recon_a_weight):.3f} "
             f"chamfer_metric={str(args.recon_chamfer_metric)}"
         )
+        if objective == "infonce":
+            accelerator.print(f"[token_pretrain] infonce tau={float(args.infonce_tau):.4f}")
         accelerator.print(
             f"[token_pretrain] reg var_w={float(args.reg_var_weight):.4f} "
             f"cov_w={float(args.reg_cov_weight):.4f} "
@@ -1170,8 +1430,14 @@ def main() -> None:
             f"far={float(args.dual_mask_far):.4f} window={int(args.dual_mask_window)} "
             f"type_aware={bool(int(args.dual_mask_type_aware))} "
             f"mode={str(args.dual_mask_mode)} keep_prefix={int(args.dual_mask_keep_prefix)} "
+            f"column_ratio={float(args.dual_mask_column_ratio):.4f} "
             f"warmup_frac={float(args.dual_mask_warmup_frac):.4f} "
             f"warmup_steps={int(dual_mask_warmup_steps)}"
+        )
+        accelerator.print(
+            f"[token_pretrain] nepa_center mode={str(args.nepa_center_mode)} "
+            f"warmup_frac={float(args.nepa_center_warmup_frac):.4f} "
+            f"warmup_steps={int(center_warmup_steps)}"
         )
         accelerator.print(f"[token_pretrain] steps_per_epoch={int(steps_per_epoch)}")
         accelerator.print(
@@ -1202,6 +1468,11 @@ def main() -> None:
             dm_ramp = 1.0
         dm_near = float(args.dual_mask_near) * dm_ramp
         dm_far = float(args.dual_mask_far) * dm_ramp
+        dm_col = float(args.dual_mask_column_ratio) * dm_ramp
+        if center_warmup_steps > 0:
+            center_ramp = min(1.0, float(step + 1) / float(max(1, center_warmup_steps)))
+        else:
+            center_ramp = 1.0
 
         with accelerator.accumulate(model):
             seq = build_qa_sequence(
@@ -1225,8 +1496,11 @@ def main() -> None:
                 dual_mask_type_aware=bool(int(args.dual_mask_type_aware)),
                 dual_mask_mode=str(args.dual_mask_mode),
                 dual_mask_keep_prefix=int(args.dual_mask_keep_prefix),
+                dual_mask_column_ratio=dm_col,
             )
             diag = None
+            diag_raw = None
+            infonce_diag = None
             recon_diag = None
             target = _build_target_sequence(
                 model_raw,
@@ -1234,27 +1508,52 @@ def main() -> None:
                 loss_target_mode=str(args.loss_target_mode),
                 center_target_alpha=float(args.center_target_alpha),
             )
+            diag_raw = _compute_copy_diag(
+                target,
+                out.z_hat,
+                out.type_id,
+                int(args.skip_k),
+                loss_mask_mode=str(args.loss_mask_mode),
+            )
+            diag = diag_raw
+            loss_infonce = target.new_zeros(())
             if objective == "nepa_cosine":
-                loss_nepa = model_raw.nepa_loss(
-                    out.z,
+                loss_nepa, diag = _compute_nepa_cosine_loss_and_diag(
+                    target,
                     out.z_hat,
                     out.type_id,
-                    skip_k=int(args.skip_k),
-                    target=target,
                     loss_mask_mode=str(args.loss_mask_mode),
+                    k=int(args.skip_k),
+                    center_mode=str(args.nepa_center_mode),
+                    center_alpha=float(center_ramp),
                 )
                 loss_recon_ctx = loss_nepa.new_zeros(())
                 loss_recon_q = loss_nepa.new_zeros(())
                 loss_recon_a = loss_nepa.new_zeros(())
                 loss_main = loss_nepa
-                diag = _compute_copy_diag(
-                    target,
+            elif objective == "infonce":
+                with torch.no_grad():
+                    loss_nepa = model_raw.nepa_loss(
+                        out.z,
+                        out.z_hat,
+                        out.type_id,
+                        skip_k=int(args.skip_k),
+                        target=target,
+                        loss_mask_mode=str(args.loss_mask_mode),
+                    )
+                loss_infonce, infonce_diag = _compute_infonce_loss_and_diag(
                     out.z_hat,
+                    target,
                     out.type_id,
                     int(args.skip_k),
+                    tau=float(args.infonce_tau),
                     loss_mask_mode=str(args.loss_mask_mode),
                 )
-            else:
+                loss_recon_ctx = loss_nepa.new_zeros(())
+                loss_recon_q = loss_nepa.new_zeros(())
+                loss_recon_a = loss_nepa.new_zeros(())
+                loss_main = loss_infonce
+            elif objective in {"recon_mse", "recon_chamfer"}:
                 with torch.no_grad():
                     loss_nepa = model_raw.nepa_loss(
                         out.z,
@@ -1293,9 +1592,7 @@ def main() -> None:
                         "reconstruction objective requested but recon_heads is None "
                         "(internal setup error)"
                     )
-                pred_ctx = recon_heads.ctx_head(pred_h)
-                pred_q = recon_heads.q_head(pred_h)
-                pred_a = recon_heads.a_head(pred_h)
+                pred_ctx, pred_q, pred_a = recon_heads(pred_h)
 
                 ctx_loss_fn = "mse"
                 if objective == "recon_chamfer":
@@ -1346,6 +1643,11 @@ def main() -> None:
                         group_size=int(args.group_size),
                         chamfer_loss=chamfer_module,
                     )
+            else:
+                raise ValueError(
+                    f"unknown pretrain_objective={objective}. "
+                    "expected one of: nepa_cosine, infonce, recon_mse, recon_chamfer"
+                )
             reg_mask = _nepa_target_mask(
                 out.type_id,
                 int(args.skip_k),
@@ -1383,6 +1685,7 @@ def main() -> None:
             step += 1
             if accelerator.is_main_process:
                 loss_nepa_val = float(loss_nepa.item())
+                loss_infonce_val = float(loss_infonce.item())
                 loss_main_val = float(loss_main.item())
                 loss_recon_ctx_val = float(loss_recon_ctx.item())
                 loss_recon_q_val = float(loss_recon_q.item())
@@ -1407,6 +1710,7 @@ def main() -> None:
                             f"loss_total={loss_val:.6f} "
                             f"loss_main={loss_main_val:.6f} "
                             f"loss_nepa={loss_nepa_val:.6f} "
+                            f"loss_infonce={loss_infonce_val:.6f} "
                             f"loss_recon_ctx={loss_recon_ctx_val:.6f} "
                             f"loss_recon_q={loss_recon_q_val:.6f} "
                             f"loss_recon_a={loss_recon_a_val:.6f} "
@@ -1418,18 +1722,45 @@ def main() -> None:
                             f"gap={_fmt_diag(float(diag['gap']))} "
                             f"copy_win={_fmt_diag(float(diag['copy_win']))}"
                         )
-                    elif objective != "nepa_cosine" and (recon_diag is not None):
+                    elif objective == "infonce" and (diag is not None) and (infonce_diag is not None):
                         accelerator.print(
                             f"[step {step:06d}] "
                             f"loss_total={loss_val:.6f} "
                             f"loss_main={loss_main_val:.6f} "
                             f"loss_nepa={loss_nepa_val:.6f} "
+                            f"loss_infonce={loss_infonce_val:.6f} "
                             f"loss_recon_ctx={loss_recon_ctx_val:.6f} "
                             f"loss_recon_q={loss_recon_q_val:.6f} "
                             f"loss_recon_a={loss_recon_a_val:.6f} "
                             f"loss_var={var_loss_val:.6f} "
                             f"loss_cov={cov_loss_val:.6f} "
                             f"loss2d={loss_2d_equiv:.6f} "
+                            f"pos_cos={_fmt_diag(float(infonce_diag['pos_cos']))} "
+                            f"neg_cos={_fmt_diag(float(infonce_diag['neg_cos']))} "
+                            f"margin={_fmt_diag(float(infonce_diag['margin']))} "
+                            f"r1={_fmt_diag(float(infonce_diag['r1']))} "
+                            f"cos_tgt={_fmt_diag(float(diag['cos_tgt']))} "
+                            f"cos_prev={_fmt_diag(float(diag['cos_prev']))} "
+                            f"gap={_fmt_diag(float(diag['gap']))} "
+                            f"copy_win={_fmt_diag(float(diag['copy_win']))}"
+                        )
+                    elif objective != "nepa_cosine" and (recon_diag is not None) and (diag is not None):
+                        accelerator.print(
+                            f"[step {step:06d}] "
+                            f"loss_total={loss_val:.6f} "
+                            f"loss_main={loss_main_val:.6f} "
+                            f"loss_nepa={loss_nepa_val:.6f} "
+                            f"loss_infonce={loss_infonce_val:.6f} "
+                            f"loss_recon_ctx={loss_recon_ctx_val:.6f} "
+                            f"loss_recon_q={loss_recon_q_val:.6f} "
+                            f"loss_recon_a={loss_recon_a_val:.6f} "
+                            f"loss_var={var_loss_val:.6f} "
+                            f"loss_cov={cov_loss_val:.6f} "
+                            f"loss2d={loss_2d_equiv:.6f} "
+                            f"cos_tgt={_fmt_diag(float(diag['cos_tgt']))} "
+                            f"cos_prev={_fmt_diag(float(diag['cos_prev']))} "
+                            f"gap={_fmt_diag(float(diag['gap']))} "
+                            f"copy_win={_fmt_diag(float(diag['copy_win']))} "
                             f"copy_ctx={_fmt_diag(float(recon_diag['copy_ctx_err']))} "
                             f"copy_q={_fmt_diag(float(recon_diag['copy_q_err']))} "
                             f"copy_a={_fmt_diag(float(recon_diag['copy_a_err']))} "
@@ -1441,29 +1772,39 @@ def main() -> None:
                     epoch_float = float(step - 1) / float(max(1, steps_per_epoch))
                     wb = {
                         "train/loss": loss_val,
-                        "train/loss_total": loss_val,
-                        "train/loss_main": loss_main_val,
-                        "train/loss_nepa": loss_nepa_val,
-                        "train/loss_recon_ctx": loss_recon_ctx_val,
-                        "train/loss_recon_q": loss_recon_q_val,
-                        "train/loss_recon_a": loss_recon_a_val,
-                        "train/loss_var": var_loss_val,
-                        "train/loss_cov": cov_loss_val,
                         "train/loss_2d_equiv": loss_2d_equiv,
                         "train/step": int(step),
                         "train/epoch": epoch_float,
-                        "train/objective_id": 0.0 if objective == "nepa_cosine" else (1.0 if objective == "recon_mse" else 2.0),
-                        "train/dual_mask_ramp": float(dm_ramp),
-                        "train/dual_mask_near": float(dm_near),
-                        "train/dual_mask_far": float(dm_far),
                     }
                     if len(optimizer.param_groups) > 0 and "lr" in optimizer.param_groups[0]:
                         wb["train/lr"] = float(optimizer.param_groups[0]["lr"])
-                    if objective == "nepa_cosine" and (diag is not None):
+                    if diag is not None:
                         wb["diag/cos_tgt"] = float(diag["cos_tgt"])
                         wb["diag/cos_prev"] = float(diag["cos_prev"])
                         wb["diag/gap"] = float(diag["gap"])
                         wb["diag/copy_win"] = float(diag["copy_win"])
+                        if "center_alpha" in diag:
+                            wb["diag/center_alpha"] = float(diag["center_alpha"])
+                        if "center_mode" in diag:
+                            wb["diag/center_mode_id"] = (
+                                0.0
+                                if str(diag["center_mode"]) == "none"
+                                else (1.0 if str(diag["center_mode"]) == "shape" else 2.0)
+                            )
+                    if diag_raw is not None and (diag_raw is not diag):
+                        wb["diag/cos_tgt_raw"] = float(diag_raw["cos_tgt"])
+                        wb["diag/cos_prev_raw"] = float(diag_raw["cos_prev"])
+                        wb["diag/gap_raw"] = float(diag_raw["gap"])
+                        wb["diag/copy_win_raw"] = float(diag_raw["copy_win"])
+                    if objective == "infonce" and (infonce_diag is not None):
+                        wb["diag/infonce_tau"] = float(infonce_diag["tau"])
+                        wb["diag/infonce_pos_cos"] = float(infonce_diag["pos_cos"])
+                        wb["diag/infonce_neg_cos"] = float(infonce_diag["neg_cos"])
+                        wb["diag/infonce_margin"] = float(infonce_diag["margin"])
+                        wb["diag/infonce_pos_logit"] = float(infonce_diag["pos_logit"])
+                        wb["diag/infonce_neg_logit"] = float(infonce_diag["neg_logit"])
+                        wb["diag/infonce_r1"] = float(infonce_diag["r1"])
+                        wb["diag/infonce_n_valid"] = float(infonce_diag["n_valid"])
                     if objective != "nepa_cosine" and (recon_diag is not None):
                         wb["diag/recon_ctx_err"] = float(recon_diag["recon_ctx_err"])
                         wb["diag/recon_q_err"] = float(recon_diag["recon_q_err"])

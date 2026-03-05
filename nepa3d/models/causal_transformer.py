@@ -560,6 +560,7 @@ class CausalTransformer(nn.Module):
         dual_mask_type_aware: int | bool = 0,
         dual_mask_mode: str = "element",
         dual_mask_keep_prefix: int = 0,
+        dual_mask_column_ratio: float = 0.0,
     ):
         """Causal transformer with optional *dual masking* (PointGPT-style).
 
@@ -574,6 +575,7 @@ class CausalTransformer(nn.Module):
             dual_mask_seed: optional seed for deterministic dual masking.
             dual_mask_mode: `element` (edge-wise Bernoulli) or `column` (PointGPT-like key-column drop).
             dual_mask_keep_prefix: in `column` mode, first K key positions are always visible.
+            dual_mask_column_ratio: in `column` mode, fixed drop ratio (PointGPT-style).
         """
         t = x.size(1)
         attn_mask = None
@@ -583,9 +585,13 @@ class CausalTransformer(nn.Module):
 
         # Dual masking only during training with causal attention.
         if bool(is_causal) and self.training:
+            mode = str(dual_mask_mode).lower()
+            if mode not in {"element", "column"}:
+                raise ValueError(f"dual_mask_mode must be element|column, got {dual_mask_mode}")
             p_near = self._clamp01(dual_mask_near)
             p_far = self._clamp01(dual_mask_far)
-            if (p_near > 0.0) or (p_far > 0.0):
+            p_col = self._clamp01(dual_mask_column_ratio)
+            if (p_near > 0.0) or (p_far > 0.0) or (mode == "column" and p_col > 0.0):
                 i = torch.arange(t, device=x.device)[:, None]
                 j = torch.arange(t, device=x.device)[None, :]
                 rel = i - j  # >0 means "past" token
@@ -625,22 +631,49 @@ class CausalTransformer(nn.Module):
                     gen = torch.Generator(device=x.device)
                     gen.manual_seed(int(dual_mask_seed) & 0xFFFFFFFF)
 
-                mode = str(dual_mask_mode).lower()
-                if mode not in {"element", "column"}:
-                    raise ValueError(f"dual_mask_mode must be element|column, got {dual_mask_mode}")
-
                 if mode == "element":
+                    if int(dual_mask_window) > 0:
+                        win = int(dual_mask_window)
+                        prob = torch.zeros((t, t), device=x.device, dtype=torch.float32)
+                        prob = prob.masked_fill(eligible & (rel <= win), p_near)
+                        prob = prob.masked_fill(eligible & (rel > win), p_far)
+                    else:
+                        prob = torch.zeros((t, t), device=x.device, dtype=torch.float32)
+                        prob = prob.masked_fill(eligible, p_far)
                     u = torch.rand((t, t), device=x.device, generator=gen)
                     extra = eligible & (u < prob)
                 else:
-                    # PointGPT-like: sample dropped keys once, apply to whole column.
+                    # PointGPT-like column-wise masking:
+                    # select dropped key columns once, then mask those columns for all queries.
                     keep_prefix = max(0, min(int(dual_mask_keep_prefix), t))
-                    col_prob = prob.max(dim=0).values
                     col_eligible = eligible.any(dim=0)
                     if keep_prefix > 0:
                         col_eligible[:keep_prefix] = False
-                    u_col = torch.rand((t,), device=x.device, generator=gen)
-                    col_drop = col_eligible & (u_col < col_prob)
+                    if p_col > 0.0:
+                        # Match PointGPT behavior: fixed-count drop based on mask ratio.
+                        n_eligible = int(col_eligible.sum().item())
+                        n_drop = int(round(float(n_eligible) * float(p_col)))
+                        n_drop = max(0, min(n_drop, n_eligible))
+                        col_drop = torch.zeros((t,), device=x.device, dtype=torch.bool)
+                        if n_drop > 0 and n_eligible > 0:
+                            eligible_idx = torch.nonzero(col_eligible, as_tuple=False).flatten()
+                            scores = torch.rand((n_eligible,), device=x.device, generator=gen)
+                            perm = torch.argsort(scores)
+                            drop_idx = eligible_idx[perm[:n_drop]]
+                            col_drop[drop_idx] = True
+                    else:
+                        # Backward-compatible Bernoulli mode from near/far probabilities.
+                        if int(dual_mask_window) > 0:
+                            win = int(dual_mask_window)
+                            prob = torch.zeros((t, t), device=x.device, dtype=torch.float32)
+                            prob = prob.masked_fill(eligible & (rel <= win), p_near)
+                            prob = prob.masked_fill(eligible & (rel > win), p_far)
+                        else:
+                            prob = torch.zeros((t, t), device=x.device, dtype=torch.float32)
+                            prob = prob.masked_fill(eligible, p_far)
+                        col_prob = prob.max(dim=0).values
+                        u_col = torch.rand((t,), device=x.device, generator=gen)
+                        col_drop = col_eligible & (u_col < col_prob)
                     extra = eligible & col_drop[None, :]
                 attn_mask = attn_mask | extra
 

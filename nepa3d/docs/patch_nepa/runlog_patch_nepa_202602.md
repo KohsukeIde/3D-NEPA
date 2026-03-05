@@ -5746,3 +5746,449 @@ Current behavior:
 Interpretation rule:
 
 - `recon_lift_* > 0` means model prediction beats copy-baseline in the same loss space.
+
+## 138. Short re-run after recon path fixes (`105287`, `105288`) (2026-03-04)
+
+Purpose:
+
+- re-run short `mesh50+udf50` for `recon_mse` and `recon_chamfer`
+- verify objective-aligned trend via `recon_lift_q/a`.
+
+Fixes included before rerun:
+
+- `pretrain_patch_nepa_tokens.py`
+  - fixed DDP access bug in recon heads (`recon_heads(pred_h)` path).
+  - fixed chamfer import collision (`Point-MAE/datasets` shadowing HF `datasets`)
+    by loading chamfer extension from `Point-MAE/extensions/chamfer_dist` only.
+
+Runs:
+
+- `105287.qjcm` -> `reconmse_m50u50_short_fix`
+- `105288.qjcm` -> `reconchamfer_m50u50_short_fix`
+
+Both:
+
+- completed with `[done]` marker
+- `max_steps=2000`
+- logs:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_reconmse_diagfix_20260304_1835/reconmse_m50u50_short_fix.mr0.log`
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_reconchamfer_diagfix_20260304_1835/reconchamfer_m50u50_short_fix.mr0.log`
+
+Key final diagnostics:
+
+- `recon_mse`:
+  - `diag/recon_lift_q=0.2626`, `diag/recon_lift_a=0.1196`
+  - `diag/recon_q_err=0.2600`, `diag/recon_a_err=0.1200`
+  - `diag/copy_q_err=0.5226`, `diag/copy_a_err=0.2396`
+- `recon_chamfer`:
+  - `diag/recon_lift_q=0.2626`, `diag/recon_lift_a=0.1196`
+  - `diag/recon_q_err=0.2599`, `diag/recon_a_err=0.1200`
+  - `diag/copy_q_err=0.5226`, `diag/copy_a_err=0.2396`
+
+Trend (first100 -> last100):
+
+- `recon_mse`:
+  - `lift_q: 0.1280 -> 0.2028`
+  - `lift_a: 0.0261 -> 0.1180`
+- `recon_chamfer`:
+  - `lift_q: 0.1273 -> 0.2028`
+  - `lift_a: 0.0260 -> 0.1180`
+
+Conclusion:
+
+- both objectives now show stable positive lift against copy baseline.
+- under this setup, `recon_mse` and `recon_chamfer` behave almost identically.
+
+## 139. Full FT launched from converged short recon checkpoints (2026-03-04)
+
+Decision:
+
+- short recon runs are in late-stage plateau (tail averages stable), so proceed to full FT as final criterion.
+
+Source checkpoints:
+
+- `runs/patchnepa_tokens/patchnepa_tokens_reconmse_diagfix_20260304_1835/ckpt_final.pt`
+- `runs/patchnepa_tokens/patchnepa_tokens_reconchamfer_diagfix_20260304_1835/ckpt_final.pt`
+
+Submission batch:
+
+- `105297.qjcm` : `reconmse -> obj_bg`
+- `105298.qjcm` : `reconmse -> obj_only`
+- `105299.qjcm` : `reconmse -> pb_t50_rs`
+- `105300.qjcm` : `reconchamfer -> obj_bg`
+- `105301.qjcm` : `reconchamfer -> obj_only`
+- `105302.qjcm` : `reconchamfer -> pb_t50_rs`
+
+FT conditions:
+
+- `EPOCHS=300`
+- `N_POINT=2048`
+- `BATCH=64` (`global`)
+- `patchnepa_ft_mode=qa_zeroa`
+- `pooling=cls_max`, `head_mode=pointmae_mlp`
+- `AUG_PRESET=pointmae`, `AUG_EVAL=1`, `MC_EVAL_K_TEST=10`
+- W&B on (`patchnepa-finetune`)
+
+Submit log root:
+
+- `logs/sanity/patchnepa_ft/ft_recon_full_20260304_190412/`
+
+## 140. Centered-cosine objective path added (2026-03-04)
+
+Purpose:
+
+- address the "shared common-mode vector" failure mode under `nepa_cosine`
+- keep NEPA structure (AR + stop-grad + content target) unchanged
+
+Implemented in:
+
+- `nepa3d/train/pretrain_patch_nepa_tokens.py`
+
+Added CLI options:
+
+- `--nepa_center_mode {none,shape,segment}`
+- `--nepa_center_warmup_frac <float>`
+
+Behavior:
+
+- `none`: legacy cosine path (no centering)
+- `shape`: shape-wise centering before cosine objective
+- `segment`: centering by segment (Q/A boundary-aware) before cosine objective
+- warmup: centering contribution ramps from 0 to 1 over `nepa_center_warmup_frac` of total steps
+
+Additional logs/W&B:
+
+- `train/nepa_center_ramp`
+- `diag/center_alpha`
+- `diag/center_mode_id`
+- centered diagnostics remain on standard keys:
+  - `diag/cos_tgt`, `diag/cos_prev`, `diag/gap`, `diag/copy_win`
+- raw reference diagnostics also emitted when centering is active:
+  - `diag/cos_tgt_raw`, `diag/cos_prev_raw`, `diag/gap_raw`, `diag/copy_win_raw`
+
+Launcher propagation added:
+
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_qf.sh`
+- `scripts/pretrain/submit_pretrain_patch_nepa_tokens_qf.sh`
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_multinode_pbsdsh.sh`
+
+all now pass:
+
+- `NEPA_CENTER_MODE`
+- `NEPA_CENTER_WARMUP_FRAC`
+
+## 141. Centered-cosine smoke runs (baseline/segment/shape) (2026-03-04)
+
+Common settings:
+
+- objective: `PRETRAIN_OBJECTIVE=nepa_cosine`
+- `TOKEN_QA_LAYOUT=split_sep`
+- `LOSS_MASK_MODE=answer_and_point_context`
+- `PATCH_ORDER_MODE=morton`
+- `SKIP_K=1`
+- `BATCH=8` per GPU (`global=128`), `EPOCHS=10`, no ray (`N_RAY=0`)
+- full diag logging (`DIAG_EVERY=1`, `WANDB_LOG_EVERY=1`)
+
+### 141.1 Baseline (no centering) `105310`
+
+- job: `105310.qjcm` (`ptoksmk`)
+- log root:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_smoke_20260304_192014/`
+- status: `F`, `Exit_status=0`
+- final (`step 3700`):
+  - `loss_total=0.573958`
+  - `cos_tgt=0.4260`
+  - `cos_prev=0.4274`
+  - `gap=-0.0013`
+  - `copy_win=0.7496`
+
+### 141.2 Segment-centering `105319`
+
+- job: `105319.qjcm` (`ptokcsmk`)
+- centered options:
+  - `NEPA_CENTER_MODE=segment`
+  - `NEPA_CENTER_WARMUP_FRAC=0.05`
+- log root:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_smoke_20260304_193732/`
+- status: `F`, `Exit_status=0`
+- final (`step 3700`):
+  - `loss_total=0.473478`
+  - `cos_tgt=0.5265`
+  - `cos_prev=0.5470`
+  - `gap=-0.0205`
+  - `copy_win=0.7623`
+
+### 141.3 Shape-centering `105320`
+
+- job: `105320.qjcm` (`ptokhsmk`)
+- centered options:
+  - `NEPA_CENTER_MODE=shape`
+  - `NEPA_CENTER_WARMUP_FRAC=0.05`
+- log root:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_smoke_20260304_193922/`
+- status: `F`, `Exit_status=0`
+- final (`step 3700`):
+  - `loss_total=0.024591`
+  - `cos_tgt=0.9754`
+  - `cos_prev=0.9750`
+  - `gap=+0.0004`
+  - `copy_win=0.7494`
+
+## 142. Recording policy update for later analysis (2026-03-04)
+
+- For each new branch, record:
+  1. exact objective/mask/order/center settings,
+  2. final (or latest) `loss_total/cos_tgt/cos_prev/gap/copy_win`,
+  3. job id + log root + completion marker status.
+- This runlog remains the canonical timeline; the restart plan keeps the condensed execution view.
+
+## 143. `skip_k` short sweep launched (`k=1,2,4`) (2026-03-04)
+
+Goal:
+
+- quick A/B/C check whether increasing prediction horizon (`skip_k`) improves
+  `gap = cos_tgt - cos_prev` and reduces copy-dominant behavior.
+
+Fixed settings (identical across runs):
+
+- `PRETRAIN_OBJECTIVE=nepa_cosine`
+- `LOSS_MASK_MODE=answer_and_point_context`
+- `TOKEN_QA_LAYOUT=split_sep`
+- `PATCH_ORDER_MODE=morton`
+- `NEPA_CENTER_MODE=none`
+- `MIX_CONFIG=nepa3d/configs/shapenet_unpaired_mix_v2_tokens_drop1_mesh50_udf50.yaml`
+- `MAX_STEPS=2000` (short smoke), `EPOCHS=0`
+- `BATCH=8` per GPU (`global=128`)
+- full diagnostics enabled (`DIAG_EVERY=1`, `WANDB_LOG_EVERY=1`)
+
+Run set:
+
+- `patchnepa_tokens_skipk124_smoke_20260304_200306`
+
+Jobs:
+
+- `105324.qjcm` (`ptoksk1`) -> `RUN_TAG=skipk1_m50u50_smoke`, `SKIP_K=1`
+- `105325.qjcm` (`ptoksk2`) -> `RUN_TAG=skipk2_m50u50_smoke`, `SKIP_K=2`
+- `105326.qjcm` (`ptoksk4`) -> `RUN_TAG=skipk4_m50u50_smoke`, `SKIP_K=4`
+
+Log root:
+
+- `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_skipk124_smoke_20260304_200306/`
+
+Final status:
+
+- `105324`: `F`, `Exit_status=0`
+- `105325`: `F`, `Exit_status=0`
+- `105326`: `F`, `Exit_status=0`
+
+Final (`step 2000`, `mr0`) comparison:
+
+- `skip_k=1`
+  - `loss_total=0.499003`
+  - `cos_tgt=0.5010`
+  - `cos_prev=0.5005`
+  - `gap=+0.0005`
+  - `copy_win=0.7504`
+- `skip_k=2`
+  - `loss_total=0.499757`
+  - `cos_tgt=0.5002`
+  - `cos_prev=0.4997`
+  - `gap=+0.0005`
+  - `copy_win=0.7475`
+- `skip_k=4`
+  - `loss_total=0.500622`
+  - `cos_tgt=0.4994`
+  - `cos_prev=0.4989`
+  - `gap=+0.0005`
+  - `copy_win=0.7453`
+
+Observed takeaway:
+
+- `k=1/2/4` all converge to essentially identical gap (`~+0.0005`) and near-identical loss; skip horizon alone does not break the `cos_tgt ≈ cos_prev` regime in this setup.
+
+## 144. 200-step isolate for center warmup spike (`segment`, no warmup) (2026-03-04)
+
+Goal:
+
+- isolate whether the early spike around step ~100 in centerseg run is tied to warmup ramps.
+
+Job:
+
+- `105328.qjcm` (`ptokcs0`) -> `RUN_TAG=ptok_centerseg_nowarmup200`
+- run root:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_centerseg_nowarmup200_20260304_201009/`
+- settings:
+  - `NEPA_CENTER_MODE=segment`
+  - `NEPA_CENTER_WARMUP_FRAC=0.0`
+  - `MAX_STEPS=200`, `EPOCHS=0`
+  - other knobs fixed to the centerseg smoke branch (`nepa_cosine`, `split_sep`, `answer_and_point_context`, `morton`, `SKIP_K=1`)
+- status: `F`, `Exit_status=0`
+
+Window stats from `mr0`:
+
+- no-warmup (`105328`)
+  - `step 1-80`: `loss=0.5618`, `cos_tgt=0.4382`, `cos_prev=0.4439`, `gap=-0.0057`
+  - `step 81-120`: `loss=0.4806`, `cos_tgt=0.5194`, `cos_prev=0.5414`, `gap=-0.0220`
+  - `step 121-200`: `loss=0.4795`, `cos_tgt=0.5205`, `cos_prev=0.5553`, `gap=-0.0348`
+- warmup-0.05 reference (`105319`, same branch)
+  - `step 1-80`: `loss=0.5547`, `cos_tgt=0.4453`, `cos_prev=0.4452`, `gap=+0.0001`
+  - `step 81-120`: `loss=0.0826`, `cos_tgt=0.9174`, `cos_prev=0.9165`, `gap=+0.0009`
+  - `step 121-185`: `loss=0.2561`, `cos_tgt=0.7438`, `cos_prev=0.7428`, `gap=+0.0011`
+  - `step 186-260`: `loss=0.4825`, `cos_tgt=0.5175`, `cos_prev=0.5176`, `gap=-0.0002`
+
+Interpretation:
+
+- yes, the sharp early surge/drop pattern aligns with warmup schedules (LR + center ramp completion boundaries); removing center warmup removes that transient.
+- however, removing warmup does not improve the core issue: the run settles into stronger negative gap (`cos_prev > cos_tgt`).
+
+## 145. Backfill: previously unreferenced token run roots (2026-03-04)
+
+Purpose:
+
+- ensure all generated run roots are explicitly classified (kept / superseded / invalid), so later analysis does not confuse orphan logs with valid evidence.
+
+### 145.1 Empty roots (no files produced; non-materialized)
+
+- `patchnepa_tokens_20260304_005229`
+- `patchnepa_tokens_20260304_005248`
+- `patchnepa_tokens_20260304_032446`
+- `patchnepa_tokens_drop1_20260304_001817`
+- `patchnepa_tokens_drop1_answercheck_20260304_005258`
+- `patchnepa_tokens_drop1_m50u50_fps_20260304_022852`
+- `patchnepa_tokens_drop1_tokens_maskprimfix_random_20260304_021624`
+- `patchnepa_tokens_dualcol_20260304_032435`
+- `patchnepa_tokens_reconmse_smoke_20260304_040226`
+- `patchnepa_v2tok_pc100_smoke_20260303_193214`
+
+Interpretation:
+
+- launcher/submit side roots were created, but no actual per-rank logs were materialized.
+- these are non-evaluable and excluded from comparison.
+
+### 145.2 PBS-only roots (no `mr0`, early launch failure / replaced)
+
+- `patchnepa_tokens_drop1_answercheck_20260304_005330`
+- `patchnepa_tokens_drop1_m50u50_fps_20260304_022859`
+- `patchnepa_tokens_m50u50_ordercmp_20260304_012339`
+- `patchnepa_tokens_varcov_20260304_025805`
+- `patchnepa_tokens_varcov_intra_20260304_030620`
+- `patchnepa_tokens_hreg_20260304_033023`
+- `patchnepa_tokens_hreg_dcol_nf03_20260304_034404`
+- `patchnepa_tokens_dualcol_20260304_032501`
+- `patchnepa_tokens_reconchamfer_smoke_20260304_041358`
+- `patchnepa_v2tok_mesh50udf50_smoke_20260303_193516`
+- `patchnepa_v2tok_pc33mesh33udf33_smoke_20260303_193516`
+
+Policy:
+
+- kept as traceability artifacts only; all were superseded by later valid reruns already tracked in sections 124-144.
+
+### 145.3 Explicit failed chains with logs (now superseded)
+
+- Full300 first try (pre-DDP fixes):
+  - root: `patchnepa_tokens_full300_morton_20260304_044214`
+  - jobs: `102560/102561/102562`, all failed with missing pretrain marker (`Exit_status=97`).
+- Full300 second try (partial DDP fix):
+  - root: `patchnepa_tokens_full300_morton_fixddp_20260304_044633`
+  - jobs: `102572/102573/102574`, same early DDP failure (`Exit_status=97`).
+- Full300 short-lived submit batch root:
+  - root: `patchnepa_tokens_full300_morton_20260304_044022`
+  - jobs: `102548/102549/102550`, launch-level failure path (replaced immediately).
+- cm15655 branch (partial training, not cardinality-locked):
+  - root: `patchnepa_tokens_full300_morton_cm15655_20260304_102805`
+  - job: `102828`, stopped at ~`step 2916-2950` (`Exit_status=271`), not used for final fair comparison.
+- recon short diag first attempt (before diagfix):
+  - roots: `patchnepa_tokens_reconmse_diag_20260304_181957`, `patchnepa_tokens_reconchamfer_diag_20260304_181957`
+  - jobs: `105285`, `105286` (`Exit_status=97`), superseded by `105287/105288` (section 138).
+- umbrella token run:
+  - root: `patchnepa_tokens_20260304_181941`
+  - job: `105284` (`Exit_status=265`), terminated before step logging.
+
+Takeaway:
+
+- these roots are now fully classified; downstream analysis should use validated branches only (sections 138-144 and subsequent full reruns).
+
+## 146. InfoNCE vs Residual (centered-cosine) status snapshot (2026-03-04)
+
+InfoNCE branch status:
+
+- no completed token-pretrain run has been launched with `pretrain_objective=nepa_infonce` yet.
+- in all observed recent runs, `loss_infonce` is exactly `0.0` throughout (objective path inactive).
+
+Residual (centered-cosine) branch status:
+
+- baseline (`center_mode=none`, `105310`, step 3700):
+  - `loss_total=0.573958`, `cos_tgt=0.4260`, `cos_prev=0.4274`, `gap=-0.0013`, `copy_win=0.7496`
+- segment (`center_mode=segment`, warmup `0.05`, `105319`, step 3700):
+  - `loss_total=0.473478`, `cos_tgt=0.5265`, `cos_prev=0.5470`, `gap=-0.0205`, `copy_win=0.7623`
+- shape (`center_mode=shape`, warmup `0.05`, `105320`, step 3700):
+  - `loss_total=0.024591`, `cos_tgt=0.9754`, `cos_prev=0.9750`, `gap=+0.0004`, `copy_win=0.7494`
+- segment no-warmup isolate (`105328`, step 200):
+  - `loss_total=0.480784`, `cos_tgt=0.5192`, `cos_prev=0.5579`, `gap=-0.0387`, `copy_win=0.7832`
+
+Current interpretation:
+
+- residual centering changes optimization dynamics, but does not robustly open `gap=cos_tgt-cos_prev`.
+- `shape` mode reaches very high cosine with near-zero gap (copy-risk unresolved).
+- `segment` mode tends to negative gap in stable region.
+
+## 147. InfoNCE short smoke submitted (`m50u50`, morton, split_sep) (2026-03-04)
+
+Submission:
+
+- job: `105332.qjcm` (`pntok_nce`)
+- run set: `patchnepa_tokens_infonce_smoke_20260304_205108`
+- run tag: `infonce_m50u50_smoke`
+
+Fixed settings:
+
+- `pretrain_objective=infonce`
+- `infonce_tau=0.07`
+- `mix_config=nepa3d/configs/shapenet_unpaired_mix_v2_tokens_drop1_mesh50_udf50.yaml`
+- `patch_order_mode=morton`
+- `token_qa_layout=split_sep`
+- `loss_mask_mode=answer_and_point_context`
+- `skip_k=1`
+- `nepa_center_mode=none`
+- `max_steps=2000`, `epochs=0`
+- full diagnostics on: `diag_every=1`, `wandb_log_every=1`
+
+Paths:
+
+- pbs log:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_infonce_smoke_20260304_205108/infonce_m50u50_smoke.pbs.log`
+- ddp run dir:
+  - `logs/ddp_patch_nepa_tokens_pretrain/ddp_patchnepa_tokens_105332.qjcm_infonce_m50u50_smoke/`
+
+Initial state:
+
+- job entered `R` and node-entry logs confirm objective is `infonce` (not cosine fallback).
+
+## 148. InfoNCE interim snapshot + preliminary insight (`105332`, in progress) (2026-03-04)
+
+Source:
+
+- `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_infonce_smoke_20260304_205108/infonce_m50u50_smoke.mr0.log`
+
+Interim readout (latest observed `step=1168`):
+
+- `loss_total=6.828708`
+- `loss_infonce=6.828708`
+- `loss_nepa=0.690645` (diagnostic reference only; not optimization target)
+- `pos_cos=0.3094`, `neg_cos=-0.0325`, `margin=0.3419`
+- `r1=0.0046`
+- `cos_tgt=0.3094`, `cos_prev=0.3090`, `gap=+0.0003`
+- `copy_win=0.7319`
+
+Window summaries:
+
+- `step 1-80`: `loss=7.0012`, `cos_tgt=0.1722`, `cos_prev=0.1722`, `gap≈0`
+- `step 81-120`: `loss=6.8470`, `cos_tgt=0.2747`, `cos_prev=0.2751`, `gap≈0`
+- `tail100 (1069-1168)`:  
+  `loss=6.8292`, `cos_tgt=0.3058`, `cos_prev=0.3057`, `gap=+0.0002`,  
+  `pos_cos=0.3058`, `neg_cos=-0.0330`, `margin=0.3388`
+
+Preliminary interpretation (not final until step 2000):
+
+- InfoNCE is active and separates positives from negatives (`margin > 0`, `neg_cos < 0`).
+- however, at this interim point the copy-risk proxy remains unresolved (`cos_tgt ≈ cos_prev`, near-zero gap), similar to prior cosine-family behavior.
