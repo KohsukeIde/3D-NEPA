@@ -6,6 +6,8 @@ Point-MAE and PointGPT.
 
 ## Reading Order
 
+0. `../llm_retrieval_index.md`
+   - Default retrieval policy for the whole `docs/` tree.
 1. `storyline_query_to_patch_v2_active.md`
    - Cross-line storyline and interpretation boundary.
    - Start here when asking "what happened?" or "which result is valid?"
@@ -49,6 +51,7 @@ Point-MAE and PointGPT.
 
 ## Policy
 
+- Use `storyline_query_to_patch_v2_active.md` as the default retrieval target.
 - Put raw run additions into `runlog_patch_nepa_202602.md`.
 - Put current-branch reasoning updates into
   `restart_plan_patchnepa_data_v2_20260303.md`.
@@ -57,3 +60,4 @@ Point-MAE and PointGPT.
   `hypothesis_matrix_active.md`.
 - Do not treat historical Point-MAE-style split rows as mainline evidence unless
   explicitly labeled as historical/reference.
+- Do not retrieve archive docs for Patch-NEPA by default.

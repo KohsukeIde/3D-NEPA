@@ -5,7 +5,7 @@ This file isolates completion-side ablations and scaling runs (A-E, 6) from the 
 - Scope: Progress-8 merge, A/B/C/D/E/6 runs, and A-1 coarse-to-fine
 - Main track (NEPA/MAE): `results_ucpr_cpac_active.md`
 - Planning doc: `plan_completion_ae6.md`
-- Source archive: `results_ucpr_cpac_active_mixed_archive.md`
+- Source archive: `nepa3d/docs/archive/completion_results_ucpr_cpac_mixed_archive.md`
 
 Policy note (Feb 20, 2026):
 

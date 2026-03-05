@@ -11,6 +11,7 @@ This file separates documentation by model line to avoid mixing conclusions:
 
 ## 2. Active Line (Patch-NEPA)
 
+- LLM retrieval index: `nepa3d/docs/llm_retrieval_index.md`
 - Folder guide: `nepa3d/docs/patch_nepa/README.md`
 - Cross-line storyline: `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
 - Hypothesis matrix: `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
@@ -53,6 +54,7 @@ Current Patch-NEPA mainline recipe uses:
 ## 5. Migration Policy
 
 - Do not merge Query-NEPA and Patch-NEPA run records into one active document.
+- Use `nepa3d/docs/llm_retrieval_index.md` to keep retrieval small.
 - Add new Stage-2 runs only to `runlog_patch_nepa_202602.md`.
 - Add cross-line conclusions only to `storyline_query_to_patch_v2_active.md`.
 - Add hypothesis-status updates only to `hypothesis_matrix_active.md`.

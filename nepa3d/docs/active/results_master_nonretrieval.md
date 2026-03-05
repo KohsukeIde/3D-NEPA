@@ -36,7 +36,7 @@ This page is a single entry point for all docs that contain quantitative results
 | completion A-E/6 track | active | `nepa3d/docs/completion/results_completion_ae6_active.md` | completion-focused ledger |
 | UCPR/CPAC main log | active | `nepa3d/docs/completion/results_ucpr_cpac_active.md` | use CPAC/mesh sections only (ignore retrieval rows) |
 | UCPR/CPAC plane baselines | active | `nepa3d/docs/completion/results_ucpr_cpac_plane_baselines_active.md` | use CPAC sections only |
-| UCPR/CPAC mixed archive | archive | `nepa3d/docs/completion/results_ucpr_cpac_active_mixed_archive.md` | provenance backup; CPAC sections only |
+| UCPR/CPAC mixed archive | archive | `nepa3d/docs/archive/completion_results_ucpr_cpac_mixed_archive.md` | provenance backup; CPAC sections only |
 
 ## Integrated Ledgers (Classification + CPAC mixed history)
 
@@ -53,7 +53,7 @@ This page is a single entry point for all docs that contain quantitative results
 |---|---|---|
 | active storyline memo | `nepa3d/docs/history/ablation_transfer_dda_active.md` | transition summary with selected quantitative checkpoints |
 | active completion memo | `nepa3d/docs/completion/plan_completion_ae6.md` | completion-track policy with metric-oriented checkpoints |
-| active idea memo | `nepa3d/docs/history/answer_token_expansion_crazy_ideas.md` | mixed notes including completion-side observed numbers |
+| archived idea memo | `nepa3d/docs/archive/history_answer_token_expansion_crazy_ideas.md` | mixed notes including completion-side observed numbers |
 | meta timeline | `nepa3d/docs/history/ablation_all_docs_timeline_active.md` | cross-doc timeline; references many result pages |
 
 ## Non-Result / Planning Docs (Not part of this index)

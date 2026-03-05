@@ -4,6 +4,8 @@ Last updated: 2026-03-06
 
 ## Start Here (Current)
 
+- LLM retrieval index:
+  - `nepa3d/docs/llm_retrieval_index.md`
 - Track split index (Query vs Patch):
   - `nepa3d/docs/patch_nepa/nepa_tracks_index.md`
 - Patch-NEPA folder guide:
@@ -25,6 +27,17 @@ Last updated: 2026-03-06
 - Query-NEPA historical runlog (job-level): `nepa3d/docs/query_nepa/runlog_202602.md`
 - Non-retrieval results master index: `nepa3d/docs/active/results_master_nonretrieval.md`
 
+## Default Retrieval Policy
+
+- For most Patch-NEPA questions, read only:
+  - `nepa3d/docs/llm_retrieval_index.md`
+  - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
+  - `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
+- Read `restart_plan_patchnepa_data_v2_20260303.md` only when current-branch
+  detail is required.
+- Read raw runlogs only when provenance or exact launch history is required.
+- Do not retrieve `nepa3d/docs/archive/` by default.
+
 ## Legacy Ledgers
 
 - Historical 1024 multi-node ledger: `nepa3d/docs/query_nepa/pretrain_abcd_1024_multinode_active.md`
@@ -38,6 +51,7 @@ Last updated: 2026-03-06
 - `nepa3d/docs/completion/`: CPAC/UCPR/completion ledgers and planning
 - `nepa3d/docs/history/`: cross-era timeline/memos/legacy consolidated history
 - `nepa3d/docs/active/`: cross-track master index only
+- `nepa3d/docs/archive/`: frozen low-priority docs excluded from default retrieval
 
 ## Update Policy
 

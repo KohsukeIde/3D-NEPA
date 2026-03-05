@@ -4,7 +4,7 @@ This file isolates plane-baseline tracks from the main UCPR/CPAC log.
 
 - Scope: `tri-plane` / `k-plane` families and related robustness checks
 - Main track (NEPA/MAE): `results_ucpr_cpac_active.md`
-- Source archive: `results_ucpr_cpac_active_mixed_archive.md`
+- Source archive: `nepa3d/docs/archive/completion_results_ucpr_cpac_mixed_archive.md`
 
 ## Protocol guardrails (comparison safety)
 

@@ -5,6 +5,7 @@ Use this index to avoid mixing canonical active benchmark docs with legacy ledge
 ## Canonical Active
 
 - Docs hub: `README.md`
+- LLM retrieval index: `llm_retrieval_index.md`
 - Query/Patch track split index: `patch_nepa/nepa_tracks_index.md`
 - Patch-NEPA folder guide: `patch_nepa/README.md`
 - QueryNEPA -> PatchNEPA storyline: `patch_nepa/storyline_query_to_patch_v2_active.md`
@@ -36,6 +37,7 @@ Use this index to avoid mixing canonical active benchmark docs with legacy ledge
 
 ## Policy
 
+- Start with `llm_retrieval_index.md` when the goal is efficient retrieval.
 - Headline benchmark numbers are maintained only in `patch_nepa/benchmark_scanobjectnn_variant.md`.
 - Patch-NEPA Stage-2 job updates are maintained in `patch_nepa/runlog_patch_nepa_202602.md`.
 - Cross-line interpretation is maintained in `patch_nepa/storyline_query_to_patch_v2_active.md`.
