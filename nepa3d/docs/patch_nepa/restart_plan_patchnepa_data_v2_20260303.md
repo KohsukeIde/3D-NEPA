@@ -1528,3 +1528,54 @@ Submitted runs:
 - `105852.qjcm`: PatchNEPA parity smoke (`column+keep_prefix=10+column_ratio=0.7`, `near/far=0`)
   - run tag: `ptok_column_pgpt_equiv_smoke_20260305_213144`
   - confirms new dual-mask settings are active in startup log.
+
+## 48. Immediate outcome after parity patch (2026-03-05)
+
+### 48.1 PatchNEPA parity smoke (`105852`) — completed
+
+Log:
+
+- `logs/patch_nepa_pretrain_tokens/patchnepa_tokens_20260305_213144/ptok_column_pgpt_equiv_smoke_20260305_213144.mr0.log`
+
+Final step (`2000/2000`):
+
+- `loss_total=0.499029`
+- `loss_nepa=0.499029`
+- `loss2d=-0.500971`
+- `cos_tgt=0.5010`
+- `cos_prev=0.5005`
+- `gap=+0.0005`
+- `copy_win=0.7495`
+
+W&B:
+
+- `https://wandb.ai/ide_koh/patchnepa-pretrain/runs/7c358uzw`
+
+Interpretation:
+
+- dual-mask parity patch works technically (column mask active with `near/far=0`).
+- however, behavior remains in the same regime (`cos_tgt≈cos_prev`, high `copy_win`).
+- therefore, dual-mask implementation mismatch was not the primary bottleneck.
+
+### 48.2 PointGPT ShapeNet run (`105851`) — in progress
+
+Log:
+
+- `logs/sanity/pointgpt_pretrain_shapenet/pointgpt_shapenet_300_20260305_213137.out`
+
+Current snapshot:
+
+- ShapeNet train/test loaded as expected (`47445` / `5357`)
+- run is progressing normally through epochs (no startup/runtime error).
+- recent train summary around epoch 6:
+  - `[Training] EPOCH: 6 ... Losses=['43.6205']`
+
+W&B:
+
+- `https://wandb.ai/ide_koh/pointgpt-pretrain/runs/3i0xp672`
+
+Operational conclusion at this point:
+
+- apples-to-apples pretrain domain is now aligned (both on ShapeNet family data).
+- with mask parity applied, remaining major differences are objective/task design
+  (`PointGPT: reconstruction`, `PatchNEPA smoke here: latent cosine with QA stream).
