@@ -34,8 +34,8 @@ It is a synthesis page, not a raw ledger.
 | Query-NEPA | mixed historical line | token-level NEPA cosine | useful engineering and protocol lessons only | not headline-safe due to protocol mixups in parts of the line | historical reference |
 | PatchNEPA v1 family | historical internal reference line | earlier content-target family | still the strongest internal PatchNEPA FT reference | `obj_bg=0.8262`, `obj_only=0.8417`, `pb_t50_rs=0.7845` | internal target line |
 | PatchNEPA v2 cosine path | ShapeNet-family token-path branch | latent cosine with QA stream | repeated `cos_tgt ~= cos_prev`, tiny gap, high copy-win | no evidence it beats v1 | active negative result |
-| PatchNEPA v2 recon `mse` | ShapeNet-family token-path branch | `ctx(mse)+q/a(mse)` composite recon | positive `recon_lift_q/a`, but weak FT | `0.7900 / 0.7814 / 0.7620` on `obj_bg / obj_only / pb_t50_rs` | active probe, clearly below v1 |
-| PatchNEPA v2 recon `chamfer` | ShapeNet-family token-path branch | `ctx(chamfer)+q/a(mse)` composite recon | best current v2 recon branch | `0.8124 / 0.8313 / 0.7765` on `obj_bg / obj_only / pb_t50_rs` | current best v2 recon line, still below v1 |
+| PatchNEPA v2 recon `g0` full300 | ShapeNet-family token-path branch | `ctx(chamfer)+q/a(mse)` composite recon | positive `recon_lift_q/a` survives full run and beats v1 on `2/3` ScanObjectNN variants | best headline `0.8399 / 0.8348 / 0.8102` on `obj_bg / obj_only / pb_t50_rs` | validated no-generator reconstruction baseline |
+| PatchNEPA v2 recon `g2` full300 | ShapeNet-family token-path branch | composite recon + generator depth `2` | best current v2 line; beats both v1 and `g0` on all three ScanObjectNN variants | best headline `0.8485 / 0.8589 / 0.8140` on `obj_bg / obj_only / pb_t50_rs` | current main reconstruction line |
 | Point-MAE | external baseline | masked point-patch modeling | protocol sanity and benchmark context | use benchmark page only | external benchmark context |
 | PointGPT | ShapeNet control line | causal reconstruction with generator | healthy reconstruction-style learning curve | use as pretrain/control reference, not a direct benchmark row here | reconstruction reference |
 
@@ -84,8 +84,9 @@ Reference:
 This is the active research line. The main result split is now:
 
 - cosine-family path: repeatedly collapses in cosine-space diagnostics,
-- reconstruction-family path: shows positive objective-aligned lift, but still
-  does not exceed v1 in FT.
+- reconstruction-family path: shows positive objective-aligned lift, and the
+  full300 `g2` line now exceeds the historical v1 FT reference on all three
+  ScanObjectNN variants.
 
 ### 4.4 Point-MAE
 
@@ -167,25 +168,53 @@ Interpretation:
 - the old cosine probes are the wrong readout for this objective family,
 - `recon_chamfer` and `recon_mse` are nearly equivalent on short-run diags.
 
-### 5.3 Reconstruction FT: Current Best v2 Is Still Below v1
+### 5.3 Reconstruction FT: Full300 `g0` and `g2` Now Surpass the Old v1 Line
 
-Full FT results from short recon checkpoints:
+Full FT results from the full300 reconstruction families:
 
-| line | `obj_bg` | `obj_only` | `pb_t50_rs` | delta vs v1 family |
+| line | `obj_bg` | `obj_only` | `pb_t50_rs` | read |
 |---|---:|---:|---:|---|
-| v1 family reference | `0.8262` | `0.8417` | `0.7845` | reference |
-| `recon_mse` | `0.7900` | `0.7814` | `0.7620` | `-0.0362 / -0.0603 / -0.0225` |
-| `recon_chamfer` | `0.8124` | `0.8313` | `0.7765` | `-0.0138 / -0.0104 / -0.0080` |
+| v1 family reference | `0.8262` | `0.8417` | `0.7845` | historical internal reference |
+| `reconbest` full300 (`g0`) | `0.8399` | `0.8348` | `0.8102` | beats v1 on `obj_bg` and `pb_t50_rs`, still below on `obj_only` |
+| `recong2` full300 (`g2`) | `0.8485` | `0.8589` | `0.8140` | beats both v1 and `g0` on all three variants |
 
 Interpretation:
 
-- `recon_chamfer` is the best current v2 reconstruction branch,
-- but both reconstruction branches remain below the v1-family internal
-  reference,
-- therefore: "positive recon lift" is established, "better downstream
-  transfer" is not.
+- full300 reconstruction is no longer just a positive-diag probe; it transfers,
+- the no-generator `g0` line is a valid reconstruction baseline,
+- the generator-enabled `g2` line is the current best PatchNEPA v2 result,
+- the strongest gain is on `obj_only`, where `g2` clears the old v1 line by
+  `+0.0172`.
 
-### 5.4 PointGPT-Parity Controls: What Is Now Aligned
+### 5.4 Translation-Loss Screen + Mini-CPAC: Split Signal, Not Mainline Yet
+
+The short translation-centric screen (`MAX_STEPS=2000`, `pc33mesh33udf33`,
+`g0`, `recon_chamfer`) now has both pretrain diags and mini-CPAC readout.
+
+Pretrain readout:
+
+| mode | `recon_lift_q` | `recon_lift_a` | `target_std_mean` | short read |
+|---|---:|---:|---:|---|
+| `composite` | `+0.1371` | `0.1132` | `0.1423` | best balanced reconstruction baseline |
+| `answer_only` | `-0.2415` | `0.1133` | `0.3654` | keeps A-side lift, breaks Q-side lift |
+| `context_plus_answer` | `-0.1777` | `0.1130` | `0.1443` | also breaks Q-side lift |
+
+Mini-CPAC readout (`PC context -> UDF query`, `64/64` shapes):
+
+| mode | `iou@0.01` | `mae` | `rmse` | short read |
+|---|---:|---:|---:|---|
+| `composite` | `0.0948` | `0.07585` | `0.09929` | best RMSE |
+| `answer_only` | `0.1033` | `0.07584` | `0.09991` | best IoU |
+| `context_plus_answer` | `0.0954` | `0.07653` | `0.10043` | weakest overall |
+
+Interpretation:
+
+- classification and full reconstruction currently still favor `composite`,
+- mini-CPAC favors `answer_only` on the thresholded IoU readout,
+- this is promising for translation-style behavior, but not enough to promote
+  `answer_only` to the mainline yet.
+
+### 5.5 PointGPT-Parity Controls: What Is Now Aligned
 
 The active memo already records a stricter PointGPT comparison axis:
 
@@ -210,9 +239,9 @@ The practical comparison should currently be read as:
 | axis | PatchNEPA v2 current line | PointGPT reference |
 |---|---|---|
 | sequence/task | QA split with primitive-conditioned answer stream | single point-patch stream |
-| main objective | cosine path or composite recon path | reconstruction-dominant path |
-| loss surface | `ctx(chamfer or mse) + q/a(mse)` or cosine family | patch reconstruction (`CD-L12`) |
-| generator | now configurable in PatchNEPA, but not yet the settled mainline | present and central |
+| main objective | full300 reconstruction path (`ctx(chamfer) + q/a(mse)`) with `g2` now mainline | reconstruction-dominant path |
+| loss surface | composite recon on QA stream; translation-centric variants remain screening controls | patch reconstruction (`CD-L12`) |
+| generator | present and now empirically useful on FT, but CPAC effect is still open | present and central |
 | diagnostic space | `recon/copy/lift` for recon, cosine probes only for cosine path | reconstruction-aligned diagnostics |
 
 This means:
@@ -226,14 +255,17 @@ This means:
 - PatchNEPA v1-family remains the best internal historical reference.
 - PatchNEPA v2 cosine-family target repeatedly collapses in cosine diagnostics.
 - PatchNEPA v2 reconstruction branch shows positive objective-aligned lift.
-- `recon_chamfer` is the best current v2 reconstruction branch.
-- PatchNEPA v2 still has not exceeded the historical v1-family FT baseline.
+- `recong2` full300 is the best current v2 reconstruction branch.
+- PatchNEPA v2 reconstruction + `g2` now exceeds the historical v1-family FT
+  baseline on all three ScanObjectNN variants.
 - Point-MAE is the protocol sanity / benchmark context.
 - PointGPT is the reconstruction-style reference for the next causal tests.
 
 ## 8. What Is Still Open
 
-- whether `reconstruction + generator` closes the transfer gap,
+- whether the `g2` gain also carries over to CPAC / cross-primitive evaluation,
+- whether the `answer_only` CPAC advantage can be retained without damaging FT
+  transfer,
 - whether strict PointGPT-loss parity plus generator depth reproduces the
   expected training dynamics on PatchNEPA,
 - whether any cosine-family target on the v2 token path can escape the

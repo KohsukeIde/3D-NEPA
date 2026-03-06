@@ -49,6 +49,21 @@ class PointAugConfig:
     pointmae_exact: bool = False
 
 
+def _pointmae_point_all(n_point: int) -> int:
+    """Return Point-MAE's FPS-prefetch size for a target sample count."""
+    n_point = int(n_point)
+    if n_point == 1024:
+        return 1200
+    if n_point == 2048:
+        return 2400
+    if n_point == 4096:
+        return 4800
+    if n_point == 8192:
+        return 8192
+    # Fallback for unsupported sizes: keep the same 1.2x-ish prefetch intent.
+    return max(n_point, int(round(float(n_point) * 1.2)))
+
+
 def _apply_pointmae_scale_translate(
     xyz: np.ndarray,
     *,
@@ -88,7 +103,7 @@ class PatchClsPointDataset(Dataset):
         cache_root: str,
         label_map: Dict[str, int],
         n_point: int = 1024,
-        sample_mode: str = "random",  # random | fps
+        sample_mode: str = "random",  # random | fps | fps_then_sample
         use_normals: bool = False,
         aug: bool = False,
         aug_cfg: Optional[PointAugConfig] = None,
@@ -106,7 +121,7 @@ class PatchClsPointDataset(Dataset):
         self.cache_root = str(cache_root)
         self.label_map = dict(label_map)
         self.n_point = int(n_point)
-        assert sample_mode in {"random", "fps"}
+        assert sample_mode in {"random", "fps", "fps_then_sample"}
         self.sample_mode = sample_mode
         self.use_normals = bool(use_normals)
         self.aug = bool(aug)
@@ -129,12 +144,27 @@ class PatchClsPointDataset(Dataset):
     def _sample_indices(self, pc_xyz: np.ndarray, npz: dict, *, sample_uid: int = 0) -> np.ndarray:
         n_total = pc_xyz.shape[0]
         n = min(self.n_point, n_total)
-        if self.sample_mode == "fps" and "pc_fps_order" in npz:
-            idx = npz["pc_fps_order"][:n]
+        if self.sample_mode in {"fps", "fps_then_sample"} and "pc_fps_order" in npz:
+            fps_order = np.asarray(npz["pc_fps_order"], dtype=np.int64)
+            if self.sample_mode == "fps":
+                idx = fps_order[:n]
+            else:
+                point_all = min(int(n_total), _pointmae_point_all(n))
+                if (not self.aug) and self.deterministic_eval_sampling:
+                    seed = (int(self.rng_seed) * 1315423911 + int(sample_uid) * 2654435761) & 0xFFFFFFFF
+                    rng = np.random.RandomState(seed)
+                else:
+                    rng = self._get_rng()
+                prefix = fps_order[:point_all]
+                if int(prefix.shape[0]) <= n:
+                    idx = prefix[rng.permutation(int(prefix.shape[0]))]
+                else:
+                    sel = rng.choice(int(prefix.shape[0]), size=n, replace=False)
+                    idx = prefix[sel]
         else:
-            if self.sample_mode == "fps" and (not self._warned_missing_fps_order):
+            if self.sample_mode in {"fps", "fps_then_sample"} and (not self._warned_missing_fps_order):
                 warnings.warn(
-                    "PatchClsPointDataset: sample_mode='fps' but pc_fps_order is missing; "
+                    f"PatchClsPointDataset: sample_mode='{self.sample_mode}' but pc_fps_order is missing; "
                     "falling back to random subset (results may differ from FPS eval protocol)."
                 )
                 self._warned_missing_fps_order = True
@@ -310,7 +340,7 @@ class PatchClsArrayDataset(Dataset):
         labels: np.ndarray,
         *,
         n_point: int = 1024,
-        sample_mode: str = "random",  # random | fps
+        sample_mode: str = "random",  # random | fps | fps_then_sample
         aug: bool = False,
         aug_cfg: Optional[PointAugConfig] = None,
         rng_seed: int = 0,
@@ -326,7 +356,7 @@ class PatchClsArrayDataset(Dataset):
         self.points = points.astype(np.float32, copy=False)
         self.labels = labels.astype(np.int64, copy=False)
         self.n_point = int(n_point)
-        assert sample_mode in {"random", "fps"}
+        assert sample_mode in {"random", "fps", "fps_then_sample"}
         self.sample_mode = sample_mode
         self.aug = bool(aug)
         self.aug_cfg = aug_cfg or PointAugConfig()
@@ -357,8 +387,11 @@ class PatchClsArrayDataset(Dataset):
             rng = self._get_rng()
         # For direct h5 route we don't have precomputed fps order.
         # Keep behavior explicit and deterministic-per-worker.
-        if self.sample_mode == "fps" and (not self._warned_fps_fallback):
-            print("[warn] PatchClsArrayDataset: sample_mode=fps but no precomputed fps order in h5 route; using random subset.")
+        if self.sample_mode in {"fps", "fps_then_sample"} and (not self._warned_fps_fallback):
+            print(
+                f"[warn] PatchClsArrayDataset: sample_mode={self.sample_mode} but no precomputed fps order in h5 route; "
+                "using random subset."
+            )
             self._warned_fps_fallback = True
         idx = rng.choice(n_total, size=n, replace=False)
         return idx.astype(np.int64, copy=False)

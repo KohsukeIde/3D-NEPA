@@ -1,6 +1,6 @@
 # Patch-NEPA Runlog (2026-02)
 
-Last updated: 2026-03-03
+Last updated: 2026-03-06
 
 Track note:
 
@@ -6192,3 +6192,193 @@ Preliminary interpretation (not final until step 2000):
 
 - InfoNCE is active and separates positives from negatives (`margin > 0`, `neg_cos < 0`).
 - however, at this interim point the copy-risk proxy remains unresolved (`cos_tgt ≈ cos_prev`, near-zero gap), similar to prior cosine-family behavior.
+
+## 149. `reconbest` full300 finalized (`g0`, 2026-03-05/06)
+
+Lineage:
+
+- submit root:
+  - `logs/sanity/patchnepa_submit/patchnepa_reconbest_full300_20260305_224714`
+- pretrain log root:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_reconbest_full300_20260305_224714`
+- FT log root:
+  - `logs/sanity/patchnepa_ft/patchnepa_reconbest_full300_20260305_224714`
+
+Pretrain jobs:
+
+- `105868` : `pc100`
+- `105869` : `mesh50udf50`
+- `105870` : `pc33mesh33udf33`
+
+Dependent FT jobs:
+
+- from `105868`: `105872/105873/105874`
+- from `105869`: `105875/105876/105877`
+- from `105870`: `105878/105879/105880`
+
+Save roots:
+
+- `runs/patchnepa_tokens/patchnepa_reconbest_full300_20260305_224714/pt_pc100_reconch_g0_e300`
+- `runs/patchnepa_tokens/patchnepa_reconbest_full300_20260305_224714/pt_mesh50udf50_reconch_g0_e300`
+- `runs/patchnepa_tokens/patchnepa_reconbest_full300_20260305_224714/pt_pc33mesh33udf33_reconch_g0_e300`
+
+Final readout:
+
+| source | `recon_lift_q` | `recon_lift_a` | `obj_bg` | `obj_only` | `pb_t50_rs` |
+|---|---:|---:|---:|---:|---:|
+| `pc100` | `0.1349` | `0.1096` | `0.8348` | `0.8107` | `0.7998` |
+| `mesh50udf50` | `0.1896` | `0.1466` | `0.8399` | `0.8227` | `0.8001` |
+| `pc33mesh33udf33` | `0.1640` | `0.1357` | `0.8365` | `0.8348` | `0.8102` |
+
+Headline:
+
+- best-of-three headline = `0.8399 / 0.8348 / 0.8102`
+- this beats the historical v1 reference on `obj_bg` and `pb_t50_rs`, but not
+  on `obj_only`.
+
+Canonical sources:
+
+- pretrain diag:
+  - `wandb/run-20260305_224819-qdxxc2vn/files/wandb-summary.json`
+  - `wandb/run-20260305_224815-lv9e9hce/files/wandb-summary.json`
+  - `wandb/run-20260305_224815-c27h2zlv/files/wandb-summary.json`
+- FT logs:
+  - `logs/sanity/patchnepa_ft/patchnepa_reconbest_full300_20260305_224714/*.out`
+
+## 150. `recong2` full300 finalized (`g2`, 2026-03-06)
+
+Lineage:
+
+- submit root:
+  - `logs/sanity/patchnepa_submit/patchnepa_recong2_full300_20260306_072643`
+- pretrain log root:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_recong2_full300_20260306_072643`
+- FT log root:
+  - `logs/sanity/patchnepa_ft/patchnepa_recong2_full300_20260306_072643`
+
+Pretrain jobs:
+
+- `105911` : `pc100`
+- `105912` : `mesh50udf50`
+- `105913` : `pc33mesh33udf33`
+
+Dependent FT jobs:
+
+- from `105911`: `105914/105915/105916`
+- from `105912`: `105917/105918/105919`
+- from `105913`: `105920/105921/105922`
+
+Save roots:
+
+- `runs/patchnepa_tokens/patchnepa_recong2_full300_20260306_072643/pt_pc100_reconch_g2_e300`
+- `runs/patchnepa_tokens/patchnepa_recong2_full300_20260306_072643/pt_mesh50udf50_reconch_g2_e300`
+- `runs/patchnepa_tokens/patchnepa_recong2_full300_20260306_072643/pt_pc33mesh33udf33_reconch_g2_e300`
+
+Final readout:
+
+| source | `recon_lift_q` | `recon_lift_a` | `obj_bg` | `obj_only` | `pb_t50_rs` |
+|---|---:|---:|---:|---:|---:|
+| `pc100` | `0.1520` | `0.1031` | `0.8279` | `0.8399` | `0.7932` |
+| `mesh50udf50` | `0.1666` | `0.1507` | `0.8485` | `0.8434` | `0.8053` |
+| `pc33mesh33udf33` | `0.1821` | `0.1421` | `0.8417` | `0.8589` | `0.8140` |
+
+Headline:
+
+- best-of-three headline = `0.8485 / 0.8589 / 0.8140`
+- this beats the historical v1 reference and the `g0` best-of-three headline on
+  all three ScanObjectNN variants.
+
+Canonical sources:
+
+- pretrain diag:
+  - `wandb/run-20260306_072734-aeoo6m8d/files/wandb-summary.json`
+  - `wandb/run-20260306_073118-h1hud0eo/files/wandb-summary.json`
+  - `wandb/run-20260306_073118-ocn054xz/files/wandb-summary.json`
+- FT logs:
+  - `logs/sanity/patchnepa_ft/patchnepa_recong2_full300_20260306_072643/*.out`
+
+## 151. Translation-loss short sweep + mini-CPAC rerun completed (2026-03-06)
+
+Short pretrain sweep lineage:
+
+- run set:
+  - `patchnepa_tokens_translationloss_pc33_g0_20260306_114629_{cmp,ans,cpa}`
+- pretrain jobs:
+  - `106029` (`composite`)
+  - `106031` (`answer_only`)
+  - `106033` (`context_plus_answer`)
+- save roots:
+  - `runs/patchnepa_tokens/patchnepa_tokens_translationloss_pc33_g0_20260306_114629_cmp/ckpt_final.pt`
+  - `runs/patchnepa_tokens/patchnepa_tokens_translationloss_pc33_g0_20260306_114629_ans/ckpt_final.pt`
+  - `runs/patchnepa_tokens/patchnepa_tokens_translationloss_pc33_g0_20260306_114629_cpa/ckpt_final.pt`
+
+Initial dependent CPAC jobs:
+
+- `106030/106032/106034`
+- all invalid as canonical evidence:
+  - requested checkpoint path was one directory too deep,
+  - logs terminate with `[error] ckpt not found`.
+
+Corrected CPAC rerun lineage:
+
+- canonical log root:
+  - `logs/patch_nepa_cpac/patchnepa_tokens_translationloss_pc33_g0_20260306_1900_rerun2`
+- canonical result root:
+  - `results/patch_nepa_cpac/patchnepa_tokens_translationloss_pc33_g0_20260306_1900_rerun2`
+- corrected jobs:
+  - `106571` (`context_plus_answer`)
+  - `106572` (`answer_only`)
+  - `106573` (`composite`)
+
+Short pretrain readout:
+
+| mode | pretrain job | `recon_lift_q` | `recon_lift_a` | `target_std_mean` |
+|---|---:|---:|---:|---:|
+| `composite` | `106029` | `+0.1371` | `0.1132` | `0.1423` |
+| `answer_only` | `106031` | `-0.2415` | `0.1133` | `0.3654` |
+| `context_plus_answer` | `106033` | `-0.1777` | `0.1130` | `0.1443` |
+
+Canonical mini-CPAC readout:
+
+| mode | corrected job | JSON | `iou@0.01` | `mae` | `rmse` |
+|---|---:|---|---:|---:|---:|
+| `composite` | `106573` | `cpac_pc2udf_cmp_fix.json` | `0.0948` | `0.07585` | `0.09929` |
+| `answer_only` | `106572` | `cpac_pc2udf_ans_fix.json` | `0.1033` | `0.07584` | `0.09991` |
+| `context_plus_answer` | `106571` | `cpac_pc2udf_cpa_fix.json` | `0.0954` | `0.07653` | `0.10043` |
+
+Ledger decision:
+
+- keep `composite` as the reconstruction baseline,
+- keep translation-centric modes as screening controls until a mode wins on both
+  pretrain and downstream criteria.
+
+Canonical source note:
+
+- use `logs/patch_nepa_cpac/...` and `results/patch_nepa_cpac/...json`,
+  not flat `pntok_cpac.o*`, as the persistent source of truth.
+
+## 152. `fps_then_sample` FT ablation recorded, not benchmark-eligible (2026-03-06)
+
+Lineage:
+
+- job:
+  - `106582`
+- run root:
+  - `logs/sanity/patchnepa_ft/patchnepa_recong2_pc33_objonly_fpsparity_20260306_1810`
+- compared against:
+  - `logs/sanity/patchnepa_ft/patchnepa_recong2_full300_20260306_072643/pc33mesh33udf33_obj_only.out`
+
+Result:
+
+| run | train sampler | best `val_acc` | `TEST acc` |
+|---|---|---:|---:|
+| baseline `g2` | `random` | `0.8969` | `0.8589` |
+| parity screen | `fps_then_sample` | `0.8924` | `0.8193` |
+
+Why this row is not benchmark-eligible:
+
+- the current `scanobjectnn_*_v3_nonorm` cache already stores exactly `2048`
+  input points per sample,
+- therefore `fps_then_sample` on this cache degenerates to a full-set
+  permutation, not a true `point_all > npoints` crop like Point-MAE,
+- this run is retained as an inconclusive ablation, not as headline evidence.

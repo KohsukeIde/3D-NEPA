@@ -1,6 +1,6 @@
 # Patch-NEPA Restart Plan (Data-v2 + CPAC Alignment)
 
-Last updated: 2026-03-03
+Last updated: 2026-03-06
 
 ## 1. Purpose
 
@@ -1787,3 +1787,240 @@ Key config:
 Queue status at submission check:
 
 - `job_state=R`
+
+## 55. Translation-centric minimal compare enabled + completed (2026-03-06)
+
+Intent:
+
+- add only comparison-enabling changes for the translation/CPAC direction.
+- do **not** hard-code stronger research conclusions (`generator required`, staged training,
+  `PC` removal, discrete answer language) into the mainline.
+
+Code changes applied:
+
+- `nepa3d/train/pretrain_patch_nepa_tokens.py`
+  - added `recon_loss_mode={answer_only, context_plus_answer, query_plus_answer}`
+  - added loss-mode-aware DDP handling:
+    - `find_unused_parameters=True` is now enabled automatically for reconstruction modes
+      that optimize only a strict subset of `{ctx, q, a}` heads
+    - this is the required fix to avoid the same unused-parameter failure seen in
+      `pointgpt_ctx_only` run `105884`
+  - W&B `diag/recon_loss_mode_id` now distinguishes all active reconstruction modes
+- `nepa3d/analysis/completion_cpac_udf_patchnepa.py`
+  - added `--surf_xyz_key`, `--qry_xyz_key`, `--qry_dist_key`
+  - added `--context_primitive`, `--query_primitive`
+  - context/query token `type_id` now follows primitive-specific PatchNEPA point types
+- `scripts/analysis/nepa3d_cpac_udf_patchnepa_qf.sh`
+  - forwards the new CPAC primitive/key arguments
+- `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_qf.sh`
+  - updated `RECON_LOSS_MODE` comment to include the new translation-centric modes
+
+Minimal experiment matrix (screening only):
+
+1. short pretrain sweep (`recon_chamfer`, `g0`, `pc33_mesh33_udf33`, `MAX_STEPS=2000`)
+2. dependent mini-CPAC on each resulting checkpoint
+   - context: `pc`
+   - query: `udf`
+   - keys: `pc_xyz -> udf_qry_xyz / udf_qry_dist`
+3. defer until after this screen:
+   - `query_plus_answer` launch
+   - `g0` vs `g2` comparison on the winning loss mode
+   - ScanObjectNN FT on the winning loss mode only
+
+Submitted jobs:
+
+| arm | pretrain mode | pretrain job | cpac job | status at submit check | pretrain save root |
+|---|---|---|---|---|---|
+| `cmp` | `composite` | `106029.qjcm` | `106030.qjcm` | pretrain `R`, CPAC `H(afterok)` | `runs/patchnepa_tokens/patchnepa_tokens_translationloss_pc33_g0_20260306_114629_cmp/pt_pc33_reconch_g0_cmp_s2000` |
+| `ans` | `answer_only` | `106031.qjcm` | `106032.qjcm` | pretrain `R`, CPAC `H(afterok)` | `runs/patchnepa_tokens/patchnepa_tokens_translationloss_pc33_g0_20260306_114629_ans/pt_pc33_reconch_g0_ans_s2000` |
+| `cpa` | `context_plus_answer` | `106033.qjcm` | `106034.qjcm` | pretrain `R`, CPAC `H(afterok)` | `runs/patchnepa_tokens/patchnepa_tokens_translationloss_pc33_g0_20260306_114629_cpa/pt_pc33_reconch_g0_cpa_s2000` |
+
+Operational settings shared by the three pretrains:
+
+- `RT_QF=2`, `NPROC_PER_NODE=4`, `GRAD_ACCUM=2`, `BATCH=8`
+- effective global batch remains `128`
+- `PRETRAIN_OBJECTIVE=recon_chamfer`
+- `RECON_GENERATOR_DEPTH=0`
+- `SAVE_EVERY=1000`
+
+Primary readout for this screen:
+
+- pretrain:
+  - `diag/recon_lift_q`
+  - `diag/recon_lift_a`
+  - `diag/target_std_mean`
+  - `diag/target_std_min`
+- dependent mini-CPAC:
+  - `mae`
+  - `rmse`
+  - `iou@0.01`
+
+Decision rule after completion:
+
+- if `answer_only` or `context_plus_answer` beats `composite` on both
+  `recon_lift_a` and mini-CPAC, promote that mode to the next `g0 vs g2` compare
+- otherwise keep `composite` as the reconstruction baseline and treat the
+  translation-centric modes as negative controls for now
+
+Completed outcome:
+
+- pretrain `106029/106031/106033` all finished successfully.
+- dependent CPAC jobs `106030/106032/106034` are **invalid** as canonical
+  evidence because they pointed one directory too deep and failed with
+  `[error] ckpt not found`.
+- the decision rule resolved to:
+  - keep `composite` as the reconstruction baseline,
+  - keep translation-centric modes as screening controls for now,
+  - use mini-CPAC only as a secondary signal until a loss mode wins on both
+    pretrain and downstream criteria.
+
+## 56. `reconbest` full300 finalized (`g0`, 2026-03-05/06)
+
+Canonical sources:
+
+- pretrain log root:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_reconbest_full300_20260305_224714`
+- FT log root:
+  - `logs/sanity/patchnepa_ft/patchnepa_reconbest_full300_20260305_224714`
+- pretrain job manifest:
+  - `logs/sanity/patchnepa_submit/patchnepa_reconbest_full300_20260305_224714/pretrain_jobs.tsv`
+- FT job manifest:
+  - `logs/sanity/patchnepa_ft/patchnepa_reconbest_full300_20260305_224714/job_ids.tsv`
+
+Per-source final readout:
+
+| source | pretrain job | `recon_lift_q` | `recon_lift_a` | `obj_bg` | `obj_only` | `pb_t50_rs` |
+|---|---:|---:|---:|---:|---:|---:|
+| `pc100` | `105868` | `0.1349` | `0.1096` | `0.8348` | `0.8107` | `0.7998` |
+| `mesh50udf50` | `105869` | `0.1896` | `0.1466` | `0.8399` | `0.8227` | `0.8001` |
+| `pc33mesh33udf33` | `105870` | `0.1640` | `0.1357` | `0.8365` | `0.8348` | `0.8102` |
+
+Headline read:
+
+- best `obj_bg`: `0.8399` (`mesh50udf50`)
+- best `obj_only`: `0.8348` (`pc33mesh33udf33`)
+- best `pb_t50_rs`: `0.8102` (`pc33mesh33udf33`)
+- vs historical v1 reference (`0.8262 / 0.8417 / 0.7845`), `g0` beats v1 on
+  `obj_bg` and `pb_t50_rs`, but remains below on `obj_only`.
+
+## 57. `recong2` full300 finalized (`g2`, 2026-03-06)
+
+Canonical sources:
+
+- pretrain log root:
+  - `logs/patch_nepa_pretrain_tokens/patchnepa_recong2_full300_20260306_072643`
+- FT log root:
+  - `logs/sanity/patchnepa_ft/patchnepa_recong2_full300_20260306_072643`
+- pretrain job manifest:
+  - `logs/sanity/patchnepa_submit/patchnepa_recong2_full300_20260306_072643/pretrain_jobs.tsv`
+- FT job manifest:
+  - `logs/sanity/patchnepa_ft/patchnepa_recong2_full300_20260306_072643/job_ids.tsv`
+
+Per-source final readout:
+
+| source | pretrain job | `recon_lift_q` | `recon_lift_a` | `obj_bg` | `obj_only` | `pb_t50_rs` |
+|---|---:|---:|---:|---:|---:|---:|
+| `pc100` | `105911` | `0.1520` | `0.1031` | `0.8279` | `0.8399` | `0.7932` |
+| `mesh50udf50` | `105912` | `0.1666` | `0.1507` | `0.8485` | `0.8434` | `0.8053` |
+| `pc33mesh33udf33` | `105913` | `0.1821` | `0.1421` | `0.8417` | `0.8589` | `0.8140` |
+
+Headline read:
+
+- best `obj_bg`: `0.8485` (`mesh50udf50`)
+- best `obj_only`: `0.8589` (`pc33mesh33udf33`)
+- best `pb_t50_rs`: `0.8140` (`pc33mesh33udf33`)
+- this exceeds both the historical v1 reference
+  (`0.8262 / 0.8417 / 0.7845`) and the `g0` best headline
+  (`0.8399 / 0.8348 / 0.8102`) on all three ScanObjectNN variants.
+
+## 58. Translation-loss minimal screen completed (2026-03-06)
+
+Canonical W&B sources:
+
+- `wandb/run-20260306_114732-75xy5ej0/files/wandb-summary.json`
+- `wandb/run-20260306_114732-awx50i19/files/wandb-summary.json`
+- `wandb/run-20260306_114732-wgtsmqey/files/wandb-summary.json`
+
+Short pretrain readout (`pc33mesh33udf33`, `g0`, `recon_chamfer`, `MAX_STEPS=2000`):
+
+| arm | mode | pretrain job | `recon_lift_q` | `recon_lift_a` | `target_std_mean` | `target_std_min` |
+|---|---|---:|---:|---:|---:|---:|
+| `cmp` | `composite` | `106029` | `+0.1371` | `0.1132` | `0.1423` | `0.0356` |
+| `ans` | `answer_only` | `106031` | `-0.2415` | `0.1133` | `0.3654` | `0.0703` |
+| `cpa` | `context_plus_answer` | `106033` | `-0.1777` | `0.1130` | `0.1443` | `0.0364` |
+
+Decision outcome:
+
+- `answer_only` and `context_plus_answer` did not beat `composite` on the joint
+  criterion because both degraded `recon_lift_q` sharply.
+- `composite` remains the reconstruction baseline for the next `g0` vs `g2`
+  comparisons.
+- translation-centric modes remain useful screening controls, not mainline.
+
+## 59. Mini-CPAC reevaluation completed (2026-03-06)
+
+Invalid first dependency chain:
+
+| arm | invalid job | reason |
+|---|---:|---|
+| `cmp` | `106030` | checkpoint path pointed one directory too deep |
+| `ans` | `106032` | checkpoint path pointed one directory too deep |
+| `cpa` | `106034` | checkpoint path pointed one directory too deep |
+
+Canonical rerun sources:
+
+- log root:
+  - `logs/patch_nepa_cpac/patchnepa_tokens_translationloss_pc33_g0_20260306_1900_rerun2`
+- result JSON root:
+  - `results/patch_nepa_cpac/patchnepa_tokens_translationloss_pc33_g0_20260306_1900_rerun2`
+
+Canonical rerun metrics (`PC context -> UDF query`, `64/64` shapes, `rep_source=h`):
+
+| arm | corrected job | result JSON | `iou@0.01` | `mae` | `rmse` |
+|---|---:|---|---:|---:|---:|
+| `cmp` | `106573` | `cpac_pc2udf_cmp_fix.json` | `0.0948` | `0.07585` | `0.09929` |
+| `ans` | `106572` | `cpac_pc2udf_ans_fix.json` | `0.1033` | `0.07584` | `0.09991` |
+| `cpa` | `106571` | `cpac_pc2udf_cpa_fix.json` | `0.0954` | `0.07653` | `0.10043` |
+
+Conclusion:
+
+- `answer_only` is best on `iou@0.01`,
+- `composite` is best on `rmse`,
+- `context_plus_answer` is weakest overall,
+- CPAC therefore gives a real but still split signal: translation-style loss
+  helps a thresholded completion metric, but not enough to replace the current
+  reconstruction baseline.
+
+## 60. Sampling-parity screen (`fps_then_sample`) completed (2026-03-06)
+
+Canonical source:
+
+- FT log:
+  - `logs/sanity/patchnepa_ft/patchnepa_recong2_pc33_objonly_fpsparity_20260306_1810/obj_only.out`
+
+Result:
+
+| run | train sampler | best `val_acc` | `TEST acc` |
+|---|---|---:|---:|
+| baseline `g2` (`pc33mesh33udf33`, `obj_only`) | `random` | `0.8969` | `0.8589` |
+| parity screen `106582` | `fps_then_sample` | `0.8924` | `0.8193` |
+
+Interpretation boundary:
+
+- this is **not** strong causal evidence about Point-MAE-style train sampling,
+  because the current `scanobjectnn_*_v3_nonorm` cache exposes
+  `pc_xyz.shape[0] = 2048`,
+- therefore `fps_then_sample` degenerates to a full-set permutation rather than
+  a true `point_all > npoints` crop,
+- keep this row as an inconclusive ablation only; do not promote it to a
+  benchmark headline comparison.
+
+Retention rule (effective immediately):
+
+- do not treat flat PBS stdout/stderr such as `pntok_cpac.o*` as the sole
+  storage location for final results,
+- store final evidence in docs plus structured artifacts:
+  - FT/pretrain metrics in the active docs,
+  - machine-readable completion metrics in `results/patch_nepa_cpac/.../*.json`,
+  - machine-readable pretrain diags in the corresponding W&B
+    `wandb-summary.json`.

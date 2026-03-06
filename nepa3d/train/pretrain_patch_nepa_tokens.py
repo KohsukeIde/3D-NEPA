@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from accelerate import Accelerator
+from accelerate import Accelerator, DistributedDataParallelKwargs
 from accelerate.utils import set_seed
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -58,6 +58,14 @@ A_POINT_TYPES = (
     int(TYPE_A_POINT_UDF),
     int(TYPE_A_POINT_PC),
 )
+
+RECON_LOSS_MODE_TO_ID = {
+    "composite": 0.0,
+    "pointgpt_ctx_only": 1.0,
+    "answer_only": 2.0,
+    "context_plus_answer": 3.0,
+    "query_plus_answer": 4.0,
+}
 
 
 @dataclass
@@ -215,11 +223,20 @@ def parse_args() -> argparse.Namespace:
         "--recon_loss_mode",
         type=str,
         default="composite",
-        choices=["composite", "pointgpt_ctx_only"],
+        choices=[
+            "composite",
+            "pointgpt_ctx_only",
+            "answer_only",
+            "context_plus_answer",
+            "query_plus_answer",
+        ],
         help=(
             "Reconstruction loss composition. "
             "'composite' = ctx+q+a (weighted), "
-            "'pointgpt_ctx_only' = context reconstruction only (PointGPT-equivalent axis)."
+            "'pointgpt_ctx_only' = context reconstruction only (PointGPT-equivalent axis), "
+            "'answer_only' = answer reconstruction only, "
+            "'context_plus_answer' = context+answer reconstruction, "
+            "'query_plus_answer' = query+answer reconstruction."
         ),
     )
     p.add_argument(
@@ -1303,9 +1320,27 @@ def _scheduler_scale(step: int, args: argparse.Namespace, warmup_steps: int) -> 
     return min_scale + (1.0 - min_scale) * cosv
 
 
+def _recon_loss_mode_uses_partial_heads(mode: str) -> bool:
+    return str(mode) in {
+        "pointgpt_ctx_only",
+        "answer_only",
+        "context_plus_answer",
+        "query_plus_answer",
+    }
+
+
 def main() -> None:
     args = parse_args()
-    accelerator = Accelerator(gradient_accumulation_steps=int(args.grad_accum))
+    objective = str(args.pretrain_objective)
+    ddp_find_unused = (
+        objective in {"recon_mse", "recon_chamfer"}
+        and _recon_loss_mode_uses_partial_heads(str(args.recon_loss_mode))
+    )
+    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=ddp_find_unused)
+    accelerator = Accelerator(
+        gradient_accumulation_steps=int(args.grad_accum),
+        kwargs_handlers=[ddp_kwargs],
+    )
     set_seed(int(args.seed))
 
     save_root = Path(args.save_dir) / args.run_name
@@ -1383,7 +1418,6 @@ def main() -> None:
         q_mask_mode=str(args.q_mask_mode),
         use_ray_patch=False,
     )
-    objective = str(args.pretrain_objective)
     chamfer_module: Optional[nn.Module] = None
     if objective == "recon_chamfer":
         chamfer_module = _load_chamfer_module(str(args.recon_chamfer_metric))
@@ -1488,6 +1522,7 @@ def main() -> None:
             f"chamfer_metric={str(args.recon_chamfer_metric)} "
             f"generator_depth={int(args.recon_generator_depth)}"
         )
+        accelerator.print(f"[token_pretrain] ddp_find_unused_parameters={bool(ddp_find_unused)}")
         if objective == "infonce":
             accelerator.print(f"[token_pretrain] infonce tau={float(args.infonce_tau):.4f}")
         accelerator.print(
@@ -1714,11 +1749,29 @@ def main() -> None:
                 if recon_loss_mode == "pointgpt_ctx_only":
                     # PointGPT-equivalent axis: optimize only patch-coordinate reconstruction.
                     loss_main = loss_recon_ctx
-                else:
+                elif recon_loss_mode == "answer_only":
+                    loss_main = float(args.recon_a_weight) * loss_recon_a
+                elif recon_loss_mode == "context_plus_answer":
+                    loss_main = (
+                        float(args.recon_ctx_weight) * loss_recon_ctx
+                        + float(args.recon_a_weight) * loss_recon_a
+                    )
+                elif recon_loss_mode == "query_plus_answer":
+                    loss_main = (
+                        float(args.recon_q_weight) * loss_recon_q
+                        + float(args.recon_a_weight) * loss_recon_a
+                    )
+                elif recon_loss_mode == "composite":
                     loss_main = (
                         float(args.recon_ctx_weight) * loss_recon_ctx
                         + float(args.recon_q_weight) * loss_recon_q
                         + float(args.recon_a_weight) * loss_recon_a
+                    )
+                else:
+                    raise ValueError(
+                        f"unknown recon_loss_mode={recon_loss_mode}. "
+                        "expected one of: composite, pointgpt_ctx_only, "
+                        "answer_only, context_plus_answer, query_plus_answer"
                     )
                 with torch.no_grad():
                     recon_diag = _compute_recon_diag(
@@ -1880,8 +1933,9 @@ def main() -> None:
                     if objective in {"recon_mse", "recon_chamfer"}:
                         wb["train/loss_pointgpt_equiv"] = loss_pointgpt_equiv
                         wb["train/loss_pointgpt_equiv_x1k"] = loss_pointgpt_equiv_x1k
-                        wb["diag/recon_loss_mode_id"] = (
-                            1.0 if str(args.recon_loss_mode) == "pointgpt_ctx_only" else 0.0
+                        wb["diag/recon_loss_mode_id"] = RECON_LOSS_MODE_TO_ID.get(
+                            str(args.recon_loss_mode),
+                            -1.0,
                         )
                     if len(optimizer.param_groups) > 0 and "lr" in optimizer.param_groups[0]:
                         wb["train/lr"] = float(optimizer.param_groups[0]["lr"])

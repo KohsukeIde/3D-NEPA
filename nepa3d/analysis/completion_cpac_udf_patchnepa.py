@@ -86,6 +86,44 @@ def _list_npz_files(root: str, split: str, max_files: int = 0) -> List[str]:
     return out
 
 
+def _key_candidates(override: str, defaults: List[str]) -> List[str]:
+    custom = str(override).strip()
+    if custom:
+        return [custom]
+    return list(defaults)
+
+
+def _default_surf_xyz_keys(context_primitive: str) -> List[str]:
+    s = str(context_primitive).strip().lower()
+    if ("pc" in s) or ("point" in s) or (s == "p"):
+        return ["pc_xyz", "surf_xyz", "pt_xyz_pool"]
+    return ["surf_xyz", "pc_xyz", "pt_xyz_pool"]
+
+
+def _default_qry_xyz_keys(query_primitive: str) -> List[str]:
+    s = str(query_primitive).strip().lower()
+    if ("mesh" in s) or (s == "m"):
+        return ["mesh_qry_xyz", "qry_xyz", "pt_xyz_pool"]
+    if ("pc" in s) or ("point" in s) or (s == "p"):
+        return ["pc_qry_xyz", "qry_xyz", "pt_xyz_pool"]
+    return ["udf_qry_xyz", "qry_xyz", "pt_xyz_pool"]
+
+
+def _default_qry_dist_keys(query_primitive: str) -> List[str]:
+    s = str(query_primitive).strip().lower()
+    if ("mesh" in s) or (s == "m"):
+        return []
+    if ("pc" in s) or ("point" in s) or (s == "p"):
+        return []
+    return [
+        "qry_dist_udf",
+        "udf_qry_dist",
+        "qry_udf",
+        "pt_dist_udf_pool",
+        "pt_dist_pool",
+    ]
+
+
 def _sample_rows(arr: np.ndarray, n: int, rng: np.random.RandomState) -> np.ndarray:
     n = int(n)
     if arr.shape[0] <= n:
@@ -119,31 +157,40 @@ class ShapeData:
     udf_grid: Optional[np.ndarray] = None  # [R, R, R]
 
 
-def _load_shape_npz(npz_path: str) -> ShapeData:
+def _load_shape_npz(
+    npz_path: str,
+    *,
+    surf_xyz_key: str = "",
+    qry_xyz_key: str = "",
+    qry_dist_key: str = "",
+    context_primitive: str = "generic",
+    query_primitive: str = "udf",
+) -> ShapeData:
     with np.load(npz_path, allow_pickle=False) as f:
-        surf_xyz = _npz_get_first(f, ["surf_xyz", "pc_xyz"])
+        surf_xyz = _npz_get_first(
+            f,
+            _key_candidates(surf_xyz_key, _default_surf_xyz_keys(context_primitive)),
+        )
         if surf_xyz is None:
             # Fallback: old pool (not ideal, but keeps script usable).
             surf_xyz = _npz_get_first(f, ["pt_xyz_pool"])
         if surf_xyz is None:
             raise KeyError(f"No surface xyz found in {npz_path}")
 
-        qry_xyz = _npz_get_first(f, ["udf_qry_xyz", "qry_xyz", "pt_xyz_pool"])
+        qry_xyz = _npz_get_first(
+            f,
+            _key_candidates(qry_xyz_key, _default_qry_xyz_keys(query_primitive)),
+        )
         if qry_xyz is None:
             raise KeyError(f"No query xyz found in {npz_path}")
 
-        qry_dist = _npz_get_first(
-            f,
-            [
-                "qry_dist_udf",
-                "udf_qry_dist",
-                "qry_udf",
-                "pt_dist_udf_pool",
-                "pt_dist_pool",
-            ],
-        )
+        qry_dist_keys = _key_candidates(qry_dist_key, _default_qry_dist_keys(query_primitive))
+        qry_dist = _npz_get_first(f, qry_dist_keys)
         if qry_dist is None:
-            raise KeyError(f"No query distance found in {npz_path}")
+            raise KeyError(
+                f"No query distance found in {npz_path} "
+                f"(query_primitive={query_primitive}, qry_dist_key={qry_dist_key!r})"
+            )
 
         qry_dist = np.asarray(qry_dist, dtype=np.float32).reshape(-1)
         surf_xyz = np.asarray(surf_xyz, dtype=np.float32).reshape(-1, 3)
@@ -175,6 +222,8 @@ def _build_patchnepa_from_ckpt(
         num_groups_val = None
     elif num_groups_val is not None:
         num_groups_val = int(num_groups_val)
+
+    ckpt_answer_in_dim = _get("answer_in_dim", None)
 
     model = PatchTransformerNepa(
         patch_embed=str(_get("patch_embed", "fps_knn")),
@@ -211,7 +260,7 @@ def _build_patchnepa_from_ckpt(
         answer_in_dim=(
             int(answer_in_dim_override)
             if answer_in_dim_override is not None
-            else (int(_get("answer_in_dim")) if _get("answer_in_dim", None) is not None else None)
+            else (int(ckpt_answer_in_dim) if ckpt_answer_in_dim is not None else None)
         ),
         answer_mlp_layers=int(_get("answer_mlp_layers", 2)),
         answer_pool=str(_get("answer_pool", "max")),
@@ -245,6 +294,11 @@ def _build_patchnepa_from_ckpt(
     return model
 
 
+def _query_point_type_for_primitive(model: PatchTransformerNepa, primitive: str) -> int:
+    q_type, _ = model._primitive_to_point_type_pair(str(primitive))
+    return int(q_type)
+
+
 def _extract_query_reps(
     *,
     model: PatchTransformerNepa,
@@ -255,6 +309,8 @@ def _extract_query_reps(
     chunk_n_query: int,
     device: torch.device,
     seed: int,
+    context_primitive: str,
+    query_primitive: str,
 ) -> np.ndarray:
     """Extract representations for query points given surface context."""
     rng = np.random.RandomState(int(seed))
@@ -271,6 +327,8 @@ def _extract_query_reps(
     sep = model.sep_ctx_token.expand(1, 1, -1)
     eos = model.eos_token.expand(1, 1, -1)
     zc = torch.zeros((1, 1, 3), device=device, dtype=torch.float32)
+    ctx_type = _query_point_type_for_primitive(model, context_primitive)
+    qry_type = _query_point_type_for_primitive(model, query_primitive)
 
     ctx_len = int(ctx_tok.shape[1])
     reps: List[np.ndarray] = []
@@ -296,9 +354,9 @@ def _extract_query_reps(
             type_id = torch.cat(
                 [
                     torch.full((1, 1), TYPE_BOS, device=device, dtype=torch.long),
-                    torch.full((1, ctx_len), TYPE_Q_POINT, device=device, dtype=torch.long),
+                    torch.full((1, ctx_len), ctx_type, device=device, dtype=torch.long),
                     torch.full((1, 1), TYPE_SEP_CTX, device=device, dtype=torch.long),
-                    torch.full((1, q_tok.shape[1]), TYPE_Q_POINT, device=device, dtype=torch.long),
+                    torch.full((1, q_tok.shape[1]), qry_type, device=device, dtype=torch.long),
                     torch.full((1, 1), TYPE_EOS, device=device, dtype=torch.long),
                 ],
                 dim=1,
@@ -383,6 +441,11 @@ def main() -> None:
     p.add_argument("--chunk_n_query", type=int, default=2048)
     p.add_argument("--rep_source", type=str, default="h", choices=["h", "zhat"])
     p.add_argument("--answer_in_dim", type=int, default=0, help="Override answer embedding input dim (0=ckpt/default)")
+    p.add_argument("--surf_xyz_key", type=str, default="", help="Override context xyz key (default follows context_primitive).")
+    p.add_argument("--qry_xyz_key", type=str, default="", help="Override query xyz key (default follows query_primitive).")
+    p.add_argument("--qry_dist_key", type=str, default="", help="Override query target-distance key.")
+    p.add_argument("--context_primitive", type=str, default="generic", help="Primitive label for context token types (e.g. pc, mesh, udf).")
+    p.add_argument("--query_primitive", type=str, default="udf", help="Primitive label for query token types (e.g. udf, mesh, pc).")
     p.add_argument("--ridge_alpha", type=float, default=1.0)
     p.add_argument("--tau", type=float, default=0.01)
     p.add_argument("--mesh_eval", action="store_true")
@@ -409,7 +472,14 @@ def main() -> None:
     y_all: List[np.ndarray] = []
     rng = np.random.RandomState(int(args.seed))
     for fp in train_files:
-        sd = _load_shape_npz(fp)
+        sd = _load_shape_npz(
+            fp,
+            surf_xyz_key=args.surf_xyz_key,
+            qry_xyz_key=args.qry_xyz_key,
+            qry_dist_key=args.qry_dist_key,
+            context_primitive=args.context_primitive,
+            query_primitive=args.query_primitive,
+        )
         # Sample query points for head training from the provided pool.
         q_xyz, q_dist = _sample_rows_aligned(
             [sd.qry_xyz, sd.qry_dist.reshape(-1, 1)],
@@ -427,6 +497,8 @@ def main() -> None:
             chunk_n_query=args.chunk_n_query,
             device=device,
             seed=args.seed,
+            context_primitive=args.context_primitive,
+            query_primitive=args.query_primitive,
         )
         X_all.append(X)
         y_all.append(q_dist.reshape(-1, 1))
@@ -446,7 +518,14 @@ def main() -> None:
     mesh_sum: Dict[str, float] = {}
     mesh_n = 0
     for fp in eval_files:
-        sd = _load_shape_npz(fp)
+        sd = _load_shape_npz(
+            fp,
+            surf_xyz_key=args.surf_xyz_key,
+            qry_xyz_key=args.qry_xyz_key,
+            qry_dist_key=args.qry_dist_key,
+            context_primitive=args.context_primitive,
+            query_primitive=args.query_primitive,
+        )
         q_xyz, q_dist = _sample_rows_aligned(
             [sd.qry_xyz, sd.qry_dist.reshape(-1, 1)],
             int(args.n_query),
@@ -463,6 +542,8 @@ def main() -> None:
             chunk_n_query=args.chunk_n_query,
             device=device,
             seed=args.seed,
+            context_primitive=args.context_primitive,
+            query_primitive=args.query_primitive,
         )
         y_pred = ridge.predict(X).reshape(-1)
         m = _compute_metrics(q_dist, y_pred, tau=args.tau)
@@ -488,6 +569,8 @@ def main() -> None:
                 chunk_n_query=args.chunk_n_query,
                 device=device,
                 seed=args.seed,
+                context_primitive=args.context_primitive,
+                query_primitive=args.query_primitive,
             )
 
             try:
@@ -551,6 +634,11 @@ def main() -> None:
             "n_query": int(args.n_query),
             "chunk_n_query": int(args.chunk_n_query),
             "rep_source": str(args.rep_source),
+            "surf_xyz_key": str(args.surf_xyz_key),
+            "qry_xyz_key": str(args.qry_xyz_key),
+            "qry_dist_key": str(args.qry_dist_key),
+            "context_primitive": str(args.context_primitive),
+            "query_primitive": str(args.query_primitive),
             "ridge_alpha": float(args.ridge_alpha),
             "tau": float(args.tau),
             "seed": int(args.seed),

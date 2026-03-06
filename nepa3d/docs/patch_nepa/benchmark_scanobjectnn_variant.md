@@ -1,6 +1,6 @@
 # ScanObjectNN Variant Benchmark (Active Canonical)
 
-Last updated: 2026-03-02
+Last updated: 2026-03-06
 
 ## 1. Scope
 
@@ -687,3 +687,49 @@ Result table (completed rows only):
 | `obj_bg` | 0.7281 |
 | `obj_only` | 0.7762 |
 | `pb_t50_rs` | pending |
+
+## 13. PatchNEPA v2 reconstruction headline update (2026-03-06)
+
+This section is the canonical PatchNEPA-v2 headline snapshot for the current
+variant-split protocol.
+
+Canonical table:
+
+| line | `obj_bg` | `obj_only` | `pb_t50_rs` | note |
+|---|---:|---:|---:|---|
+| PatchNEPA v1 reference | `0.8262` | `0.8417` | `0.7845` | historical internal reference |
+| PatchNEPA v2 `reconbest` full300 (`g0`) | `0.8399` | `0.8348` | `0.8102` | no-generator recon baseline; best-of-three-source headline |
+| PatchNEPA v2 `recong2` full300 (`g2`) | `0.8485` | `0.8589` | `0.8140` | current best PatchNEPA v2 line; exceeds v1 on all three variants |
+| Point-MAE corrected variant-aligned sanity | `0.9019` | `0.8795` | `0.8459` | corrected repo-local sanity (`90.1893 / 87.9518 / 84.5940` in %) |
+
+Current PatchNEPA headline FT recipe:
+
+- `num_groups=64`, `group_size=32`
+- `train_sample=random`, `eval_sample=fps`
+- `aug_preset=pointmae`, `aug_eval=1`
+- `mc_test=10`
+
+Recipe boundary:
+
+- current PatchNEPA headline FT already uses Point-MAE-style runtime
+  scale+translate augmentation,
+- rotation augmentation is still absent from the current headline recipe.
+
+Sampling-parity note:
+
+- the `fps_then_sample` screen on `106582` is **not** included as a benchmark
+  row,
+- reason: the current `scanobjectnn_*_v3_nonorm` cache exposes exactly `2048`
+  input points, so this ablation degenerates to a full-set permutation and is
+  confounded by single-run variance.
+
+Canonical source paths for this section:
+
+- PatchNEPA v1 reference:
+  - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
+- PatchNEPA `g0` FT logs:
+  - `logs/sanity/patchnepa_ft/patchnepa_reconbest_full300_20260305_224714`
+- PatchNEPA `g2` FT logs:
+  - `logs/sanity/patchnepa_ft/patchnepa_recong2_full300_20260306_072643`
+- Point-MAE corrected sanity rows:
+  - section `2.2 External sanity already executed (Point-MAE)` in this file

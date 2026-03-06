@@ -93,8 +93,8 @@ def add_args(p: argparse.ArgumentParser) -> None:
     )
 
     p.add_argument("--n_point", type=int, default=1024)
-    p.add_argument("--pt_sample_mode_train", type=str, default="random", choices=["random", "fps"])
-    p.add_argument("--pt_sample_mode_eval", type=str, default="fps", choices=["random", "fps"])
+    p.add_argument("--pt_sample_mode_train", type=str, default="random", choices=["random", "fps", "fps_then_sample"])
+    p.add_argument("--pt_sample_mode_eval", type=str, default="fps", choices=["random", "fps", "fps_then_sample"])
     p.add_argument("--use_normals", type=int, default=0)
 
     # Aug
