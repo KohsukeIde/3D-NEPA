@@ -28,6 +28,8 @@ legacy scripts.
     ablation submitters)
 - `scripts/logs/`
   - maintained workspace cleanup helpers
+- `scripts/local/`
+  - maintained local-only queue manifests and runners for post-PBS operation
 
 ## Archived scripts
 
@@ -55,6 +57,7 @@ legacy scripts.
 When adding new automation:
 
 1. prefer `submit_*_qf.sh` style for PBS entrypoints
-2. keep ad-hoc local chains out of active folders
+2. keep ad-hoc local chains out of active folders; maintained local-only ops
+   belong under `scripts/local/`
 3. if a script becomes historical, broken-by-default, or unused, move it to
    `scripts/legacy/<date_tag>/`

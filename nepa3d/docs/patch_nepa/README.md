@@ -13,13 +13,16 @@ Point-MAE and PointGPT.
    - Start here when asking "what happened?" or "which result is valid?"
 2. `hypothesis_matrix_active.md`
    - Hypotheses, supporting evidence, current status, and next minimal tests.
-3. `restart_plan_patchnepa_data_v2_20260303.md`
+3. `execution_backlog_active.md`
+   - Canonical local-only execution backlog and gating rules.
+   - Start here when asking "what should run next locally?"
+4. `restart_plan_patchnepa_data_v2_20260303.md`
    - Active investigation memo for the current v2 token-path branch.
-4. `patch_nepa_stage2_active.md`
+5. `patch_nepa_stage2_active.md`
    - Active mainline policy and stage-2 execution rules.
-5. `runlog_patch_nepa_202602.md`
+6. `runlog_patch_nepa_202602.md`
    - Raw execution ledger for Patch-NEPA jobs.
-6. `benchmark_scanobjectnn_variant.md`
+7. `benchmark_scanobjectnn_variant.md`
    - Canonical headline ScanObjectNN benchmark table.
 
 ## Document Roles
@@ -29,6 +32,8 @@ Point-MAE and PointGPT.
 - `restart_plan_patchnepa_data_v2_20260303.md`
   - Current experiment branch notebook. Use for in-flight diagnostics and local
     decision notes.
+- `execution_backlog_active.md`
+  - Canonical local-only execution order, gating, and canonization targets.
 - `storyline_query_to_patch_v2_active.md`
   - Cross-era summary across QueryNEPA, PatchNEPA v1, PatchNEPA v2, and
     external baselines.
@@ -55,6 +60,7 @@ Point-MAE and PointGPT.
 - Put raw run additions into `runlog_patch_nepa_202602.md`.
 - Put current-branch reasoning updates into
   `restart_plan_patchnepa_data_v2_20260303.md`.
+- Put local-only next-run decisions into `execution_backlog_active.md`.
 - Put cross-line conclusions only into
   `storyline_query_to_patch_v2_active.md` and
   `hypothesis_matrix_active.md`.

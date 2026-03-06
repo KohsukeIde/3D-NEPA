@@ -24,6 +24,8 @@ It is a synthesis page, not a raw ledger.
   - `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
 - Patch benchmark headline table:
   - `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
+- Patch local-only execution backlog:
+  - `nepa3d/docs/patch_nepa/execution_backlog_active.md`
 - Query-to-patch validity audit:
   - `nepa3d/docs/patch_nepa/query_nepa_chronology_audit_202602_active.md`
 
@@ -271,13 +273,24 @@ This means:
 - whether any cosine-family target on the v2 token path can escape the
   `cos_tgt ~= cos_prev` regime,
 - whether Q/A composite structure helps or hurts transfer once generator-based
-  recon is working.
+  recon is working,
+- whether true train-sampling parity changes the current negative
+  `fps_then_sample` ablation once a real `point_all > npoints` path exists,
+- whether FT-side recipe follow-ups such as rotation materially change the
+  current external-gap readout,
+- how to package the current cosine/reconstruction diagnostics into a stable
+  paper-ready metric sheet.
+
+Operational execution order for these open items now lives in:
+
+- `nepa3d/docs/patch_nepa/execution_backlog_active.md`
 
 ## 9. Practical Reading Order for New Analysis
 
 1. `nepa3d/docs/llm_retrieval_index.md`
 2. `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
 3. `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
-4. `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
-5. `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`
-6. `nepa3d/docs/query_nepa/runlog_202602.md`
+4. `nepa3d/docs/patch_nepa/execution_backlog_active.md`
+5. `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
+6. `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`
+7. `nepa3d/docs/query_nepa/runlog_202602.md`
