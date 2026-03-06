@@ -91,7 +91,7 @@ qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<ckpt>,CONTEX
 Use the local table launcher:
 
 ```bash
-bash scripts/finetune/run_scanobjectnn_m1_table_local.sh
+bash scripts/legacy/local_chains_20260226/finetune/run_scanobjectnn_m1_table_local.sh
 ```
 
 Methods should include scratch, ShapeNet-only, ShapeNet+UDF, mixed-unpaired (NEPA/MAE).

@@ -73,8 +73,8 @@ Purpose:
 
 Chain:
 
-- runner: `scripts/finetune/run_scanobjectnn_review_fixedgrid_after_v3_objbg_local.sh`
-- launcher: `scripts/finetune/launch_scanobjectnn_review_fixedgrid_after_v3_objbg_local.sh`
+- runner: `scripts/legacy/local_chains_20260226/finetune/run_scanobjectnn_review_fixedgrid_after_v3_objbg_local.sh`
+- launcher: `scripts/legacy/local_chains_20260226/finetune/launch_scanobjectnn_review_fixedgrid_after_v3_objbg_local.sh`
 - pipeline log: `logs/finetune/scan_variants_review_fixedgrid_after_v3_objbg_chain/pipeline.log`
 
 Stages (auto-resume by `last.pt`, now complete):
@@ -451,10 +451,10 @@ Source: `runs/scan_variants_review_ft_fair_pcxyz2k_v1/obj_bg/scan_<method>_ablat
 - [ ] Decide whether fixed-grid query (and/or `bos` pooling) should be expanded beyond diagnostic scope.
 - [ ] Keep completion-side TODOs tracked separately (this page is classification-focused).
 - [ ] Keep launcher references up to date:
-  - launcher: `scripts/finetune/launch_scanobjectnn_review_fair_ft_chain_local.sh`
-  - runner: `scripts/finetune/run_scanobjectnn_review_fair_ft_chain_local.sh`
-  - launcher: `scripts/finetune/launch_scanobjectnn_review_fixedgrid_after_v3_objbg_local.sh`
-  - runner: `scripts/finetune/run_scanobjectnn_review_fixedgrid_after_v3_objbg_local.sh`
+  - launcher: `scripts/legacy/local_chains_20260226/finetune/launch_scanobjectnn_review_fair_ft_chain_local.sh`
+  - runner: `scripts/legacy/local_chains_20260226/finetune/run_scanobjectnn_review_fair_ft_chain_local.sh`
+  - launcher: `scripts/legacy/local_chains_20260226/finetune/launch_scanobjectnn_review_fixedgrid_after_v3_objbg_local.sh`
+  - runner: `scripts/legacy/local_chains_20260226/finetune/run_scanobjectnn_review_fixedgrid_after_v3_objbg_local.sh`
 
 ## Protocol reference (`v0` poolfix rerun)
 

@@ -14,13 +14,13 @@ Current launch flow in this repo:
 
 ```bash
 # 1) M1 pretrains (2 GPUs, queued 3 jobs)
-bash scripts/pretrain/launch_shapenet_m1_pretrains_local.sh
+bash scripts/legacy/local_chains_20260226/pretrain/launch_shapenet_m1_pretrains_local.sh
 
 # 2) (optional) auto-launch M1 ScanObjectNN table after pretrain succeeds
-bash scripts/finetune/launch_scanobjectnn_m1_after_pretrain.sh
+bash scripts/legacy/deprecated_20260306/finetune/launch_scanobjectnn_m1_after_pretrain.sh
 
 # 3) or launch table manually
-bash scripts/finetune/launch_scanobjectnn_m1_table_local.sh
+bash scripts/legacy/local_chains_20260226/finetune/launch_scanobjectnn_m1_table_local.sh
 ```
 
 Resume behavior for pretrain:
@@ -32,7 +32,8 @@ Current log locations:
 - pretrain: `logs/pretrain/m1/`
 - finetune table: `logs/finetune/scan_m1_table/`
 - auto-chain watcher: `logs/finetune/m1_after_pretrain/`
-- status/cleanup helpers: `scripts/logs/show_pipeline_status.sh`, `scripts/logs/cleanup_stale_pids.sh`
+- historical status/cleanup helpers were retired; the maintained helper is
+  `scripts/logs/prune_superseded_logs.sh`
 
 Legacy ModelNet40-era experiments are kept for reference but are no longer the primary experimental path.
 
@@ -238,7 +239,7 @@ Simple mesh-only pretrain on ShapeNet cache (NEPA + MAE in parallel):
 ```bash
 CACHE_ROOT=data/shapenet_cache_v0 \
 SAVE_EVERY=10 SAVE_LAST=1 \
-bash scripts/pretrain/run_shapenet_simple_local.sh
+bash scripts/legacy/local_chains_20260226/pretrain/run_shapenet_simple_local.sh
 ```
 
 Checkpoint pruning helper (keep every 10 epochs + last):
@@ -277,13 +278,13 @@ Suggested log files:
 Run full + few-shot (K=0/1/5/10/20) for 4 methods (`scratch`, `mesh_nepa`, `mix_nepa`, `mix_mae`) and seeds `0,1,2`:
 
 ```bash
-bash scripts/finetune/run_scanobjectnn_main_table_local.sh
+bash scripts/legacy/local_chains_20260226/finetune/run_scanobjectnn_main_table_local.sh
 ```
 
 Background launcher:
 
 ```bash
-bash scripts/finetune/launch_scanobjectnn_main_table_local.sh
+bash scripts/legacy/local_chains_20260226/finetune/launch_scanobjectnn_main_table_local.sh
 ```
 
 This launches 60 jobs total (2 in parallel, one per GPU), with resume/skip by `last.pt`:
@@ -306,19 +307,19 @@ nvidia-smi
 Run full + few-shot (K=0/1/5/10/20) for 3 methods (`scratch`, `shapenet_nepa`, `shapenet_mae`) and seeds `0,1,2`:
 
 ```bash
-bash scripts/finetune/run_scanobjectnn_shapenet_table_local.sh
+bash scripts/legacy/local_chains_20260226/finetune/run_scanobjectnn_shapenet_table_local.sh
 ```
 
 Background launcher:
 
 ```bash
-bash scripts/finetune/launch_scanobjectnn_shapenet_table_local.sh
+bash scripts/legacy/local_chains_20260226/finetune/launch_scanobjectnn_shapenet_table_local.sh
 ```
 
 Chain launcher (auto-start mixed/main-table after shapenet-table completes successfully):
 
 ```bash
-bash scripts/finetune/launch_chain_shapenet_to_main.sh
+bash scripts/legacy/deprecated_20260306/finetune/launch_chain_shapenet_to_main.sh
 ```
 
 This launches 45 jobs total (2 in parallel, one per GPU), with resume/skip by `last.pt`:
@@ -336,7 +337,7 @@ Pretrain jobs for M1:
 Run:
 
 ```bash
-bash scripts/pretrain/launch_shapenet_m1_pretrains_local.sh
+bash scripts/legacy/local_chains_20260226/pretrain/launch_shapenet_m1_pretrains_local.sh
 ```
 
 Logs:
@@ -355,7 +356,7 @@ Methods:
 Run:
 
 ```bash
-bash scripts/finetune/launch_scanobjectnn_m1_table_local.sh
+bash scripts/legacy/local_chains_20260226/finetune/launch_scanobjectnn_m1_table_local.sh
 ```
 
 Logs:
@@ -369,7 +370,7 @@ Wait for current `scan_shapenet_table` completion, then launch:
 2) M1 ScanObjectNN table
 
 ```bash
-bash scripts/finetune/launch_m1_pipeline_after_shapenet_table.sh
+bash scripts/legacy/deprecated_20260306/finetune/launch_m1_pipeline_after_shapenet_table.sh
 ```
 
 ### v0 cache
@@ -406,7 +407,7 @@ As of this snapshot, M1 fine-tune is not fully complete yet.
 Resume command:
 
 ```bash
-bash scripts/finetune/launch_scanobjectnn_m1_table_local.sh
+bash scripts/legacy/local_chains_20260226/finetune/launch_scanobjectnn_m1_table_local.sh
 ```
 
 The launcher skips jobs with existing `last.pt`, so it resumes from remaining jobs.

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -eu
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Deprecated helper kept for archived local-chain flow.
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "${ROOT_DIR}" || exit 1
 
 PRE_PID_FILE="${PRE_PID_FILE:-logs/finetune/scan_shapenet_table/pipeline.pid}"

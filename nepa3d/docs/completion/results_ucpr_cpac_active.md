@@ -1200,13 +1200,13 @@ CUDA_VISIBLE_DEVICES=1 .venv/bin/python -u -m nepa3d.train.pretrain_kplane \
 Auto evaluation chain (wait for `ckpt_ep049.pt`, then UCPR/CPAC):
 
 ```bash
-bash scripts/analysis/launch_kplane_full_chain_local.sh
+bash scripts/legacy/local_chains_20260226/analysis/launch_kplane_full_chain_local.sh
 ```
 
 Chain scripts:
 
-- `scripts/analysis/run_kplane_full_chain_local.sh`
-- `scripts/analysis/launch_kplane_full_chain_local.sh`
+- `scripts/legacy/local_chains_20260226/analysis/run_kplane_full_chain_local.sh`
+- `scripts/legacy/local_chains_20260226/analysis/launch_kplane_full_chain_local.sh`
 
 ### Results (e50, single-seed)
 
@@ -1390,7 +1390,7 @@ Logs:
 
 Auto-eval chain:
 
-- runner: `scripts/analysis/run_kplane_sum_chain_local.sh` (retargeted via env)
+- runner: `scripts/legacy/local_chains_20260226/analysis/run_kplane_sum_chain_local.sh` (retargeted via env)
 - pipeline log: `logs/analysis/kplane_product_c64_chain/pipeline.log`
 - completion line confirmed: `all evaluations finished`
 
@@ -1442,17 +1442,17 @@ Logs:
 Auto evaluation chain (wait for `ckpt_ep049.pt`, then run tie-aware UCPR/CPAC pack):
 
 ```bash
-bash scripts/analysis/launch_kplane_sum_chain_local.sh
+bash scripts/legacy/local_chains_20260226/analysis/launch_kplane_sum_chain_local.sh
 ```
 
 Smoke validation (existing checkpoints, reduced `max_files/max_shapes`) was run to verify chain wiring before waiting for new checkpoints:
 
-- `scripts/analysis/run_kplane_sum_chain_local.sh`
+- `scripts/legacy/local_chains_20260226/analysis/run_kplane_sum_chain_local.sh`
 - both model branches completed and emitted `_tmp_chain_smoke_*` JSON successfully
 
 Final eval execution:
 
-- `bash scripts/analysis/run_kplane_sum_chain_local.sh`
+- `bash scripts/legacy/local_chains_20260226/analysis/run_kplane_sum_chain_local.sh`
 - tie-aware UCPR + CPAC pack completed for both `kplane_sum_s0_e50` and `kplane_sum_large_s0_e50`
 
 ### Results (e50, single-seed)

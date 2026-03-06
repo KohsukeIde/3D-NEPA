@@ -1794,7 +1794,7 @@ Readout:
 
 Main runner:
 
-- `scripts/analysis/run_impl_update_plus_grad_unc_topo_chain_local.sh`
+- `scripts/legacy/local_chains_20260226/analysis/run_impl_update_plus_grad_unc_topo_chain_local.sh`
 
 Configured goal:
 
@@ -1806,7 +1806,7 @@ Configured goal:
 
 Follow-up runner:
 
-- `scripts/analysis/run_impl_update_plus_grad_unc_topo_bbox_chain_local.sh`
+- `scripts/legacy/local_chains_20260226/analysis/run_impl_update_plus_grad_unc_topo_bbox_chain_local.sh`
 - purpose: compare EncDec `topo_ray_coord=bbox` vs `proj` under the same +grad/+unc settings.
 
 Current status (finalized):
@@ -1888,11 +1888,11 @@ For next rerun, launch explicitly and independently:
 ```bash
 # 1) topo/proj line (no wait)
 RUN_ID=$(date +%Y%m%d_%H%M%S) WAIT_FOR_PRIOR=0 \
-  bash scripts/analysis/launch_impl_update_plus_grad_unc_topo_chain_local.sh
+  bash scripts/legacy/local_chains_20260226/analysis/launch_impl_update_plus_grad_unc_topo_chain_local.sh
 
 # 2) bbox line (no wait; launch when GPU is free)
 RUN_ID=$(date +%Y%m%d_%H%M%S) WAIT_FOR_PRIOR=0 \
-  bash scripts/analysis/launch_impl_update_plus_grad_unc_topo_bbox_chain_local.sh
+  bash scripts/legacy/local_chains_20260226/analysis/launch_impl_update_plus_grad_unc_topo_bbox_chain_local.sh
 ```
 
 Operational notes:
@@ -1980,7 +1980,7 @@ Objective:
 
 Runner:
 
-- `scripts/analysis/run_scale_retry_variant_local.sh`
+- `scripts/legacy/local_chains_20260226/analysis/run_scale_retry_variant_local.sh`
 
 Run logs:
 
@@ -2029,7 +2029,7 @@ Policy alignment:
 
 Runner:
 
-- `scripts/analysis/run_scale_objpres_retry_local.sh`
+- `scripts/legacy/local_chains_20260226/analysis/run_scale_objpres_retry_local.sh`
 
 Launch logs:
 
@@ -2081,7 +2081,7 @@ Objective:
 
 Protocol:
 
-- script: `scripts/analysis/run_cpac_mesh_a1_objpres_local.sh`
+- script: `scripts/legacy/local_chains_20260226/analysis/run_cpac_mesh_a1_objpres_local.sh`
 - eval settings: `max_shapes=800`, `mesh_eval_max_shapes=80`, `mesh_grid_res=24`, `mesh_chunk_n_query=512`, `mesh_mc_level=0.03`, `mesh_num_samples=10000`, `mesh_fscore_tau=0.01`
 - query modes: `grid_uniform`, `grid_near08`, `grid_c2f163264`
 - all runs finished with `mesh_eval.fail_count=0`

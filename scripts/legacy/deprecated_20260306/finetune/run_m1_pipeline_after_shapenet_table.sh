@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eu
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "${ROOT_DIR}" || exit 1
 
 PRE_PID_FILE="${PRE_PID_FILE:-logs/finetune/scan_shapenet_table/pipeline.pid}"
@@ -9,11 +9,11 @@ PRE_LOG_FILE="${PRE_LOG_FILE:-logs/finetune/scan_shapenet_table/pipeline.log}"
 POLL_SEC="${POLL_SEC:-60}"
 REQUIRE_SUCCESS="${REQUIRE_SUCCESS:-1}"
 
-PRETRAIN_LAUNCH="${PRETRAIN_LAUNCH:-scripts/pretrain/launch_shapenet_m1_pretrains_local.sh}"
+PRETRAIN_LAUNCH="${PRETRAIN_LAUNCH:-scripts/legacy/local_chains_20260226/pretrain/launch_shapenet_m1_pretrains_local.sh}"
 PRETRAIN_PID_FILE="${PRETRAIN_PID_FILE:-logs/pretrain/m1/pipeline.pid}"
 PRETRAIN_LOG_FILE="${PRETRAIN_LOG_FILE:-logs/pretrain/m1/pipeline.log}"
 
-FINETUNE_LAUNCH="${FINETUNE_LAUNCH:-scripts/finetune/launch_scanobjectnn_m1_table_local.sh}"
+FINETUNE_LAUNCH="${FINETUNE_LAUNCH:-scripts/legacy/local_chains_20260226/finetune/launch_scanobjectnn_m1_table_local.sh}"
 
 if [ ! -f "${PRE_PID_FILE}" ]; then
   echo "[error] shapenet-table pid file not found: ${PRE_PID_FILE}"

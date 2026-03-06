@@ -257,9 +257,9 @@ Applied from `nepa_pretrain_lrscale_mixedprecision_patch.zip` (with one safety a
   - `scripts/pretrain/nepa3d_pretrain.sh`
   - `scripts/pretrain/nepa3d_pretrain_pointcloud.sh`
   - `scripts/pretrain/nepa3d_kplane_pretrain.sh`
-  - `scripts/pretrain/run_shapenet_mix_pretrains_mainsplit_local.sh`
-  - `scripts/pretrain/run_shapenet_m1_pretrains_local.sh`
-  - `scripts/pretrain/run_shapenet_simple_local.sh`
+  - `scripts/legacy/local_chains_20260226/pretrain/run_shapenet_mix_pretrains_mainsplit_local.sh`
+  - `scripts/legacy/local_chains_20260226/pretrain/run_shapenet_m1_pretrains_local.sh`
+  - `scripts/legacy/local_chains_20260226/pretrain/run_shapenet_simple_local.sh`
 - Changes:
   - `LR_SCALE_ENABLE` default set to `0` (off by default).
   - fixed base-LR derivation formula:

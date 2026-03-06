@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -eu
 
-# Legacy chain launcher (kept for reference).
-# Current active track uses M1 launchers instead.
+# Deprecated chain launcher kept for history/reference.
+# This wrapper is archived because it is no longer part of the active tree.
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "${ROOT_DIR}" || exit 1
 
 CHAIN_DIR="${CHAIN_DIR:-logs/finetune/chain_shapenet_to_main}"
@@ -15,7 +16,7 @@ mkdir -p "${CHAIN_DIR}"
 
 echo "[warn] legacy launcher: this chain is not part of the current M1 path"
 
-nohup bash scripts/finetune/launch_scan_main_after_shapenet_table.sh > "${CHAIN_LOG}" 2>&1 &
+nohup bash "${SCRIPT_DIR}/launch_scan_main_after_shapenet_table.sh" > "${CHAIN_LOG}" 2>&1 &
 echo $! > "${CHAIN_PID}"
 
 echo "started chain_pid=$(cat "${CHAIN_PID}")"

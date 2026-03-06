@@ -188,28 +188,32 @@ bash scripts/preprocess/migrate_add_pt_fps_order.sh
 
 ## 3) Train/eval launch commands
 
+Historical `*_local.sh` launchers were archived under
+`scripts/legacy/local_chains_20260226/`. Current scheduler entrypoints remain
+under active `scripts/pretrain/`, `scripts/eval/`, and `scripts/preprocess/`.
+
 M1 pretrain:
 
 ```bash
-bash scripts/pretrain/launch_shapenet_m1_pretrains_local.sh
+bash scripts/legacy/local_chains_20260226/pretrain/launch_shapenet_m1_pretrains_local.sh
 ```
 
 M1 fine-tune table:
 
 ```bash
-bash scripts/finetune/launch_scanobjectnn_m1_table_local.sh
+bash scripts/legacy/local_chains_20260226/finetune/launch_scanobjectnn_m1_table_local.sh
 ```
 
 Paper-safe protocol variants (OBJ-BG / OBJ-ONLY / PB-T50-RS):
 
 ```bash
-bash scripts/finetune/launch_scanobjectnn_variants_chain_local.sh
+bash scripts/legacy/local_chains_20260226/finetune/launch_scanobjectnn_variants_chain_local.sh
 ```
 
 Review-response chain (core3 with mix methods + `N_RAY=0` + linear-probe):
 
 ```bash
-CLS_IS_CAUSAL=0 bash scripts/finetune/launch_scanobjectnn_review_chain_local.sh
+CLS_IS_CAUSAL=0 bash scripts/legacy/local_chains_20260226/finetune/launch_scanobjectnn_review_chain_local.sh
 ```
 
 Default review-chain eval policy:
@@ -221,19 +225,19 @@ Default review-chain eval policy:
 Review follow-up chain (no `n_point` scaling; K=1 seed expansion + dist ablation + QA+dualmask spot-check):
 
 ```bash
-bash scripts/finetune/launch_scanobjectnn_review_followups_chain_local.sh
+bash scripts/legacy/local_chains_20260226/finetune/launch_scanobjectnn_review_followups_chain_local.sh
 ```
 
 ModelNet40 protocol run (full + episodic few-shot):
 
 ```bash
-CLS_IS_CAUSAL=0 bash scripts/finetune/launch_modelnet40_pointgpt_protocol_local.sh
+CLS_IS_CAUSAL=0 bash scripts/legacy/local_chains_20260226/finetune/launch_modelnet40_pointgpt_protocol_local.sh
 ```
 
 Auto-chain (wait current review jobs, then start ModelNet40 protocol):
 
 ```bash
-CLS_IS_CAUSAL=0 bash scripts/finetune/launch_after_review_modelnet_chain_local.sh
+CLS_IS_CAUSAL=0 bash scripts/legacy/local_chains_20260226/finetune/launch_after_review_modelnet_chain_local.sh
 ```
 
 UCPR template:
@@ -274,13 +278,13 @@ qsub -v CACHE_ROOT=data/shapenet_unpaired_cache_v1,SPLIT=eval,CKPT=<kplane_ckpt>
 K-plane full-chain (wait pretrain completion, then run UCPR/CPAC pack):
 
 ```bash
-bash scripts/analysis/launch_kplane_full_chain_local.sh
+bash scripts/legacy/local_chains_20260226/analysis/launch_kplane_full_chain_local.sh
 ```
 
 K-plane fusion sweep chain (wait `kplane_sum` / `kplane_sum_large` e50 completion, then run tie-aware UCPR/CPAC pack):
 
 ```bash
-bash scripts/analysis/launch_kplane_sum_chain_local.sh
+bash scripts/legacy/local_chains_20260226/analysis/launch_kplane_sum_chain_local.sh
 ```
 
 Qualitative CPAC (grid query + marching cubes):
@@ -319,7 +323,7 @@ accelerate launch --num_processes 4 -m nepa3d.train.pretrain \
     - `LEARNING_RATE = BASE_LEARNING_RATE * TOTAL_BATCH_SIZE / 256`
     - `TOTAL_BATCH_SIZE` defaults to `BATCH * NUM_PROCESSES`
     - override controls: `LR_SCALE_ENABLE`, `BASE_LEARNING_RATE`, `LR_SCALE_REF_BATCH`, `TOTAL_BATCH_SIZE`, `LR_BASE_TOTAL_BATCH`
-  - local pretrain runners (`scripts/pretrain/run_shapenet_*_local.sh`) also use the same scaling rule (with default `TOTAL_BATCH_SIZE=BATCH`).
+  - archived local pretrain runners (`scripts/legacy/local_chains_20260226/pretrain/run_shapenet_*_local.sh`) use the same scaling rule (with default `TOTAL_BATCH_SIZE=BATCH`).
 
 Fine-tune:
 
@@ -335,8 +339,8 @@ Fine-tune:
 Helpers:
 
 ```bash
-bash scripts/logs/show_pipeline_status.sh
-bash scripts/logs/cleanup_stale_pids.sh
+bash scripts/logs/prune_superseded_logs.sh --dry-run
+bash scripts/logs/prune_superseded_logs.sh --apply
 ```
 
 ## 6) Current result snapshot
@@ -419,8 +423,8 @@ Full tables:
   - kplane(sum, large): `MAE=0.14229`, `RMSE=0.21260`, `IoU@0.03=0.52054`
   - `kplane(sum)` is the stronger variant in this sweep
 - auto-eval chain:
-  - launcher: `scripts/analysis/launch_kplane_sum_chain_local.sh`
-  - worker: `scripts/analysis/run_kplane_sum_chain_local.sh`
+  - launcher: `scripts/legacy/local_chains_20260226/analysis/launch_kplane_sum_chain_local.sh`
+  - worker: `scripts/legacy/local_chains_20260226/analysis/run_kplane_sum_chain_local.sh`
   - pipeline log: `logs/analysis/kplane_sum_chain/pipeline.log`
   - final completion is tracked by `results/ucpr_kplane_sum*_e50*_tiefix.json` and `results/cpac_kplane_sum*_e50*.json`
 
