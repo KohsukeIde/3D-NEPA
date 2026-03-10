@@ -30,6 +30,11 @@ legacy scripts.
   - maintained workspace cleanup helpers
 - `scripts/local/`
   - maintained local-only queue manifests and runners for post-PBS operation
+- `scripts/abci/`
+  - curated collaborator-facing ABCI submit wrappers for the current PatchNEPA
+    line
+  - start here when someone asks "which script should I run on ABCI?"
+  - see `scripts/abci/README.md`
 
 ## Archived scripts
 
@@ -59,5 +64,7 @@ When adding new automation:
 1. prefer `submit_*_qf.sh` style for PBS entrypoints
 2. keep ad-hoc local chains out of active folders; maintained local-only ops
    belong under `scripts/local/`
-3. if a script becomes historical, broken-by-default, or unused, move it to
+3. keep collaborator-facing ABCI shortcuts under `scripts/abci/` and point
+   them at maintained workers/submitters rather than duplicating logic
+4. if a script becomes historical, broken-by-default, or unused, move it to
    `scripts/legacy/<date_tag>/`

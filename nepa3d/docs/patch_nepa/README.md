@@ -25,6 +25,35 @@ Point-MAE and PointGPT.
 7. `benchmark_scanobjectnn_variant.md`
    - Canonical headline ScanObjectNN benchmark table.
 
+## Collaborator Quick Path
+
+If a collaborator asks:
+
+- "which ABCI script should I run?"
+- "which docs should I read first?"
+- "where do I quickly confirm the current result?"
+
+start from:
+
+1. `scripts/abci/README.md`
+   - curated ABCI entrypoints for the current PatchNEPA line
+   - includes the thin submit wrappers for pretrain / finetune / mini-CPAC
+2. `storyline_query_to_patch_v2_active.md`
+   - shortest answer to "what is the current valid result?"
+3. `benchmark_scanobjectnn_variant.md`
+   - canonical ScanObjectNN headline table
+4. `restart_plan_patchnepa_data_v2_20260303.md`
+   - current branch memo and the most detailed active result backfill
+
+Current short answer:
+
+- current main reconstruction line: PatchNEPA v2 `recong2` full300
+- current headline FT: `0.8485 / 0.8589 / 0.8140`
+- current thin ABCI entrypoints:
+  - `scripts/abci/submit_patchnepa_current_pretrain.sh`
+  - `scripts/abci/submit_patchnepa_current_ft.sh`
+  - `scripts/abci/submit_patchnepa_current_cpac.sh`
+
 ## Document Roles
 
 - `runlog_patch_nepa_202602.md`
@@ -64,6 +93,8 @@ Point-MAE and PointGPT.
 - Put cross-line conclusions only into
   `storyline_query_to_patch_v2_active.md` and
   `hypothesis_matrix_active.md`.
+- For collaborator-facing ABCI usage, prefer the curated wrappers under
+  `scripts/abci/` over searching the broader `scripts/` tree directly.
 - Do not treat historical Point-MAE-style split rows as mainline evidence unless
   explicitly labeled as historical/reference.
 - Do not retrieve archive docs for Patch-NEPA by default.
