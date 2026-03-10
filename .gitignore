@@ -42,4 +42,6 @@ logs/pretrain/m1/runner_gpu0.log
 # Cluster / job outputs
 *.err
 *.out
+*.o[0-9]*
+*.e[0-9]*
 PointGPT/
