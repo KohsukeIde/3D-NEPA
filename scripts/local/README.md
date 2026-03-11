@@ -13,6 +13,13 @@ NeurIPS, while PBS/QF runners are no longer the default operational path.
   - local queue runner
 - `patchnepa_local_status.sh`
   - status view over the manifest + runtime state
+- `pointgpt_train_local_ddp.sh`
+  - PointGPT local 2-GPU DDP pretrain wrapper
+- `pointgpt_finetune_local_ddp.sh`
+  - PointGPT local 2-GPU DDP ScanObjectNN fine-tune wrapper
+- `pointgpt_nepa_vs_cdl12_pipeline.sh`
+  - local sequential pipeline:
+    `nepa_cosine pretrain -> cdl12 pretrain -> obj_bg fine-tune compare`
 
 ## Source of Truth
 
@@ -57,3 +64,5 @@ bash scripts/local/patchnepa_visocc_branch.sh
 - if a branch script already manages both GPUs internally (for example
   `patchnepa_visocc_branch.sh`), prefer launching it directly or make it the
   only enabled queue row
+- `scripts/sanity/pointgpt_*_local_*.sh` are compatibility shims only;
+  maintained local entrypoints live here under `scripts/local/`
