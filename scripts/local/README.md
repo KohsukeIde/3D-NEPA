@@ -66,7 +66,7 @@ Check status:
 bash scripts/local/patchnepa_local_status.sh
 ```
 
-Run the current visibility-first exploratory branch directly:
+Run the current world-package visibility-first exploratory branch directly:
 
 ```bash
 bash scripts/local/patchnepa_visocc_branch.sh
