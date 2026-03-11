@@ -26,6 +26,9 @@ If it is maintained and ABCI-facing, it belongs in `scripts/abci/`.
   - mainline examples: `nepa3d_pretrain.sh`, `submit_pretrain_abcd_qf.sh`,
     `submit_pretrain_patch_nepa_pointonly_qf.sh`,
     `submit_pretrain_patch_nepa_tokens_qf.sh`
+  - supporting worker layer; direct runs on this workstation should still
+    start from `scripts/local/`
+  - see `scripts/pretrain/README.md`
 - `scripts/eval/`
   - maintained classification / CPAC eval workers and submitters
   - mainline examples: `nepa3d_eval_cls_cpac_qf.sh`,
@@ -39,6 +42,9 @@ If it is maintained and ABCI-facing, it belongs in `scripts/abci/`.
 - `scripts/finetune/`
   - maintained fine-tune entrypoints (`patchcls_*`, `patchnepa_*`,
     `nepa3d_finetune*.sh`)
+  - supporting worker layer; direct runs on this workstation should still
+    start from `scripts/local/`
+  - see `scripts/finetune/README.md`
 - `scripts/sanity/`
   - external baseline / environment sanity jobs (Point-MAE, PointGPT, patch
     ablation submitters) plus compatibility shims

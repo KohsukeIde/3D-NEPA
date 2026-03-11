@@ -10,6 +10,7 @@ for this machine, while ABCI-facing entrypoints are kept separately under
 ## Boundary
 
 - this folder is the source of truth for workstation execution
+- on this PC, any script you directly launch should come from this folder
 - local assumptions are allowed here:
   - fixed small-GPU layouts such as 1-2 GPU DDP
   - local log roots under `logs/local/`
@@ -79,6 +80,8 @@ bash scripts/local/patchnepa_visocc_branch.sh
 - keep launch commands relative to the repo root
 - prefer existing maintained wrappers under `scripts/pretrain/`,
   `scripts/analysis/`, and `scripts/finetune/`
+- but on this workstation, invoke them through a maintained `scripts/local/`
+  entrypoint whenever one exists
 - use direct `python -m ...` only when the maintained wrapper does not expose
   the needed knobs
 - if a branch script already manages both GPUs internally (for example

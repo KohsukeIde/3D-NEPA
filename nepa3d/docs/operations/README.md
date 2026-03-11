@@ -20,6 +20,7 @@ Use it to answer:
 
 ## Boundary Rules
 
+- on this workstation, direct launches should come from `scripts/local/`
 - local-only launchers, queue manifests, and workstation pipelines belong
   under `scripts/local/`
 - ABCI-facing wrappers belong under `scripts/abci/`
