@@ -3,6 +3,7 @@
 This folder now keeps only cross-track index pages.
 
 - Cross-track results index: `results_master_nonretrieval.md`
+- Operational entrypoint boundary: `nepa3d/docs/operations/README.md`
 
 Track-specific active docs were moved to dedicated folders:
 

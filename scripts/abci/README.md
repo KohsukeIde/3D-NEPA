@@ -6,6 +6,16 @@ current PatchNEPA line.
 Use these when a collaborator asks "which `sh` should I run?" and does not
 need the full internal script tree.
 
+## Boundary
+
+- this folder is the source of truth for collaborator-facing ABCI entrypoints
+- local workstation launchers do not belong here; keep those in
+  `scripts/local/`
+- internal workers and detailed PBS helpers still belong in
+  `scripts/pretrain/`, `scripts/finetune/`, `scripts/eval/`, and
+  `scripts/analysis/`
+- operational boundary notes live in `nepa3d/docs/operations/README.md`
+
 ## Current Defaults
 
 - current pretrain line: PatchNEPA v2 reconstruction `g2`
@@ -26,6 +36,7 @@ Reference:
 
 - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
 - `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
+- `nepa3d/docs/operations/README.md`
 
 ## Entrypoints
 

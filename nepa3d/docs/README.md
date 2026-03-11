@@ -4,6 +4,8 @@ Last updated: 2026-03-06
 
 ## Start Here (Current)
 
+- Operations boundary (local vs ABCI):
+  - `nepa3d/docs/operations/README.md`
 - LLM retrieval index:
   - `nepa3d/docs/llm_retrieval_index.md`
 - Track split index (Query vs Patch):
@@ -45,6 +47,7 @@ Last updated: 2026-03-06
 
 ## Folder Map
 
+- `nepa3d/docs/operations/`: execution-surface boundary and operational entrypoint guide
 - `nepa3d/docs/query_nepa/`: Query-NEPA historical ledgers, runlog, and folder guide
 - `nepa3d/docs/patch_nepa/`: Patch-NEPA active plan/runlog plus synthesis docs
 - `nepa3d/docs/classification/`: ScanObjectNN / ModelNet result ledgers
@@ -60,6 +63,7 @@ Last updated: 2026-03-06
 - Put cross-line conclusions in `patch_nepa/storyline_query_to_patch_v2_active.md`.
 - Put active hypothesis status in `patch_nepa/hypothesis_matrix_active.md`.
 - Keep Query-NEPA historical job history in `query_nepa/runlog_202602.md`.
+- Put local-vs-ABCI operational boundary notes in `operations/README.md`.
 - Keep `test_acc` as headline metric for ScanObjectNN benchmark tables.
 - Keep `best_val` and `best_ep` as diagnostics (not headline).
 - Keep protocol metadata for every table row:

@@ -1,9 +1,24 @@
 # Local Ops
 
-This directory is the maintained local-only operations area for PatchNEPA.
+This directory is the maintained local-only operations area for PatchNEPA and
+external baseline work on this workstation.
 
-It exists because local GPU execution is now the primary launch surface until
-NeurIPS, while PBS/QF runners are no longer the default operational path.
+It exists because local GPU execution is the current default execution surface
+for this machine, while ABCI-facing entrypoints are kept separately under
+`scripts/abci/`.
+
+## Boundary
+
+- this folder is the source of truth for workstation execution
+- local assumptions are allowed here:
+  - fixed small-GPU layouts such as 1-2 GPU DDP
+  - local log roots under `logs/local/`
+  - local W&B naming / resumption conventions
+  - machine-specific queue manifests
+- if a launcher is meant for ABCI users, it does not belong here
+- `scripts/sanity/pointgpt_*_local_*.sh` are compatibility shims only
+- science and benchmark interpretation do not belong here; keep those in
+  `nepa3d/docs/...`
 
 ## Files
 
@@ -20,6 +35,9 @@ NeurIPS, while PBS/QF runners are no longer the default operational path.
 - `pointgpt_nepa_vs_cdl12_pipeline.sh`
   - local sequential pipeline:
     `nepa_cosine pretrain -> cdl12 pretrain -> obj_bg fine-tune compare`
+- `pointgpt_ft_recipe_matrix_2x2.sh`
+  - local sequential matrix:
+    `pretrain objective {nepa_cosine, cdl12} x FT recipe {cls-only, PointGPT FT}`
 
 ## Source of Truth
 
@@ -30,6 +48,8 @@ NeurIPS, while PBS/QF runners are no longer the default operational path.
   - `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`
 - execution order, gating, and local budget live in:
   - `nepa3d/docs/patch_nepa/execution_backlog_active.md`
+- local-vs-ABCI operational boundary lives in:
+  - `nepa3d/docs/operations/README.md`
 
 ## Usage
 
