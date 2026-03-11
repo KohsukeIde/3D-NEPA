@@ -23,15 +23,15 @@ GPU_BASE="${GPU_BASE:-0}"
 GPU_VISOCC="${GPU_VISOCC:-1}"
 GPU_OPTIONAL="${GPU_OPTIONAL:-0}"
 
-SHAPENET_ROOT="${SHAPENET_ROOT:-data/ShapeNetCore.v2/synsets}"
-SOURCE_CACHE="${SOURCE_CACHE:-data/shapenet_cache_v2_20260306_visocc}"
-SPLIT_JSON_BASE="${SPLIT_JSON_BASE:-data/shapenet_unpaired_splits_v2_20260306_visocc.json}"
-SPLIT_JSON_PC33="${SPLIT_JSON_PC33:-data/shapenet_unpaired_splits_v2_pc33_mesh33_udf33_visocc.json}"
-SPLIT_JSON_M50U50="${SPLIT_JSON_M50U50:-data/shapenet_unpaired_splits_v2_mesh50_udf50_visocc.json}"
-UNPAIRED_ROOT="${UNPAIRED_ROOT:-data/shapenet_unpaired_cache_v2_20260306_visocc}"
-UNPAIRED_DROP1_ROOT="${UNPAIRED_DROP1_ROOT:-data/shapenet_unpaired_cache_v2_20260306_visocc_drop1}"
-UNPAIRED_PC33_ROOT="${UNPAIRED_PC33_ROOT:-data/shapenet_unpaired_cache_v2_pc33_mesh33_udf33_visocc}"
-UNPAIRED_M50U50_ROOT="${UNPAIRED_M50U50_ROOT:-data/shapenet_unpaired_cache_v2_mesh50_udf50_visocc}"
+SHAPENET_ROOT="${SHAPENET_ROOT:-data/ShapeNetCore.v2}"
+SOURCE_CACHE="${SOURCE_CACHE:-data/shapenet_cache_v2_20260311_worldvis}"
+SPLIT_JSON_BASE="${SPLIT_JSON_BASE:-data/shapenet_unpaired_splits_v2_20260311_worldvis.json}"
+SPLIT_JSON_PC33="${SPLIT_JSON_PC33:-data/shapenet_unpaired_splits_v2_pc33_mesh33_udf33_worldvis.json}"
+SPLIT_JSON_M50U50="${SPLIT_JSON_M50U50:-data/shapenet_unpaired_splits_v2_mesh50_udf50_worldvis.json}"
+UNPAIRED_ROOT="${UNPAIRED_ROOT:-data/shapenet_unpaired_cache_v2_20260311_worldvis}"
+UNPAIRED_DROP1_ROOT="${UNPAIRED_DROP1_ROOT:-data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1}"
+UNPAIRED_PC33_ROOT="${UNPAIRED_PC33_ROOT:-data/shapenet_unpaired_cache_v2_pc33_mesh33_udf33_worldvis}"
+UNPAIRED_M50U50_ROOT="${UNPAIRED_M50U50_ROOT:-data/shapenet_unpaired_cache_v2_mesh50_udf50_worldvis}"
 
 MIX_BASE="${MIX_BASE:-nepa3d/configs/shapenet_unpaired_mix_v2_tokens_drop1_pc33_mesh33_udf33_visocc_base.yaml}"
 MIX_VISOCC="${MIX_VISOCC:-nepa3d/configs/shapenet_unpaired_mix_v2_tokens_drop1_pc33_mesh33_udf33_visocc.yaml}"
@@ -123,10 +123,11 @@ run_step "build_source_cache" env \
   OUT_ROOT="${SOURCE_CACHE}" \
   WORKERS="${BUILD_WORKERS:-32}" \
   N_RAYS="${N_RAYS:-0}" \
-  MESH_VIS_ENABLE="1" \
-  MESH_VIS_DIRS="${MESH_VIS_DIRS:-16}" \
-  MESH_VIS_MAX_T="${MESH_VIS_MAX_T:-0.25}" \
-  MESH_VIS_EPS="${MESH_VIS_EPS:-1e-3}" \
+  PC_CTX_BANK="${PC_CTX_BANK:-4}" \
+  UDF_PROBE_DELTAS="${UDF_PROBE_DELTAS:-0.01,0.02,0.05}" \
+  MESH_VIS_N_DIRS="${MESH_VIS_N_DIRS:-8}" \
+  MESH_VIS_MAX_T="${MESH_VIS_MAX_T:-2.5}" \
+  MESH_VIS_EPS="${MESH_VIS_EPS:-1e-4}" \
   SKIP_EXISTING="${SKIP_EXISTING:-0}" \
   AUGMENT_EXISTING="${AUGMENT_EXISTING:-0}" \
   bash scripts/preprocess/preprocess_shapenet_v2.sh

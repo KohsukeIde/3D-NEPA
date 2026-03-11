@@ -8,7 +8,6 @@ Store **surface context points** separately from **primitive-specific query poin
 
 One NPZ (one shape) can contain multiple query sets:
 - mesh queries: `mesh_qry_xyz` + normals/curvature proxy
-- mesh visibility answers: `mesh_qry_vis_hit` + `mesh_qry_vis_t`
 - udf queries:  `udf_qry_xyz`  + unsigned distance + gradient proxy
 - pc context/query: `pc_xyz`, `pc_qry_xyz` + PCA normals + density proxy
 - ray queries (optional): `ray_o`, `ray_d` + hit/t/normal
@@ -87,49 +86,170 @@ def _sample_surface(mesh: "trimesh.Trimesh", n: int, rng: np.random.RandomState)
     return pts.astype(np.float32), face_idx.astype(np.int64)
 
 
-def _fibonacci_hemisphere_dirs(n: int) -> np.ndarray:
-    """Deterministic quasi-uniform hemisphere directions around +Z."""
-    if int(n) <= 0:
-        return np.zeros((0, 3), dtype=np.float32)
-    k = np.arange(int(n), dtype=np.float32) + 0.5
-    z = 1.0 - (k / float(n))
-    z = np.clip(z, 0.0, 1.0)
-    phi = (math.pi * (3.0 - math.sqrt(5.0))) * k
-    r = np.sqrt(np.clip(1.0 - (z * z), 0.0, 1.0))
-    x = r * np.cos(phi)
-    y = r * np.sin(phi)
-    dirs = np.stack([x, y, z], axis=1).astype(np.float32)
-    dirs /= np.linalg.norm(dirs, axis=1, keepdims=True) + 1e-8
-    return dirs
+def _surface_barycentric(mesh: "trimesh.Trimesh", pts: np.ndarray, face_idx: np.ndarray) -> np.ndarray:
+    tri = np.asarray(mesh.triangles[face_idx], dtype=np.float32)  # [N,3,3]
+    a = tri[:, 0, :]
+    b = tri[:, 1, :]
+    c = tri[:, 2, :]
+    v0 = b - a
+    v1 = c - a
+    v2 = np.asarray(pts, dtype=np.float32) - a
+    d00 = np.sum(v0 * v0, axis=1)
+    d01 = np.sum(v0 * v1, axis=1)
+    d11 = np.sum(v1 * v1, axis=1)
+    d20 = np.sum(v2 * v0, axis=1)
+    d21 = np.sum(v2 * v1, axis=1)
+    denom = d00 * d11 - d01 * d01
+    denom = np.where(np.abs(denom) < 1e-12, 1e-12, denom)
+    v = (d11 * d20 - d01 * d21) / denom
+    w = (d00 * d21 - d01 * d20) / denom
+    u = 1.0 - v - w
+    bary = np.stack([u, v, w], axis=1).astype(np.float32)
+    bary = np.nan_to_num(bary, nan=0.0, posinf=0.0, neginf=0.0)
+    bary = np.clip(bary, 0.0, 1.0)
+    s = np.sum(bary, axis=1, keepdims=True)
+    s = np.where(s < 1e-8, 1.0, s)
+    return (bary / s).astype(np.float32)
 
 
-def _orthonormal_basis_from_normals(n: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Return tangent/bitangent for each normal."""
-    nn = np.asarray(n, dtype=np.float32)
-    nn = nn / (np.linalg.norm(nn, axis=1, keepdims=True) + 1e-8)
-    helper = np.zeros_like(nn, dtype=np.float32)
-    mask = np.abs(nn[:, 2]) < 0.999
-    helper[mask] = np.array([0.0, 0.0, 1.0], dtype=np.float32)
-    helper[~mask] = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-    tangent = np.cross(helper, nn)
-    tangent /= np.linalg.norm(tangent, axis=1, keepdims=True) + 1e-8
-    bitangent = np.cross(nn, tangent)
-    bitangent /= np.linalg.norm(bitangent, axis=1, keepdims=True) + 1e-8
-    return tangent.astype(np.float32), bitangent.astype(np.float32)
+def _fibonacci_dirs(n: int) -> np.ndarray:
+    n = int(max(n, 1))
+    i = np.arange(n, dtype=np.float32)
+    phi = math.pi * (3.0 - math.sqrt(5.0))
+    y = 1.0 - (2.0 * i + 1.0) / float(n)
+    r = np.sqrt(np.clip(1.0 - y * y, 0.0, 1.0))
+    theta = phi * i
+    x = np.cos(theta) * r
+    z = np.sin(theta) * r
+    d = np.stack([x, y, z], axis=1).astype(np.float32)
+    d /= np.linalg.norm(d, axis=1, keepdims=True) + 1e-8
+    return d
+
+
+def _sample_udf_grid_grad(udf_grid: np.ndarray, xyz: np.ndarray) -> np.ndarray:
+    g = int(np.asarray(udf_grid).shape[0])
+    h = 2.0 / float(max(g, 2))
+    x = np.asarray(xyz, dtype=np.float32)
+    ex = np.array([[h, 0.0, 0.0]], dtype=np.float32)
+    ey = np.array([[0.0, h, 0.0]], dtype=np.float32)
+    ez = np.array([[0.0, 0.0, h]], dtype=np.float32)
+    gx = trilinear_sample_grid(udf_grid, np.clip(x + ex, -1.0, 1.0), bmin=-1.0, bmax=1.0) -          trilinear_sample_grid(udf_grid, np.clip(x - ex, -1.0, 1.0), bmin=-1.0, bmax=1.0)
+    gy = trilinear_sample_grid(udf_grid, np.clip(x + ey, -1.0, 1.0), bmin=-1.0, bmax=1.0) -          trilinear_sample_grid(udf_grid, np.clip(x - ey, -1.0, 1.0), bmin=-1.0, bmax=1.0)
+    gz = trilinear_sample_grid(udf_grid, np.clip(x + ez, -1.0, 1.0), bmin=-1.0, bmax=1.0) -          trilinear_sample_grid(udf_grid, np.clip(x - ez, -1.0, 1.0), bmin=-1.0, bmax=1.0)
+    grad = np.stack([gx, gy, gz], axis=1).astype(np.float32)
+    grad /= np.linalg.norm(grad, axis=1, keepdims=True) + 1e-8
+    return grad.astype(np.float32)
+
+
+def _visibility_signature(
+    mesh: "trimesh.Trimesh",
+    xyz: np.ndarray,
+    normals: np.ndarray,
+    *,
+    n_dirs: int,
+    eps: float,
+    max_t: float,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Visibility signature from fixed external directions.
+
+    Preferred path: exact ray visibility.
+    Fallback path (no rtree / spatial index): front-facing signature based on surface normals.
+    """
+    n = int(np.asarray(xyz).shape[0])
+    dirs = _fibonacci_dirs(int(n_dirs))
+    pts = np.asarray(xyz, dtype=np.float32)
+    nrms = np.asarray(normals, dtype=np.float32)
+    nrms = nrms / (np.linalg.norm(nrms, axis=1, keepdims=True) + 1e-8)
+    vis = np.zeros((n, dirs.shape[0]), dtype=np.float32)
+    try:
+        intersector = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
+        epsf = float(max(eps, 1e-6))
+        max_tf = float(max_t)
+        for j, v in enumerate(dirs):
+            sign = np.where((nrms @ v.reshape(3, 1)).reshape(-1, 1) >= 0.0, 1.0, -1.0).astype(np.float32)
+            o = pts + sign * epsf * v.reshape(1, 3)
+            d = np.repeat(v.reshape(1, 3), n, axis=0).astype(np.float32)
+            loc, idx_ray, _idx_tri = intersector.intersects_location(o, d, multiple_hits=False)
+            vis[:, j] = 1.0
+            if loc.shape[0] > 0:
+                t = np.linalg.norm(loc - o[idx_ray], axis=1)
+                occ = t < max_tf
+                if np.any(occ):
+                    vis[idx_ray[occ], j] = 0.0
+    except Exception:
+        # fallback: front-facing visibility signature (local but stable and dependency-free)
+        vis = (nrms @ dirs.T > 0.0).astype(np.float32)
+    vis_count = vis.sum(axis=1, keepdims=True).astype(np.float32)
+    ao = (1.0 - vis.mean(axis=1, keepdims=True)).astype(np.float32)
+    return vis.astype(np.float32), vis_count, ao
+
+
+def _make_pc_ctx_bank(
+    surf_xyz: np.ndarray,
+    *,
+    n_bank: int,
+    n_pc: int,
+    rng: np.random.RandomState,
+    view_crop: float,
+    noise_std: float,
+    dropout: float,
+    pca_knn: int,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    n_bank = int(max(n_bank, 1))
+    bank_xyz = []
+    bank_n = []
+    bank_d = []
+    bank_v = []
+    for _ in range(n_bank):
+        # sample a fresh auxiliary RNG from the parent RNG so each bank view is deterministic per-shape
+        brng = np.random.RandomState(int(rng.randint(0, 2**31 - 1)))
+        pc = _make_partial_noisy_pc(
+            surf_xyz,
+            n_pc=int(n_pc),
+            rng=brng,
+            view_crop=float(view_crop),
+            noise_std=float(noise_std),
+            dropout=float(dropout),
+        )
+        nrm = estimate_normals_pca(pc, k=int(pca_knn))
+        dens = estimate_density_knn(pc, k=int(pca_knn))
+        if nrm is None:
+            nrm = np.zeros_like(pc, dtype=np.float32)
+        if dens is None:
+            dens = np.zeros((pc.shape[0], 1), dtype=np.float32)
+        bank_xyz.append(pc.astype(np.float32))
+        bank_n.append(np.asarray(nrm, dtype=np.float32))
+        bank_d.append(np.asarray(dens, dtype=np.float32))
+        bank_v.append(_unit_vectors(brng, 1)[0].astype(np.float32))
+    return (
+        np.stack(bank_xyz, axis=0).astype(np.float32),
+        np.stack(bank_n, axis=0).astype(np.float32),
+        np.stack(bank_d, axis=0).astype(np.float32),
+        np.stack(bank_v, axis=0).astype(np.float32),
+    )
 
 
 def _closest_point_and_face(mesh: "trimesh.Trimesh", xyz: np.ndarray, *, chunk: int = 200000) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return closest points, distances, and face indices (chunked)."""
+    """Return closest points, distances, and face indices (chunked).
+
+    Falls back to trimesh.proximity.closest_point_naive when optional spatial
+    indexing deps (e.g. rtree) are unavailable.
+    """
     xyz = np.asarray(xyz, dtype=np.float32)
     cps = np.zeros_like(xyz)
     dist = np.zeros((xyz.shape[0],), dtype=np.float32)
     face = np.zeros((xyz.shape[0],), dtype=np.int64)
     for i in range(0, xyz.shape[0], chunk):
         sl = slice(i, min(i + chunk, xyz.shape[0]))
-        cp, d, f = trimesh.proximity.closest_point(mesh, xyz[sl])
-        cps[sl] = cp.astype(np.float32)
-        dist[sl] = d.astype(np.float32)
-        face[sl] = f.astype(np.int64)
+        try:
+            cp, d, f = trimesh.proximity.closest_point(mesh, xyz[sl])
+        except Exception as e:
+            if 'rtree' not in str(e).lower():
+                raise
+            cp, d, f = trimesh.proximity.closest_point_naive(mesh, xyz[sl])
+        cps[sl] = np.asarray(cp, dtype=np.float32)
+        dist[sl] = np.asarray(d, dtype=np.float32)
+        face[sl] = np.asarray(f, dtype=np.int64)
     return cps, dist, face
 
 
@@ -216,23 +336,26 @@ def _sample_udf_queries(
     rng: np.random.RandomState,
     near_ratio: float,
     near_std: float,
-) -> np.ndarray:
+) -> Tuple[np.ndarray, np.ndarray]:
     n_near = int(round(float(n_qry) * float(near_ratio)))
     n_uni = int(n_qry) - n_near
 
     uni = rng.uniform(-1.0, 1.0, size=(n_uni, 3)).astype(np.float32)
+    src_uni = np.zeros((n_uni, 1), dtype=np.int32)
 
     if n_near > 0:
         idx = rng.choice(surf_xyz.shape[0], size=n_near, replace=True)
         near = surf_xyz[idx] + rng.normal(scale=float(near_std), size=(n_near, 3)).astype(np.float32)
         near = np.clip(near, -1.0, 1.0)
+        src_near = np.ones((n_near, 1), dtype=np.int32)
         xyz = np.concatenate([uni, near], axis=0)
+        src = np.concatenate([src_uni, src_near], axis=0)
     else:
         xyz = uni
+        src = src_uni
 
-    # shuffle
     perm = rng.permutation(xyz.shape[0])
-    return xyz[perm].astype(np.float32)
+    return xyz[perm].astype(np.float32), src[perm].astype(np.int32)
 
 
 def _compute_udf_dist_grad(mesh: "trimesh.Trimesh", qry_xyz: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -400,6 +523,35 @@ def _compute_surface_udf_clearance(
     return t_in.astype(np.float32), t_out.astype(np.float32), hit_out.astype(np.float32), thickness
 
 
+def _compute_surface_udf_probe_bank(
+    surf_xyz: np.ndarray,
+    surf_n: np.ndarray,
+    *,
+    udf_grid: np.ndarray,
+    deltas: Sequence[float],
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    sxyz = np.asarray(surf_xyz, dtype=np.float32)
+    sn = np.asarray(surf_n, dtype=np.float32)
+    sn = sn / (np.linalg.norm(sn, axis=1, keepdims=True) + 1e-8)
+    fronts = []
+    backs = []
+    thicks = []
+    for delta in deltas:
+        d = float(max(delta, 1e-6))
+        pf = np.clip(sxyz + d * sn, -1.0, 1.0)
+        pb = np.clip(sxyz - d * sn, -1.0, 1.0)
+        ff = trilinear_sample_grid(udf_grid, pf, bmin=-1.0, bmax=1.0).reshape(-1, 1).astype(np.float32)
+        bb = trilinear_sample_grid(udf_grid, pb, bmin=-1.0, bmax=1.0).reshape(-1, 1).astype(np.float32)
+        fronts.append(ff)
+        backs.append(bb)
+        thicks.append(ff + bb)
+    return (
+        np.concatenate(fronts, axis=1).astype(np.float32),
+        np.concatenate(backs, axis=1).astype(np.float32),
+        np.concatenate(thicks, axis=1).astype(np.float32),
+    )
+
+
 def _sample_rays(
     *,
     n_rays: int,
@@ -424,91 +576,67 @@ def _ray_intersect(
     ray_o: np.ndarray,
     ray_d: np.ndarray,
     *,
-    min_t: float = 0.0,
-    max_t: Optional[float] = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (t, hit, normal) per ray."""
+    udf_grid: Optional[np.ndarray] = None,
+    max_t: float = 2.5,
+    n_steps: int = 128,
+    tol: float = 1e-4,
+    min_step: float = 1e-4,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return (t, hit, normal, hit_xyz, face_idx) per ray.
+
+    Preferred path: exact triangle ray intersection.
+    Fallback path: sphere tracing on a precomputed UDF grid, with normals from grid gradients.
+    """
     if int(ray_o.shape[0]) == 0:
         return (
             np.zeros((0, 1), dtype=np.float32),
             np.zeros((0, 1), dtype=np.float32),
             np.zeros((0, 3), dtype=np.float32),
+            np.zeros((0, 3), dtype=np.float32),
+            np.zeros((0, 1), dtype=np.int64),
         )
-    # Use trimesh's pure triangle intersector for portability.
-    intersector = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
-    loc, idx_ray, idx_tri = intersector.intersects_location(ray_o, ray_d, multiple_hits=False)
-
-    n = ray_o.shape[0]
-    hit = np.zeros((n, 1), dtype=np.float32)
-    t = np.zeros((n, 1), dtype=np.float32)
-    nrm = np.zeros((n, 3), dtype=np.float32)
-
-    if loc.shape[0] > 0:
-        dist = np.linalg.norm(loc - ray_o[idx_ray], axis=1).astype(np.float32)
-        keep = dist >= float(max(min_t, 0.0))
-        if max_t is not None:
-            keep &= dist <= float(max_t)
-        if bool(keep.any()):
-            idx_ray_keep = idx_ray[keep]
-            idx_tri_keep = idx_tri[keep]
-            dist_keep = dist[keep]
-            hit[idx_ray_keep, 0] = 1.0
-            t[idx_ray_keep, 0] = dist_keep
-            fn = mesh.face_normals[idx_tri_keep].astype(np.float32)
+    n = int(ray_o.shape[0])
+    try:
+        intersector = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
+        loc, idx_ray, idx_tri = intersector.intersects_location(ray_o, ray_d, multiple_hits=False)
+        hit = np.zeros((n, 1), dtype=np.float32)
+        t = np.zeros((n, 1), dtype=np.float32)
+        nrm = np.zeros((n, 3), dtype=np.float32)
+        hit_xyz = np.zeros((n, 3), dtype=np.float32)
+        face_idx = np.full((n, 1), -1, dtype=np.int64)
+        if loc.shape[0] > 0:
+            hit[idx_ray, 0] = 1.0
+            t[idx_ray, 0] = np.linalg.norm(loc - ray_o[idx_ray], axis=1).astype(np.float32)
+            fn = mesh.face_normals[idx_tri].astype(np.float32)
             fn /= np.linalg.norm(fn, axis=1, keepdims=True) + 1e-8
-            nrm[idx_ray_keep] = fn
-
-    return t, hit, nrm
-
-
-def _compute_mesh_query_visibility(
-    mesh: "trimesh.Trimesh",
-    mesh_qry_xyz: np.ndarray,
-    mesh_qry_n: np.ndarray,
-    *,
-    n_dirs: int,
-    max_t: float,
-    eps: float,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Compute local hemisphere visibility answers for mesh queries."""
-    qxyz = np.asarray(mesh_qry_xyz, dtype=np.float32)
-    qn = np.asarray(mesh_qry_n, dtype=np.float32)
-    n_q = int(qxyz.shape[0])
-    n_dirs_i = int(n_dirs)
-    if n_q == 0 or n_dirs_i <= 0:
-        return (
-            np.zeros((n_q, max(n_dirs_i, 0)), dtype=np.float32),
-            np.zeros((n_q, max(n_dirs_i, 0)), dtype=np.float32),
+            nrm[idx_ray] = fn
+            hit_xyz[idx_ray] = loc.astype(np.float32)
+            face_idx[idx_ray, 0] = idx_tri.astype(np.int64)
+        return t, hit, nrm, hit_xyz, face_idx
+    except Exception:
+        if udf_grid is None:
+            return (
+                np.full((n, 1), float(max_t), dtype=np.float32),
+                np.zeros((n, 1), dtype=np.float32),
+                np.zeros((n, 3), dtype=np.float32),
+                np.zeros((n, 3), dtype=np.float32),
+                np.full((n, 1), -1, dtype=np.int64),
+            )
+        t, hit = _sphere_trace_udf_grid_batch(
+            udf_grid,
+            np.asarray(ray_o, dtype=np.float32),
+            np.asarray(ray_d, dtype=np.float32),
+            max_t=float(max_t),
+            n_steps=int(n_steps),
+            tol=float(tol),
+            min_step=float(min_step),
         )
-
-    qn = qn / (np.linalg.norm(qn, axis=1, keepdims=True) + 1e-8)
-    hemi = _fibonacci_hemisphere_dirs(n_dirs_i)  # [D,3], around +Z
-    tangent, bitangent = _orthonormal_basis_from_normals(qn)
-
-    dirs_world = (
-        tangent[:, None, :] * hemi[None, :, 0:1]
-        + bitangent[:, None, :] * hemi[None, :, 1:2]
-        + qn[:, None, :] * hemi[None, :, 2:3]
-    )
-    dirs_world /= np.linalg.norm(dirs_world, axis=2, keepdims=True) + 1e-8
-
-    ray_o = np.repeat(
-        qxyz[:, None, :] + float(eps) * qn[:, None, :],
-        n_dirs_i,
-        axis=1,
-    ).reshape(-1, 3)
-    ray_d = dirs_world.reshape(-1, 3)
-    t, hit, _nrm = _ray_intersect(
-        mesh,
-        ray_o,
-        ray_d,
-        min_t=max(float(eps) * 2.0, 1e-5),
-        max_t=float(max_t),
-    )
-    hit = hit.reshape(n_q, n_dirs_i).astype(np.float32)
-    t = t.reshape(n_q, n_dirs_i).astype(np.float32)
-    t = np.where(hit > 0.5, t, float(max_t)).astype(np.float32)
-    return hit, t
+        hit_xyz = np.asarray(ray_o, dtype=np.float32) + np.asarray(ray_d, dtype=np.float32) * t
+        nrm = _sample_udf_grid_grad(udf_grid, np.clip(hit_xyz, -1.0, 1.0))
+        nrm *= hit.astype(np.float32)
+        face_idx = np.full((n, 1), -1, dtype=np.int64)
+        hit_xyz = hit_xyz.astype(np.float32) * hit.astype(np.float32)
+        return t.astype(np.float32), hit.astype(np.float32), nrm.astype(np.float32), hit_xyz.astype(np.float32), face_idx
 
 
 @dataclass
@@ -519,6 +647,7 @@ class V2GenConfig:
     n_pc: int = 2048
     n_pc_qry: int = 1024
     n_rays: int = 4096
+    pc_ctx_bank: int = 4
 
     pc_view_crop: float = 0.5
     pc_noise_std: float = 0.005
@@ -526,16 +655,16 @@ class V2GenConfig:
 
     udf_near_ratio: float = 0.5
     udf_near_std: float = 0.05
+    udf_probe_deltas: Tuple[float, ...] = (0.01, 0.02, 0.05)
 
     curvature_knn: int = 20
     pca_knn: int = 20
+    mesh_vis_n_dirs: int = 8
+    mesh_vis_eps: float = 1e-4
+    mesh_vis_max_t: float = 2.5
 
     ray_radius: float = 2.5
     ray_jitter_std: float = 0.05
-    mesh_vis_enable: bool = True
-    mesh_vis_dirs: int = 16
-    mesh_vis_max_t: float = 0.25
-    mesh_vis_eps: float = 1e-3
     strict_udf_surface: bool = True
     surf_udf_grid: int = 128
     surf_udf_dilate: int = 1
@@ -549,28 +678,25 @@ class V2GenConfig:
 
 
 _REQUIRED_SURF_KEYS = (
+    "surf_xyz",
+    "surf_face_idx",
+    "surf_bary",
     "mesh_surf_n",
     "mesh_surf_curv",
+    "mesh_surf_vis_sig",
     "udf_surf_t_in",
     "udf_surf_t_out",
     "udf_surf_hit_out",
     "udf_surf_thickness",
-    "pc_n",
-    "pc_density",
-)
-
-_REQUIRED_VIS_KEYS = (
-    "mesh_qry_vis_hit",
-    "mesh_qry_vis_t",
+    "udf_surf_probe_front",
+    "pc_ctx_bank_xyz",
+    "pc_ctx_bank_n",
+    "pc_ctx_bank_density",
 )
 
 
-def _has_required_keys(npz: "np.lib.npyio.NpzFile", *, cfg: V2GenConfig) -> bool:
-    if not all(k in npz for k in _REQUIRED_SURF_KEYS):
-        return False
-    if bool(cfg.mesh_vis_enable) and not all(k in npz for k in _REQUIRED_VIS_KEYS):
-        return False
-    return True
+def _has_required_surface_keys(npz: "np.lib.npyio.NpzFile") -> bool:
+    return all(k in npz for k in _REQUIRED_SURF_KEYS)
 
 
 def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int) -> Optional[str]:
@@ -581,7 +707,7 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
             return None
         try:
             with np.load(out_path, allow_pickle=False) as npz_old:
-                if _has_required_keys(npz_old, cfg=cfg):
+                if _has_required_surface_keys(npz_old):
                     return None
         except Exception:
             pass
@@ -594,77 +720,103 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
 
         mesh = trimesh.load(mesh_path, force="mesh", process=False)
         if not isinstance(mesh, trimesh.Trimesh):
-            # some files load as Scene
             mesh = mesh.dump().sum()
         mesh = normalize_mesh(mesh)
         if mesh.faces.shape[0] == 0 or mesh.vertices.shape[0] == 0:
             return f"empty mesh: {mesh_path}"
 
-        # --- surface context ---
-        if "surf_xyz" in existing:
-            surf_xyz = np.asarray(existing["surf_xyz"], dtype=np.float32)
-        else:
-            surf_xyz, _ = _sample_surface(mesh, int(cfg.n_surf), rng)
-            surf_xyz = np.asarray(surf_xyz, dtype=np.float32)
+        bbox_min = mesh.bounds[0].astype(np.float32)
+        bbox_max = mesh.bounds[1].astype(np.float32)
+        surface_area = np.float32(getattr(mesh, "area", 0.0))
+        try:
+            volume = np.float32(abs(float(mesh.volume)))
+        except Exception:
+            volume = np.float32(0.0)
+        is_watertight = np.int32(1 if bool(getattr(mesh, "is_watertight", False)) else 0)
+        is_winding_consistent = np.int32(1 if bool(getattr(mesh, "is_winding_consistent", False)) else 0)
+        vertex_count = np.int32(int(mesh.vertices.shape[0]))
+        face_count = np.int32(int(mesh.faces.shape[0]))
 
-        # --- mesh query: normals + curvature proxy ---
-        if ("mesh_qry_xyz" in existing) and ("mesh_qry_n" in existing) and ("mesh_qry_curv" in existing):
+        # --- shared surface master set ---
+        if {"surf_xyz", "surf_face_idx", "surf_bary"}.issubset(existing.keys()):
+            surf_xyz = np.asarray(existing["surf_xyz"], dtype=np.float32)
+            surf_face_idx = np.asarray(existing["surf_face_idx"], dtype=np.int64).reshape(-1)
+            surf_bary = np.asarray(existing["surf_bary"], dtype=np.float32)
+        else:
+            surf_xyz, surf_face_idx = _sample_surface(mesh, int(cfg.n_surf), rng)
+            surf_bary = _surface_barycentric(mesh, surf_xyz, surf_face_idx)
+
+        # --- mesh query set ---
+        if {"mesh_qry_xyz", "mesh_qry_face_idx", "mesh_qry_bary", "mesh_qry_n", "mesh_qry_curv"}.issubset(existing.keys()):
             mesh_qry_xyz = np.asarray(existing["mesh_qry_xyz"], dtype=np.float32)
+            mesh_qry_face_idx = np.asarray(existing["mesh_qry_face_idx"], dtype=np.int64).reshape(-1)
+            mesh_qry_bary = np.asarray(existing["mesh_qry_bary"], dtype=np.float32)
             mesh_qry_n = np.asarray(existing["mesh_qry_n"], dtype=np.float32)
             mesh_qry_curv = np.asarray(existing["mesh_qry_curv"], dtype=np.float32)
         else:
-            mesh_qry_xyz, mesh_qry_f = _sample_surface(mesh, int(cfg.n_mesh_qry), rng)
-            mesh_qry_n = mesh.face_normals[mesh_qry_f].astype(np.float32)
+            mesh_qry_xyz, mesh_qry_face_idx = _sample_surface(mesh, int(cfg.n_mesh_qry), rng)
+            mesh_qry_bary = _surface_barycentric(mesh, mesh_qry_xyz, mesh_qry_face_idx)
+            mesh_qry_n = mesh.face_normals[mesh_qry_face_idx].astype(np.float32)
             mesh_qry_n /= np.linalg.norm(mesh_qry_n, axis=1, keepdims=True) + 1e-8
             mesh_qry_curv = _normal_variation_curv(mesh_qry_xyz, mesh_qry_n, k=int(cfg.curvature_knn))
-        if bool(cfg.mesh_vis_enable) and ("mesh_qry_vis_hit" in existing) and ("mesh_qry_vis_t" in existing):
-            mesh_qry_vis_hit = np.asarray(existing["mesh_qry_vis_hit"], dtype=np.float32)
-            mesh_qry_vis_t = np.asarray(existing["mesh_qry_vis_t"], dtype=np.float32)
-        elif bool(cfg.mesh_vis_enable):
-            mesh_qry_vis_hit, mesh_qry_vis_t = _compute_mesh_query_visibility(
+        if {"mesh_qry_vis_sig", "mesh_qry_viscount", "mesh_qry_ao"}.issubset(existing.keys()):
+            mesh_qry_vis_sig = np.asarray(existing["mesh_qry_vis_sig"], dtype=np.float32)
+            mesh_qry_viscount = np.asarray(existing["mesh_qry_viscount"], dtype=np.float32)
+            mesh_qry_ao = np.asarray(existing["mesh_qry_ao"], dtype=np.float32)
+        else:
+            mesh_qry_vis_sig, mesh_qry_viscount, mesh_qry_ao = _visibility_signature(
                 mesh,
                 mesh_qry_xyz,
                 mesh_qry_n,
-                n_dirs=int(cfg.mesh_vis_dirs),
-                max_t=float(cfg.mesh_vis_max_t),
+                n_dirs=int(cfg.mesh_vis_n_dirs),
                 eps=float(cfg.mesh_vis_eps),
+                max_t=float(cfg.mesh_vis_max_t),
             )
 
-        # --- UDF queries: distance + gradient proxy ---
-        if ("udf_qry_xyz" in existing) and ("udf_qry_dist" in existing) and ("udf_qry_grad" in existing):
+        # --- UDF volume queries ---
+        if {"udf_qry_xyz", "udf_qry_dist", "udf_qry_grad", "udf_qry_src_code"}.issubset(existing.keys()):
             udf_qry_xyz = np.asarray(existing["udf_qry_xyz"], dtype=np.float32)
             udf_qry_dist = np.asarray(existing["udf_qry_dist"], dtype=np.float32)
             udf_qry_grad = np.asarray(existing["udf_qry_grad"], dtype=np.float32)
+            udf_qry_src_code = np.asarray(existing["udf_qry_src_code"], dtype=np.int32)
+            udf_qry_cp_xyz = np.asarray(existing.get("udf_qry_cp_xyz", np.zeros_like(udf_qry_xyz)), dtype=np.float32)
+            udf_qry_cp_n = np.asarray(existing.get("udf_qry_cp_n", np.zeros_like(udf_qry_xyz)), dtype=np.float32)
         else:
-            udf_qry_xyz = _sample_udf_queries(
+            udf_qry_xyz, udf_qry_src_code = _sample_udf_queries(
                 surf_xyz,
                 n_qry=int(cfg.n_udf_qry),
                 rng=rng,
                 near_ratio=float(cfg.udf_near_ratio),
                 near_std=float(cfg.udf_near_std),
             )
+            cp, dist1d, face_idx = _closest_point_and_face(mesh, udf_qry_xyz)
+            udf_qry_cp_xyz = cp.astype(np.float32)
+            udf_qry_cp_n = mesh.face_normals[face_idx].astype(np.float32)
+            udf_qry_cp_n /= np.linalg.norm(udf_qry_cp_n, axis=1, keepdims=True) + 1e-8
             udf_qry_dist, udf_qry_grad = _compute_udf_dist_grad(mesh, udf_qry_xyz)
 
-        # --- point cloud context/query: PCA normal + density ---
-        if "pc_xyz" in existing:
-            pc_xyz = np.asarray(existing["pc_xyz"], dtype=np.float32)
+        # --- PC context banks ---
+        if {"pc_ctx_bank_xyz", "pc_ctx_bank_n", "pc_ctx_bank_density"}.issubset(existing.keys()):
+            pc_ctx_bank_xyz = np.asarray(existing["pc_ctx_bank_xyz"], dtype=np.float32)
+            pc_ctx_bank_n = np.asarray(existing["pc_ctx_bank_n"], dtype=np.float32)
+            pc_ctx_bank_density = np.asarray(existing["pc_ctx_bank_density"], dtype=np.float32)
+            pc_ctx_bank_view_dir = np.asarray(existing.get("pc_ctx_bank_view_dir", np.zeros((pc_ctx_bank_xyz.shape[0], 3))), dtype=np.float32)
         else:
-            pc_xyz = _make_partial_noisy_pc(
+            pc_ctx_bank_xyz, pc_ctx_bank_n, pc_ctx_bank_density, pc_ctx_bank_view_dir = _make_pc_ctx_bank(
                 surf_xyz,
+                n_bank=int(cfg.pc_ctx_bank),
                 n_pc=int(cfg.n_pc),
                 rng=rng,
                 view_crop=float(cfg.pc_view_crop),
                 noise_std=float(cfg.pc_noise_std),
                 dropout=float(cfg.pc_dropout),
+                pca_knn=int(cfg.pca_knn),
             )
-        pc_n_all = estimate_normals_pca(pc_xyz, k=int(cfg.pca_knn))
-        pc_d_all = estimate_density_knn(pc_xyz, k=int(cfg.pca_knn))
-        if pc_n_all is None:
-            pc_n_all = np.zeros_like(pc_xyz, dtype=np.float32)
-        if pc_d_all is None:
-            pc_d_all = np.zeros((pc_xyz.shape[0], 1), dtype=np.float32)
+        pc_xyz = np.asarray(pc_ctx_bank_xyz[0], dtype=np.float32)
+        pc_n_all = np.asarray(pc_ctx_bank_n[0], dtype=np.float32)
+        pc_d_all = np.asarray(pc_ctx_bank_density[0], dtype=np.float32)
 
-        if ("pc_qry_xyz" in existing) and ("pc_qry_n" in existing) and ("pc_qry_density" in existing):
+        if {"pc_qry_xyz", "pc_qry_n", "pc_qry_density"}.issubset(existing.keys()):
             pc_qry_xyz = np.asarray(existing["pc_qry_xyz"], dtype=np.float32)
             pc_qry_n = np.asarray(existing["pc_qry_n"], dtype=np.float32)
             pc_qry_density = np.asarray(existing["pc_qry_density"], dtype=np.float32)
@@ -674,40 +826,86 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
             pc_qry_n = pc_n_all[pc_qry_idx].astype(np.float32)
             pc_qry_density = pc_d_all[pc_qry_idx].astype(np.float32)
 
-        # --- surf-aligned strict mesh/UDF/PC features ---
-        mesh_surf_n, mesh_surf_curv = _compute_mesh_surface_features(
-            mesh, surf_xyz, curvature_knn=int(cfg.curvature_knn)
-        )
+        # --- surface-aligned mesh / UDF / PC answer packs ---
+        if {"mesh_surf_n", "mesh_surf_curv"}.issubset(existing.keys()):
+            mesh_surf_n = np.asarray(existing["mesh_surf_n"], dtype=np.float32)
+            mesh_surf_curv = np.asarray(existing["mesh_surf_curv"], dtype=np.float32)
+        else:
+            mesh_surf_n = mesh.face_normals[surf_face_idx].astype(np.float32)
+            mesh_surf_n /= np.linalg.norm(mesh_surf_n, axis=1, keepdims=True) + 1e-8
+            mesh_surf_curv = _normal_variation_curv(surf_xyz, mesh_surf_n, k=int(cfg.curvature_knn))
+        if {"mesh_surf_vis_sig", "mesh_surf_viscount", "mesh_surf_ao"}.issubset(existing.keys()):
+            mesh_surf_vis_sig = np.asarray(existing["mesh_surf_vis_sig"], dtype=np.float32)
+            mesh_surf_viscount = np.asarray(existing["mesh_surf_viscount"], dtype=np.float32)
+            mesh_surf_ao = np.asarray(existing["mesh_surf_ao"], dtype=np.float32)
+        else:
+            mesh_surf_vis_sig, mesh_surf_viscount, mesh_surf_ao = _visibility_signature(
+                mesh,
+                surf_xyz,
+                mesh_surf_n,
+                n_dirs=int(cfg.mesh_vis_n_dirs),
+                eps=float(cfg.mesh_vis_eps),
+                max_t=float(cfg.mesh_vis_max_t),
+            )
+
         if bool(cfg.strict_udf_surface):
             udf_grid_local = _build_udf_grid_from_surface(
                 surf_xyz,
                 grid=int(cfg.surf_udf_grid),
                 dilate=int(cfg.surf_udf_dilate),
             )
-            udf_surf_t_in, udf_surf_t_out, udf_surf_hit_out, udf_surf_thickness = _compute_surface_udf_clearance(
-                surf_xyz,
-                mesh_surf_n,
-                udf_grid=udf_grid_local,
-                max_t=float(cfg.surf_udf_max_t),
-                eps=float(cfg.surf_udf_eps),
-                n_steps=int(cfg.surf_udf_steps),
-                tol=float(cfg.surf_udf_tol),
-                min_step=float(cfg.surf_udf_min_step),
-            )
+            if {"udf_surf_t_in", "udf_surf_t_out", "udf_surf_hit_out", "udf_surf_thickness"}.issubset(existing.keys()):
+                udf_surf_t_in = np.asarray(existing["udf_surf_t_in"], dtype=np.float32)
+                udf_surf_t_out = np.asarray(existing["udf_surf_t_out"], dtype=np.float32)
+                udf_surf_hit_out = np.asarray(existing["udf_surf_hit_out"], dtype=np.float32)
+                udf_surf_thickness = np.asarray(existing["udf_surf_thickness"], dtype=np.float32)
+            else:
+                udf_surf_t_in, udf_surf_t_out, udf_surf_hit_out, udf_surf_thickness = _compute_surface_udf_clearance(
+                    surf_xyz,
+                    mesh_surf_n,
+                    udf_grid=udf_grid_local,
+                    max_t=float(cfg.surf_udf_max_t),
+                    eps=float(cfg.surf_udf_eps),
+                    n_steps=int(cfg.surf_udf_steps),
+                    tol=float(cfg.surf_udf_tol),
+                    min_step=float(cfg.surf_udf_min_step),
+                )
+            udf_surf_clear_front = np.asarray(udf_surf_t_out, dtype=np.float32)
+            udf_surf_clear_back = np.asarray(udf_surf_t_in, dtype=np.float32)
+            if {"udf_surf_probe_front", "udf_surf_probe_back", "udf_surf_probe_thickness"}.issubset(existing.keys()):
+                udf_surf_probe_front = np.asarray(existing["udf_surf_probe_front"], dtype=np.float32)
+                udf_surf_probe_back = np.asarray(existing["udf_surf_probe_back"], dtype=np.float32)
+                udf_surf_probe_thickness = np.asarray(existing["udf_surf_probe_thickness"], dtype=np.float32)
+            else:
+                udf_surf_probe_front, udf_surf_probe_back, udf_surf_probe_thickness = _compute_surface_udf_probe_bank(
+                    surf_xyz,
+                    mesh_surf_n,
+                    udf_grid=udf_grid_local,
+                    deltas=cfg.udf_probe_deltas,
+                )
         else:
             n_s = int(surf_xyz.shape[0])
             udf_surf_t_in = np.zeros((n_s, 1), dtype=np.float32)
             udf_surf_t_out = np.zeros((n_s, 1), dtype=np.float32)
             udf_surf_hit_out = np.zeros((n_s, 1), dtype=np.float32)
             udf_surf_thickness = np.zeros((n_s, 1), dtype=np.float32)
+            udf_surf_clear_front = np.zeros((n_s, 1), dtype=np.float32)
+            udf_surf_clear_back = np.zeros((n_s, 1), dtype=np.float32)
+            n_probe = int(len(cfg.udf_probe_deltas))
+            udf_surf_probe_front = np.zeros((n_s, n_probe), dtype=np.float32)
+            udf_surf_probe_back = np.zeros((n_s, n_probe), dtype=np.float32)
+            udf_surf_probe_thickness = np.zeros((n_s, n_probe), dtype=np.float32)
+            udf_grid_local = None
 
         # --- rays (optional) ---
-        if ("ray_o" in existing) and ("ray_d" in existing) and ("ray_t" in existing) and ("ray_hit" in existing) and ("ray_n" in existing):
+        if {"ray_o", "ray_d", "ray_t", "ray_hit", "ray_n", "ray_hit_xyz", "ray_face_idx"}.issubset(existing.keys()):
             ray_o = np.asarray(existing["ray_o"], dtype=np.float32)
             ray_d = np.asarray(existing["ray_d"], dtype=np.float32)
             ray_t = np.asarray(existing["ray_t"], dtype=np.float32)
             ray_hit = np.asarray(existing["ray_hit"], dtype=np.float32)
             ray_n = np.asarray(existing["ray_n"], dtype=np.float32)
+            ray_hit_xyz = np.asarray(existing["ray_hit_xyz"], dtype=np.float32)
+            ray_face_idx = np.asarray(existing["ray_face_idx"], dtype=np.int64)
         else:
             ray_o, ray_d = _sample_rays(
                 n_rays=int(cfg.n_rays),
@@ -715,7 +913,16 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
                 radius=float(cfg.ray_radius),
                 jitter_std=float(cfg.ray_jitter_std),
             )
-            ray_t, ray_hit, ray_n = _ray_intersect(mesh, ray_o, ray_d)
+            ray_t, ray_hit, ray_n, ray_hit_xyz, ray_face_idx = _ray_intersect(
+                mesh,
+                ray_o,
+                ray_d,
+                udf_grid=udf_grid_local,
+                max_t=float(cfg.mesh_vis_max_t),
+                n_steps=max(64, int(cfg.surf_udf_steps)),
+                tol=float(cfg.surf_udf_tol),
+                min_step=float(cfg.surf_udf_min_step),
+            )
 
         payload: Dict[str, np.ndarray] = dict(existing) if bool(existing) else {}
         payload.update(
@@ -723,39 +930,71 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
                 "v2": np.int32(2),
                 "synset": np.bytes_(synset),
                 "model_id": np.bytes_(model_id),
-                # contexts
+                "mesh_source_path": np.bytes_(mesh_path),
+                "bbox_min": bbox_min,
+                "bbox_max": bbox_max,
+                "surface_area": np.asarray([surface_area], dtype=np.float32),
+                "volume": np.asarray([volume], dtype=np.float32),
+                "is_watertight": np.asarray([is_watertight], dtype=np.int32),
+                "is_winding_consistent": np.asarray([is_winding_consistent], dtype=np.int32),
+                "vertex_count": np.asarray([vertex_count], dtype=np.int32),
+                "face_count": np.asarray([face_count], dtype=np.int32),
+                # shared surface master set
                 "surf_xyz": surf_xyz.astype(np.float32),
+                "surf_face_idx": surf_face_idx.reshape(-1, 1).astype(np.int64),
+                "surf_bary": surf_bary.astype(np.float32),
+                # context banks / legacy aliases
+                "pc_ctx_bank_xyz": pc_ctx_bank_xyz.astype(np.float32),
+                "pc_ctx_bank_n": pc_ctx_bank_n.astype(np.float32),
+                "pc_ctx_bank_density": pc_ctx_bank_density.astype(np.float32),
+                "pc_ctx_bank_view_dir": pc_ctx_bank_view_dir.astype(np.float32),
                 "pc_xyz": pc_xyz.astype(np.float32),
+                "pc_n": pc_n_all.astype(np.float32),
+                "pc_density": pc_d_all.astype(np.float32),
                 # surf-aligned primitive-native answer sources
                 "mesh_surf_n": mesh_surf_n.astype(np.float32),
                 "mesh_surf_curv": mesh_surf_curv.astype(np.float32),
+                "mesh_surf_vis_sig": mesh_surf_vis_sig.astype(np.float32),
+                "mesh_surf_viscount": mesh_surf_viscount.astype(np.float32),
+                "mesh_surf_ao": mesh_surf_ao.astype(np.float32),
                 "udf_surf_t_in": udf_surf_t_in.astype(np.float32),
                 "udf_surf_t_out": udf_surf_t_out.astype(np.float32),
                 "udf_surf_hit_out": udf_surf_hit_out.astype(np.float32),
                 "udf_surf_thickness": udf_surf_thickness.astype(np.float32),
-                "pc_n": pc_n_all.astype(np.float32),
-                "pc_density": pc_d_all.astype(np.float32),
-                # legacy v2 query path (kept for token pretrain / CPAC)
+                "udf_surf_clear_front": udf_surf_clear_front.astype(np.float32),
+                "udf_surf_clear_back": udf_surf_clear_back.astype(np.float32),
+                "udf_probe_deltas": np.asarray(cfg.udf_probe_deltas, dtype=np.float32),
+                "udf_surf_probe_front": udf_surf_probe_front.astype(np.float32),
+                "udf_surf_probe_back": udf_surf_probe_back.astype(np.float32),
+                "udf_surf_probe_thickness": udf_surf_probe_thickness.astype(np.float32),
+                # query-aligned packs
                 "pc_qry_xyz": pc_qry_xyz.astype(np.float32),
                 "pc_qry_n": pc_qry_n.astype(np.float32),
                 "pc_qry_density": pc_qry_density.astype(np.float32),
                 "mesh_qry_xyz": mesh_qry_xyz.astype(np.float32),
+                "mesh_qry_face_idx": mesh_qry_face_idx.reshape(-1, 1).astype(np.int64),
+                "mesh_qry_bary": mesh_qry_bary.astype(np.float32),
                 "mesh_qry_n": mesh_qry_n.astype(np.float32),
                 "mesh_qry_curv": mesh_qry_curv.astype(np.float32),
+                "mesh_qry_vis_sig": mesh_qry_vis_sig.astype(np.float32),
+                "mesh_qry_viscount": mesh_qry_viscount.astype(np.float32),
+                "mesh_qry_ao": mesh_qry_ao.astype(np.float32),
                 "udf_qry_xyz": udf_qry_xyz.astype(np.float32),
+                "udf_qry_src_code": udf_qry_src_code.astype(np.int32),
                 "udf_qry_dist": udf_qry_dist.astype(np.float32),
                 "udf_qry_grad": udf_qry_grad.astype(np.float32),
-                # optional rays
+                "udf_qry_cp_xyz": udf_qry_cp_xyz.astype(np.float32),
+                "udf_qry_cp_n": udf_qry_cp_n.astype(np.float32),
+                # optional rays / visibility
                 "ray_o": ray_o.astype(np.float32),
                 "ray_d": ray_d.astype(np.float32),
                 "ray_t": ray_t.astype(np.float32),
                 "ray_hit": ray_hit.astype(np.float32),
                 "ray_n": ray_n.astype(np.float32),
+                "ray_hit_xyz": ray_hit_xyz.astype(np.float32),
+                "ray_face_idx": ray_face_idx.astype(np.int64),
             }
         )
-        if bool(cfg.mesh_vis_enable):
-            payload["mesh_qry_vis_hit"] = mesh_qry_vis_hit.astype(np.float32)
-            payload["mesh_qry_vis_t"] = mesh_qry_vis_t.astype(np.float32)
 
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         np.savez(out_path, **payload)
@@ -812,6 +1051,7 @@ def main() -> None:
     ap.add_argument("--n_pc", type=int, default=2048)
     ap.add_argument("--n_pc_qry", type=int, default=1024)
     ap.add_argument("--n_rays", type=int, default=4096)
+    ap.add_argument("--pc_ctx_bank", type=int, default=4)
 
     # pc
     ap.add_argument("--pc_view_crop", type=float, default=0.5)
@@ -821,18 +1061,18 @@ def main() -> None:
     # udf
     ap.add_argument("--udf_near_ratio", type=float, default=0.5)
     ap.add_argument("--udf_near_std", type=float, default=0.05)
+    ap.add_argument("--udf_probe_deltas", type=str, default="0.01,0.02,0.05")
 
     # knn
     ap.add_argument("--curvature_knn", type=int, default=20)
     ap.add_argument("--pca_knn", type=int, default=20)
+    ap.add_argument("--mesh_vis_n_dirs", type=int, default=8)
+    ap.add_argument("--mesh_vis_eps", type=float, default=1e-4)
+    ap.add_argument("--mesh_vis_max_t", type=float, default=2.5)
 
     # rays
     ap.add_argument("--ray_radius", type=float, default=2.5)
     ap.add_argument("--ray_jitter_std", type=float, default=0.05)
-    ap.add_argument("--mesh_vis_enable", type=int, default=1, choices=[0, 1])
-    ap.add_argument("--mesh_vis_dirs", type=int, default=16)
-    ap.add_argument("--mesh_vis_max_t", type=float, default=0.25)
-    ap.add_argument("--mesh_vis_eps", type=float, default=1e-3)
     ap.add_argument("--strict_udf_surface", type=int, default=1, choices=[0, 1])
     ap.add_argument("--surf_udf_grid", type=int, default=128)
     ap.add_argument("--surf_udf_dilate", type=int, default=1)
@@ -873,19 +1113,20 @@ def main() -> None:
         n_pc=args.n_pc,
         n_pc_qry=args.n_pc_qry,
         n_rays=args.n_rays,
+        pc_ctx_bank=int(args.pc_ctx_bank),
         pc_view_crop=args.pc_view_crop,
         pc_noise_std=args.pc_noise_std,
         pc_dropout=args.pc_dropout,
         udf_near_ratio=args.udf_near_ratio,
         udf_near_std=args.udf_near_std,
+        udf_probe_deltas=tuple(float(x) for x in str(args.udf_probe_deltas).split(",") if str(x).strip()),
         curvature_knn=args.curvature_knn,
         pca_knn=args.pca_knn,
+        mesh_vis_n_dirs=int(args.mesh_vis_n_dirs),
+        mesh_vis_eps=float(args.mesh_vis_eps),
+        mesh_vis_max_t=float(args.mesh_vis_max_t),
         ray_radius=args.ray_radius,
         ray_jitter_std=args.ray_jitter_std,
-        mesh_vis_enable=bool(int(args.mesh_vis_enable)),
-        mesh_vis_dirs=int(args.mesh_vis_dirs),
-        mesh_vis_max_t=float(args.mesh_vis_max_t),
-        mesh_vis_eps=float(args.mesh_vis_eps),
         strict_udf_surface=bool(int(args.strict_udf_surface)),
         surf_udf_grid=int(args.surf_udf_grid),
         surf_udf_dilate=int(args.surf_udf_dilate),

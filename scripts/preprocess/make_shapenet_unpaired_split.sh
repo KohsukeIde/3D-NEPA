@@ -13,6 +13,13 @@ if [[ -f ".venv/bin/activate" ]]; then
   source .venv/bin/activate
 fi
 
+if [[ -n "${ENV_FILE:-}" && -f "${ENV_FILE}" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "${ENV_FILE}"
+  set +a
+fi
+
 PYTHON_BIN="${PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"
 CACHE_ROOT="${CACHE_ROOT:-data/shapenet_cache_v2_20260303}"
 TRAIN_SPLIT="${TRAIN_SPLIT:-train}"

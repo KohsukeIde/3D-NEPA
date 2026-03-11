@@ -54,10 +54,11 @@ Reference:
 
 ## Recommended Reading
 
-1. `nepa3d/docs/patch_nepa/README.md`
-2. `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
-3. `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
-4. `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
+1. `nepa3d/docs/patch_nepa/collaborator_reading_guide_active.md`
+2. `nepa3d/docs/patch_nepa/README.md`
+3. `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
+4. `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
+5. `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
 
 ## Examples
 

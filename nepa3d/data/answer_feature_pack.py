@@ -47,11 +47,20 @@ FEATURE_DIMS: Dict[str, int] = {
     "t_out": 1,
     "hit_out": 1,
     "thickness": 1,
+    "clear_front": 1,
+    "clear_back": 1,
+    # fixed dims for the current world-package defaults:
+    # - probe bank uses 3 deltas by default
+    # - visibility signature uses 8 directions by default
+    "probe_front": 3,
+    "probe_back": 3,
+    "probe_thickness": 3,
+    "vis": 8,
+    "vis_sig": 8,
+    "viscount": 1,
+    "ao": 1,
     # pointcloud-like
     "density": 1,
-    # mesh-query visibility
-    "vis_hit": 16,
-    "vis_t": 16,
 }
 
 # Aliases to accept legacy or alternative key names in NPZ.
@@ -64,12 +73,19 @@ FEATURE_KEY_ALIASES: Dict[str, List[str]] = {
     "density": ["density", "dens"],
     "occ": ["occ", "occupancy"],
     "near": ["near", "near_surface"],
-    "t_in": ["t_in", "tin", "clear_in"],
-    "t_out": ["t_out", "tout", "clear_out"],
+    "t_in": ["t_in", "tin", "clear_in", "probe_in"],
+    "t_out": ["t_out", "tout", "clear_out", "probe_out"],
     "hit_out": ["hit_out", "hout"],
     "thickness": ["thickness", "thick"],
-    "vis_hit": ["vis_hit"],
-    "vis_t": ["vis_t", "vis_dist"],
+    "clear_front": ["clear_front", "clear_fwd", "clearance_front"],
+    "clear_back": ["clear_back", "clear_bwd", "clearance_back"],
+    "probe_front": ["probe_front", "probe_fwd", "offset_front"],
+    "probe_back": ["probe_back", "probe_bwd", "offset_back"],
+    "probe_thickness": ["probe_thickness", "probe_thick", "offset_thickness"],
+    "vis": ["vis", "visibility", "vis_sig", "visibility_sig"],
+    "vis_sig": ["vis_sig", "visibility_sig"],
+    "viscount": ["viscount", "viewcount", "vis_count"],
+    "ao": ["ao", "ambient_occlusion"],
 }
 
 
@@ -114,6 +130,19 @@ def _as_2d(arr: np.ndarray) -> np.ndarray:
     return arr.reshape(arr.shape[0], -1)
 
 
+def _select_bank(arr: np.ndarray, bank_idx: Optional[int]) -> np.ndarray:
+    arr = np.asarray(arr)
+    if bank_idx is None:
+        return arr
+    if arr.ndim >= 3:
+        if bank_idx < 0 or bank_idx >= arr.shape[0]:
+            raise IndexError(f"bank_idx={bank_idx} out of range for shape {arr.shape}")
+        return arr[int(bank_idx)]
+    return arr
+
+
+
+
 @dataclass
 class PackedFeatures:
     feat: np.ndarray  # [N, C]
@@ -129,7 +158,7 @@ class V2AnswerFeaturePacker:
         self.schema = parse_schema(schema)
         self.fill_value = float(fill_value)
 
-    def pack(self, npz: "np.lib.npyio.NpzFile", *, prefix: str, n_rows: Optional[int] = None) -> PackedFeatures:
+    def pack(self, npz: "np.lib.npyio.NpzFile", *, prefix: str, n_rows: Optional[int] = None, bank_idx: Optional[int] = None) -> PackedFeatures:
         """Pack features under the given prefix ('surf' or 'qry').
 
         Args:
@@ -141,7 +170,8 @@ class V2AnswerFeaturePacker:
             xyz_key = f"{prefix}_xyz"
             if xyz_key not in npz:
                 raise KeyError(f"V2AnswerFeaturePacker: missing {xyz_key} to infer row count")
-            n_rows = int(np.asarray(npz[xyz_key]).shape[0])
+            xyz_arr = _select_bank(np.asarray(npz[xyz_key]), bank_idx)
+            n_rows = int(np.asarray(xyz_arr).shape[0])
 
         feats: List[np.ndarray] = []
         dims: List[int] = []
@@ -158,7 +188,8 @@ class V2AnswerFeaturePacker:
                 feats.append(np.full((n_rows, d), self.fill_value, dtype=np.float32))
                 continue
 
-            arr = _as_2d(np.asarray(npz[key], dtype=np.float32))
+            arr = _select_bank(np.asarray(npz[key], dtype=np.float32), bank_idx)
+            arr = _as_2d(arr)
             if arr.shape[0] != n_rows:
                 raise ValueError(
                     f"V2AnswerFeaturePacker: key {key} first-dim mismatch: {arr.shape[0]} != {n_rows}"

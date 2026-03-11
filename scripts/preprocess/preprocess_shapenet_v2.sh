@@ -13,8 +13,15 @@ if [[ -f ".venv/bin/activate" ]]; then
   source .venv/bin/activate
 fi
 
+if [[ -n "${ENV_FILE:-}" && -f "${ENV_FILE}" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "${ENV_FILE}"
+  set +a
+fi
+
 PYTHON_BIN="${PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"
-SHAPENET_ROOT="${SHAPENET_ROOT:-data/ShapeNetCore.v2/synsets}"
+SHAPENET_ROOT="${SHAPENET_ROOT:-data/ShapeNetCore.v2}"
 OUT_ROOT="${OUT_ROOT:-data/shapenet_cache_v2}"
 SYNSETS="${SYNSETS:-}"
 TRAIN_RATIO="${TRAIN_RATIO:-0.9}"
@@ -47,10 +54,11 @@ CURVATURE_KNN="${CURVATURE_KNN:-20}"
 PCA_KNN="${PCA_KNN:-20}"
 RAY_RADIUS="${RAY_RADIUS:-2.5}"
 RAY_JITTER_STD="${RAY_JITTER_STD:-0.05}"
-MESH_VIS_ENABLE="${MESH_VIS_ENABLE:-1}"
-MESH_VIS_DIRS="${MESH_VIS_DIRS:-16}"
-MESH_VIS_MAX_T="${MESH_VIS_MAX_T:-0.25}"
-MESH_VIS_EPS="${MESH_VIS_EPS:-1e-3}"
+PC_CTX_BANK="${PC_CTX_BANK:-4}"
+UDF_PROBE_DELTAS="${UDF_PROBE_DELTAS:-0.01,0.02,0.05}"
+MESH_VIS_N_DIRS="${MESH_VIS_N_DIRS:-8}"
+MESH_VIS_MAX_T="${MESH_VIS_MAX_T:-2.5}"
+MESH_VIS_EPS="${MESH_VIS_EPS:-1e-4}"
 STRICT_UDF_SURFACE="${STRICT_UDF_SURFACE:-1}"
 SURF_UDF_GRID="${SURF_UDF_GRID:-128}"
 SURF_UDF_DILATE="${SURF_UDF_DILATE:-1}"
@@ -100,17 +108,18 @@ set -x
   --n_pc "${N_PC}" \
   --n_pc_qry "${N_PC_QRY}" \
   --n_rays "${N_RAYS}" \
+  --pc_ctx_bank "${PC_CTX_BANK}" \
   --pc_view_crop "${PC_VIEW_CROP}" \
   --pc_noise_std "${PC_NOISE_STD}" \
   --pc_dropout "${PC_DROPOUT}" \
   --udf_near_ratio "${UDF_NEAR_RATIO}" \
   --udf_near_std "${UDF_NEAR_STD}" \
+  --udf_probe_deltas "${UDF_PROBE_DELTAS}" \
   --curvature_knn "${CURVATURE_KNN}" \
   --pca_knn "${PCA_KNN}" \
   --ray_radius "${RAY_RADIUS}" \
   --ray_jitter_std "${RAY_JITTER_STD}" \
-  --mesh_vis_enable "${MESH_VIS_ENABLE}" \
-  --mesh_vis_dirs "${MESH_VIS_DIRS}" \
+  --mesh_vis_n_dirs "${MESH_VIS_N_DIRS}" \
   --mesh_vis_max_t "${MESH_VIS_MAX_T}" \
   --mesh_vis_eps "${MESH_VIS_EPS}" \
   --strict_udf_surface "${STRICT_UDF_SURFACE}" \

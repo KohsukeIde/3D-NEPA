@@ -38,15 +38,28 @@ LINK_MODE="${LINK_MODE:-symlink}"
 OVERWRITE="${OVERWRITE:-0}"
 
 # resources
-RT_QF_SPLIT="${RT_QF_SPLIT:-1}"
+RT_CLASS_SPLIT="${RT_CLASS_SPLIT:-rt_QF}"
+RT_UNITS_SPLIT="${RT_UNITS_SPLIT:-${RT_QF_SPLIT:-1}}"
 WALLTIME_SPLIT="${WALLTIME_SPLIT:-02:00:00}"
-RT_QF_MAT="${RT_QF_MAT:-1}"
+RT_CLASS_MAT="${RT_CLASS_MAT:-rt_QF}"
+RT_UNITS_MAT="${RT_UNITS_MAT:-${RT_QF_MAT:-1}}"
 WALLTIME_MAT="${WALLTIME_MAT:-04:00:00}"
 
 if ! command -v qsub >/dev/null 2>&1; then
   echo "[error] qsub not found"
   exit 1
 fi
+
+write_env_file() {
+  local path="$1"
+  shift
+  : > "${path}"
+  for kv in "$@"; do
+    local key="${kv%%=*}"
+    local val="${kv#*=}"
+    printf '%s=%q\n' "${key}" "${val}" >> "${path}"
+  done
+}
 
 _dep_ids="$(echo "${PREPROC_JOB_IDS}" | tr ',' ' ' | xargs)"
 _dep_expr="$(echo "${_dep_ids}" | tr ' ' ':')"
@@ -66,19 +79,20 @@ split_vars=(
   "RATIOS=${RATIOS}"
   "ALLOW_EMPTY_SPLITS=${ALLOW_EMPTY_SPLITS}"
 )
-SPLIT_QVARS="$(IFS=,; echo "${split_vars[*]}")"
+split_env="${LOG_DIR}/split.env"
+write_env_file "${split_env}" "${split_vars[@]}"
 
 split_job_name="${JOB_NAME_SPLIT:-shpv2_split}"
 split_cmd=(
   qsub
-  -l "rt_QF=${RT_QF_SPLIT}"
+  -l "${RT_CLASS_SPLIT}=${RT_UNITS_SPLIT}"
   -l "walltime=${WALLTIME_SPLIT}"
   -W "group_list=${GROUP_LIST}"
   -W "depend=${DEPEND_PREPROC}"
   -N "${split_job_name}"
   -o "${LOG_DIR}/${split_job_name}.out"
   -e "${LOG_DIR}/${split_job_name}.err"
-  -v "${SPLIT_QVARS}"
+  -v "WORKDIR=${WORKDIR},ENV_FILE=${split_env}"
   "${SPLIT_SCRIPT}"
 )
 split_jid="$("${split_cmd[@]}")"
@@ -92,19 +106,20 @@ mat_vars=(
   "LINK_MODE=${LINK_MODE}"
   "OVERWRITE=${OVERWRITE}"
 )
-MAT_QVARS="$(IFS=,; echo "${mat_vars[*]}")"
+mat_env="${LOG_DIR}/materialize.env"
+write_env_file "${mat_env}" "${mat_vars[@]}"
 
 mat_job_name="${JOB_NAME_MAT:-shpv2_mat}"
 mat_cmd=(
   qsub
-  -l "rt_QF=${RT_QF_MAT}"
+  -l "${RT_CLASS_MAT}=${RT_UNITS_MAT}"
   -l "walltime=${WALLTIME_MAT}"
   -W "group_list=${GROUP_LIST}"
   -W "depend=afterok:${split_jid}"
   -N "${mat_job_name}"
   -o "${LOG_DIR}/${mat_job_name}.out"
   -e "${LOG_DIR}/${mat_job_name}.err"
-  -v "${MAT_QVARS}"
+  -v "WORKDIR=${WORKDIR},ENV_FILE=${mat_env}"
   "${MAT_SCRIPT}"
 )
 mat_jid="$("${mat_cmd[@]}")"

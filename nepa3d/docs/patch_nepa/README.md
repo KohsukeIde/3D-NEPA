@@ -8,21 +8,24 @@ Point-MAE and PointGPT.
 
 0. `../llm_retrieval_index.md`
    - Default retrieval policy for the whole `docs/` tree.
-1. `storyline_query_to_patch_v2_active.md`
+1. `collaborator_reading_guide_active.md`
+   - One-page collaborator-facing entrypoint.
+   - Start here when sharing the current line with a coauthor.
+2. `storyline_query_to_patch_v2_active.md`
    - Cross-line storyline and interpretation boundary.
    - Start here when asking "what happened?" or "which result is valid?"
-2. `hypothesis_matrix_active.md`
+3. `hypothesis_matrix_active.md`
    - Hypotheses, supporting evidence, current status, and next minimal tests.
-3. `execution_backlog_active.md`
+4. `execution_backlog_active.md`
    - Canonical local-only execution backlog and gating rules.
    - Start here when asking "what should run next locally?"
-4. `restart_plan_patchnepa_data_v2_20260303.md`
+5. `restart_plan_patchnepa_data_v2_20260303.md`
    - Active investigation memo for the current v2 token-path branch.
-5. `patch_nepa_stage2_active.md`
+6. `patch_nepa_stage2_active.md`
    - Active mainline policy and stage-2 execution rules.
-6. `runlog_patch_nepa_202602.md`
+7. `runlog_patch_nepa_202602.md`
    - Raw execution ledger for Patch-NEPA jobs.
-7. `benchmark_scanobjectnn_variant.md`
+8. `benchmark_scanobjectnn_variant.md`
    - Canonical headline ScanObjectNN benchmark table.
 
 ## Collaborator Quick Path
@@ -35,14 +38,16 @@ If a collaborator asks:
 
 start from:
 
-1. `scripts/abci/README.md`
+1. `collaborator_reading_guide_active.md`
+   - one-page reading order and file-role memo
+2. `scripts/abci/README.md`
    - curated ABCI entrypoints for the current PatchNEPA line
    - includes the thin submit wrappers for pretrain / finetune / mini-CPAC
-2. `storyline_query_to_patch_v2_active.md`
+3. `storyline_query_to_patch_v2_active.md`
    - shortest answer to "what is the current valid result?"
-3. `benchmark_scanobjectnn_variant.md`
+4. `benchmark_scanobjectnn_variant.md`
    - canonical ScanObjectNN headline table
-4. `restart_plan_patchnepa_data_v2_20260303.md`
+5. `restart_plan_patchnepa_data_v2_20260303.md`
    - current branch memo and the most detailed active result backfill
 
 Current short answer:

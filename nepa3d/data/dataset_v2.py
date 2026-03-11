@@ -33,6 +33,23 @@ def _choice(n: int, k: int, rng: Any, replace: bool = False) -> np.ndarray:
     return rng.choice(n, size=k, replace=replace).astype(np.int64)
 
 
+def _select_optional_bank(arr: np.ndarray, rng: Any, mode: str, *, fallback_seed: int = 0) -> Tuple[np.ndarray, Optional[int]]:
+    """If arr is [B,N,...], select one bank. Otherwise return as-is."""
+    arr = np.asarray(arr)
+    if arr.ndim < 3:
+        return arr, None
+    n_bank = int(arr.shape[0])
+    if n_bank <= 0:
+        raise ValueError(f"empty bank array with shape {arr.shape}")
+    if mode == "train":
+        b = int(rng.randint(0, n_bank))
+    else:
+        b = int(fallback_seed % n_bank)
+    return np.asarray(arr[b]), b
+
+
+
+
 def _infer_prefix_from_xyz_key(qry_xyz_key: str) -> str:
     if qry_xyz_key.endswith("_xyz"):
         return qry_xyz_key[: -len("_xyz")]
@@ -82,14 +99,12 @@ def _apply_answer_scale_rules(
     if norm_radius is not None and float(norm_radius) > 1e-8:
         r = float(norm_radius)
         for name, sl in schema_slices:
-            if name in {"dist", "udf"}:
+            if name in {"dist", "udf", "t_in", "t_out", "thickness", "clear_front", "clear_back", "probe_front", "probe_back", "probe_thickness"}:
                 out[:, sl] = out[:, sl] / r
             elif name in {"curv", "curvature"}:
                 out[:, sl] = out[:, sl] * r
             elif name in {"density"}:
                 out[:, sl] = out[:, sl] * r
-            elif name in {"vis_t"}:
-                out[:, sl] = out[:, sl] / r
 
     if aug_scales_xyz is not None:
         sc = np.asarray(aug_scales_xyz, dtype=np.float32).reshape(3)
@@ -101,14 +116,12 @@ def _apply_answer_scale_rules(
             det_sc = 1.0
 
         for name, sl in schema_slices:
-            if name in {"dist", "udf"}:
+            if name in {"dist", "udf", "t_in", "t_out", "thickness", "clear_front", "clear_back", "probe_front", "probe_back", "probe_thickness"}:
                 out[:, sl] = out[:, sl] * mean_sc
             elif name in {"curv", "curvature"}:
                 out[:, sl] = out[:, sl] / mean_sc
             elif name in {"density"}:
                 out[:, sl] = out[:, sl] / det_sc
-            elif name in {"vis_t"}:
-                out[:, sl] = out[:, sl] * mean_sc
             elif name in {"n", "normal", "grad", "grad_udf"}:
                 out[:, sl] = _transform_vec_diag(out[:, sl], sc)
 
@@ -163,7 +176,7 @@ class V2SurfaceQueryDataset(Dataset):
         self.pt_answer_prefix = (
             str(pt_answer_prefix)
             if pt_answer_prefix is not None
-            else self.surf_xyz_key
+            else _infer_prefix_from_xyz_key(self.surf_xyz_key)
         )
         self.pt_answer_key = None if pt_answer_key is None else str(pt_answer_key)
         self.answer_packer = V2AnswerFeaturePacker(answer_schema)
@@ -187,7 +200,13 @@ class V2SurfaceQueryDataset(Dataset):
         with np.load(path, allow_pickle=False) as npz:
             if self.surf_xyz_key not in npz:
                 raise KeyError(f"v2 NPZ missing {self.surf_xyz_key}: {path}")
-            surf_xyz_all = np.asarray(npz[self.surf_xyz_key], dtype=np.float32)
+            surf_xyz_src = np.asarray(npz[self.surf_xyz_key], dtype=np.float32)
+            surf_xyz_all, ctx_bank_idx = _select_optional_bank(
+                surf_xyz_src,
+                rng,
+                self.mode,
+                fallback_seed=self.seed + idx,
+            )
             n_surf_all = int(surf_xyz_all.shape[0])
             surf_idx = _choice(n_surf_all, self.n_surf, rng)
             surf_xyz = surf_xyz_all[surf_idx]
@@ -214,20 +233,34 @@ class V2SurfaceQueryDataset(Dataset):
                 if self.pt_answer_key is not None:
                     if self.pt_answer_key not in npz:
                         raise KeyError(f"v2 NPZ missing {self.pt_answer_key}: {path}")
-                    pt_full = np.asarray(npz[self.pt_answer_key], dtype=np.float32)
+                    pt_arr = np.asarray(npz[self.pt_answer_key], dtype=np.float32)
+                    if pt_arr.ndim >= 3 and ctx_bank_idx is not None:
+                        pt_arr = np.asarray(pt_arr[int(ctx_bank_idx)], dtype=np.float32)
+                    pt_full = np.asarray(pt_arr, dtype=np.float32)
                     if int(pt_full.shape[0]) != n_surf_all:
                         raise ValueError(
                             f"pt_answer_key rows mismatch: key={self.pt_answer_key} "
                             f"rows={int(pt_full.shape[0])} surf_rows={n_surf_all} path={path}"
                         )
                 else:
-                    packed_pt = self.answer_packer.pack(npz, prefix=self.pt_answer_prefix, n_rows=n_surf_all)
+                    packed_pt = self.answer_packer.pack(
+                        npz,
+                        prefix=self.pt_answer_prefix,
+                        n_rows=n_surf_all,
+                        bank_idx=ctx_bank_idx,
+                    )
                     pt_full = packed_pt.feat
                 pt_ans_feat_np = pt_full[surf_idx]
 
             if self.return_qry:
                 if self.qry_xyz_key in npz:
-                    qry_xyz = np.asarray(npz[self.qry_xyz_key], dtype=np.float32)
+                    qry_xyz_src = np.asarray(npz[self.qry_xyz_key], dtype=np.float32)
+                    qry_xyz, qry_bank_idx = _select_optional_bank(
+                        qry_xyz_src,
+                        rng,
+                        self.mode,
+                        fallback_seed=self.seed + idx + 17,
+                    )
                     n_q_all = int(qry_xyz.shape[0])
                     if self.n_qry is None:
                         qry_idx = np.arange(n_q_all, dtype=np.int64)
@@ -235,7 +268,12 @@ class V2SurfaceQueryDataset(Dataset):
                         qry_idx = _choice(n_q_all, self.n_qry, rng)
                     qry_xyz_np = qry_xyz[qry_idx]
 
-                    packed = self.answer_packer.pack(npz, prefix=self.answer_prefix, n_rows=n_q_all)
+                    packed = self.answer_packer.pack(
+                        npz,
+                        prefix=self.answer_prefix,
+                        n_rows=n_q_all,
+                        bank_idx=qry_bank_idx,
+                    )
                     ans_feat_np = packed.feat[qry_idx]
                 else:
                     if self.n_qry is not None:
@@ -247,8 +285,18 @@ class V2SurfaceQueryDataset(Dataset):
 
             if self.return_rays:
                 if ("ray_o" in npz) and ("ray_d" in npz):
-                    ray_o = np.asarray(npz["ray_o"], dtype=np.float32)
-                    ray_d = np.asarray(npz["ray_d"], dtype=np.float32)
+                    ray_o_src = np.asarray(npz["ray_o"], dtype=np.float32)
+                    ray_d_src = np.asarray(npz["ray_d"], dtype=np.float32)
+                    ray_o, ray_bank_idx = _select_optional_bank(
+                        ray_o_src,
+                        rng,
+                        self.mode,
+                        fallback_seed=self.seed + idx + 29,
+                    )
+                    if ray_d_src.ndim >= 3 and ray_bank_idx is not None:
+                        ray_d = np.asarray(ray_d_src[int(ray_bank_idx)], dtype=np.float32)
+                    else:
+                        ray_d = np.asarray(ray_d_src, dtype=np.float32)
                     n_r_all = int(ray_o.shape[0])
                     if self.n_ray is None:
                         ray_idx = np.arange(n_r_all, dtype=np.int64)
@@ -256,9 +304,18 @@ class V2SurfaceQueryDataset(Dataset):
                         ray_idx = _choice(n_r_all, self.n_ray, rng)
                     ray_o_np = ray_o[ray_idx]
                     ray_d_np = ray_d[ray_idx]
-                    ray_t_np = np.asarray(npz.get("ray_t", np.zeros((n_r_all, 1))), dtype=np.float32)[ray_idx]
-                    ray_hit_np = np.asarray(npz.get("ray_hit", np.zeros((n_r_all, 1))), dtype=np.float32)[ray_idx]
-                    ray_n_np = np.asarray(npz.get("ray_n", np.zeros((n_r_all, 3))), dtype=np.float32)[ray_idx]
+                    ray_t_arr = np.asarray(npz.get("ray_t", np.zeros((n_r_all, 1))), dtype=np.float32)
+                    ray_hit_arr = np.asarray(npz.get("ray_hit", np.zeros((n_r_all, 1))), dtype=np.float32)
+                    ray_n_arr = np.asarray(npz.get("ray_n", np.zeros((n_r_all, 3))), dtype=np.float32)
+                    if ray_t_arr.ndim >= 3 and ray_bank_idx is not None:
+                        ray_t_arr = np.asarray(ray_t_arr[int(ray_bank_idx)], dtype=np.float32)
+                    if ray_hit_arr.ndim >= 3 and ray_bank_idx is not None:
+                        ray_hit_arr = np.asarray(ray_hit_arr[int(ray_bank_idx)], dtype=np.float32)
+                    if ray_n_arr.ndim >= 3 and ray_bank_idx is not None:
+                        ray_n_arr = np.asarray(ray_n_arr[int(ray_bank_idx)], dtype=np.float32)
+                    ray_t_np = ray_t_arr[ray_idx]
+                    ray_hit_np = ray_hit_arr[ray_idx]
+                    ray_n_np = ray_n_arr[ray_idx]
                 else:
                     if self.n_ray is not None:
                         ray_o_np = np.zeros((self.n_ray, 3), dtype=np.float32)
@@ -340,6 +397,7 @@ class V2SurfaceQueryDataset(Dataset):
                 "pt_xyz": _np_to_torch_f32(surf_xyz),
                 "primitive": prim,
                 "path": path,
+                "context_bank_idx": None if ctx_bank_idx is None else int(ctx_bank_idx),
             }
 
             if self.return_pt_ans:
@@ -377,6 +435,7 @@ def v2_collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     out["pt_xyz"] = torch.stack([b["pt_xyz"] for b in batch], dim=0)
     out["primitive"] = [b.get("primitive") for b in batch]
     out["path"] = [b.get("path") for b in batch]
+    out["context_bank_idx"] = [b.get("context_bank_idx") for b in batch]
 
     if batch[0].get("pt_ans_feat") is None:
         out["pt_ans_feat"] = None

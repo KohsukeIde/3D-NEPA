@@ -1,6 +1,6 @@
 dataset_version: v2
 
-answer_schema: [n, curv, dist, grad, density, vis_hit, vis_t]
+answer_schema: [n, curv, dist, grad, density, vis_sig, ao]
 n_qry: 1024
 return_qry: true
 return_ray: false
@@ -17,7 +17,7 @@ mix_num_samples: 47445
 
 datasets:
   - name: shapenet_mesh
-    cache_root: data/shapenet_unpaired_cache_v2_20260306_visocc_drop1
+    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
     split: train_mesh
     backend: mesh
     weight: 1.0
@@ -25,7 +25,7 @@ datasets:
     qry_xyz_key: mesh_qry_xyz
 
   - name: shapenet_udf
-    cache_root: data/shapenet_unpaired_cache_v2_20260306_visocc_drop1
+    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
     split: train_udf
     backend: udf
     weight: 1.0

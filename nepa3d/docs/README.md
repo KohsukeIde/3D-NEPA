@@ -4,6 +4,8 @@ Last updated: 2026-03-06
 
 ## Start Here (Current)
 
+- Collaborator reading guide:
+  - `nepa3d/docs/patch_nepa/collaborator_reading_guide_active.md`
 - Operations boundary (local vs ABCI):
   - `nepa3d/docs/operations/README.md`
 - LLM retrieval index:
