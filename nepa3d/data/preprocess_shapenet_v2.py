@@ -8,6 +8,7 @@ Store **surface context points** separately from **primitive-specific query poin
 
 One NPZ (one shape) can contain multiple query sets:
 - mesh queries: `mesh_qry_xyz` + normals/curvature proxy
+- mesh visibility answers: `mesh_qry_vis_hit` + `mesh_qry_vis_t`
 - udf queries:  `udf_qry_xyz`  + unsigned distance + gradient proxy
 - pc context/query: `pc_xyz`, `pc_qry_xyz` + PCA normals + density proxy
 - ray queries (optional): `ray_o`, `ray_d` + hit/t/normal
@@ -84,6 +85,37 @@ def _sample_surface(mesh: "trimesh.Trimesh", n: int, rng: np.random.RandomState)
     finally:
         np.random.set_state(state)
     return pts.astype(np.float32), face_idx.astype(np.int64)
+
+
+def _fibonacci_hemisphere_dirs(n: int) -> np.ndarray:
+    """Deterministic quasi-uniform hemisphere directions around +Z."""
+    if int(n) <= 0:
+        return np.zeros((0, 3), dtype=np.float32)
+    k = np.arange(int(n), dtype=np.float32) + 0.5
+    z = 1.0 - (k / float(n))
+    z = np.clip(z, 0.0, 1.0)
+    phi = (math.pi * (3.0 - math.sqrt(5.0))) * k
+    r = np.sqrt(np.clip(1.0 - (z * z), 0.0, 1.0))
+    x = r * np.cos(phi)
+    y = r * np.sin(phi)
+    dirs = np.stack([x, y, z], axis=1).astype(np.float32)
+    dirs /= np.linalg.norm(dirs, axis=1, keepdims=True) + 1e-8
+    return dirs
+
+
+def _orthonormal_basis_from_normals(n: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Return tangent/bitangent for each normal."""
+    nn = np.asarray(n, dtype=np.float32)
+    nn = nn / (np.linalg.norm(nn, axis=1, keepdims=True) + 1e-8)
+    helper = np.zeros_like(nn, dtype=np.float32)
+    mask = np.abs(nn[:, 2]) < 0.999
+    helper[mask] = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    helper[~mask] = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    tangent = np.cross(helper, nn)
+    tangent /= np.linalg.norm(tangent, axis=1, keepdims=True) + 1e-8
+    bitangent = np.cross(nn, tangent)
+    bitangent /= np.linalg.norm(bitangent, axis=1, keepdims=True) + 1e-8
+    return tangent.astype(np.float32), bitangent.astype(np.float32)
 
 
 def _closest_point_and_face(mesh: "trimesh.Trimesh", xyz: np.ndarray, *, chunk: int = 200000) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -387,7 +419,14 @@ def _sample_rays(
     return o.astype(np.float32), d.astype(np.float32)
 
 
-def _ray_intersect(mesh: "trimesh.Trimesh", ray_o: np.ndarray, ray_d: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _ray_intersect(
+    mesh: "trimesh.Trimesh",
+    ray_o: np.ndarray,
+    ray_d: np.ndarray,
+    *,
+    min_t: float = 0.0,
+    max_t: Optional[float] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return (t, hit, normal) per ray."""
     if int(ray_o.shape[0]) == 0:
         return (
@@ -405,14 +444,71 @@ def _ray_intersect(mesh: "trimesh.Trimesh", ray_o: np.ndarray, ray_d: np.ndarray
     nrm = np.zeros((n, 3), dtype=np.float32)
 
     if loc.shape[0] > 0:
-        hit[idx_ray, 0] = 1.0
-        # distance along ray
-        t[idx_ray, 0] = np.linalg.norm(loc - ray_o[idx_ray], axis=1).astype(np.float32)
-        fn = mesh.face_normals[idx_tri].astype(np.float32)
-        fn /= np.linalg.norm(fn, axis=1, keepdims=True) + 1e-8
-        nrm[idx_ray] = fn
+        dist = np.linalg.norm(loc - ray_o[idx_ray], axis=1).astype(np.float32)
+        keep = dist >= float(max(min_t, 0.0))
+        if max_t is not None:
+            keep &= dist <= float(max_t)
+        if bool(keep.any()):
+            idx_ray_keep = idx_ray[keep]
+            idx_tri_keep = idx_tri[keep]
+            dist_keep = dist[keep]
+            hit[idx_ray_keep, 0] = 1.0
+            t[idx_ray_keep, 0] = dist_keep
+            fn = mesh.face_normals[idx_tri_keep].astype(np.float32)
+            fn /= np.linalg.norm(fn, axis=1, keepdims=True) + 1e-8
+            nrm[idx_ray_keep] = fn
 
     return t, hit, nrm
+
+
+def _compute_mesh_query_visibility(
+    mesh: "trimesh.Trimesh",
+    mesh_qry_xyz: np.ndarray,
+    mesh_qry_n: np.ndarray,
+    *,
+    n_dirs: int,
+    max_t: float,
+    eps: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute local hemisphere visibility answers for mesh queries."""
+    qxyz = np.asarray(mesh_qry_xyz, dtype=np.float32)
+    qn = np.asarray(mesh_qry_n, dtype=np.float32)
+    n_q = int(qxyz.shape[0])
+    n_dirs_i = int(n_dirs)
+    if n_q == 0 or n_dirs_i <= 0:
+        return (
+            np.zeros((n_q, max(n_dirs_i, 0)), dtype=np.float32),
+            np.zeros((n_q, max(n_dirs_i, 0)), dtype=np.float32),
+        )
+
+    qn = qn / (np.linalg.norm(qn, axis=1, keepdims=True) + 1e-8)
+    hemi = _fibonacci_hemisphere_dirs(n_dirs_i)  # [D,3], around +Z
+    tangent, bitangent = _orthonormal_basis_from_normals(qn)
+
+    dirs_world = (
+        tangent[:, None, :] * hemi[None, :, 0:1]
+        + bitangent[:, None, :] * hemi[None, :, 1:2]
+        + qn[:, None, :] * hemi[None, :, 2:3]
+    )
+    dirs_world /= np.linalg.norm(dirs_world, axis=2, keepdims=True) + 1e-8
+
+    ray_o = np.repeat(
+        qxyz[:, None, :] + float(eps) * qn[:, None, :],
+        n_dirs_i,
+        axis=1,
+    ).reshape(-1, 3)
+    ray_d = dirs_world.reshape(-1, 3)
+    t, hit, _nrm = _ray_intersect(
+        mesh,
+        ray_o,
+        ray_d,
+        min_t=max(float(eps) * 2.0, 1e-5),
+        max_t=float(max_t),
+    )
+    hit = hit.reshape(n_q, n_dirs_i).astype(np.float32)
+    t = t.reshape(n_q, n_dirs_i).astype(np.float32)
+    t = np.where(hit > 0.5, t, float(max_t)).astype(np.float32)
+    return hit, t
 
 
 @dataclass
@@ -436,6 +532,10 @@ class V2GenConfig:
 
     ray_radius: float = 2.5
     ray_jitter_std: float = 0.05
+    mesh_vis_enable: bool = True
+    mesh_vis_dirs: int = 16
+    mesh_vis_max_t: float = 0.25
+    mesh_vis_eps: float = 1e-3
     strict_udf_surface: bool = True
     surf_udf_grid: int = 128
     surf_udf_dilate: int = 1
@@ -459,9 +559,18 @@ _REQUIRED_SURF_KEYS = (
     "pc_density",
 )
 
+_REQUIRED_VIS_KEYS = (
+    "mesh_qry_vis_hit",
+    "mesh_qry_vis_t",
+)
 
-def _has_required_surface_keys(npz: "np.lib.npyio.NpzFile") -> bool:
-    return all(k in npz for k in _REQUIRED_SURF_KEYS)
+
+def _has_required_keys(npz: "np.lib.npyio.NpzFile", *, cfg: V2GenConfig) -> bool:
+    if not all(k in npz for k in _REQUIRED_SURF_KEYS):
+        return False
+    if bool(cfg.mesh_vis_enable) and not all(k in npz for k in _REQUIRED_VIS_KEYS):
+        return False
+    return True
 
 
 def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int) -> Optional[str]:
@@ -472,7 +581,7 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
             return None
         try:
             with np.load(out_path, allow_pickle=False) as npz_old:
-                if _has_required_surface_keys(npz_old):
+                if _has_required_keys(npz_old, cfg=cfg):
                     return None
         except Exception:
             pass
@@ -508,6 +617,18 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
             mesh_qry_n = mesh.face_normals[mesh_qry_f].astype(np.float32)
             mesh_qry_n /= np.linalg.norm(mesh_qry_n, axis=1, keepdims=True) + 1e-8
             mesh_qry_curv = _normal_variation_curv(mesh_qry_xyz, mesh_qry_n, k=int(cfg.curvature_knn))
+        if bool(cfg.mesh_vis_enable) and ("mesh_qry_vis_hit" in existing) and ("mesh_qry_vis_t" in existing):
+            mesh_qry_vis_hit = np.asarray(existing["mesh_qry_vis_hit"], dtype=np.float32)
+            mesh_qry_vis_t = np.asarray(existing["mesh_qry_vis_t"], dtype=np.float32)
+        elif bool(cfg.mesh_vis_enable):
+            mesh_qry_vis_hit, mesh_qry_vis_t = _compute_mesh_query_visibility(
+                mesh,
+                mesh_qry_xyz,
+                mesh_qry_n,
+                n_dirs=int(cfg.mesh_vis_dirs),
+                max_t=float(cfg.mesh_vis_max_t),
+                eps=float(cfg.mesh_vis_eps),
+            )
 
         # --- UDF queries: distance + gradient proxy ---
         if ("udf_qry_xyz" in existing) and ("udf_qry_dist" in existing) and ("udf_qry_grad" in existing):
@@ -600,8 +721,8 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
         payload.update(
             {
                 "v2": np.int32(2),
-                "synset": np.string_(synset),
-                "model_id": np.string_(model_id),
+                "synset": np.bytes_(synset),
+                "model_id": np.bytes_(model_id),
                 # contexts
                 "surf_xyz": surf_xyz.astype(np.float32),
                 "pc_xyz": pc_xyz.astype(np.float32),
@@ -632,6 +753,9 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
                 "ray_n": ray_n.astype(np.float32),
             }
         )
+        if bool(cfg.mesh_vis_enable):
+            payload["mesh_qry_vis_hit"] = mesh_qry_vis_hit.astype(np.float32)
+            payload["mesh_qry_vis_t"] = mesh_qry_vis_t.astype(np.float32)
 
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         np.savez(out_path, **payload)
@@ -705,6 +829,10 @@ def main() -> None:
     # rays
     ap.add_argument("--ray_radius", type=float, default=2.5)
     ap.add_argument("--ray_jitter_std", type=float, default=0.05)
+    ap.add_argument("--mesh_vis_enable", type=int, default=1, choices=[0, 1])
+    ap.add_argument("--mesh_vis_dirs", type=int, default=16)
+    ap.add_argument("--mesh_vis_max_t", type=float, default=0.25)
+    ap.add_argument("--mesh_vis_eps", type=float, default=1e-3)
     ap.add_argument("--strict_udf_surface", type=int, default=1, choices=[0, 1])
     ap.add_argument("--surf_udf_grid", type=int, default=128)
     ap.add_argument("--surf_udf_dilate", type=int, default=1)
@@ -754,6 +882,10 @@ def main() -> None:
         pca_knn=args.pca_knn,
         ray_radius=args.ray_radius,
         ray_jitter_std=args.ray_jitter_std,
+        mesh_vis_enable=bool(int(args.mesh_vis_enable)),
+        mesh_vis_dirs=int(args.mesh_vis_dirs),
+        mesh_vis_max_t=float(args.mesh_vis_max_t),
+        mesh_vis_eps=float(args.mesh_vis_eps),
         strict_udf_surface=bool(int(args.strict_udf_surface)),
         surf_udf_grid=int(args.surf_udf_grid),
         surf_udf_dilate=int(args.surf_udf_dilate),

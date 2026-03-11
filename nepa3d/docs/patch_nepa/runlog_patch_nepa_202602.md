@@ -6382,3 +6382,67 @@ Why this row is not benchmark-eligible:
 - therefore `fps_then_sample` on this cache degenerates to a full-set
   permutation, not a true `point_all > npoints` crop like Point-MAE,
 - this run is retained as an inconclusive ablation, not as headline evidence.
+
+## 153. Visibility-first branch launched (`L000A/L000B`, 2026-03-07)
+
+Lineage:
+
+- branch script:
+  - `scripts/local/patchnepa_visocc_branch.sh`
+- runtime root:
+  - `logs/local_patchnepa_visocc/patchnepa_visocc_l000ab_20260306`
+- decision artifact:
+  - `logs/local_patchnepa_visocc/patchnepa_visocc_l000ab_20260306/decision.json`
+
+Data lineage prepared by this branch:
+
+- source cache:
+  - `data/shapenet_cache_v2_20260306_visocc`
+- split JSON:
+  - `data/shapenet_unpaired_splits_v2_20260306_visocc.json`
+  - `data/shapenet_unpaired_splits_v2_pc33_mesh33_udf33_visocc.json`
+  - `data/shapenet_unpaired_splits_v2_mesh50_udf50_visocc.json`
+- unpaired caches:
+  - `data/shapenet_unpaired_cache_v2_20260306_visocc`
+  - `data/shapenet_unpaired_cache_v2_20260306_visocc_drop1`
+  - `data/shapenet_unpaired_cache_v2_pc33_mesh33_udf33_visocc`
+  - `data/shapenet_unpaired_cache_v2_mesh50_udf50_visocc`
+
+Schema change under test:
+
+- added mesh-query-aligned keys:
+  - `mesh_qry_vis_hit`
+  - `mesh_qry_vis_t`
+- active visibility answer schema:
+  - `[n, curv, dist, grad, density, vis_hit, vis_t]`
+
+Config paths used by the short screen:
+
+- baseline:
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_tokens_drop1_pc33_mesh33_udf33_visocc_base.yaml`
+- visocc:
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_tokens_drop1_pc33_mesh33_udf33_visocc.yaml`
+
+Pre-launch validation artifacts:
+
+- smoke NPZ:
+  - `results/_tmp_visocc_smoke/sample_visocc.npz`
+- validation result:
+  - `mesh_qry_vis_hit.shape = (64, 16)`
+  - `mesh_qry_vis_t.shape = (64, 16)`
+  - values are nontrivial and bounded by `max_t = 0.25`
+
+Operational correction applied before the live run:
+
+- first launch failed immediately because the preprocess root pointed at
+  `data/ShapeNetCore.v2` while the current source layout lives under
+  `data/ShapeNetCore.v2/synsets`
+- fixed defaults:
+  - `scripts/preprocess/preprocess_shapenet_v2.sh`
+  - `scripts/local/patchnepa_visocc_branch.sh`
+
+Status at record time:
+
+- source-cache rebuild is running
+- no canonical metrics exist yet
+- `L001-L004` remain gated until this branch resolves

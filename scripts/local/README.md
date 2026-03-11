@@ -38,6 +38,12 @@ Check status:
 bash scripts/local/patchnepa_local_status.sh
 ```
 
+Run the current visibility-first exploratory branch directly:
+
+```bash
+bash scripts/local/patchnepa_visocc_branch.sh
+```
+
 ## Operational Rules
 
 - runner state is written under `logs/local_queue/<queue_name>/`
@@ -48,3 +54,6 @@ bash scripts/local/patchnepa_local_status.sh
   `scripts/analysis/`, and `scripts/finetune/`
 - use direct `python -m ...` only when the maintained wrapper does not expose
   the needed knobs
+- if a branch script already manages both GPUs internally (for example
+  `patchnepa_visocc_branch.sh`), prefer launching it directly or make it the
+  only enabled queue row

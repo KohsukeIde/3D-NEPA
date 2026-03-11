@@ -88,6 +88,8 @@ def _apply_answer_scale_rules(
                 out[:, sl] = out[:, sl] * r
             elif name in {"density"}:
                 out[:, sl] = out[:, sl] * r
+            elif name in {"vis_t"}:
+                out[:, sl] = out[:, sl] / r
 
     if aug_scales_xyz is not None:
         sc = np.asarray(aug_scales_xyz, dtype=np.float32).reshape(3)
@@ -105,6 +107,8 @@ def _apply_answer_scale_rules(
                 out[:, sl] = out[:, sl] / mean_sc
             elif name in {"density"}:
                 out[:, sl] = out[:, sl] / det_sc
+            elif name in {"vis_t"}:
+                out[:, sl] = out[:, sl] * mean_sc
             elif name in {"n", "normal", "grad", "grad_udf"}:
                 out[:, sl] = _transform_vec_diag(out[:, sl], sc)
 

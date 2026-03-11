@@ -72,5 +72,15 @@ Last updated: 2026-03-06
 
 - `scanobjectnn_main_split_v2` mixed-cache reporting is not used for fair benchmark headline.
 - Variant-split caches (`obj_bg`, `obj_only`, `pb_t50_rs`) are the default benchmark protocol.
+- Local derived-cache cleanup (2026-03-06):
+  - removed from this workspace to prevent accidental reuse:
+    - `data/scanobjectnn_cache_v2`
+    - `data/shapenet_cache_v0`
+    - `data/shapenet_unpaired_cache_v1`
+    - `data/shapenet_unpaired_splits_v1.json`
+  - source dataset roots were kept
+  - current mainline requires regenerating canonical caches before running:
+    - ScanObjectNN: `data/scanobjectnn_obj_bg_v3_nonorm`, `data/scanobjectnn_obj_only_v3_nonorm`, `data/scanobjectnn_pb_t50_rs_v3_nonorm`
+    - ShapeNet: `data/shapenet_cache_v2_20260303`, `data/shapenet_unpaired_cache_v2_20260303` and any active v2 variants
 - Raw log pruning helper:
   - `scripts/logs/prune_superseded_logs.sh` (`--dry-run` / `--apply`)

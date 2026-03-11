@@ -49,6 +49,9 @@ FEATURE_DIMS: Dict[str, int] = {
     "thickness": 1,
     # pointcloud-like
     "density": 1,
+    # mesh-query visibility
+    "vis_hit": 16,
+    "vis_t": 16,
 }
 
 # Aliases to accept legacy or alternative key names in NPZ.
@@ -65,6 +68,8 @@ FEATURE_KEY_ALIASES: Dict[str, List[str]] = {
     "t_out": ["t_out", "tout", "clear_out"],
     "hit_out": ["hit_out", "hout"],
     "thickness": ["thickness", "thick"],
+    "vis_hit": ["vis_hit"],
+    "vis_t": ["vis_t", "vis_dist"],
 }
 
 

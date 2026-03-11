@@ -78,6 +78,8 @@ Policy:
 
 | ID | Priority | Question | Class | Status | Local Cost | Gating | Canonical Input | Canonical Output | Decision Rule | Canonize Target | Notes |
 |---|---:|---|---|---|---|---|---|---|---|---|---|
+| `L000A` | `5` | Can a visibility-first ShapeNet v2 rebuild (`mesh_qry_vis_hit`, `mesh_qry_vis_t`) complete cleanly and keep short-run reconstruction healthy? | `D` | `running` | `multi-stage local rebuild + 2 GPU short screen` | none | `data/ShapeNetCore.v2` + `scripts/local/patchnepa_visocc_branch.sh` + `nepa3d/configs/shapenet_unpaired_mix_v2_tokens_drop1_pc33_mesh33_udf33_visocc{,_base}.yaml` | `logs/local_patchnepa_visocc/patchnepa_visocc_l000ab_20260306/decision.json` | `visocc` stays alive only if short pretrain keeps `recon_lift_q >= 0` and `recon_lift_a > 0`; otherwise close the branch as an exploratory negative result. | `restart_plan -> runlog -> hypothesis_matrix if branch starts` | This row owns the source-cache rebuild plus the baseline/visocc short pretrain screen. |
+| `L000B` | `6` | Under one fixed mini-CPAC protocol, does `visocc` beat the same-lineage baseline enough to justify a follow-up `answer_only` arm? | `B` | `queued` | `<=2h once L000A ckpts exist` | `L000A` short pretrain ckpts | `results/local_patchnepa_cpac/l000b_visocc_{base,pc33,answeronly}.json` + `logs/local_patchnepa_visocc/patchnepa_visocc_l000ab_20260306/decision.json` | Promote only if `visocc` improves mini-CPAC by either `iou@0.01 >= baseline + 0.005` or `rmse <= baseline - 0.002` without catastrophic regression (`iou@0.01 < baseline - 0.003` or `rmse > baseline + 0.003`). | `restart_plan -> runlog -> storyline only if the branch materially changes the read` | Executed by the same local visibility pipeline after the short pretrain arms complete. |
 | `L001` | `10` | Does the `g2` gain carry over to mini-CPAC on the current best mixed-source ckpt? | `B` | `queued` | `<=2h` | none | `runs/patchnepa_tokens/patchnepa_recong2_full300_20260306_072643/pt_pc33mesh33udf33_reconch_g2_e300/ckpt_final.pt` + `data/shapenet_unpaired_cache_v2_pc33_mesh33_udf33` | `results/local_patchnepa_cpac/l001_g2_pc33_cmp.json` | Compare against `g0 composite` mini-CPAC (`iou@0.01=0.0948`, `rmse=0.09929`). If either metric improves, mark `g2 CPAC favorable`; if both worsen, mark `FT-only gain`. | `restart_plan -> runlog -> storyline if favorable` | Same `PC context -> UDF query`, `64/64` mini-CPAC protocol as the canonical g0 rerun. |
 | `L002` | `20` | For CPAC, is `mesh50udf50` or `pc33mesh33udf33` the better `g2` source ckpt under the same eval protocol? | `B` | `queued` | `<=2h` | none | `runs/patchnepa_tokens/patchnepa_recong2_full300_20260306_072643/pt_mesh50udf50_reconch_g2_e300/ckpt_final.pt` + `data/shapenet_unpaired_cache_v2_pc33_mesh33_udf33` | `results/local_patchnepa_cpac/l002_g2_mesh50udf50_cmp.json` | Use the same `iou@0.01` and `rmse` criteria as `L001`; then rank `mesh50udf50` vs `pc33mesh33udf33` under one fixed CPAC protocol. | `restart_plan -> runlog -> storyline if source ranking changes` | Eval root stays fixed to `pc33_mesh33_udf33` so only the pretrain source changes. |
 | `L003` | `30` | Can strict `pointgpt_ctx_only` run cleanly enough to give a real short-readout? | `B` | `queued` | `<=2h` | none | `nepa3d/configs/shapenet_unpaired_mix_v2_tokens_drop1_pc100.yaml` | `runs/local_patchnepa/l003_pgptctxonly_pc100_s2000/ckpt_final.pt` | If the run finishes without graph/DDP failure and yields `recon_lift_q >= 0`, promote to a longer `10k` parity test; otherwise mark the parity branch `blocked`. | `restart_plan -> runlog` | Single-GPU local rerun is intentional because the earlier full run failed before scientific readout. |
@@ -100,8 +102,6 @@ Queue policy:
 
 - `enabled=1` rows are runnable now
 - `enabled=0` rows remain visible but are not launched by the runner
-- current enabled set is intentionally limited to:
-  - `L001`
-  - `L002`
-  - `L003`
-  - the two runnable arms under `L004`
+- current enabled set is intentionally limited to the visibility-first branch:
+  - `L000A`
+- `L001-L004` stay queued but gated behind `L000A/L000B`

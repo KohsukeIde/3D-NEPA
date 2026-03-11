@@ -2024,3 +2024,111 @@ Retention rule (effective immediately):
   - machine-readable completion metrics in `results/patch_nepa_cpac/.../*.json`,
   - machine-readable pretrain diags in the corresponding W&B
     `wandb-summary.json`.
+
+## 61. Visibility-first geometry-answer branch staged (`L000A/L000B`, 2026-03-07)
+
+Purpose:
+
+- test a first high-frequency geometry answer family before returning to
+  `L001-L004`
+- rebuild ShapeNet v2 derived caches from source with mesh-query-aligned
+  visibility / occlusion answers
+- compare same-lineage `baseline` vs `visocc` under one short
+  `recon_chamfer + g2 + composite` screen and one fixed mini-CPAC protocol
+
+Canonical structured paths:
+
+- branch log root:
+  - `logs/local_patchnepa_visocc/patchnepa_visocc_l000ab_20260306`
+- branch decision JSON:
+  - `logs/local_patchnepa_visocc/patchnepa_visocc_l000ab_20260306/decision.json`
+- local launch script:
+  - `scripts/local/patchnepa_visocc_branch.sh`
+- source smoke artifact:
+  - `results/_tmp_visocc_smoke/sample_visocc.npz`
+
+New lineage for this exploratory branch:
+
+- source cache:
+  - `data/shapenet_cache_v2_20260306_visocc`
+- split JSON:
+  - `data/shapenet_unpaired_splits_v2_20260306_visocc.json`
+  - `data/shapenet_unpaired_splits_v2_pc33_mesh33_udf33_visocc.json`
+  - `data/shapenet_unpaired_splits_v2_mesh50_udf50_visocc.json`
+- unpaired cache:
+  - `data/shapenet_unpaired_cache_v2_20260306_visocc`
+  - `data/shapenet_unpaired_cache_v2_20260306_visocc_drop1`
+  - `data/shapenet_unpaired_cache_v2_pc33_mesh33_udf33_visocc`
+  - `data/shapenet_unpaired_cache_v2_mesh50_udf50_visocc`
+
+Added answer family (first pass only):
+
+- NPZ keys:
+  - `mesh_qry_vis_hit`
+  - `mesh_qry_vis_t`
+- semantics:
+  - local hemisphere visibility from each `mesh_qry_xyz`, aligned to
+    `mesh_qry_n`
+  - `16` deterministic hemisphere directions
+  - `mesh_qry_vis_hit[d] = 1` if a ray hits within `max_t=0.25`
+  - `mesh_qry_vis_t[d] = t_hit` if hit, else `0.25`
+
+Public API changes staged for this branch:
+
+- `nepa3d/data/preprocess_shapenet_v2.py`
+  - new CLI:
+    - `--mesh_vis_enable`
+    - `--mesh_vis_dirs`
+    - `--mesh_vis_max_t`
+    - `--mesh_vis_eps`
+  - new outputs:
+    - `mesh_qry_vis_hit`
+    - `mesh_qry_vis_t`
+- `nepa3d/data/answer_feature_pack.py`
+  - new schema entries:
+    - `vis_hit`
+    - `vis_t`
+- `nepa3d/data/dataset_v2.py`
+  - `vis_t` now follows the same geometric scaling rules as other distance-like
+    answers
+- `scripts/preprocess/preprocess_shapenet_v2.sh`
+  - forwards the visibility knobs
+
+Config lineage staged for the screen:
+
+- baseline:
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_tokens_drop1_pc33_mesh33_udf33_visocc_base.yaml`
+- visibility:
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_tokens_drop1_pc33_mesh33_udf33_visocc.yaml`
+- side lineage prepared but not screened first:
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_tokens_drop1_mesh50_udf50_visocc_base.yaml`
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_tokens_drop1_mesh50_udf50_visocc.yaml`
+
+Validation completed before launch:
+
+- syntax / formatting:
+  - `git diff --check`
+  - `.venv/bin/python -m py_compile nepa3d/data/preprocess_shapenet_v2.py nepa3d/data/answer_feature_pack.py nepa3d/data/dataset_v2.py`
+  - `bash -n scripts/preprocess/preprocess_shapenet_v2.sh scripts/local/patchnepa_visocc_branch.sh`
+- data smoke:
+  - `results/_tmp_visocc_smoke/sample_visocc.npz`
+  - observed nontrivial keys:
+    - `mesh_qry_vis_hit.shape == (64, 16)`
+    - `mesh_qry_vis_t.shape == (64, 16)`
+    - `vis_hit.mean = 0.1523`
+    - `vis_t.mean = 0.2255`
+
+Operational note:
+
+- the first launch attempt exposed a source-root mismatch
+  (`data/ShapeNetCore.v2` vs `data/ShapeNetCore.v2/synsets`)
+- default local/preprocess roots were corrected before the current branch was
+  relaunched
+
+Current status at this memo update:
+
+- `L000A` is running from
+  `logs/local_patchnepa_visocc/patchnepa_visocc_l000ab_20260306`
+- `L000B` is queued inside the same branch script and will only execute after
+  the source-cache rebuild and the two short pretrain arms succeed
+- no scientific conclusion changes are promoted yet

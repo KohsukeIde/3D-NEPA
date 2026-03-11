@@ -34,12 +34,14 @@ Status labels:
 | H14 | `answer_only` can keep its CPAC IoU advantage once generator-based recon is active | open | `g0` translation screen gives split signal only (`answer_only` helps IoU, hurts `recon_lift_q`) | run `L004` from the execution backlog |
 | H15 | strict PointGPT-loss parity can be made stable enough for scientific readout | engineering pending | the earlier full300 parity run failed before learning-signal readout; the branch still needs a clean short rerun | run `L003` from the execution backlog |
 | H16 | true `fps_then_sample` parity requires a real `point_all > npoints` path | engineering pending | the current `2048`-point cache degenerates the parity test into a permutation-only ablation | stage the real input path before rerunning `L005` |
+| H17 | mesh-query visibility answers can improve translation-side readout without destroying reconstruction-side lift | open | current active line still uses smooth answer families only; visibility/occlusion is the first high-frequency geometry branch now being staged | run `L000A/L000B` from the execution backlog |
 
 ## 3. Current Priority Order
 
 1. `reconstruction + generator_depth`
-2. strict PointGPT-axis compare (`pointgpt_ctx_only`, aligned mask, aligned diag)
-3. FT decision against the historical v1-family reference
+2. visibility-first high-frequency answer branch (`L000A/L000B`)
+3. strict PointGPT-axis compare (`pointgpt_ctx_only`, aligned mask, aligned diag)
+4. FT decision against the historical v1-family reference
 
 Operational note:
 

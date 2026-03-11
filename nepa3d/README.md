@@ -7,6 +7,14 @@ This file is the active-run hub.
   - UCPR/CPAC evaluation loop on ShapeNet-unpaired cache
   - K-plane/Tri-plane baseline track on ShapeNet-unpaired cache (UCPR/CPAC)
 - As-of snapshot date: February 16, 2026
+- Local workspace note (2026-03-06):
+  - historical derived caches were intentionally removed to prevent accidental reuse:
+    - `data/scanobjectnn_cache_v2`
+    - `data/shapenet_cache_v0`
+    - `data/shapenet_unpaired_cache_v1`
+    - `data/shapenet_unpaired_splits_v1.json`
+  - keep `data/ShapeNetCore.v2` and other source datasets
+  - regenerate current canonical v2/v3 caches before running active pipelines
 
 Legacy means early/pre-review snapshots (including old ModelNet40-era runs). Current active ModelNet40 protocol is tracked separately.
 
