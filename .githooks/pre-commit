@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "${ROOT_DIR}"
+
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="python3"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+else
+  echo "[pre-commit] python interpreter not found" >&2
+  exit 1
+fi
+
+echo "[pre-commit] running docs sync check"
+"${PYTHON_BIN}" scripts/analysis/check_top_level_docs_sync.py

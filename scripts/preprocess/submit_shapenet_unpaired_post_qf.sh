@@ -12,13 +12,10 @@ RUN_TAG="${RUN_TAG:-shapenet_v2_post_$(date +%Y%m%d_%H%M%S)}"
 LOG_DIR="${LOG_DIR:-${WORKDIR}/logs/preprocess/shapenet_unpaired/${RUN_TAG}}"
 mkdir -p "${LOG_DIR}"
 
-# Required: IDs of all preprocess shard jobs.
-# Accepts either comma or whitespace separated list.
+# Optional: IDs of all preprocess shard jobs.
+# If provided, split depends on their successful completion.
+# If empty, submit split immediately against the current source cache.
 PREPROC_JOB_IDS="${PREPROC_JOB_IDS:-}"
-if [[ -z "${PREPROC_JOB_IDS}" ]]; then
-  echo "[error] PREPROC_JOB_IDS is required. e.g. \"101714.qjcm,101715.qjcm,...\""
-  exit 1
-fi
 
 # split settings
 CACHE_ROOT="${CACHE_ROOT:-data/shapenet_cache_v2_20260303}"
@@ -61,13 +58,18 @@ write_env_file() {
   done
 }
 
-_dep_ids="$(echo "${PREPROC_JOB_IDS}" | tr ',' ' ' | xargs)"
-_dep_expr="$(echo "${_dep_ids}" | tr ' ' ':')"
-if [[ -z "${_dep_expr}" ]]; then
-  echo "[error] failed to parse PREPROC_JOB_IDS=${PREPROC_JOB_IDS}"
-  exit 1
+_dep_ids="$(echo "${PREPROC_JOB_IDS}" | tr ',' ' ' | xargs || true)"
+DEPEND_PREPROC=""
+DEPEND_ARGS=()
+if [[ -n "${_dep_ids}" ]]; then
+  _dep_expr="$(echo "${_dep_ids}" | tr ' ' ':')"
+  if [[ -z "${_dep_expr}" ]]; then
+    echo "[error] failed to parse PREPROC_JOB_IDS=${PREPROC_JOB_IDS}"
+    exit 1
+  fi
+  DEPEND_PREPROC="afterok:${_dep_expr}"
+  DEPEND_ARGS=( -W "depend=${DEPEND_PREPROC}" )
 fi
-DEPEND_PREPROC="afterok:${_dep_expr}"
 
 split_vars=(
   "WORKDIR=${WORKDIR}"
@@ -88,11 +90,11 @@ split_cmd=(
   -l "${RT_CLASS_SPLIT}=${RT_UNITS_SPLIT}"
   -l "walltime=${WALLTIME_SPLIT}"
   -W "group_list=${GROUP_LIST}"
-  -W "depend=${DEPEND_PREPROC}"
   -N "${split_job_name}"
   -o "${LOG_DIR}/${split_job_name}.out"
   -e "${LOG_DIR}/${split_job_name}.err"
   -v "WORKDIR=${WORKDIR},ENV_FILE=${split_env}"
+  "${DEPEND_ARGS[@]}"
   "${SPLIT_SCRIPT}"
 )
 split_jid="$("${split_cmd[@]}")"
@@ -124,7 +126,11 @@ mat_cmd=(
 )
 mat_jid="$("${mat_cmd[@]}")"
 
-echo "[submitted] split job: ${split_jid} (depend=${DEPEND_PREPROC})"
+if [[ -n "${DEPEND_PREPROC}" ]]; then
+  echo "[submitted] split job: ${split_jid} (depend=${DEPEND_PREPROC})"
+else
+  echo "[submitted] split job: ${split_jid} (depend=none)"
+fi
 echo "[submitted] materialize job: ${mat_jid} (depend=afterok:${split_jid})"
 echo "[log_dir] ${LOG_DIR}"
 {

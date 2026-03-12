@@ -1,6 +1,6 @@
 # Patch-NEPA Runlog (2026-02)
 
-Last updated: 2026-03-06
+Last updated: 2026-03-12
 
 Track note:
 
@@ -6446,3 +6446,73 @@ Status at record time:
 - source-cache rebuild is running
 - no canonical metrics exist yet
 - `L001-L004` remain gated until this branch resolves
+
+## 154. Worldvis cache accepted at `52311` shapes; split/materialize completed from existing source cache (2026-03-12)
+
+Lineage:
+
+- source cache:
+  - `data/shapenet_cache_v2_20260311_worldvis`
+- accepted source count:
+  - `52311 / 52472`
+- missing-shape records:
+  - `logs/preprocess/shapenet_v2/shapenet_worldvis_20260311_abci_r3_missing_qc/missing_shapes_by_synset.tsv`
+  - `logs/preprocess/shapenet_v2/shapenet_worldvis_20260311_abci_r3_missing_qc/missing_shapes_synset_summary.tsv`
+  - `logs/preprocess/shapenet_v2/shapenet_worldvis_20260311_abci_r3_missing_qc/missing_shapes_by_synset.json`
+
+Interpretation:
+
+- the unresolved `161` source misses are recorded as **shape dropout**,
+- they are not reinterpreted as modality-dropout or `pc-only` fallback samples,
+- pipeline proceeds with the existing `52311` source NPZs.
+
+Observed missing concentration:
+
+- top synsets by missing count:
+  - `02691156`: `42 / 4045`
+  - `03790512`: `22 / 337`
+  - `04530566`: `22 / 1939`
+  - `02958343`: `18 / 3514`
+  - `04468005`: `9 / 389`
+- global rate remains `0.3068%`.
+
+Immediate post-cache continuation on `rt_QC` without preprocess dependency:
+
+- base:
+  - split job `112178`
+  - materialize job `112179`
+  - log root:
+    - `logs/preprocess/shapenet_unpaired/shapenet_worldvis_20260312_existing52311_qc_base`
+  - output:
+    - `created=52311`, `missing=0`
+    - split counts `train_mesh=16004`, `train_pc=15533`, `train_udf=15533`, `eval=5241`
+- drop1:
+  - split job `112180`
+  - materialize job `112181`
+  - log root:
+    - `logs/preprocess/shapenet_unpaired/shapenet_worldvis_20260312_existing52311_qc_drop1`
+  - output:
+    - `created=52311`, `missing=0`
+    - split counts `train_mesh=16004`, `train_pc=15533`, `train_udf=15533`, `eval=5241`
+- pc33mesh33udf33:
+  - split job `112182`
+  - materialize job `112183`
+  - log root:
+    - `logs/preprocess/shapenet_unpaired/shapenet_worldvis_20260312_existing52311_qc_pc33`
+  - output:
+    - `created=52311`, `missing=0`
+    - split counts `train_mesh=15533`, `train_pc=15533`, `train_udf=16004`, `eval=5241`
+- mesh50udf50:
+  - split job `112184`
+  - materialize job `112185`
+  - log root:
+    - `logs/preprocess/shapenet_unpaired/shapenet_worldvis_20260312_existing52311_qc_mesh50udf50`
+  - output:
+    - `created=52311`, `missing=0`
+    - split counts `train_mesh=23534`, `train_udf=23536`, `eval=5241`
+
+Operational note:
+
+- directory-level counts can show `52312` because `_meta/split_source.json` is
+  included,
+- canonical cache size is the materializer's `created=52311`.

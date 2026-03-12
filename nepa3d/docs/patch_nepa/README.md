@@ -88,6 +88,13 @@ Current short answer:
 - `diagcopy_probe_100755_gap_copywin.tsv`
 - `latent_diag_snapshot_20260304.tsv`
 
+## Archived Reference
+
+- `../archive/patch_nepa_scratch_to_patch_comparison_reference.md`
+  - archived comparison matrix after its headline role moved to:
+    - `benchmark_scanobjectnn_variant.md`
+    - `storyline_query_to_patch_v2_active.md`
+
 ## Policy
 
 - Use `storyline_query_to_patch_v2_active.md` as the default retrieval target.

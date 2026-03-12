@@ -1,11 +1,31 @@
 # NEPA3D Docs Hub
 
-Last updated: 2026-03-06
+Last updated: 2026-03-12
+
+## Current Snapshot
+
+- current PatchNEPA mainline:
+  - PatchNEPA v2 reconstruction `recong2` full300
+  - `recon_chamfer`, `composite`, generator depth `2`
+- current canonical ScanObjectNN headline:
+  - `obj_bg=0.8485`
+  - `obj_only=0.8589`
+  - `pb_t50_rs=0.8140`
+- canonical machine-readable current state:
+  - `nepa3d/docs/current_state.json`
+- first collaborator-facing entrypoint:
+  - `nepa3d/docs/patch_nepa/collaborator_reading_guide_active.md`
 
 ## Start Here (Current)
 
 - Collaborator reading guide:
   - `nepa3d/docs/patch_nepa/collaborator_reading_guide_active.md`
+- Insight register:
+  - `nepa3d/docs/insight_register_active.md`
+- Docs cleanup plan:
+  - `nepa3d/docs/docs_cleanup_plan_active.md`
+- Docs inventory:
+  - `nepa3d/docs/docs_inventory_active.md`
 - Operations boundary (local vs ABCI):
   - `nepa3d/docs/operations/README.md`
 - LLM retrieval index:
@@ -18,6 +38,8 @@ Last updated: 2026-03-06
   - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
 - Patch-NEPA hypothesis matrix:
   - `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
+- Patch-NEPA local execution backlog:
+  - `nepa3d/docs/patch_nepa/execution_backlog_active.md`
 - Patch-NEPA Stage-2 active plan:
   - `nepa3d/docs/patch_nepa/patch_nepa_stage2_active.md`
 - Patch-NEPA Stage-2 runlog:
@@ -37,6 +59,9 @@ Last updated: 2026-03-06
   - `nepa3d/docs/llm_retrieval_index.md`
   - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
   - `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
+- For local execution / next-run questions, also read:
+  - `nepa3d/docs/patch_nepa/execution_backlog_active.md`
+  - `nepa3d/docs/operations/README.md`
 - Read `restart_plan_patchnepa_data_v2_20260303.md` only when current-branch
   detail is required.
 - Read raw runlogs only when provenance or exact launch history is required.
@@ -60,6 +85,20 @@ Last updated: 2026-03-06
 
 ## Update Policy
 
+- Top-level docs contract:
+  - `nepa3d/docs/README.md`, `nepa3d/docs/llm_retrieval_index.md`, and
+    `nepa3d/docs/results_index.md` must always reflect the current mainline.
+  - `nepa3d/docs/current_state.json` is the machine-readable source of truth
+    for the current mainline snapshot used by top-level docs checks.
+  - Update them whenever benchmark headline, retrieval order, or collaborator
+    entrypoint changes.
+- Validation:
+  - run `python scripts/analysis/check_top_level_docs_sync.py`
+    after updating the current mainline or benchmark headline.
+  - commit-time enforcement:
+    - install tracked hooks with `bash scripts/analysis/install_git_hooks.sh`
+    - this activates `.githooks/pre-commit`, which blocks commits when the
+      top-level docs are out of sync.
 - Put headline benchmark numbers only in `patch_nepa/benchmark_scanobjectnn_variant.md`.
 - Put Patch-NEPA Stage-2 job history in `patch_nepa/runlog_patch_nepa_202602.md`.
 - Put cross-line conclusions in `patch_nepa/storyline_query_to_patch_v2_active.md`.

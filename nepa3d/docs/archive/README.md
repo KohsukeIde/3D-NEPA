@@ -1,6 +1,6 @@
 # Archive Notes
 
-Last updated: 2026-03-06
+Last updated: 2026-03-12
 
 This folder is reserved for frozen, low-priority, or provenance-only documents
 that should not be part of default LLM retrieval.
@@ -15,6 +15,7 @@ that should not be part of default LLM retrieval.
 
 - `nepa3d/docs/archive/patch_nepa_baseline_patchcls_scratch_reference.md`
 - `nepa3d/docs/archive/patch_nepa_cls_raypatch_migration_plan_legacy.md`
+- `nepa3d/docs/archive/patch_nepa_scratch_to_patch_comparison_reference.md`
 - `nepa3d/docs/archive/completion_results_ucpr_cpac_mixed_archive.md`
 - `nepa3d/docs/archive/history_answer_token_expansion_crazy_ideas.md`
 

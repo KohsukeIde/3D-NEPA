@@ -1,6 +1,6 @@
 # Patch-NEPA Restart Plan (Data-v2 + CPAC Alignment)
 
-Last updated: 2026-03-06
+Last updated: 2026-03-12
 
 ## 1. Purpose
 
@@ -2132,3 +2132,75 @@ Current status at this memo update:
 - `L000B` is queued inside the same branch script and will only execute after
   the source-cache rebuild and the two short pretrain arms succeed
 - no scientific conclusion changes are promoted yet
+
+## 62. Worldvis source cache finalized at `52311` shapes; proceed with shape-dropout protocol (2026-03-12)
+
+Canonical source-cache status:
+
+- source cache root:
+  - `data/shapenet_cache_v2_20260311_worldvis`
+- finalized source count:
+  - `52311` NPZ files
+- unresolved source misses:
+  - `161 / 52472` shapes (`0.3068%`)
+- missing-shape artifacts:
+  - `logs/preprocess/shapenet_v2/shapenet_worldvis_20260311_abci_r3_missing_qc/missing_shapes_by_synset.tsv`
+  - `logs/preprocess/shapenet_v2/shapenet_worldvis_20260311_abci_r3_missing_qc/missing_shapes_synset_summary.tsv`
+  - `logs/preprocess/shapenet_v2/shapenet_worldvis_20260311_abci_r3_missing_qc/missing_shapes_by_synset.json`
+
+Decision:
+
+- proceed with the existing `52311`-shape source cache,
+- treat the unresolved `161` as **shape dropout / excluded shapes**,
+- do **not** reinterpret them as modality-dropout or ad hoc `pc-only` samples.
+
+Bias check summary:
+
+- missing synsets with the largest counts:
+  - `02691156`: `42 / 4045` (`1.04%`)
+  - `03790512`: `22 / 337` (`6.53%`)
+  - `04530566`: `22 / 1939` (`1.13%`)
+  - `02958343`: `18 / 3514` (`0.51%`)
+  - `04468005`: `9 / 389` (`2.31%`)
+- interpretation:
+  - the missing set is not fully uniform across synsets,
+  - but the global missing rate remains low enough to proceed without blocking
+    the pipeline.
+
+Canonical post-materialization rerun from the existing source cache:
+
+- base:
+  - split log root:
+    - `logs/preprocess/shapenet_unpaired/shapenet_worldvis_20260312_existing52311_qc_base`
+  - split counts:
+    - `train_mesh=16004`, `train_pc=15533`, `train_udf=15533`, `eval=5241`
+  - materialize result:
+    - `created=52311`, `missing=0`
+- drop1:
+  - split log root:
+    - `logs/preprocess/shapenet_unpaired/shapenet_worldvis_20260312_existing52311_qc_drop1`
+  - split counts:
+    - `train_mesh=16004`, `train_pc=15533`, `train_udf=15533`, `eval=5241`
+  - materialize result:
+    - `created=52311`, `missing=0`
+- pc33mesh33udf33:
+  - split log root:
+    - `logs/preprocess/shapenet_unpaired/shapenet_worldvis_20260312_existing52311_qc_pc33`
+  - split counts:
+    - `train_mesh=15533`, `train_pc=15533`, `train_udf=16004`, `eval=5241`
+  - materialize result:
+    - `created=52311`, `missing=0`
+- mesh50udf50:
+  - split log root:
+    - `logs/preprocess/shapenet_unpaired/shapenet_worldvis_20260312_existing52311_qc_mesh50udf50`
+  - split counts:
+    - `train_mesh=23534`, `train_udf=23536`, `eval=5241`
+  - materialize result:
+    - `created=52311`, `missing=0`
+
+Operational note:
+
+- the directory-level file count may appear as `52312` because each
+  materialized cache also contains `_meta/split_source.json`,
+- the canonical dataset count is the `created=52311` value emitted by
+  `preprocess_shapenet_unpaired.py`.

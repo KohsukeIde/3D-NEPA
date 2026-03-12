@@ -1,15 +1,36 @@
 # Results Index
 
+Last updated: 2026-03-12
+
+## Current Snapshot
+
+- current PatchNEPA mainline:
+  - PatchNEPA v2 reconstruction `recong2` full300
+- current canonical ScanObjectNN headline:
+  - `obj_bg=0.8485`
+  - `obj_only=0.8589`
+  - `pb_t50_rs=0.8140`
+- machine-readable state source:
+  - `nepa3d/docs/current_state.json`
+- first collaborator handoff doc:
+  - `patch_nepa/collaborator_reading_guide_active.md`
+
 Use this index to avoid mixing canonical active benchmark docs with legacy ledgers.
 
 ## Canonical Active
 
 - Docs hub: `README.md`
+- Insight register: `insight_register_active.md`
+- Docs cleanup plan: `docs_cleanup_plan_active.md`
+- Docs inventory: `docs_inventory_active.md`
+- Collaborator reading guide: `patch_nepa/collaborator_reading_guide_active.md`
 - LLM retrieval index: `llm_retrieval_index.md`
+- Operations boundary: `operations/README.md`
 - Query/Patch track split index: `patch_nepa/nepa_tracks_index.md`
 - Patch-NEPA folder guide: `patch_nepa/README.md`
 - QueryNEPA -> PatchNEPA storyline: `patch_nepa/storyline_query_to_patch_v2_active.md`
 - Patch-NEPA hypothesis matrix: `patch_nepa/hypothesis_matrix_active.md`
+- Patch-NEPA local execution backlog: `patch_nepa/execution_backlog_active.md`
 - Patch-NEPA Stage-2 active plan: `patch_nepa/patch_nepa_stage2_active.md`
 - Patch-NEPA Stage-2 runlog: `patch_nepa/runlog_patch_nepa_202602.md`
 - ScanObjectNN canonical benchmark: `patch_nepa/benchmark_scanobjectnn_variant.md`
@@ -37,6 +58,15 @@ Use this index to avoid mixing canonical active benchmark docs with legacy ledge
 
 ## Policy
 
+- Top-level docs (`README.md`, `llm_retrieval_index.md`, `results_index.md`)
+  must stay synchronized with the current mainline and current benchmark
+  headline.
+- `nepa3d/docs/current_state.json` is the source of truth for the top-level
+  current snapshot.
+- If a recent update changes local execution policy, reflect that in:
+  - `operations/README.md`
+  - `patch_nepa/execution_backlog_active.md`
+  - and the top-level indexes on this page.
 - Start with `llm_retrieval_index.md` when the goal is efficient retrieval.
 - Headline benchmark numbers are maintained only in `patch_nepa/benchmark_scanobjectnn_variant.md`.
 - Patch-NEPA Stage-2 job updates are maintained in `patch_nepa/runlog_patch_nepa_202602.md`.
