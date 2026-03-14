@@ -1,6 +1,6 @@
 # Docs Cleanup Plan
 
-Last updated: 2026-03-12
+Last updated: 2026-03-14
 
 ## Purpose
 
@@ -82,6 +82,7 @@ These should remain easy to find and light to retrieve:
 - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
 - `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
 - `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
+- `nepa3d/docs/patch_nepa/scanobjectnn_ft_policy_audit_active.md`
 - `nepa3d/docs/patch_nepa/execution_backlog_active.md`
 - `nepa3d/docs/operations/README.md`
 
@@ -174,3 +175,5 @@ Start with:
 - active references now point to:
   - `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
   - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
+- added canonical policy-boundary audit:
+  - `nepa3d/docs/patch_nepa/scanobjectnn_ft_policy_audit_active.md`

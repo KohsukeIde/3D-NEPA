@@ -1,6 +1,6 @@
 # NEPA3D Docs Hub
 
-Last updated: 2026-03-12
+Last updated: 2026-03-14
 
 ## Current Snapshot
 
@@ -8,13 +8,16 @@ Last updated: 2026-03-12
   - PatchNEPA v2 reconstruction `recong2` full300
   - `recon_chamfer`, `composite`, generator depth `2`
 - current canonical ScanObjectNN headline:
-  - `obj_bg=0.8485`
-  - `obj_only=0.8589`
-  - `pb_t50_rs=0.8140`
+  - `obj_bg=pending`
+  - `obj_only=pending`
+  - `pb_t50_rs=pending`
 - canonical machine-readable current state:
   - `nepa3d/docs/current_state.json`
 - first collaborator-facing entrypoint:
   - `nepa3d/docs/patch_nepa/collaborator_reading_guide_active.md`
+- benchmark note:
+  - ScanObjectNN headline is under revalidation after the 2026-03-14 policy
+    correction from `file` split to official `test-as-val`.
 
 ## Start Here (Current)
 
@@ -36,6 +39,8 @@ Last updated: 2026-03-12
   - `nepa3d/docs/patch_nepa/README.md`
 - QueryNEPA -> PatchNEPA -> external baseline storyline:
   - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
+- ScanObjectNN FT policy audit:
+  - `nepa3d/docs/patch_nepa/scanobjectnn_ft_policy_audit_active.md`
 - Patch-NEPA hypothesis matrix:
   - `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
 - Patch-NEPA local execution backlog:

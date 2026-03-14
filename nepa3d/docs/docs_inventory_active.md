@@ -1,6 +1,6 @@
 # Docs Inventory
 
-Last updated: 2026-03-12
+Last updated: 2026-03-14
 
 ## Purpose
 
@@ -126,6 +126,7 @@ It records, for every doc currently under `docs/`:
 | `patch_nepa/query_nepa_chronology_audit_202602_active.md` | Query-era chronology audit for Patch line | `tier1` | `keep` | self | still used to qualify inherited claims |
 | `patch_nepa/restart_plan_patchnepa_data_v2_20260303.md` | heavy active branch memo | `tier1` | `keep` | self | current-branch detail only |
 | `patch_nepa/runlog_patch_nepa_202602.md` | raw PatchNEPA ledger | `tier1` | `keep` | self | canonical raw execution record |
+| `patch_nepa/scanobjectnn_ft_policy_audit_active.md` | ScanObjectNN FT policy boundary audit | `tier1` | `keep` | self | authoritative list of file-split historical rows |
 | `patch_nepa/storyline_query_to_patch_v2_active.md` | cross-line storyline | `tier0` | `keep` | self | default synthesis doc |
 
 ## `query_nepa/`

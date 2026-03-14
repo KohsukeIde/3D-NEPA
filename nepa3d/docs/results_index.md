@@ -1,19 +1,22 @@
 # Results Index
 
-Last updated: 2026-03-12
+Last updated: 2026-03-14
 
 ## Current Snapshot
 
 - current PatchNEPA mainline:
   - PatchNEPA v2 reconstruction `recong2` full300
 - current canonical ScanObjectNN headline:
-  - `obj_bg=0.8485`
-  - `obj_only=0.8589`
-  - `pb_t50_rs=0.8140`
+  - `obj_bg=pending`
+  - `obj_only=pending`
+  - `pb_t50_rs=pending`
 - machine-readable state source:
   - `nepa3d/docs/current_state.json`
 - first collaborator handoff doc:
   - `patch_nepa/collaborator_reading_guide_active.md`
+- benchmark note:
+  - previous `file`-split FT headlines are now historical/internal only;
+    official `test-as-val` reruns are pending
 
 Use this index to avoid mixing canonical active benchmark docs with legacy ledgers.
 
@@ -29,6 +32,7 @@ Use this index to avoid mixing canonical active benchmark docs with legacy ledge
 - Query/Patch track split index: `patch_nepa/nepa_tracks_index.md`
 - Patch-NEPA folder guide: `patch_nepa/README.md`
 - QueryNEPA -> PatchNEPA storyline: `patch_nepa/storyline_query_to_patch_v2_active.md`
+- ScanObjectNN FT policy audit: `patch_nepa/scanobjectnn_ft_policy_audit_active.md`
 - Patch-NEPA hypothesis matrix: `patch_nepa/hypothesis_matrix_active.md`
 - Patch-NEPA local execution backlog: `patch_nepa/execution_backlog_active.md`
 - Patch-NEPA Stage-2 active plan: `patch_nepa/patch_nepa_stage2_active.md`

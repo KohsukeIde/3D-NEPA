@@ -71,7 +71,7 @@ if [[ -n "${SCAN_VARIANTS}" ]]; then
     CKPT_RUNB="${WORKDIR}/runs/pretrain_abcd_1024_runB/last.pt" \
     CKPT_RUNC="${WORKDIR}/runs/pretrain_abcd_1024_runC/last.pt" \
     CKPT_RUND="${WORKDIR}/runs/pretrain_abcd_1024_runD/last.pt" \
-    VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}" \
+    VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-official_auto}" \
     PT_XYZ_KEY_CLS="${PT_XYZ_KEY_CLS:-pc_xyz}" \
     PT_DIST_KEY_CLS="${PT_DIST_KEY_CLS:-pt_dist_pool}" \
     ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-1}" \
@@ -95,7 +95,7 @@ else
     CKPT_RUNB="${WORKDIR}/runs/pretrain_abcd_1024_runB/last.pt" \
     CKPT_RUNC="${WORKDIR}/runs/pretrain_abcd_1024_runC/last.pt" \
     CKPT_RUND="${WORKDIR}/runs/pretrain_abcd_1024_runD/last.pt" \
-    VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}" \
+    VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-official_auto}" \
     PT_XYZ_KEY_CLS="${PT_XYZ_KEY_CLS:-pc_xyz}" \
     PT_DIST_KEY_CLS="${PT_DIST_KEY_CLS:-pt_dist_pool}" \
     ABLATE_POINT_DIST="${ABLATE_POINT_DIST:-1}" \

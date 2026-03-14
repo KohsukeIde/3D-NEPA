@@ -98,7 +98,7 @@ AUG_EVAL="${AUG_EVAL:-1}"             # 0 | 1 (policy default: 1)
 MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-10}" # policy default: 10
 
 SAVE_DIR="${SAVE_DIR:-runs/patchcls}"
-VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}"  # file | group_auto | group_scanobjectnn | pointmae
+VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-pointmae}"  # pointmae(test-as-val) | official_auto | file | group_auto | group_scanobjectnn
 
 if [ ! -x "${PYTHON_BIN}" ]; then
   echo "[error] python not found: ${PYTHON_BIN}"

@@ -6222,6 +6222,13 @@ Save roots:
 - `runs/patchnepa_tokens/patchnepa_reconbest_full300_20260305_224714/pt_mesh50udf50_reconch_g0_e300`
 - `runs/patchnepa_tokens/patchnepa_reconbest_full300_20260305_224714/pt_pc33mesh33udf33_reconch_g0_e300`
 
+Policy note (2026-03-14):
+
+- these FT rows were produced under the earlier ScanObjectNN
+  `val_split_mode=file` policy
+- keep the numbers for provenance and internal comparison only
+- they are not the current canonical ScanObjectNN benchmark headline
+
 Final readout:
 
 | source | `recon_lift_q` | `recon_lift_a` | `obj_bg` | `obj_only` | `pb_t50_rs` |
@@ -6230,7 +6237,7 @@ Final readout:
 | `mesh50udf50` | `0.1896` | `0.1466` | `0.8399` | `0.8227` | `0.8001` |
 | `pc33mesh33udf33` | `0.1640` | `0.1357` | `0.8365` | `0.8348` | `0.8102` |
 
-Headline:
+Historical headline:
 
 - best-of-three headline = `0.8399 / 0.8348 / 0.8102`
 - this beats the historical v1 reference on `obj_bg` and `pb_t50_rs`, but not
@@ -6274,6 +6281,13 @@ Save roots:
 - `runs/patchnepa_tokens/patchnepa_recong2_full300_20260306_072643/pt_mesh50udf50_reconch_g2_e300`
 - `runs/patchnepa_tokens/patchnepa_recong2_full300_20260306_072643/pt_pc33mesh33udf33_reconch_g2_e300`
 
+Policy note (2026-03-14):
+
+- these FT rows were produced under the earlier ScanObjectNN
+  `val_split_mode=file` policy
+- keep the numbers for provenance and internal comparison only
+- they are not the current canonical ScanObjectNN benchmark headline
+
 Final readout:
 
 | source | `recon_lift_q` | `recon_lift_a` | `obj_bg` | `obj_only` | `pb_t50_rs` |
@@ -6282,11 +6296,12 @@ Final readout:
 | `mesh50udf50` | `0.1666` | `0.1507` | `0.8485` | `0.8434` | `0.8053` |
 | `pc33mesh33udf33` | `0.1821` | `0.1421` | `0.8417` | `0.8589` | `0.8140` |
 
-Headline:
+Historical headline:
 
 - best-of-three headline = `0.8485 / 0.8589 / 0.8140`
-- this beats the historical v1 reference and the `g0` best-of-three headline on
-  all three ScanObjectNN variants.
+- this historical file-split readout beats the historical v1 reference and the
+  `g0` historical file-split best-of-three headline on all three
+  ScanObjectNN variants.
 
 Canonical sources:
 

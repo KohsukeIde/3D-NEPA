@@ -1,12 +1,12 @@
 {
-  "last_updated": "2026-03-12",
+  "last_updated": "2026-03-14",
   "patchnepa": {
     "mainline_name": "PatchNEPA v2 reconstruction `recong2` full300",
     "objective": "`recon_chamfer`, `composite`, generator depth `2`",
     "headline": {
-      "obj_bg": "0.8485",
-      "obj_only": "0.8589",
-      "pb_t50_rs": "0.8140"
+      "obj_bg": "pending",
+      "obj_only": "pending",
+      "pb_t50_rs": "pending"
     },
     "collaborator_entrypoint": "nepa3d/docs/patch_nepa/collaborator_reading_guide_active.md",
     "local_execution_source": "nepa3d/docs/patch_nepa/execution_backlog_active.md",

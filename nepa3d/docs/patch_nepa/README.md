@@ -16,16 +16,20 @@ Point-MAE and PointGPT.
    - Start here when asking "what happened?" or "which result is valid?"
 3. `hypothesis_matrix_active.md`
    - Hypotheses, supporting evidence, current status, and next minimal tests.
-4. `execution_backlog_active.md`
+4. `scanobjectnn_ft_policy_audit_active.md`
+   - Exact list of old ScanObjectNN FT result families that are now
+     historical/internal because they came from the earlier `file`-split
+     policy.
+5. `execution_backlog_active.md`
    - Canonical local-only execution backlog and gating rules.
    - Start here when asking "what should run next locally?"
-5. `restart_plan_patchnepa_data_v2_20260303.md`
+6. `restart_plan_patchnepa_data_v2_20260303.md`
    - Active investigation memo for the current v2 token-path branch.
-6. `patch_nepa_stage2_active.md`
+7. `patch_nepa_stage2_active.md`
    - Active mainline policy and stage-2 execution rules.
-7. `runlog_patch_nepa_202602.md`
+8. `runlog_patch_nepa_202602.md`
    - Raw execution ledger for Patch-NEPA jobs.
-8. `benchmark_scanobjectnn_variant.md`
+9. `benchmark_scanobjectnn_variant.md`
    - Canonical headline ScanObjectNN benchmark table.
 
 ## Collaborator Quick Path
@@ -47,13 +51,17 @@ start from:
    - shortest answer to "what is the current valid result?"
 4. `benchmark_scanobjectnn_variant.md`
    - canonical ScanObjectNN headline table
-5. `restart_plan_patchnepa_data_v2_20260303.md`
+5. `scanobjectnn_ft_policy_audit_active.md`
+   - exact boundary between historical file-split FT rows and maintained
+     official benchmark rows
+6. `restart_plan_patchnepa_data_v2_20260303.md`
    - current branch memo and the most detailed active result backfill
 
 Current short answer:
 
 - current main reconstruction line: PatchNEPA v2 `recong2` full300
-- current headline FT: `0.8485 / 0.8589 / 0.8140`
+- current ScanObjectNN benchmark headline: pending revalidation
+- historical file-split FT headline: `0.8485 / 0.8589 / 0.8140`
 - current thin ABCI entrypoints:
   - `scripts/abci/submit_patchnepa_current_pretrain.sh`
   - `scripts/abci/submit_patchnepa_current_ft.sh`
@@ -96,6 +104,9 @@ Current merge rules:
   - Porting parity checklist from Query-NEPA to Patch-NEPA.
 - `query_nepa_chronology_audit_202602_active.md`
   - Historical validity audit for findings inherited from Query-NEPA.
+- `scanobjectnn_ft_policy_audit_active.md`
+  - Explicit audit of which ScanObjectNN FT result families are historical
+    because they were produced under the old `file`-split policy.
 
 ## Supporting Tables
 

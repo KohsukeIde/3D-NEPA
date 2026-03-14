@@ -40,7 +40,7 @@ export LR="${LR:-5e-4}"
 export WD="${WD:-0.05}"
 export WARMUP_EPOCHS="${WARMUP_EPOCHS:-10}"
 export AUG_PRESET="${AUG_PRESET:-pointmae}"
-export VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}"
+export VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-pointmae}"
 export VAL_RATIO="${VAL_RATIO:-0.1}"
 export VAL_SEED="${VAL_SEED:-0}"
 export SEED="${SEED:-0}"
@@ -49,4 +49,3 @@ export PT_SAMPLE_MODE_TRAIN="${PT_SAMPLE_MODE_TRAIN:-random}"
 export PT_SAMPLE_MODE_EVAL="${PT_SAMPLE_MODE_EVAL:-fps}"
 
 exec "${ROOT_DIR}/scripts/finetune/patchcls_scanobjectnn_scratch.sh"
-

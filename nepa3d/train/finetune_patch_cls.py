@@ -82,13 +82,15 @@ def add_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--val_split_mode",
         type=str,
-        default="file",
-        choices=["file", "group_auto", "group_scanobjectnn", "pointmae"],
+        default="official_auto",
+        choices=["official_auto", "file", "group_auto", "group_scanobjectnn", "pointmae"],
         help=(
-            "Validation split mode from TRAIN. "
+            "Validation split mode. "
+            "official_auto uses ScanObjectNN official downstream parity "
+            "(official test split as validation) and falls back to file split for non-ScanObjectNN data. "
             "group_auto resolves to ScanObjectNN group split when cache_root contains 'scanobjectnn'. "
-            "pointmae uses official train for training and official test for validation (Point-MAE legacy test-as-val). "
-            "Default=file to match current Point-MAE strict policy (train->train/val split)."
+            "pointmae uses official train for training and official test for validation "
+            "(Point-MAE / PointGPT-style test-as-val)."
         ),
     )
 
@@ -960,11 +962,21 @@ def main() -> None:
         num_classes = max(label_map.values()) + 1
 
         resolved_val_split_mode = str(args.val_split_mode)
+        use_test_as_val = False
         if args.val_split_mode == "pointmae":
+            use_test_as_val = True
+            resolved_val_split_mode = "pointmae(test-as-val)"
+        elif args.val_split_mode == "official_auto":
+            if "scanobjectnn" in cache_root_abs_l:
+                use_test_as_val = True
+                resolved_val_split_mode = "pointmae(test-as-val,auto)"
+            else:
+                resolved_val_split_mode = "file(auto-nonscan)"
+
+        if use_test_as_val:
             # Point-MAE style: train on official train split, select/check by official test split.
             train_paths = train_paths_full
             val_paths = test_paths
-            resolved_val_split_mode = "pointmae(test-as-val)"
         else:
             val_group_key_fn = None
             if args.val_split_mode == "group_scanobjectnn":
@@ -990,10 +1002,13 @@ def main() -> None:
         h5_train, h5_test = _resolve_scan_h5_files(args.scan_h5_root, args.scan_variant)
         tr_points, tr_labels = load_scanobjectnn_h5_arrays(str(h5_train))
         te_points, te_labels = load_scanobjectnn_h5_arrays(str(h5_test))
-        if args.val_split_mode == "pointmae":
+        if args.val_split_mode in ("pointmae", "official_auto"):
             tr_idx = np.arange(tr_labels.shape[0], dtype=np.int64)
             va_points, va_labels = te_points, te_labels
-            resolved_val_split_mode = "pointmae(test-as-val)"
+            if args.val_split_mode == "official_auto":
+                resolved_val_split_mode = "pointmae(test-as-val,auto)"
+            else:
+                resolved_val_split_mode = "pointmae(test-as-val)"
         else:
             tr_idx, va_idx = _stratified_split_indices(tr_labels, args.val_ratio, args.val_seed)
             va_points, va_labels = tr_points[va_idx], tr_labels[va_idx]

@@ -89,8 +89,10 @@ Target is strict compatibility with `patchcls` training/eval settings.
 
 ### 4.3 Policy alignment
 
-- Mainline split policy is fixed to `val_split_mode=file` only.
-- `group_*` and `pointmae(test-as-val)` are treated as historical/reference modes and are excluded from new mainline comparisons.
+- Mainline ScanObjectNN split policy is now `val_split_mode=pointmae`
+  (official test-as-val parity).
+- earlier `file`-split and `group_*` rows are historical/internal only for
+  ScanObjectNN benchmark comparison.
 - Avoid legacy `scanobjectnn_*_v2` caches unless explicitly allowed (`ALLOW_SCAN_UNISCALE_V2=1`).
 
 ## 5. Active Run References

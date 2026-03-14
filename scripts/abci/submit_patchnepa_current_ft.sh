@@ -53,7 +53,7 @@ export LLRD_MODE="${LLRD_MODE:-linear}"
 export AUG_PRESET="${AUG_PRESET:-pointmae}"
 export AUG_EVAL="${AUG_EVAL:-1}"
 export MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-10}"
-export VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}"
+export VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-pointmae}"
 export ALLOW_SCAN_UNISCALE_V2="${ALLOW_SCAN_UNISCALE_V2:-0}"
 
 export USE_WANDB="${USE_WANDB:-1}"

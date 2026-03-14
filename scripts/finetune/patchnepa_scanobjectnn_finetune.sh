@@ -14,8 +14,8 @@ export WANDB_PROJECT="${WANDB_PROJECT:-patchnepa-finetune}"
 export WANDB_GROUP="${WANDB_GROUP:-patchnepa-ft}"
 export WANDB_TAGS="${WANDB_TAGS:-patchnepa,finetune,direct}"
 
-# Keep strict evaluation defaults unless explicitly overridden.
-export VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-file}"
+# Keep official ScanObjectNN downstream defaults unless explicitly overridden.
+export VAL_SPLIT_MODE="${VAL_SPLIT_MODE:-pointmae}"
 export AUG_EVAL="${AUG_EVAL:-1}"
 export MC_EVAL_K_TEST="${MC_EVAL_K_TEST:-10}"
 

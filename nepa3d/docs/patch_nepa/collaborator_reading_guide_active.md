@@ -1,6 +1,6 @@
 # PatchNEPA Collaborator Reading Guide
 
-Last updated: 2026-03-12
+Last updated: 2026-03-14
 
 ## Purpose
 
@@ -20,17 +20,27 @@ duplicating the raw ledger.
 ## One-Sentence Current Status
 
 Current mainline is PatchNEPA v2 reconstruction `recong2` full300
-(`recon_chamfer`, `composite`, generator depth `2`), and the current canonical
-ScanObjectNN headline is:
+(`recon_chamfer`, `composite`, generator depth `2`), but the ScanObjectNN
+benchmark headline is currently under revalidation because the maintained FT
+policy switched on 2026-03-14 from `val_split_mode=file` to official
+`test-as-val`.
 
-- `obj_bg=0.8485`
-- `obj_only=0.8589`
-- `pb_t50_rs=0.8140`
+Current canonical headline status:
+
+- `obj_bg=pending`
+- `obj_only=pending`
+- `pb_t50_rs=pending`
+
+Historical note:
+
+- previously cited `0.8485 / 0.8589 / 0.8140` was obtained under the earlier
+  `file`-split FT policy and is now treated as internal/historical only.
 
 Primary evidence:
 
 - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
 - `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
+- `nepa3d/docs/patch_nepa/scanobjectnn_ft_policy_audit_active.md`
 
 ## 10-Minute Reading Order
 
@@ -41,23 +51,26 @@ Primary evidence:
 2. `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
    - Canonical benchmark table.
    - Use this for any paper-facing or collaborator-facing headline number.
-3. `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
+3. `nepa3d/docs/patch_nepa/scanobjectnn_ft_policy_audit_active.md`
+   - Exact list of which older ScanObjectNN FT rows are historical because they
+     came from the earlier `file`-split policy.
+4. `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
    - Shows which hypotheses are now supported, unsupported, or still open.
 
-If you only read three files, read those three.
+If you only read three files, read items `1-3`.
 
 ## 30-Minute Reading Order
 
 After the 10-minute path, read:
 
-4. `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
+5. `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
    - Detailed active-branch memo.
    - Best source for recent reconstruction, generator, PointGPT-parity, and
      branch-level decisions.
-5. `scripts/abci/README.md`
+6. `scripts/abci/README.md`
    - Current collaborator-facing ABCI entrypoints.
    - Best answer to "which shell script should I run?"
-6. `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`
+7. `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`
    - Raw job ledger.
    - Use only if you need exact job IDs, launch history, or provenance.
 
@@ -70,6 +83,9 @@ After the 10-minute path, read:
 - `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
   - What are the benchmark-valid numbers?
   - Which rows are headline-safe versus internal-only?
+- `nepa3d/docs/patch_nepa/scanobjectnn_ft_policy_audit_active.md`
+  - Which old ScanObjectNN numbers are file-split based?
+  - Which rows were demoted to historical/internal?
 - `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
   - What did we believe, and what is the current verdict?
 - `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`

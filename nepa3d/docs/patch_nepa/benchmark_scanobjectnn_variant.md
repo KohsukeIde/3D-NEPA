@@ -1,10 +1,20 @@
 # ScanObjectNN Variant Benchmark (Active Canonical)
 
-Last updated: 2026-03-06
+Last updated: 2026-03-14
 
 ## 1. Scope
 
 This file is the canonical benchmark summary for protocol-correct ScanObjectNN evaluation.
+
+Current status:
+
+- benchmark headline is under revalidation
+- previous PatchNEPA FT headline `0.8485 / 0.8589 / 0.8140` was obtained under
+  the earlier `val_split_mode=file` policy
+- as of 2026-03-14, maintained ScanObjectNN FT policy follows official
+  Point-MAE / PointGPT-style `test-as-val`
+- exact audit of which old ScanObjectNN rows are now historical:
+  - `nepa3d/docs/patch_nepa/scanobjectnn_ft_policy_audit_active.md`
 
 - Variant-split only: `obj_bg`, `obj_only`, `pb_t50_rs`
 - Headline metric: `test_acc`
@@ -37,6 +47,21 @@ Scope note for historical issues:
 - Python 3.9 type-hint import failure was a CPAC path issue, not a Scan classification issue.
 - Env propagation issue affected specific old submissions and is fixed; canonical tables use re-submitted protocol-correct jobs.
 
+### 1.2 Policy correction (2026-03-14)
+
+Public-code audit across Point-BERT / Point-MAE / Point-M2AE / I2P-MAE / ACT /
+ReCon / PointGPT / Point-RAE / Point-FEMAE and related ScanObjectNN downstream
+setups indicates that `val=test` / official test-split validation is the
+dominant public pattern.
+
+Therefore:
+
+- maintained ScanObjectNN FT policy in this repo is now
+  `val_split_mode=pointmae` (`test-as-val`)
+- earlier `file`-split FT rows remain useful for internal diagnosis
+- earlier `file`-split FT rows are no longer treated as the canonical
+  benchmark headline
+
 ## 2. Non-Negotiable Protocol
 
 - `SCAN_CACHE_ROOT` must be one of:
@@ -47,6 +72,8 @@ Scope note for historical issues:
 - `scanobjectnn_*_v2` (uni-scale) is legacy-only and excluded from new benchmark rows.
 - `test_acc` is benchmark headline.
 - `best_val` / `best_ep` are diagnostics only.
+- maintained ScanObjectNN FT policy is `val_split_mode=pointmae`
+  (`test-as-val`) for official Point-MAE / PointGPT parity.
 
 ### 2.1 Why "same-split sanity" is required
 
@@ -218,7 +245,8 @@ Obj-only random-sampling parity check (seed-fixed):
 Interpretation note:
 
 - random-seed parity looks consistent between `npz(v3_nonorm)` and `scan_h5`.
-- mainline policy is now fixed to `val_split_mode=file` only; historical `group_*`/`pointmae` rows below are reference-only.
+- earlier `file`-split and `group_*` rows below are historical/internal only.
+- maintained official-parity policy is now `val_split_mode=pointmae`.
 
 Obj-only parity recheck (Point-MAE split unified):
 
@@ -234,8 +262,8 @@ Obj-only parity recheck (Point-MAE split unified):
 
 Interpretation update:
 
-- this `val_split_mode=pointmae` block is historical/reference only.
-- mainline strict comparisons must use `val_split_mode=file`.
+- this block is now the maintained official-parity direction.
+- earlier `file`-split rows remain useful only as internal diagnostics.
 
 Point-MAE scratch ckpt direct test extraction:
 
@@ -288,7 +316,7 @@ PatchCls PM-aligned scratch rerun (1024, all variants finalized):
 | `obj_only` | 0.8176 |
 | `pb_t50_rs` | 0.7609 |
 
-Point-MAE strict retry5 (`NO_TEST_AS_VAL=1`, `npoints=1024`, BS64 extfix) finalized:
+Point-MAE file-split retry5 (`NO_TEST_AS_VAL=1`, `npoints=1024`, BS64 extfix) finalized:
 
 - scratch jobs: `99275` (`obj_bg`), `99277` (`obj_only`), `99279` (`pb_t50_rs`) all `Exit_status=0`
 - test jobs: `99276`, `99278`, `99280` all `Exit_status=0`
@@ -297,7 +325,7 @@ Point-MAE strict retry5 (`NO_TEST_AS_VAL=1`, `npoints=1024`, BS64 extfix) finali
   - `logs/sanity/pointmae_scratch_tests/obj_only_pointmae_scan3_scratch_bs64_extfix_retry5_20260227_220742_test.out`
   - `logs/sanity/pointmae_scratch_tests/pb_t50_rs_pointmae_scan3_scratch_bs64_extfix_retry5_20260227_220742_test.out`
 
-| variant | Point-MAE strict retry5 `test_acc` |
+| variant | Point-MAE file-split retry5 `test_acc` |
 |---|---:|
 | `obj_bg` | 0.8296 |
 | `obj_only` | 0.8399 |
@@ -312,7 +340,8 @@ PatchCls split-only parity check (`obj_bg`, PM-aligned recipe fixed):
 Interpretation:
 
 - `group_auto` -> `file` split change on patchcls (with other settings fixed) produced `delta=0.0000` on `obj_bg` in this run.
-- `obj_bg` gap vs Point-MAE strict retry5 remains about `-4.65pt` (`0.7831 - 0.8296`).
+- this comparison is now historical because both sides use the earlier
+  file-split FT policy rather than maintained official `test-as-val`.
 
 ### 2.2.3 Non-normalized cache + dynamic query-bbox follow-up (`v3_nonorm`)
 
@@ -418,7 +447,7 @@ Confirmed major diffs (code-level):
 | positional encoding | center-MLP positional embedding (`Point-MAE/models/Point_MAE.py`) | learned absolute `pos_emb` table (`nepa3d/models/patch_classifier.py`) | token position signal differs |
 | classifier head | concat(`[CLS]`, token-max) + MLP head (`Point-MAE/models/Point_MAE.py`) | single linear head after pooled feature (`nepa3d/models/patch_classifier.py`) | head capacity differs |
 | optimization | `lr=5e-4`, `grad_norm_clip=10` (`Point-MAE/cfgs/finetune_scan_objonly.yaml`) | commonly used parity run used `lr=1e-3`, `grad_clip=1` (`runs/patchcls/.../args.json`) | update scale/clip regime differs |
-| validation protocol | legacy test-as-val (`subset=test`) or strict split override (`NO_TEST_AS_VAL=1`) | mainline fixed to `file` (`nepa3d/train/finetune_patch_cls.py`) | comparison target is fixed under current policy |
+| validation protocol | official downstream practice is `test-as-val`; some internal strict file-split reruns also exist | earlier PatchNEPA mainline used `file`; maintained policy is now `pointmae(test-as-val)` | old file-split comparisons are historical only |
 
 Practical implication:
 
@@ -688,26 +717,28 @@ Result table (completed rows only):
 | `obj_only` | 0.7762 |
 | `pb_t50_rs` | pending |
 
-## 13. PatchNEPA v2 reconstruction headline update (2026-03-06)
+## 13. PatchNEPA v2 reconstruction headline status (updated 2026-03-14)
 
-This section is the canonical PatchNEPA-v2 headline snapshot for the current
-variant-split protocol.
+This section records the best currently observed PatchNEPA-v2 FT numbers, but
+they were produced under the earlier `file`-split FT policy. They are kept as
+historical/internal reference while official `test-as-val` reruns are pending.
 
 Canonical table:
 
 | line | `obj_bg` | `obj_only` | `pb_t50_rs` | note |
 |---|---:|---:|---:|---|
 | PatchNEPA v1 reference | `0.8262` | `0.8417` | `0.7845` | historical internal reference |
-| PatchNEPA v2 `reconbest` full300 (`g0`) | `0.8399` | `0.8348` | `0.8102` | no-generator recon baseline; best-of-three-source headline |
-| PatchNEPA v2 `recong2` full300 (`g2`) | `0.8485` | `0.8589` | `0.8140` | current best PatchNEPA v2 line; exceeds v1 on all three variants |
+| PatchNEPA v2 `reconbest` full300 (`g0`) | `0.8399` | `0.8348` | `0.8102` | historical file-split FT baseline |
+| PatchNEPA v2 `recong2` full300 (`g2`) | `0.8485` | `0.8589` | `0.8140` | historical file-split FT best line; official rerun pending |
 | Point-MAE corrected variant-aligned sanity | `0.9019` | `0.8795` | `0.8459` | corrected repo-local sanity (`90.1893 / 87.9518 / 84.5940` in %) |
 
-Current PatchNEPA headline FT recipe:
+Current maintained PatchNEPA FT policy:
 
 - `num_groups=64`, `group_size=32`
 - `train_sample=random`, `eval_sample=fps`
 - `aug_preset=pointmae`, `aug_eval=1`
 - `mc_test=10`
+- `val_split_mode=pointmae` (`test-as-val`)
 
 Recipe boundary:
 

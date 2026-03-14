@@ -1,6 +1,6 @@
 # LLM Retrieval Index
 
-Last updated: 2026-03-12
+Last updated: 2026-03-14
 
 ## Purpose
 
@@ -12,9 +12,9 @@ answer questions without loading raw ledgers unnecessarily.
 - active PatchNEPA line:
   - PatchNEPA v2 reconstruction `recong2` full300
 - current canonical ScanObjectNN headline:
-  - `obj_bg=0.8485`
-  - `obj_only=0.8589`
-  - `pb_t50_rs=0.8140`
+  - `obj_bg=pending`
+  - `obj_only=pending`
+  - `pb_t50_rs=pending`
 - machine-readable state source:
   - `nepa3d/docs/current_state.json`
 - docs-maintenance inventory:
@@ -25,6 +25,9 @@ answer questions without loading raw ledgers unnecessarily.
   - `nepa3d/docs/patch_nepa/collaborator_reading_guide_active.md`
   - note: this is useful for human handoff, but is not required in default LLM
     Tier 0 retrieval
+- benchmark note:
+  - current ScanObjectNN headline is under revalidation because maintained
+    FT policy now follows official `test-as-val`.
 
 ## Tier 0: Default First Read
 
@@ -44,6 +47,7 @@ Read only when the question needs current branch specifics:
 - `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`
 - `nepa3d/docs/patch_nepa/gap_audit_query_to_patch_active.md`
 - `nepa3d/docs/patch_nepa/query_nepa_chronology_audit_202602_active.md`
+- `nepa3d/docs/patch_nepa/scanobjectnn_ft_policy_audit_active.md`
 - `nepa3d/docs/operations/README.md`
 
 ## Tier 2: Historical Traceback
@@ -74,6 +78,7 @@ provenance backup, or abandoned ideas:
 | "What should run next locally?" | `patch_nepa/execution_backlog_active.md`, `operations/README.md`, then `patch_nepa/restart_plan_patchnepa_data_v2_20260303.md` if needed |
 | "Where did this claim come from?" | add `runlog_patch_nepa_202602.md` or `query_nepa/runlog_202602.md` |
 | "What is the benchmark headline?" | `benchmark_scanobjectnn_variant.md` |
+| "Which old ScanObjectNN numbers are file-split / historical?" | `patch_nepa/scanobjectnn_ft_policy_audit_active.md`, then `patch_nepa/benchmark_scanobjectnn_variant.md` if needed |
 | "What should I send a collaborator first?" | `patch_nepa/collaborator_reading_guide_active.md`, `patch_nepa/storyline_query_to_patch_v2_active.md`, `patch_nepa/benchmark_scanobjectnn_variant.md` |
 | "How is `docs/` organized or what can be archived?" | `docs_inventory_active.md`, `docs_cleanup_plan_active.md`, then folder `README.md` if needed |
 | "What old experiments existed?" | Tier 2, then archive only if still needed |

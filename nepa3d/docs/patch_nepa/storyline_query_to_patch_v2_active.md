@@ -1,6 +1,6 @@
 # QueryNEPA -> PatchNEPA v2 Storyline
 
-Last updated: 2026-03-06
+Last updated: 2026-03-14
 
 ## 1. Purpose
 
@@ -14,6 +14,13 @@ This document is the shortest path for answering:
 
 It is a synthesis page, not a raw ledger.
 
+Important 2026-03-14 correction:
+
+- maintained ScanObjectNN downstream policy has been switched from
+  `val_split_mode=file` to official `test-as-val`
+- historical FT numbers obtained under the old `file`-split policy are kept as
+  internal diagnostics, not as the current canonical benchmark headline
+
 ## 2. Canonical Sources
 
 - Query historical raw ledger:
@@ -24,6 +31,8 @@ It is a synthesis page, not a raw ledger.
   - `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
 - Patch benchmark headline table:
   - `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
+- ScanObjectNN FT policy audit:
+  - `nepa3d/docs/patch_nepa/scanobjectnn_ft_policy_audit_active.md`
 - Patch local-only execution backlog:
   - `nepa3d/docs/patch_nepa/execution_backlog_active.md`
 - Query-to-patch validity audit:
@@ -36,8 +45,8 @@ It is a synthesis page, not a raw ledger.
 | Query-NEPA | mixed historical line | token-level NEPA cosine | useful engineering and protocol lessons only | not headline-safe due to protocol mixups in parts of the line | historical reference |
 | PatchNEPA v1 family | historical internal reference line | earlier content-target family | still the strongest internal PatchNEPA FT reference | `obj_bg=0.8262`, `obj_only=0.8417`, `pb_t50_rs=0.7845` | internal target line |
 | PatchNEPA v2 cosine path | ShapeNet-family token-path branch | latent cosine with QA stream | repeated `cos_tgt ~= cos_prev`, tiny gap, high copy-win | no evidence it beats v1 | active negative result |
-| PatchNEPA v2 recon `g0` full300 | ShapeNet-family token-path branch | `ctx(chamfer)+q/a(mse)` composite recon | positive `recon_lift_q/a` survives full run and beats v1 on `2/3` ScanObjectNN variants | best headline `0.8399 / 0.8348 / 0.8102` on `obj_bg / obj_only / pb_t50_rs` | validated no-generator reconstruction baseline |
-| PatchNEPA v2 recon `g2` full300 | ShapeNet-family token-path branch | composite recon + generator depth `2` | best current v2 line; beats both v1 and `g0` on all three ScanObjectNN variants | best headline `0.8485 / 0.8589 / 0.8140` on `obj_bg / obj_only / pb_t50_rs` | current main reconstruction line |
+| PatchNEPA v2 recon `g0` full300 | ShapeNet-family token-path branch | `ctx(chamfer)+q/a(mse)` composite recon | positive `recon_lift_q/a` survives full run | historical file-split FT readout `0.8399 / 0.8348 / 0.8102`; official rerun pending | validated no-generator reconstruction baseline |
+| PatchNEPA v2 recon `g2` full300 | ShapeNet-family token-path branch | composite recon + generator depth `2` | strongest current pretrain/transfer line | historical file-split FT readout `0.8485 / 0.8589 / 0.8140`; official rerun pending | current main reconstruction line, benchmark under revalidation |
 | Point-MAE | external baseline | masked point-patch modeling | protocol sanity and benchmark context | use benchmark page only | external benchmark context |
 | PointGPT | ShapeNet control line | causal reconstruction with generator | healthy reconstruction-style learning curve | use as pretrain/control reference, not a direct benchmark row here | reconstruction reference |
 
@@ -170,23 +179,25 @@ Interpretation:
 - the old cosine probes are the wrong readout for this objective family,
 - `recon_chamfer` and `recon_mse` are nearly equivalent on short-run diags.
 
-### 5.3 Reconstruction FT: Full300 `g0` and `g2` Now Surpass the Old v1 Line
+### 5.3 Reconstruction FT: Historical File-Split Results Favor `g2`, But Official Rerun Is Still Required
 
 Full FT results from the full300 reconstruction families:
 
 | line | `obj_bg` | `obj_only` | `pb_t50_rs` | read |
 |---|---:|---:|---:|---|
-| v1 family reference | `0.8262` | `0.8417` | `0.7845` | historical internal reference |
-| `reconbest` full300 (`g0`) | `0.8399` | `0.8348` | `0.8102` | beats v1 on `obj_bg` and `pb_t50_rs`, still below on `obj_only` |
-| `recong2` full300 (`g2`) | `0.8485` | `0.8589` | `0.8140` | beats both v1 and `g0` on all three variants |
+| v1 family reference | `0.8262` | `0.8417` | `0.7845` | historical internal reference under earlier file-split FT policy |
+| `reconbest` full300 (`g0`) | `0.8399` | `0.8348` | `0.8102` | historical file-split FT readout |
+| `recong2` full300 (`g2`) | `0.8485` | `0.8589` | `0.8140` | historical file-split FT readout; best observed transfer line so far |
 
 Interpretation:
 
 - full300 reconstruction is no longer just a positive-diag probe; it transfers,
 - the no-generator `g0` line is a valid reconstruction baseline,
-- the generator-enabled `g2` line is the current best PatchNEPA v2 result,
-- the strongest gain is on `obj_only`, where `g2` clears the old v1 line by
-  `+0.0172`.
+- the generator-enabled `g2` line is still the strongest PatchNEPA v2 line,
+- however, these specific FT numbers were obtained under the earlier
+  `file`-split FT policy,
+- therefore the benchmark-valid conclusion is not yet "`g2` is solved", but
+  rather "`g2` is the right rerun candidate under official `test-as-val`".
 
 ### 5.4 Translation-Loss Screen + Mini-CPAC: Split Signal, Not Mainline Yet
 

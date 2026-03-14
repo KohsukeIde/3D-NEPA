@@ -216,14 +216,16 @@ def main():
     ap.add_argument(
         "--val_split_mode",
         type=str,
-        default="file",
-        choices=["file", "group_auto", "group_scanobjectnn", "pointmae"],
+        default="official_auto",
+        choices=["official_auto", "file", "group_auto", "group_scanobjectnn", "pointmae"],
         help=(
-            "Validation split mode from TRAIN. "
-            "file: stratified file-level split from official train (Point-MAE strict style); "
+            "Validation split mode. "
+            "official_auto: use ScanObjectNN official downstream parity "
+            "(official test split as validation) and fall back to file split for non-ScanObjectNN datasets; "
+            "file: stratified file-level split from official train; "
             "group_auto: group-aware split for ScanObjectNN caches only; "
             "group_scanobjectnn: always use ScanObjectNN group key; "
-            "pointmae: use official test split as validation (Point-MAE legacy test-as-val)."
+            "pointmae: use official test split as validation (Point-MAE / PointGPT-style test-as-val)."
         ),
     )
     ap.add_argument(
@@ -568,12 +570,22 @@ def main():
 
     val_group_key_fn = None
     resolved_val_split_mode = str(args.val_split_mode)
+    use_test_as_val = False
     if args.val_split_mode == "pointmae":
+        use_test_as_val = True
+        resolved_val_split_mode = "pointmae(test-as-val)"
+    elif args.val_split_mode == "official_auto":
+        if is_scan_cache:
+            use_test_as_val = True
+            resolved_val_split_mode = "pointmae(test-as-val,auto)"
+        else:
+            resolved_val_split_mode = "file(auto-nonscan)"
+
+    if use_test_as_val:
         # Point-MAE style: keep official train for optimization and reuse official
         # test split for model selection/validation.
         train_paths = train_paths_full
         val_paths = test_paths
-        resolved_val_split_mode = "pointmae(test-as-val)"
     else:
         if args.val_split_mode == "group_scanobjectnn":
             val_group_key_fn = scanobjectnn_group_key

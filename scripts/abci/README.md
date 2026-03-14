@@ -26,11 +26,18 @@ need the full internal script tree.
 - no ray path in the current token-path mainline (`N_RAY=0`)
 - current mixed-source default: `pc33mesh33udf33`
 
-The current best benchmark headline is:
+Current ScanObjectNN benchmark headline status:
 
-- `obj_bg=0.8485`
-- `obj_only=0.8589`
-- `pb_t50_rs=0.8140`
+- `obj_bg=pending`
+- `obj_only=pending`
+- `pb_t50_rs=pending`
+
+Reason:
+
+- maintained FT policy switched on 2026-03-14 to official ScanObjectNN
+  `test-as-val` parity (`val=test` style).
+- previously cited `0.8485 / 0.8589 / 0.8140` remains useful as a historical
+  file-split FT result, but is no longer the canonical benchmark headline.
 
 Reference:
 
@@ -47,6 +54,7 @@ Reference:
 - `submit_patchnepa_current_ft.sh`
   - submit the current ScanObjectNN variant finetune set
   - default ckpt: current best mixed-source `g2` checkpoint
+  - default FT validation policy: official `test-as-val`
   - override with `CKPT=/abs/path/to/ckpt_final.pt`
 - `submit_patchnepa_current_cpac.sh`
   - submit the current mini-CPAC (`PC context -> UDF query`) evaluation

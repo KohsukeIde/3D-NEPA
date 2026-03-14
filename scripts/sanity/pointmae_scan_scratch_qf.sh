@@ -26,7 +26,7 @@ TOTAL_BS_OVERRIDE="${TOTAL_BS_OVERRIDE:-}"
 NPOINT_OVERRIDE="${NPOINT_OVERRIDE:-}"
 NUM_GROUP_OVERRIDE="${NUM_GROUP_OVERRIDE:-}"
 GROUP_SIZE_OVERRIDE="${GROUP_SIZE_OVERRIDE:-}"
-NO_TEST_AS_VAL="${NO_TEST_AS_VAL:-1}"   # 1: split train->(train/val), 0: legacy Point-MAE test-as-val
+NO_TEST_AS_VAL="${NO_TEST_AS_VAL:-0}"   # 0: official Point-MAE ScanObjectNN default (test-as-val), 1: explicit train->val split override
 VAL_RATIO="${VAL_RATIO:-0.1}"
 VAL_SEED="${VAL_SEED:-0}"
 
@@ -148,7 +148,9 @@ with open(cfg_path, "w") as f:
 PY
 fi
 
-# Default policy: do not use test-as-val. Build val split from train set.
+# Default policy: follow official Point-MAE ScanObjectNN downstream setup
+# (test-as-val). Build a train-split validation set only when explicitly
+# requested by NO_TEST_AS_VAL=1.
 if [[ "${NO_TEST_AS_VAL}" == "1" ]]; then
   if [[ -z "${TMP_CFG_DIR:-}" ]]; then
     TMP_CFG_DIR="${WORKDIR}/tmp/pointmae_scratch_cfg_override"
@@ -213,11 +215,11 @@ if [[ -n "${GROUP_SIZE_OVERRIDE}" ]]; then
 fi
 echo "no_test_as_val=${NO_TEST_AS_VAL}"
 if [[ "${NO_TEST_AS_VAL}" == "1" ]]; then
-  echo "policy=STRICT(no test-as-val)"
+  echo "policy=OVERRIDE(train->val split; not official default)"
   echo "val_ratio=${VAL_RATIO}"
   echo "val_seed=${VAL_SEED}"
 else
-  echo "policy=LEGACY(test-as-val, explicitly requested)"
+  echo "policy=DEFAULT(test-as-val, official Point-MAE ScanObjectNN setup)"
 fi
 echo "log=${OUT_LOG}"
 echo

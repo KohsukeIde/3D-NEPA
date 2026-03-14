@@ -1,6 +1,6 @@
 # PatchNEPA Hypothesis Matrix
 
-Last updated: 2026-03-11
+Last updated: 2026-03-14
 
 ## 1. Purpose
 
@@ -23,8 +23,8 @@ Status labels:
 | H3 | larger `skip_k` fixes the collapse by making the task longer-horizon | rejected | `k=1,2,4` short sweep ends with nearly identical gap | none; keep `skip_k=1` default |
 | H4 | reconstruction-space objectives create real context use | supported | `recon_lift_q/a` become positive and stay positive in both `recon_mse` and `recon_chamfer` short runs | continue using reconstruction-aligned diagnostics as the primary probe |
 | H5 | `recon_chamfer` is materially better than `recon_mse` in short pretrain diagnostics | rejected | short-run diagnostics are almost numerically identical | treat them as equivalent on short smoke; decide by FT or generator runs |
-| H6 | current reconstruction branch already beats the historical v1-family baseline in FT | supported | `recong2` full300 now beats the historical v1 line on all three ScanObjectNN variants; `g0` already beats it on `2/3` | lock `g2` as the current mainline and measure whether the gain survives CPAC |
-| H7 | current transfer gap is partly due to missing reconstruction-side generator depth | supported | `g2` improves over `g0` on all three ScanObjectNN variants under the same current FT protocol | keep generator-enabled reconstruction as the default transfer line and test its CPAC side next |
+| H6 | current reconstruction branch already beats the historical v1-family baseline in FT under official ScanObjectNN downstream policy | open | `g2>g0>v1` was shown only under the earlier `file`-split FT policy; official `test-as-val` rerun is still pending | rerun `g0` vs `g2` under `val_split_mode=pointmae` |
+| H7 | current transfer gap is partly due to missing reconstruction-side generator depth | open | `g2` improves over `g0` under the earlier `file`-split FT policy, but the gain is not yet confirmed under official `test-as-val` | rerun `g0` vs `g2` under official downstream policy |
 | H8 | PointGPT-style loss parity is required for a strict apples-to-apples comparison | supported | PointGPT objective is context patch reconstruction; PatchNEPA composite loss is a different axis | keep dedicated `pointgpt_ctx_only` runs for strict comparison |
 | H9 | dual-mask parity vs PointGPT was previously incomplete | supported | older PatchNEPA runs often used `near/far` regimes; PointGPT-like `column + keep_prefix` parity was added later | use only parity-configured reruns for direct PointGPT mask comparison |
 | H10 | PointGPT should be compared to PatchNEPA with cosine probes as the main axis | rejected | PointGPT native objective is reconstruction; PatchNEPA cosine probes are off-objective for recon runs | compare in `recon/copy/lift` and latent-spread space |
@@ -35,13 +35,14 @@ Status labels:
 | H15 | strict PointGPT-loss parity can be made stable enough for scientific readout | engineering pending | the earlier full300 parity run failed before learning-signal readout; the branch still needs a clean short rerun | run `L003` from the execution backlog |
 | H16 | true `fps_then_sample` parity requires a real `point_all > npoints` path | engineering pending | the current `2048`-point cache degenerates the parity test into a permutation-only ablation | stage the real input path before rerunning `L005` |
 | H17 | mesh visibility-signature answers (`vis_sig`, `ao`) can improve translation-side readout without destroying reconstruction-side lift | open | the schema-breaking world-package rebuild now stages visibility-signature / AO answers plus banked PC contexts on top of the current recon mainline | run `L000A/L000B` from the execution backlog |
+| H18 | official ScanObjectNN downstream parity for Point-MAE / PointGPT-style SSL requires `test-as-val` model selection | supported | external code audit shows `val=test` / official test-split validation is the dominant public pattern; earlier `file`-split FT policy is not parity-safe | keep all maintained ScanObjectNN launch surfaces on `val_split_mode=pointmae` and mark old `file` rows historical |
 
 ## 3. Current Priority Order
 
-1. `reconstruction + generator_depth`
+1. `reconstruction + generator_depth` under official ScanObjectNN FT policy
 2. visibility-first high-frequency answer branch (`L000A/L000B`)
 3. strict PointGPT-axis compare (`pointgpt_ctx_only`, aligned mask, aligned diag)
-4. FT decision against the historical v1-family reference
+4. FT decision against the historical v1-family reference after `test-as-val` rerun
 
 Operational note:
 

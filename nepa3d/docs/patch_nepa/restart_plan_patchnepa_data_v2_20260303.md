@@ -1887,6 +1887,13 @@ Canonical sources:
 - FT job manifest:
   - `logs/sanity/patchnepa_ft/patchnepa_reconbest_full300_20260305_224714/job_ids.tsv`
 
+Policy note (2026-03-14):
+
+- these ScanObjectNN FT readouts were produced under the earlier
+  `val_split_mode=file` policy
+- keep them as historical/internal reference only
+- do not reuse them as the current canonical ScanObjectNN benchmark headline
+
 Per-source final readout:
 
 | source | pretrain job | `recon_lift_q` | `recon_lift_a` | `obj_bg` | `obj_only` | `pb_t50_rs` |
@@ -1895,7 +1902,7 @@ Per-source final readout:
 | `mesh50udf50` | `105869` | `0.1896` | `0.1466` | `0.8399` | `0.8227` | `0.8001` |
 | `pc33mesh33udf33` | `105870` | `0.1640` | `0.1357` | `0.8365` | `0.8348` | `0.8102` |
 
-Headline read:
+Historical headline read:
 
 - best `obj_bg`: `0.8399` (`mesh50udf50`)
 - best `obj_only`: `0.8348` (`pc33mesh33udf33`)
@@ -1916,6 +1923,13 @@ Canonical sources:
 - FT job manifest:
   - `logs/sanity/patchnepa_ft/patchnepa_recong2_full300_20260306_072643/job_ids.tsv`
 
+Policy note (2026-03-14):
+
+- these ScanObjectNN FT readouts were produced under the earlier
+  `val_split_mode=file` policy
+- keep them as historical/internal reference only
+- do not reuse them as the current canonical ScanObjectNN benchmark headline
+
 Per-source final readout:
 
 | source | pretrain job | `recon_lift_q` | `recon_lift_a` | `obj_bg` | `obj_only` | `pb_t50_rs` |
@@ -1924,13 +1938,13 @@ Per-source final readout:
 | `mesh50udf50` | `105912` | `0.1666` | `0.1507` | `0.8485` | `0.8434` | `0.8053` |
 | `pc33mesh33udf33` | `105913` | `0.1821` | `0.1421` | `0.8417` | `0.8589` | `0.8140` |
 
-Headline read:
+Historical headline read:
 
 - best `obj_bg`: `0.8485` (`mesh50udf50`)
 - best `obj_only`: `0.8589` (`pc33mesh33udf33`)
 - best `pb_t50_rs`: `0.8140` (`pc33mesh33udf33`)
-- this exceeds both the historical v1 reference
-  (`0.8262 / 0.8417 / 0.7845`) and the `g0` best headline
+- this historical file-split readout exceeds both the historical v1 reference
+  (`0.8262 / 0.8417 / 0.7845`) and the `g0` historical file-split headline
   (`0.8399 / 0.8348 / 0.8102`) on all three ScanObjectNN variants.
 
 ## 58. Translation-loss minimal screen completed (2026-03-06)

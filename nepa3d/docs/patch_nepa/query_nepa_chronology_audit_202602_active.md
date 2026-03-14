@@ -78,7 +78,8 @@ These are ported only in dedicated milestones after point-only patch baseline is
 ## 5. Obsolete or Restricted Practices
 
 - Treat `scanobjectnn_main_split_v2` mixed-cache headline reporting as obsolete for fair benchmark.
-- Treat legacy `test-as-val` (`val_split_mode=pointmae`) as reproduction-only.
+- Treat old `file`-split ScanObjectNN FT policy as a historical internal choice,
+  not as the official Point-MAE / PointGPT downstream default.
 - Treat run sets with known config mismatch or DDP/eval-path mismatch as invalid for comparison.
 
 ## 6. Active Patch-NEPA Pretrain Baseline (frozen defaults)
