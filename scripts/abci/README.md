@@ -51,6 +51,10 @@ Reference:
 - `submit_patchnepa_current_cpac.sh`
   - submit the current mini-CPAC (`PC context -> UDF query`) evaluation
   - default ckpt: current best mixed-source `g2` checkpoint
+- `submit_patchnepa_current_cqa_pretrain.sh`
+  - submit the experimental explicit-query CQA branch on ABCI
+  - current default tasks: `mesh_visibility + udf_thickness`
+  - current default cache: `data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1`
 
 ## Recommended Reading
 
@@ -59,6 +63,7 @@ Reference:
 3. `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
 4. `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
 5. `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
+6. `nepa3d/docs/patch_nepa/spec_cqa_vocab.md`
 
 ## Examples
 
@@ -71,6 +76,9 @@ bash scripts/abci/submit_patchnepa_current_ft.sh
 
 # current default mini-CPAC
 bash scripts/abci/submit_patchnepa_current_cpac.sh
+
+# experimental explicit-query CQA pretrain
+bash scripts/abci/submit_patchnepa_current_cqa_pretrain.sh
 ```
 
 ```bash

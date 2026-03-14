@@ -561,6 +561,7 @@ class CausalTransformer(nn.Module):
         dual_mask_mode: str = "element",
         dual_mask_keep_prefix: int = 0,
         dual_mask_column_ratio: float = 0.0,
+        attn_mask_override: Optional[torch.Tensor] = None,
     ):
         """Causal transformer with optional *dual masking* (PointGPT-style).
 
@@ -579,12 +580,14 @@ class CausalTransformer(nn.Module):
         """
         t = x.size(1)
         attn_mask = None
-        if bool(is_causal):
+        if attn_mask_override is not None:
+            attn_mask = attn_mask_override
+        elif bool(is_causal):
             # Base causal mask (True = blocked)
             attn_mask = torch.triu(torch.ones(t, t, device=x.device, dtype=torch.bool), diagonal=1)
 
         # Dual masking only during training with causal attention.
-        if bool(is_causal) and self.training:
+        if (attn_mask_override is None) and bool(is_causal) and self.training:
             mode = str(dual_mask_mode).lower()
             if mode not in {"element", "column"}:
                 raise ValueError(f"dual_mask_mode must be element|column, got {dual_mask_mode}")

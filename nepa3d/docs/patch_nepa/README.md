@@ -58,6 +58,24 @@ Current short answer:
   - `scripts/abci/submit_patchnepa_current_pretrain.sh`
   - `scripts/abci/submit_patchnepa_current_ft.sh`
   - `scripts/abci/submit_patchnepa_current_cpac.sh`
+  - `scripts/abci/submit_patchnepa_current_cqa_pretrain.sh` (experimental)
+
+## Experimental CQA Branch
+
+An additive explicit-query CQA branch now exists alongside the current
+`recong2/composite` mainline.
+
+- core model: `nepa3d/models/primitive_answering.py`
+- dataset: `nepa3d/data/dataset_cqa.py`
+- fixed vocab spec: `spec_cqa_vocab.md`
+- minimal config: `nepa3d/configs/shapenet_unpaired_mix_v2_cqa.yaml`
+
+Current merge rules:
+
+- existing `recong2/composite` remains the mainline baseline
+- CQA is evaluated as an additive branch
+- surface-aligned tasks use `surf_xyz` as the query carrier
+- only `ASK_DISTANCE` uses `udf_qry_xyz`
 
 ## Document Roles
 
