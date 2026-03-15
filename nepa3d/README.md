@@ -36,9 +36,12 @@ Legacy means early/pre-review snapshots (including old ModelNet40-era runs). Cur
 - Track-oriented code index: `nepa3d/tracks/README.md`
 - Shared building blocks: `nepa3d/core/models/`
 - Legacy QueryNEPA implementation: `nepa3d/tracks/query_nepa/`
+- Legacy QueryNEPA analysis: `nepa3d/tracks/query_nepa/analysis/`
 - PatchNEPA mainline: `nepa3d/tracks/patch_nepa/mainline/`
+- PatchNEPA mainline analysis: `nepa3d/tracks/patch_nepa/mainline/analysis/`
 - PatchNEPA token-stream branch: `nepa3d/tracks/patch_nepa/tokens/`
 - PatchNEPA additive CQA branch: `nepa3d/tracks/patch_nepa/cqa/`
+- KPlane baseline: `nepa3d/tracks/kplane/`
 
 Legacy module paths under `nepa3d/models`, `nepa3d/data`, `nepa3d/train`,
 and `nepa3d/analysis` remain available as compatibility shims.

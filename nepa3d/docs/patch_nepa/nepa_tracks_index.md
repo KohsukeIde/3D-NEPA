@@ -14,6 +14,7 @@ It now also matches the code layout:
 - shared building blocks: `nepa3d/core/models/`
 - legacy QueryNEPA code: `nepa3d/tracks/query_nepa/`
 - active PatchNEPA code: `nepa3d/tracks/patch_nepa/`
+- KPlane baseline code: `nepa3d/tracks/kplane/`
 
 ## 2. Active Line (Patch-NEPA)
 

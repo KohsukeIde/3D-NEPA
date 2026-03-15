@@ -7,6 +7,7 @@ legacy QueryNEPA, PatchNEPA variants, and the additive CQA branch.
 - `patch_nepa/mainline/`: patch-level PatchNEPA base implementation
 - `patch_nepa/tokens/`: active v2 token-stream PatchNEPA training
 - `patch_nepa/cqa/`: additive explicit-query CQA branch
+- `kplane/`: tri-plane / k-plane baseline line
 
 Shared model building blocks live under `nepa3d/core/models/`.
 
