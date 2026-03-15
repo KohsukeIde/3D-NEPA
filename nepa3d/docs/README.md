@@ -35,6 +35,8 @@ Last updated: 2026-03-14
   - `nepa3d/docs/llm_retrieval_index.md`
 - Track split index (Query vs Patch):
   - `nepa3d/docs/patch_nepa/nepa_tracks_index.md`
+- Code track index:
+  - `nepa3d/tracks/README.md`
 - Patch-NEPA folder guide:
   - `nepa3d/docs/patch_nepa/README.md`
 - QueryNEPA -> PatchNEPA -> external baseline storyline:

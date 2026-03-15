@@ -1,0 +1,19 @@
+# Pointcloud-only mixed pretraining corpus (for fair XYZ-only ablations).
+# Both components expose pc_xyz / pc_fps_order.
+
+mix_seed: 0
+mix_num_samples: 200000
+replacement: true
+
+datasets:
+  - name: shapenet_pc
+    cache_root: data/shapenet_cache_v0
+    split: train
+    backend: pointcloud_noray
+    weight: 0.50
+
+  - name: scan_noray_mainsplit
+    cache_root: data/scanobjectnn_main_split_v2
+    split: train
+    backend: pointcloud_noray
+    weight: 0.50

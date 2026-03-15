@@ -1,11 +1,3 @@
-"""Compatibility shim for PatchNEPA classifier import path.
+"""Compatibility shim for legacy PatchNEPA classifier import path."""
 
-`PatchTransformerNepaClassifier` now lives in `patch_nepa.py` as a sibling
-class to pretrain model (`PatchTransformerNepa`), while this module is kept to
-avoid breaking existing imports.
-"""
-
-from .patch_nepa import PatchTransformerNepaClassifier
-
-__all__ = ["PatchTransformerNepaClassifier"]
-
+from nepa3d.tracks.patch_nepa.mainline.models.patch_nepa_classifier import *  # noqa: F401,F403

@@ -1,0 +1,25 @@
+# M1 main pretraining corpus:
+#   ShapeNet mesh + ShapeNet UDF + ScanObjectNN pointcloud_noray (real no-ray).
+
+mix_seed: 0
+mix_num_samples: 200000
+replacement: true
+
+datasets:
+  - name: shapenet_mesh
+    cache_root: data/shapenet_cache_v0
+    split: train
+    backend: mesh
+    weight: 0.34
+
+  - name: shapenet_udf
+    cache_root: data/shapenet_cache_v0
+    split: train
+    backend: udfgrid
+    weight: 0.33
+
+  - name: scan_noray
+    cache_root: data/scanobjectnn_cache_v2
+    split: train
+    backend: pointcloud_noray
+    weight: 0.33

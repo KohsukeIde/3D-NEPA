@@ -31,6 +31,18 @@ Legacy means early/pre-review snapshots (including old ModelNet40-era runs). Cur
 - 1024 pretrain A/B/C/D + multi-node launch plan: `nepa3d/docs/query_nepa/pretrain_abcd_1024_multinode_active.md`
 - K-plane/Tri-plane results (pilot + full e50) are tracked in `nepa3d/docs/completion/results_ucpr_cpac_active.md`
 
+## Code Layout
+
+- Track-oriented code index: `nepa3d/tracks/README.md`
+- Shared building blocks: `nepa3d/core/models/`
+- Legacy QueryNEPA implementation: `nepa3d/tracks/query_nepa/`
+- PatchNEPA mainline: `nepa3d/tracks/patch_nepa/mainline/`
+- PatchNEPA token-stream branch: `nepa3d/tracks/patch_nepa/tokens/`
+- PatchNEPA additive CQA branch: `nepa3d/tracks/patch_nepa/cqa/`
+
+Legacy module paths under `nepa3d/models`, `nepa3d/data`, `nepa3d/train`,
+and `nepa3d/analysis` remain available as compatibility shims.
+
 ## Classification Attention Mode (Important)
 
 - Historical classification tables were produced with **causal self-attention** (legacy fixed behavior, equivalent to `cls_is_causal=1`).

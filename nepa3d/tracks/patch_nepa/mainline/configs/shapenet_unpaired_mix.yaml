@@ -1,0 +1,22 @@
+mix_seed: 0
+mix_num_samples: 200000
+replacement: true
+
+datasets:
+  - name: shapenet_mesh
+    cache_root: data/shapenet_unpaired_cache_v1
+    split: train_mesh
+    backend: mesh
+    weight: 0.34
+
+  - name: shapenet_pc
+    cache_root: data/shapenet_unpaired_cache_v1
+    split: train_pc
+    backend: pointcloud_noray
+    weight: 0.33
+
+  - name: shapenet_udf
+    cache_root: data/shapenet_unpaired_cache_v1
+    split: train_udf
+    backend: udfgrid
+    weight: 0.33

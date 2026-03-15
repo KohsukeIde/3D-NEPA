@@ -1,6 +1,6 @@
 # NEPA Tracks Index
 
-Last updated: 2026-03-12
+Last updated: 2026-03-15
 
 ## 1. Purpose
 
@@ -8,6 +8,12 @@ This file separates documentation by model line to avoid mixing conclusions:
 
 - Query-NEPA line: token-level sequence (`1 point = 1 token`)
 - Patch-NEPA line: patch-level sequence (`K points = 1 token`)
+
+It now also matches the code layout:
+
+- shared building blocks: `nepa3d/core/models/`
+- legacy QueryNEPA code: `nepa3d/tracks/query_nepa/`
+- active PatchNEPA code: `nepa3d/tracks/patch_nepa/`
 
 ## 2. Active Line (Patch-NEPA)
 

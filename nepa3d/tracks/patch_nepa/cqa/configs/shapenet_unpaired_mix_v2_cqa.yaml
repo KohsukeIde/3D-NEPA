@@ -1,0 +1,23 @@
+dataset_version: v2_cqa
+mix_num_samples: 31537
+replacement: true
+mix_seed: 0
+
+datasets:
+  # Initial additive CQA branch: two tasks only.
+  # Surface-aligned tasks use surf_xyz as the shared query carrier.
+  - name: mesh_visibility
+    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
+    split: train_mesh
+    backend: mesh
+    weight: 1.0
+    task_name: mesh_visibility
+    context_source: surf
+
+  - name: udf_thickness
+    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
+    split: train_udf
+    backend: udf
+    weight: 1.0
+    task_name: udf_thickness
+    context_source: surf
