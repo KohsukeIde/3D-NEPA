@@ -16,11 +16,74 @@ LOG_ROOT="${LOG_ROOT:-logs/cqa_pretrain/${RUN_SET}}"
 PBS_LOG_DIR="${PBS_LOG_DIR:-${WORKDIR}/${LOG_ROOT}}"
 mkdir -p "${PBS_LOG_DIR}"
 PBS_LOG_PATH="${PBS_LOG_PATH:-${PBS_LOG_DIR}/${RUN_TAG}.pbs.log}"
+ENV_DIR="${ENV_DIR:-${PBS_LOG_DIR}}"
+mkdir -p "${ENV_DIR}"
 
 if ! command -v qsub >/dev/null 2>&1; then
   echo "ERROR: qsub not found in PATH"
   exit 1
 fi
+
+write_env_file() {
+  local path="$1"
+  shift
+  : > "${path}"
+  for kv in "$@"; do
+    local key="${kv%%=*}"
+    local val="${kv#*=}"
+    printf '%s=%q\n' "${key}" "${val}" >> "${path}"
+  done
+}
+
+qvars=(
+  "WORKDIR=${WORKDIR}"
+  "RUN_TAG=${RUN_TAG}"
+  "SAVE_DIR=${SAVE_DIR}"
+  "LOG_ROOT=${LOG_ROOT}"
+  "MIX_CONFIG=${MIX_CONFIG:-nepa3d/configs/shapenet_unpaired_mix_v2_cqa.yaml}"
+  "EPOCHS=${EPOCHS:-20}"
+  "SAVE_EVERY=${SAVE_EVERY:-5}"
+  "SAVE_EVERY_STEPS=${SAVE_EVERY_STEPS:-0}"
+  "BATCH=${BATCH:-8}"
+  "NUM_WORKERS=${NUM_WORKERS:-8}"
+  "SEED=${SEED:-0}"
+  "LR=${LR:-3e-4}"
+  "WEIGHT_DECAY=${WEIGHT_DECAY:-0.05}"
+  "MAX_STEPS=${MAX_STEPS:--1}"
+  "LR_SCHEDULER=${LR_SCHEDULER:-cosine}"
+  "WARMUP_STEPS=${WARMUP_STEPS:--1}"
+  "WARMUP_RATIO=${WARMUP_RATIO:-0.05}"
+  "MIN_LR=${MIN_LR:-1e-6}"
+  "MAX_GRAD_NORM=${MAX_GRAD_NORM:-1.0}"
+  "N_CTX=${N_CTX:-2048}"
+  "N_QRY=${N_QRY:-64}"
+  "D_MODEL=${D_MODEL:-384}"
+  "N_LAYERS=${N_LAYERS:-12}"
+  "N_HEADS=${N_HEADS:-6}"
+  "MLP_RATIO=${MLP_RATIO:-4.0}"
+  "DROPOUT=${DROPOUT:-0.0}"
+  "DROP_PATH=${DROP_PATH:-0.0}"
+  "BACKBONE_IMPL=${BACKBONE_IMPL:-nepa2d}"
+  "NUM_GROUPS=${NUM_GROUPS:-64}"
+  "GROUP_SIZE=${GROUP_SIZE:-32}"
+  "PATCH_CENTER_MODE=${PATCH_CENTER_MODE:-fps}"
+  "PATCH_FPS_RANDOM_START=${PATCH_FPS_RANDOM_START:-1}"
+  "LOCAL_ENCODER=${LOCAL_ENCODER:-pointmae_conv}"
+  "QUERY_TYPE_VOCAB=${QUERY_TYPE_VOCAB:-6}"
+  "ANSWER_VOCAB=${ANSWER_VOCAB:-640}"
+  "GENERATOR_DEPTH=${GENERATOR_DEPTH:-2}"
+  "USE_WANDB=${USE_WANDB:-1}"
+  "WANDB_PROJECT=${WANDB_PROJECT:-patchnepa-cqa-pretrain}"
+  "WANDB_ENTITY=${WANDB_ENTITY:-}"
+  "WANDB_RUN_NAME=${WANDB_RUN_NAME:-${RUN_TAG}}"
+  "WANDB_GROUP=${WANDB_GROUP:-}"
+  "WANDB_TAGS=${WANDB_TAGS:-cqa,primitive-answering}"
+  "WANDB_MODE=${WANDB_MODE:-online}"
+  "WANDB_LOG_EVERY=${WANDB_LOG_EVERY:-10}"
+  "WANDB_DIR=${WANDB_DIR:-${WORKDIR}/wandb_cqa}"
+)
+ENV_FILE="${ENV_FILE:-${ENV_DIR}/${RUN_TAG}.env}"
+write_env_file "${ENV_FILE}" "${qvars[@]}"
 
 cmd=(
   qsub
@@ -29,7 +92,7 @@ cmd=(
   -W "group_list=${GROUP_LIST}"
   -N "${JOB_NAME:-cqa_pt}"
   -o "${PBS_LOG_PATH}"
-  -v "WORKDIR=${WORKDIR},RUN_TAG=${RUN_TAG},SAVE_DIR=${SAVE_DIR},LOG_ROOT=${LOG_ROOT},MIX_CONFIG=${MIX_CONFIG:-nepa3d/configs/shapenet_unpaired_mix_v2_cqa.yaml},EPOCHS=${EPOCHS:-20},SAVE_EVERY=${SAVE_EVERY:-5},BATCH=${BATCH:-8},NUM_WORKERS=${NUM_WORKERS:-8},SEED=${SEED:-0},LR=${LR:-3e-4},WEIGHT_DECAY=${WEIGHT_DECAY:-0.05},N_CTX=${N_CTX:-2048},N_QRY=${N_QRY:-64},D_MODEL=${D_MODEL:-384},N_LAYERS=${N_LAYERS:-12},N_HEADS=${N_HEADS:-6},MLP_RATIO=${MLP_RATIO:-4.0},DROPOUT=${DROPOUT:-0.0},DROP_PATH=${DROP_PATH:-0.0},BACKBONE_IMPL=${BACKBONE_IMPL:-nepa2d},NUM_GROUPS=${NUM_GROUPS:-64},GROUP_SIZE=${GROUP_SIZE:-32},PATCH_CENTER_MODE=${PATCH_CENTER_MODE:-fps},PATCH_FPS_RANDOM_START=${PATCH_FPS_RANDOM_START:-1},LOCAL_ENCODER=${LOCAL_ENCODER:-pointmae_conv},QUERY_TYPE_VOCAB=${QUERY_TYPE_VOCAB:-6},ANSWER_VOCAB=${ANSWER_VOCAB:-640},GENERATOR_DEPTH=${GENERATOR_DEPTH:-2}"
+  -v "WORKDIR=${WORKDIR},ENV_FILE=${ENV_FILE}"
 )
 cmd+=( "${SCRIPT}" )
 
@@ -40,3 +103,4 @@ echo "[run_tag] ${RUN_TAG}"
 echo "[save_dir] ${SAVE_DIR}"
 echo "[log_root] ${LOG_ROOT}"
 echo "[pbs_log] ${PBS_LOG_PATH}"
+echo "[env_file] ${ENV_FILE}"

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Dict, Tuple
 
 import numpy as np
+import torch
 
 # -----------------------------------------------------------------------------
 # Versioned query / answer vocabulary spec
@@ -75,6 +76,59 @@ _CURV_SPEC = ScalarBinning(n_bins=64, vmin=-0.5, vmax=0.5, log=False)
 _THICK_SPEC = ScalarBinning(n_bins=64, vmin=1e-3, vmax=1.0, log=True)
 _CLEAR_SPEC = ScalarBinning(n_bins=64, vmin=1e-3, vmax=1.0, log=True)
 _DIST_SPEC = ScalarBinning(n_bins=64, vmin=1e-3, vmax=1.0, log=True)
+
+
+def answer_range_for_query_name(query_name: str) -> Tuple[int, int]:
+    if query_name not in ANSWER_RANGES:
+        raise KeyError(f"unknown query_name={query_name}")
+    return ANSWER_RANGES[str(query_name)]
+
+
+def answer_range_for_query_type(query_type: int) -> Tuple[int, int]:
+    qt = int(query_type)
+    if qt not in QUERY_TYPE_NAMES:
+        raise KeyError(f"unknown query_type={qt}")
+    return answer_range_for_query_name(QUERY_TYPE_NAMES[qt])
+
+
+def valid_answer_mask_for_query_type(query_type: torch.Tensor, *, vocab_size: int = ANSWER_VOCAB_SIZE) -> torch.Tensor:
+    qt = torch.as_tensor(query_type, dtype=torch.long)
+    if qt.dim() == 0:
+        qt = qt.view(1)
+    if qt.dim() > 1:
+        qt = qt.reshape(-1)
+    mask = torch.zeros((int(qt.shape[0]), int(vocab_size)), device=qt.device, dtype=torch.bool)
+    for i, qti in enumerate(qt.tolist()):
+        lo, hi = answer_range_for_query_type(int(qti))
+        mask[i, int(lo) : int(hi)] = True
+    return mask
+
+
+def mask_logits_for_query_type(
+    logits: torch.Tensor,
+    query_type: torch.Tensor,
+    *,
+    vocab_size: int = ANSWER_VOCAB_SIZE,
+    invalid_fill: float = -1e9,
+) -> torch.Tensor:
+    if logits.dim() != 3:
+        raise ValueError(f"expected logits with shape (B,N,V), got {tuple(logits.shape)}")
+    if int(logits.shape[-1]) != int(vocab_size):
+        raise ValueError(f"logits vocab mismatch: got V={int(logits.shape[-1])}, expected {int(vocab_size)}")
+
+    qt = torch.as_tensor(query_type, device=logits.device, dtype=torch.long)
+    if qt.dim() == 1:
+        qt = qt.unsqueeze(1).expand(int(logits.shape[0]), int(logits.shape[1]))
+    elif qt.dim() == 2:
+        if tuple(qt.shape) != tuple(logits.shape[:2]):
+            raise ValueError(f"query_type shape mismatch: {tuple(qt.shape)} vs logits {tuple(logits.shape)}")
+    else:
+        raise ValueError(f"expected query_type with shape (B,) or (B,N), got {tuple(qt.shape)}")
+
+    flat_mask = valid_answer_mask_for_query_type(qt.reshape(-1), vocab_size=int(vocab_size))
+    mask = flat_mask.view(int(logits.shape[0]), int(logits.shape[1]), int(vocab_size))
+    fill = torch.full_like(logits, float(invalid_fill))
+    return torch.where(mask, logits, fill)
 
 
 def _quantize_scalar(x: np.ndarray, spec: ScalarBinning) -> np.ndarray:

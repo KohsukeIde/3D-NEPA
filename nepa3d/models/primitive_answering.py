@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 
+from nepa3d.data.cqa_codec import mask_logits_for_query_type
+
 from .causal_transformer import CausalTransformer
 from .point_patch_embed import PointPatchEmbed
 
@@ -205,7 +207,8 @@ class PrimitiveAnsweringModel(nn.Module):
         out_codes = torch.zeros((b, n), device=ctx_xyz.device, dtype=torch.long)
         for i in range(n):
             cur = self.forward(ctx_xyz, qry_xyz[:, : i + 1, :], qry_type[:, : i + 1], out_codes[:, : i + 1])
-            out_codes[:, i] = cur.logits[:, i, :].argmax(dim=-1)
+            step_logits = mask_logits_for_query_type(cur.logits[:, i : i + 1, :], qry_type[:, i : i + 1])
+            out_codes[:, i] = step_logits[:, 0, :].argmax(dim=-1)
         return out_codes
 
 
