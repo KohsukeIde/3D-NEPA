@@ -76,6 +76,66 @@ exp_path_from_cfg() {
   printf '%s/experiments/%s/%s/%s\n' "${POINTGPT_DIR}" "${cfg_stem}" "${cfg_parent}" "${exp_name}"
 }
 
+meta_path_for_exp() {
+  local exp_name="$1"
+  printf '%s/%s.meta.env\n' "${LOG_ROOT}" "${exp_name}"
+}
+
+load_meta_for_exp() {
+  local exp_name="$1"
+  local meta_path
+  meta_path="$(meta_path_for_exp "${exp_name}")"
+  if [[ ! -f "${meta_path}" ]]; then
+    echo "[error] runtime meta missing for ${exp_name}: ${meta_path}"
+    exit 1
+  fi
+  # shellcheck disable=SC1090
+  source "${meta_path}"
+}
+
+resolve_existing_exp_path() {
+  local exp_name="$1"
+  local fallback="$2"
+  local meta_path
+  meta_path="$(meta_path_for_exp "${exp_name}")"
+  if [[ -f "${meta_path}" ]]; then
+    # shellcheck disable=SC1090
+    source "${meta_path}"
+    local resolved="${EXPERIMENT_PATH}"
+    if [[ "${resolved}" == ./* ]]; then
+      resolved="${POINTGPT_DIR}/${resolved#./}"
+    elif [[ "${resolved}" != /* ]]; then
+      resolved="${POINTGPT_DIR}/${resolved}"
+    fi
+    printf '%s\n' "${resolved}"
+    return 0
+  fi
+
+  local found=""
+  while IFS= read -r candidate; do
+    [[ -z "${candidate}" ]] && continue
+    if [[ "${candidate}" == *"/experiments/config/"* ]]; then
+      continue
+    fi
+    if [[ -f "${candidate}/ckpt-last.pth" || -f "${candidate}/ckpt-best.pth" ]]; then
+      found="${candidate}"
+      break
+    fi
+  done < <(find "${POINTGPT_DIR}/experiments" -type d -name "${exp_name}" | sort)
+  if [[ -n "${found}" ]]; then
+    printf '%s\n' "${found}"
+    return 0
+  fi
+
+  found="$(find "${POINTGPT_DIR}/experiments" -type d -name "${exp_name}" | sort | rg -v '/experiments/config/' | head -n 1 || true)"
+  if [[ -n "${found}" ]]; then
+    printf '%s\n' "${found}"
+    return 0
+  fi
+
+  printf '%s\n' "${fallback}"
+}
+
 ckpt_epoch() {
   local ckpt_path="$1"
   "${PYTHON_BIN}" - "$ckpt_path" <<'PY'
@@ -210,6 +270,8 @@ run_finetune_sync() {
   local tags="$4"
   local master_port="$5"
   local ft_recon_weight="$6"
+  local extra_args="${7:-}"
+  local meta_path="${8:-}"
 
   WANDB_ENTITY="${WANDB_ENTITY}" \
   WANDB_MODE="${WANDB_MODE}" \
@@ -227,9 +289,69 @@ run_finetune_sync() {
   MASTER_PORT="${master_port}" \
   CONFIG_PATH="${config_path}" \
   EXP_NAME="${exp_name}" \
+  RUNTIME_META_PATH="${meta_path}" \
   CKPT_PATH="${ckpt_path}" \
   VAL_FREQ="${FT_VAL_FREQ}" \
+  EXTRA_ARGS="${extra_args}" \
   "${FINETUNE_WRAPPER}"
+}
+
+ckpt_epoch_if_exists() {
+  local ckpt_path="$1"
+  if [[ -f "${ckpt_path}" ]]; then
+    ckpt_epoch "${ckpt_path}"
+  else
+    printf '%s\n' "-1"
+  fi
+}
+
+ensure_finetune_stage() {
+  local label="$1"
+  local config_path="$2"
+  local exp_name="$3"
+  local exp_path="$4"
+  local expected_epoch="$5"
+  local source_ckpt_path="$6"
+  local tags="$7"
+  local master_port="$8"
+  local ft_recon_weight="$9"
+  local meta_path
+  meta_path="$(meta_path_for_exp "${exp_name}")"
+  exp_path="$(resolve_existing_exp_path "${exp_name}" "${exp_path}")"
+  local ckpt_path="${exp_path}/ckpt-last.pth"
+  local epoch
+  epoch="$(ckpt_epoch_if_exists "${ckpt_path}")"
+
+  if (( epoch >= expected_epoch )); then
+    echo "[done] ${label} already complete: epoch=${epoch}" >&2
+    return 0
+  fi
+
+  if pgrep -af -- "--exp_name ${exp_name}" >/dev/null; then
+    wait_for_exp_completion "${label}_existing" "${exp_name}" "${exp_path}" "${expected_epoch}"
+    return 0
+  fi
+
+  local extra_args=""
+  if (( epoch >= 0 )); then
+    extra_args="--resume"
+    echo "[resume] ${label}: epoch=${epoch} exp_name=${exp_name}" >&2
+  else
+    echo "[launch] ${label}: exp_name=${exp_name}" >&2
+  fi
+
+  run_finetune_sync \
+    "${config_path}" \
+    "${exp_name}" \
+    "${source_ckpt_path}" \
+    "${tags}" \
+    "${master_port}" \
+    "${ft_recon_weight}" \
+    "${extra_args}" \
+    "${meta_path}"
+  load_meta_for_exp "${exp_name}"
+  exp_path="${EXPERIMENT_PATH}"
+  wait_for_exp_completion "${label}" "${exp_name}" "${exp_path}" "${expected_epoch}"
 }
 
 ensure_cdl12_pretrain() {
@@ -289,32 +411,38 @@ run_ft_chain() {
   obj_only_exp_path="$(exp_path_from_cfg "${OBJ_ONLY_CONFIG_PATH}" "${obj_only_exp_name}")"
   hardest_exp_path="$(exp_path_from_cfg "${HARDEST_CONFIG_PATH}" "${hardest_exp_name}")"
 
-  run_finetune_sync \
+  ensure_finetune_stage \
+    "${source_label}_${ft_label}_objbg" \
     "${OBJ_BG_CONFIG_PATH}" \
     "${obj_bg_exp_name}" \
+    "${obj_bg_exp_path}" \
+    "${FT_MAX_EPOCH_OBJ_BG}" \
     "${ckpt_path}" \
     "pointgpt,finetune,objbg,ddp2,${source_label},${ft_label}" \
     "29551" \
     "${ft_recon_weight}"
-  wait_for_exp_completion "${source_label}_${ft_label}_objbg" "${obj_bg_exp_name}" "${obj_bg_exp_path}" "${FT_MAX_EPOCH_OBJ_BG}"
 
-  run_finetune_sync \
+  ensure_finetune_stage \
+    "${source_label}_${ft_label}_objonly" \
     "${OBJ_ONLY_CONFIG_PATH}" \
     "${obj_only_exp_name}" \
+    "${obj_only_exp_path}" \
+    "${FT_MAX_EPOCH_OBJ_ONLY}" \
     "${ckpt_path}" \
     "pointgpt,finetune,objonly,ddp2,${source_label},${ft_label}" \
     "29553" \
     "${ft_recon_weight}"
-  wait_for_exp_completion "${source_label}_${ft_label}_objonly" "${obj_only_exp_name}" "${obj_only_exp_path}" "${FT_MAX_EPOCH_OBJ_ONLY}"
 
-  run_finetune_sync \
+  ensure_finetune_stage \
+    "${source_label}_${ft_label}_hardest" \
     "${HARDEST_CONFIG_PATH}" \
     "${hardest_exp_name}" \
+    "${hardest_exp_path}" \
+    "${FT_MAX_EPOCH_HARDEST}" \
     "${ckpt_path}" \
     "pointgpt,finetune,hardest,ddp2,${source_label},${ft_label}" \
     "29555" \
     "${ft_recon_weight}"
-  wait_for_exp_completion "${source_label}_${ft_label}_hardest" "${hardest_exp_name}" "${hardest_exp_path}" "${FT_MAX_EPOCH_HARDEST}"
 
   local arm_summary_path="${LOG_ROOT}/${source_label}_${ft_label}_${RUN_TAG}_summary.md"
   cat > "${arm_summary_path}" <<EOF

@@ -33,12 +33,18 @@ for this machine, while ABCI-facing entrypoints are kept separately under
   - PointGPT local 2-GPU DDP pretrain wrapper
 - `pointgpt_finetune_local_ddp.sh`
   - PointGPT local 2-GPU DDP ScanObjectNN fine-tune wrapper
+  - supports both legacy `test-as-val` and strict `train->val` policy
+- `pointgpt_test_local.sh`
+  - PointGPT local test wrapper for final test-set evaluation from a chosen ckpt
 - `pointgpt_nepa_vs_cdl12_pipeline.sh`
   - local sequential pipeline:
     `nepa_cosine pretrain -> cdl12 pretrain -> obj_bg fine-tune compare`
 - `pointgpt_ft_recipe_matrix_2x2.sh`
   - local sequential matrix:
     `pretrain objective {nepa_cosine, cdl12} x FT recipe {cls-only, PointGPT FT}`
+- `pointgpt_protocol_compare.sh`
+  - local sequential PointGPT baseline protocol audit:
+    `test-as-val vs strict(train->val)` under the original PointGPT FT recipe
 
 ## Source of Truth
 
