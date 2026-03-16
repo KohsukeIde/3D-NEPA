@@ -47,6 +47,43 @@ def _np_to_torch_i64(x: np.ndarray) -> torch.Tensor:
     return torch.from_numpy(np.asarray(x, dtype=np.int64))
 
 
+_QUERY_SRC_NAME_TO_CODE = {
+    "uniform": 0,
+    "near": 1,
+    "near_surface": 1,
+}
+
+QUERY_SRC_CODE_TO_NAME = {
+    -1: "na",
+    0: "uniform",
+    1: "near_surface",
+}
+
+
+def _normalize_query_src_filter(v: Any) -> tuple[int, ...] | None:
+    if v is None:
+        return None
+    if isinstance(v, (list, tuple)):
+        items = list(v)
+    else:
+        text = str(v).strip()
+        if not text:
+            return None
+        items = [x.strip() for x in text.split(",") if x.strip()]
+    codes: list[int] = []
+    for item in items:
+        if isinstance(item, (int, np.integer)):
+            codes.append(int(item))
+            continue
+        key = str(item).strip().lower()
+        if key not in _QUERY_SRC_NAME_TO_CODE:
+            raise KeyError(f"unknown query_src_filter item={item}")
+        codes.append(int(_QUERY_SRC_NAME_TO_CODE[key]))
+    if not codes:
+        return None
+    return tuple(sorted(set(codes)))
+
+
 @dataclass(frozen=True)
 class CQATaskSpec:
     name: str
@@ -85,6 +122,7 @@ TASK_REGISTRY: Dict[str, CQATaskSpec] = {
         name="udf_clearance",
         query_type=ASK_CLEARANCE,
         query_xyz_key="surf_xyz",
+        # Current task semantics are front-clearance only.
         field_keys={"clearance": "udf_surf_clear_front"},
     ),
     # Explicit off-surface query task.
@@ -110,6 +148,9 @@ class V2PrimitiveCQADataset(Dataset):
         n_qry: int = 64,
         seed: int = 0,
         mode: str = "train",
+        query_src_filter: Any = None,
+        query_dist_min: float | None = None,
+        query_dist_max: float | None = None,
     ) -> None:
         super().__init__()
         self.paths = list(paths)
@@ -121,6 +162,9 @@ class V2PrimitiveCQADataset(Dataset):
         self.n_qry = int(n_qry)
         self.seed = int(seed)
         self.mode = str(mode)
+        self.query_src_filter = _normalize_query_src_filter(query_src_filter)
+        self.query_dist_min = None if query_dist_min is None else float(query_dist_min)
+        self.query_dist_max = None if query_dist_max is None else float(query_dist_max)
 
     def __len__(self) -> int:
         return len(self.paths)
@@ -146,8 +190,36 @@ class V2PrimitiveCQADataset(Dataset):
             ctx_xyz = np.asarray(ctx_all[ctx_idx], dtype=np.float32)
 
             qry_all = np.asarray(npz[self.task.query_xyz_key], dtype=np.float32)
-            q_idx = _choice(int(qry_all.shape[0]), self.n_qry, rng)
+            q_pool = np.arange(int(qry_all.shape[0]), dtype=np.int64)
+            qry_src_code_all = None
+            if self.task.query_xyz_key == "udf_qry_xyz":
+                qry_src_code_all = np.asarray(npz["udf_qry_src_code"], dtype=np.int64).reshape(-1)
+                if self.query_src_filter is not None:
+                    q_pool = q_pool[np.isin(qry_src_code_all, np.asarray(self.query_src_filter, dtype=np.int64))]
+                if self.query_dist_min is not None or self.query_dist_max is not None:
+                    dist = np.asarray(npz["udf_qry_dist"], dtype=np.float32).reshape(-1)
+                    keep = np.ones((int(dist.shape[0]),), dtype=np.bool_)
+                    if self.query_dist_min is not None:
+                        keep &= dist >= float(self.query_dist_min)
+                    if self.query_dist_max is not None:
+                        keep &= dist <= float(self.query_dist_max)
+                    q_pool = q_pool[keep[q_pool]]
+            if int(q_pool.shape[0]) <= 0:
+                raise RuntimeError(
+                    f"empty query pool after filtering: task={self.task.name} path={path} "
+                    f"query_src_filter={self.query_src_filter} query_dist_min={self.query_dist_min} "
+                    f"query_dist_max={self.query_dist_max}"
+                )
+            if self.n_qry >= int(q_pool.shape[0]):
+                q_idx = q_pool
+            else:
+                take = _choice(int(q_pool.shape[0]), self.n_qry, rng)
+                q_idx = q_pool[take]
             qry_xyz = np.asarray(qry_all[q_idx], dtype=np.float32)
+            if qry_src_code_all is None:
+                qry_src_code = np.full((int(q_idx.shape[0]),), -1, dtype=np.int64)
+            else:
+                qry_src_code = np.asarray(qry_src_code_all[q_idx], dtype=np.int64)
 
             fields: Dict[str, np.ndarray] = {}
             for alias, key in self.task.field_keys.items():
@@ -159,6 +231,7 @@ class V2PrimitiveCQADataset(Dataset):
                 perm = rng.permutation(int(qry_xyz.shape[0])).astype(np.int64)
                 qry_xyz = qry_xyz[perm]
                 answer_code = answer_code[perm]
+                qry_src_code = qry_src_code[perm]
 
             path_obj = Path(path)
             out: Dict[str, Any] = {
@@ -166,12 +239,16 @@ class V2PrimitiveCQADataset(Dataset):
                 "qry_xyz": _np_to_torch_f32(qry_xyz),
                 "qry_type": torch.full((int(qry_xyz.shape[0]),), int(self.task.query_type), dtype=torch.long),
                 "answer_code": _np_to_torch_i64(answer_code),
+                "qry_src_code": _np_to_torch_i64(qry_src_code),
                 "task_name": self.task.name,
                 "context_source": self.context_source,
                 "cache_split": path_obj.parent.parent.name,
                 "synset": path_obj.parent.name,
                 "path": path,
                 "context_bank_idx": None if ctx_bank_idx is None else int(ctx_bank_idx),
+                "query_src_filter": None if self.query_src_filter is None else list(self.query_src_filter),
+                "query_dist_min": self.query_dist_min,
+                "query_dist_max": self.query_dist_max,
                 "answer_vocab_size": int(ANSWER_VOCAB_SIZE),
                 "vocab_version": CQA_VOCAB_VERSION,
             }
@@ -184,12 +261,16 @@ def cqa_collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     out["qry_xyz"] = torch.stack([b["qry_xyz"] for b in batch], dim=0)
     out["qry_type"] = torch.stack([b["qry_type"] for b in batch], dim=0)
     out["answer_code"] = torch.stack([b["answer_code"] for b in batch], dim=0)
+    out["qry_src_code"] = torch.stack([b["qry_src_code"] for b in batch], dim=0)
     out["task_name"] = [b["task_name"] for b in batch]
     out["context_source"] = [b["context_source"] for b in batch]
     out["cache_split"] = [b["cache_split"] for b in batch]
     out["synset"] = [b["synset"] for b in batch]
     out["path"] = [b["path"] for b in batch]
     out["context_bank_idx"] = [b.get("context_bank_idx") for b in batch]
+    out["query_src_filter"] = [b.get("query_src_filter") for b in batch]
+    out["query_dist_min"] = [b.get("query_dist_min") for b in batch]
+    out["query_dist_max"] = [b.get("query_dist_max") for b in batch]
     out["answer_vocab_size"] = int(batch[0].get("answer_vocab_size", ANSWER_VOCAB_SIZE))
     out["vocab_version"] = str(batch[0].get("vocab_version", CQA_VOCAB_VERSION))
     return out

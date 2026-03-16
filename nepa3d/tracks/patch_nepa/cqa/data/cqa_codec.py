@@ -147,6 +147,20 @@ def _quantize_scalar(x: np.ndarray, spec: ScalarBinning) -> np.ndarray:
     return np.clip(idx, 0, int(spec.n_bins) - 1)
 
 
+def _decode_scalar_indices(idx: np.ndarray, spec: ScalarBinning) -> np.ndarray:
+    idx = np.asarray(idx, dtype=np.int64).reshape(-1)
+    idx = np.clip(idx, 0, int(spec.n_bins) - 1)
+    frac = (idx.astype(np.float32) + np.float32(0.5)) / np.float32(max(int(spec.n_bins), 1))
+    lo = float(spec.vmin)
+    hi = float(spec.vmax)
+    if spec.log:
+        lo_log = math.log(max(lo, 1e-8))
+        hi_log = math.log(max(hi, 1e-8))
+        x = lo_log + frac * np.float32(hi_log - lo_log)
+        return np.exp(x).astype(np.float32, copy=False)
+    return (np.float32(lo) + frac * np.float32(hi - lo)).astype(np.float32, copy=False)
+
+
 def quantize_normals_to_vocab(normals: np.ndarray) -> np.ndarray:
     n = np.asarray(normals, dtype=np.float32)
     n = n / (np.linalg.norm(n, axis=1, keepdims=True) + 1e-8)
@@ -195,6 +209,14 @@ def quantize_distance_to_vocab(dist: np.ndarray) -> np.ndarray:
     idx = _quantize_scalar(dist, _DIST_SPEC)
     off, _ = ANSWER_RANGES["udf_distance"]
     return idx + int(off)
+
+
+def decode_distance_from_vocab(code: np.ndarray) -> np.ndarray:
+    code = np.asarray(code, dtype=np.int64)
+    off, hi = ANSWER_RANGES["udf_distance"]
+    idx = np.clip(code.reshape(-1) - int(off), 0, int(hi - off) - 1)
+    out = _decode_scalar_indices(idx, _DIST_SPEC)
+    return out.reshape(code.shape).astype(np.float32, copy=False)
 
 
 def encode_answers_from_fields(query_type: int, fields: Dict[str, np.ndarray]) -> np.ndarray:

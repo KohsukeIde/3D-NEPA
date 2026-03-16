@@ -58,6 +58,15 @@ WANDB_TAGS="${WANDB_TAGS:-cqa,primitive-answering}"
 WANDB_MODE="${WANDB_MODE:-online}"
 WANDB_LOG_EVERY="${WANDB_LOG_EVERY:-10}"
 WANDB_DIR="${WANDB_DIR:-${WORKDIR}/wandb_cqa}"
+RUN_EVAL_CONTROLS="${RUN_EVAL_CONTROLS:-1}"
+RUN_EVAL_CURVE="${RUN_EVAL_CURVE:-0}"
+EVAL_BATCH="${EVAL_BATCH:-128}"
+EVAL_NUM_WORKERS="${EVAL_NUM_WORKERS:-4}"
+EVAL_MAX_SAMPLES_PER_TASK="${EVAL_MAX_SAMPLES_PER_TASK:-128}"
+EVAL_SPLIT_OVERRIDE="${EVAL_SPLIT_OVERRIDE:-}"
+EVAL_TASK_FILTER="${EVAL_TASK_FILTER:-}"
+EVAL_SAMPLE_MODE="${EVAL_SAMPLE_MODE:-random}"
+EVAL_CONTROLS="${EVAL_CONTROLS:-correct,no_context,wrong_shape_same_synset,wrong_shape_other_synset,wrong_type,shuffled_query}"
 
 LOG_PATH="${LOG_ROOT}/${RUN_TAG}.log"
 
@@ -92,6 +101,7 @@ echo "epochs=${EPOCHS} batch=${BATCH} n_ctx=${N_CTX} n_qry=${N_QRY}" | tee -a "$
 echo "max_steps=${MAX_STEPS} scheduler=${LR_SCHEDULER} warmup_steps=${WARMUP_STEPS} warmup_ratio=${WARMUP_RATIO} min_lr=${MIN_LR} clip=${MAX_GRAD_NORM}" | tee -a "${LOG_PATH}"
 echo "model=d${D_MODEL}/L${N_LAYERS}/H${N_HEADS} groups=${NUM_GROUPS} group_size=${GROUP_SIZE} gdepth=${GENERATOR_DEPTH}" | tee -a "${LOG_PATH}"
 echo "wandb: use=${USE_WANDB} project=${WANDB_PROJECT} run=${WANDB_RUN_NAME} group=${WANDB_GROUP} mode=${WANDB_MODE} dir=${WANDB_DIR}" | tee -a "${LOG_PATH}"
+echo "eval: final=${RUN_EVAL_CONTROLS} curve=${RUN_EVAL_CURVE} sample_mode=${EVAL_SAMPLE_MODE} max_samples=${EVAL_MAX_SAMPLES_PER_TASK} task_filter=${EVAL_TASK_FILTER}" | tee -a "${LOG_PATH}"
 echo | tee -a "${LOG_PATH}"
 
 python -m nepa3d.train.pretrain_primitive_answering \
@@ -139,3 +149,84 @@ python -m nepa3d.train.pretrain_primitive_answering \
   --wandb_log_every "${WANDB_LOG_EVERY}" \
   --wandb_dir "${WANDB_DIR}" \
   2>&1 | tee -a "${LOG_PATH}"
+
+FINAL_CKPT="${SAVE_DIR}/ckpt_final.pt"
+if [[ "${RUN_EVAL_CONTROLS}" == "1" ]] && [[ -f "${FINAL_CKPT}" ]]; then
+  EVAL_JSON="${SAVE_DIR}/eval_controls_${EVAL_MAX_SAMPLES_PER_TASK}.json"
+  echo "[eval-controls] ckpt=${FINAL_CKPT} output=${EVAL_JSON}" | tee -a "${LOG_PATH}"
+  python -m nepa3d.tracks.patch_nepa.cqa.analysis.eval_primitive_answering_controls \
+    --ckpt "${FINAL_CKPT}" \
+    --mix_config_path "${MIX_CONFIG}" \
+    --device cuda \
+    --batch_size "${EVAL_BATCH}" \
+    --num_workers "${EVAL_NUM_WORKERS}" \
+    --seed "${SEED}" \
+    --n_ctx "${N_CTX}" \
+    --n_qry "${N_QRY}" \
+    --max_samples_per_task "${EVAL_MAX_SAMPLES_PER_TASK}" \
+    --split_override "${EVAL_SPLIT_OVERRIDE}" \
+    --task_filter "${EVAL_TASK_FILTER}" \
+    --eval_sample_mode "${EVAL_SAMPLE_MODE}" \
+    --controls "${EVAL_CONTROLS}" \
+    --output_json "${EVAL_JSON}" \
+    2>&1 | tee -a "${LOG_PATH}"
+fi
+
+if [[ "${RUN_EVAL_CURVE}" == "1" ]] && [[ -f "${FINAL_CKPT}" ]]; then
+  CURVE_DIR="${SAVE_DIR}/eval_curve_${EVAL_MAX_SAMPLES_PER_TASK}"
+  mkdir -p "${CURVE_DIR}"
+  shopt -s nullglob
+  curve_ckpts=( "${SAVE_DIR}"/ckpt_step*.pt )
+  shopt -u nullglob
+  if [[ ${#curve_ckpts[@]} -eq 0 ]]; then
+    echo "[eval-curve] no ckpt_step*.pt found under ${SAVE_DIR}; skipping" | tee -a "${LOG_PATH}"
+  else
+    curve_ckpts+=( "${FINAL_CKPT}" )
+    for ckpt in "${curve_ckpts[@]}"; do
+      stem="$(basename "${ckpt}" .pt)"
+      out_json="${CURVE_DIR}/${stem}_controls.json"
+      echo "[eval-curve] ckpt=${ckpt} output=${out_json}" | tee -a "${LOG_PATH}"
+      python -m nepa3d.tracks.patch_nepa.cqa.analysis.eval_primitive_answering_controls \
+        --ckpt "${ckpt}" \
+        --mix_config_path "${MIX_CONFIG}" \
+        --device cuda \
+        --batch_size "${EVAL_BATCH}" \
+        --num_workers "${EVAL_NUM_WORKERS}" \
+        --seed "${SEED}" \
+        --n_ctx "${N_CTX}" \
+        --n_qry "${N_QRY}" \
+        --max_samples_per_task "${EVAL_MAX_SAMPLES_PER_TASK}" \
+        --split_override "${EVAL_SPLIT_OVERRIDE}" \
+        --task_filter "${EVAL_TASK_FILTER}" \
+        --eval_sample_mode "${EVAL_SAMPLE_MODE}" \
+        --controls "${EVAL_CONTROLS}" \
+        --output_json "${out_json}" \
+        2>&1 | tee -a "${LOG_PATH}"
+    done
+    python - "${CURVE_DIR}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+curve_dir = Path(sys.argv[1])
+rows = []
+for path in sorted(curve_dir.glob("*_controls.json")):
+    payload = json.loads(path.read_text())
+    by_control = payload.get("by_control", {})
+    correct = by_control.get("correct", {})
+    results = correct.get("results", [])
+    row = {
+        "file": path.name,
+        "train_global_step": int(correct.get("train_global_step", -1)),
+        "overall": correct.get("overall", {}),
+        "per_task": {r.get("task_name", f"task_{i}"): r for i, r in enumerate(results)},
+        "deltas_vs_correct": payload.get("deltas_vs_correct", {}),
+    }
+    rows.append(row)
+rows = sorted(rows, key=lambda r: (int(r.get("train_global_step", -1)) < 0, int(r.get("train_global_step", -1))))
+summary = {"curve": rows}
+(curve_dir / "curve_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+print(json.dumps(summary, indent=2))
+PY
+  fi
+fi

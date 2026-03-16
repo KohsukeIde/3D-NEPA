@@ -38,3 +38,5 @@ primitive-answering branch.
 - checkpoints and eval outputs should record `vocab_version`
 - surface-aligned tasks use `surf_xyz` as the query carrier
 - only `ASK_DISTANCE` uses `udf_qry_xyz`
+- current `ASK_CLEARANCE` implementation is **front-clearance only**
+  (`udf_surf_clear_front`); it is not yet a symmetric front/back clearance task

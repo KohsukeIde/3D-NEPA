@@ -77,6 +77,10 @@ An additive explicit-query CQA branch now exists alongside the current
 - dataset: `nepa3d/data/dataset_cqa.py`
 - fixed vocab spec: `spec_cqa_vocab.md`
 - minimal config: `nepa3d/configs/shapenet_unpaired_mix_v2_cqa.yaml`
+- target audit: `nepa3d/analysis/audit_cqa_targets.py`
+- next smoke configs:
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfsurf.yaml`
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfpcdiag.yaml`
 
 Current merge rules:
 
@@ -84,6 +88,29 @@ Current merge rules:
 - CQA is evaluated as an additive branch
 - surface-aligned tasks use `surf_xyz` as the query carrier
 - only `ASK_DISTANCE` uses `udf_qry_xyz`
+- the first `mesh_visibility + udf_thickness` smoke is a wiring check only, not
+  headline evidence for promptable answering
+
+## Data Freeze
+
+The current raw world-package contract is frozen as:
+
+- `spec_world_v3_schema.md`
+
+Current Phase-1 data-freeze utilities:
+
+- `scripts/preprocess/augment_shapenet_world_v3.sh`
+  - add `world_v3` summary/provenance fields to the existing source cache
+- `scripts/preprocess/audit_world_v3.sh`
+  - build the canonical global audit summary for the frozen cache
+- `scripts/preprocess/build_shapenet_subset_manifest.sh`
+  - build the clean `subset_watertight` manifest from the current source cache
+
+The data-freeze policy is:
+
+- do **not** full-rebuild ShapeNet unless the raw contract itself is proven wrong
+- first freeze the raw cache contract, validity summaries, and subset manifests
+- then rerun only the smallest decisive experiments on top of that fixed cache
 
 ## Document Roles
 

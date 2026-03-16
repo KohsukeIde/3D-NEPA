@@ -1,0 +1,23 @@
+dataset_version: v2_cqa
+mix_num_samples: 31537
+replacement: true
+mix_seed: 0
+
+datasets:
+  # Paired diagnostic only: use PC-bank contexts to test whether the branch can
+  # exploit heterogeneous observations. Current `udf_clearance` is front-only.
+  - name: udf_distance
+    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
+    split: train_udf
+    backend: udf
+    weight: 1.0
+    task_name: udf_distance
+    context_source: pc_bank
+
+  - name: udf_clearance
+    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
+    split: train_udf
+    backend: udf
+    weight: 1.0
+    task_name: udf_clearance
+    context_source: pc_bank

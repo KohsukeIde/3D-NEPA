@@ -47,6 +47,7 @@ Important 2026-03-14 correction:
 | PatchNEPA v2 cosine path | ShapeNet-family token-path branch | latent cosine with QA stream | repeated `cos_tgt ~= cos_prev`, tiny gap, high copy-win | no evidence it beats v1 | active negative result |
 | PatchNEPA v2 recon `g0` full300 | ShapeNet-family token-path branch | `ctx(chamfer)+q/a(mse)` composite recon | positive `recon_lift_q/a` survives full run | historical file-split FT readout `0.8399 / 0.8348 / 0.8102`; official rerun pending | validated no-generator reconstruction baseline |
 | PatchNEPA v2 recon `g2` full300 | ShapeNet-family token-path branch | composite recon + generator depth `2` | strongest current pretrain/transfer line | historical file-split FT readout `0.8485 / 0.8589 / 0.8140`; official rerun pending | current main reconstruction line, benchmark under revalidation |
+| PatchNEPA v2 explicit-query CQA | worldvis-derived additive branch | answer-only CE over typed queries | wiring is valid; full-range single-task `udf_distance` beats the majority baseline, but near-surface and `pc_bank` diagnostics collapse and no cross-primitive headline exists yet | no valid cross-primitive headline yet | experimental branch, not headline-safe yet |
 | Point-MAE | external baseline | masked point-patch modeling | protocol sanity and benchmark context | use benchmark page only | external benchmark context |
 | PointGPT | ShapeNet control line | causal reconstruction with generator | healthy reconstruction-style learning curve | use as pretrain/control reference, not a direct benchmark row here | reconstruction reference |
 
@@ -271,6 +272,27 @@ This means:
 - `recong2` full300 is the best current v2 reconstruction branch.
 - PatchNEPA v2 reconstruction + `g2` now exceeds the historical v1-family FT
   baseline on all three ScanObjectNN variants.
+- the existing `worldvis` source cache has now been frozen as the `world_v3`
+  contract with canonical quality/provenance fields and audit artifacts; this
+  removes the need for an immediate full corpus rebuild.
+- the strict watertight + winding-consistent subset is only `119 / 52311`, so
+  it is a future pivot-side manifest rather than a replacement for the main
+  training corpus.
+- The explicit-query CQA branch now has one non-degenerate task:
+  frozen-`world_v3` full-range single-task `udf_distance` reproduces above
+  majority at `2k` and then strengthens sharply by `10k`, including strong
+  `wrong_shape_same/other_synset` controls.
+- the same `surf`-trained `udf_distance` checkpoint now transfers zero-shot to
+  `pc_bank -> udf_distance` at eval time only, still above majority and with
+  positive `no_context` / `wrong_shape_other_synset` deltas.
+- the `udf_distance` mainline and off-diagonal reads now reproduce across
+  seeds `0/1/2`, so the branch is no longer a single-seed provisional result.
+- a paired `pc_bank -> udf_distance` upper bound is also positive
+  (`acc=0.2533` vs majority `0.0375`), but it is best treated as a diagnostic
+  ceiling rather than replacing the cleaner zero-shot off-diagonal story.
+- `udf_distance` CQA also now has method-native dense-grid completion evidence:
+  a held-out `grid_res=12` pilot gives `MAE=0.0479`, `RMSE=0.0638`,
+  `IoU@0.05=0.5712`.
 - Point-MAE is the protocol sanity / benchmark context.
 - PointGPT is the reconstruction-style reference for the next causal tests.
 
@@ -289,6 +311,14 @@ This means:
   `fps_then_sample` ablation once a real `point_all > npoints` path exists,
 - whether FT-side recipe follow-ups such as rotation materially change the
   current external-gap readout,
+- whether the explicit-query CQA branch can turn the current full-range
+  `udf_distance` signal into a broader task family beyond its current single
+  surviving branch,
+- whether a redesigned task/target definition can increase context dependence
+  without repeating the negative `near_surface` collapse or the negative
+  `pc_bank` retry,
+- how far the positive off-diagonal `pc_bank -> udf_distance` read survives
+  under stronger completion settings and broader query regimes,
 - how to package the current cosine/reconstruction diagnostics into a stable
   paper-ready metric sheet.
 

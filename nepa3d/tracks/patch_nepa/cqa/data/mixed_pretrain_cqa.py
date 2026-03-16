@@ -36,6 +36,9 @@ def build_mixed_pretrain_cqa(
             n_qry=int(s.extra.get("n_qry", n_qry)),
             seed=int(eval_seed),
             mode=str(mode),
+            query_src_filter=s.extra.get("query_src_filter", None),
+            query_dist_min=s.extra.get("query_dist_min", None),
+            query_dist_max=s.extra.get("query_dist_max", None),
         )
         datasets.append(ds)
         names.append(s.name)

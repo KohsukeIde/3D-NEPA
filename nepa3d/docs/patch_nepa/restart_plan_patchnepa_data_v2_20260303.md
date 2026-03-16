@@ -2218,3 +2218,741 @@ Operational note:
   materialized cache also contains `_meta/split_source.json`,
 - the canonical dataset count is the `created=52311` value emitted by
   `preprocess_shapenet_unpaired.py`.
+
+## 63. CQA vis/thickness smoke completed; branch wiring is valid but the current tasks are majority-code dominated (2026-03-15)
+
+Canonical sources:
+
+- smoke log:
+  - `logs/cqa_pretrain/patchnepa_cqa_smoke_20260315/cqa_visthick_g2_s2000.pbs.log`
+- save root:
+  - `runs/cqa/patchnepa_cqa_smoke_20260315/cqa_visthick_g2_s2000`
+- control eval:
+  - `runs/cqa/patchnepa_cqa_smoke_20260315/cqa_visthick_g2_s2000/eval_controls_128.json`
+- target audit:
+  - `results/cqa_audit/patchnepa_cqa_target_audit_20260315/summary.json`
+
+Current branch interpretation:
+
+- the explicit-query CQA branch trains and the mask / type-routing / vocab
+  wiring are functioning,
+- but the first `mesh_visibility + udf_thickness` 2k-step smoke is **not**
+  evidence that promptable primitive-conditioned answering has been learned,
+- it is a branch-level wiring confirmation plus a target-selection negative
+  result.
+
+Canonical 2k smoke readout (`128` eval shapes / task, current config:
+`mesh_visibility + udf_thickness`, both with `context_source=surf`):
+
+| control | overall `ce` | overall token acc | note |
+|---|---:|---:|---|
+| `correct` | `1.6237` | `0.6277` | train/eval path runs end-to-end |
+| `no_context` | `1.8052` | `0.6260` | only small overall accuracy drop |
+| `shuffled_context` | `1.6381` | `0.6285` | almost unchanged |
+| `wrong_type` | `~1e9` | `0.0000` | type routing is active |
+| `shuffled_query` | `1.7264` | `0.6282` | weak query sensitivity |
+
+Per-task smoke readout:
+
+| task | `ce` | token acc | dominant prediction |
+|---|---:|---:|---|
+| `mesh_visibility` | `1.9862` | `0.5875` | token `128` on `8191 / 8192` predictions |
+| `udf_thickness` | `1.2613` | `0.6680` | token `448` on `8016 / 8192` predictions |
+
+Majority-baseline check from the same evaluation slice:
+
+- `mesh_visibility` target top-1 share:
+  - token `128` on `4814 / 8192` targets (`0.5876`)
+- `udf_thickness` target top-1 share:
+  - token `448` on `5484 / 8192` targets (`0.6694`)
+- interpretation:
+  - the model is, at this stage, extremely close to a majority-code predictor
+    on both tasks.
+
+Target-audit summary (`256` shapes / task from
+`data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1`):
+
+| task | top-1 code share | entropy (bits) | practical read |
+|---|---:|---:|---|
+| `udf_distance` | `0.0607` | `5.6230` | healthiest next mainline candidate |
+| `udf_clearance` (front-only in current code) | `0.6966` | `2.2096` | usable next diagnostic / secondary candidate |
+| `udf_thickness` | `0.6636` | `1.8394` | conditional only; first-bin pressure is strong |
+
+Additional raw-field audit notes:
+
+- `udf_surf_thickness` quantiles show median `0.0`,
+- `udf_surf_clear_front/back` both saturate at `2.0`,
+- `mesh_visibility` still has a documented fallback path in
+  `_visibility_signature(...)`, but fallback usage is **not** recorded per
+  shape in the current cache, so the cache-level fallback rate remains unknown.
+
+Decision boundary after this smoke:
+
+- demote `mesh_visibility` from the next CQA headline smoke,
+- move the next mainline CQA smoke to `surf -> udf_distance + udf_clearance`,
+- run `pc_bank -> udf_distance + udf_clearance` only as a paired diagnostic,
+- keep `udf_thickness` conditional on later entropy / control improvements.
+
+## 64. CQA UDF-surf smoke completed; `udf_distance` is the first viable task, but context use is still weak (2026-03-15)
+
+Canonical sources:
+
+- ABCI log:
+  - `logs/cqa_pretrain/patchnepa_cqa_udfsurf_20260315/cqa_udfdist_clearfront_g2_s2000.pbs.log`
+- save root:
+  - `runs/cqa/patchnepa_cqa_udfsurf_20260315/cqa_udfdist_clearfront_g2_s2000`
+- control eval:
+  - `runs/cqa/patchnepa_cqa_udfsurf_20260315/cqa_udfdist_clearfront_g2_s2000/eval_controls_128.json`
+- target audit reference:
+  - `results/cqa_audit/patchnepa_cqa_target_audit_20260315/summary.json`
+
+Scope:
+
+- config:
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfsurf.yaml`
+- tasks:
+  - `udf_distance`
+  - `udf_clearance` (`front` only in current code)
+- context:
+  - both use `context_source=surf`
+- job:
+  - `113068`
+- W&B:
+  - project `patchnepa-cqa-smoke`
+  - run `patchnepa_cqa_udfsurf_20260315_cqa_udfdist_clearfront_g2_s2000`
+
+Teacher-forced token eval (`128` eval shapes / task):
+
+| control | overall `ce` | overall token acc |
+|---|---:|---:|
+| `correct` | `2.4268` | `0.4052` |
+| `no_context` | `2.5955` | `0.3921` |
+| `shuffled_context` | `2.4353` | `0.4042` |
+| `wrong_type` | `~1e9` | `0.0000` |
+| `shuffled_query` | `3.4468` | `0.3681` |
+
+Per-task `correct` control:
+
+| task | `ce` | token acc | same-slice majority baseline | read |
+|---|---:|---:|---:|---|
+| `udf_distance` | `3.3442` | `0.1093` | `0.0586` | beats majority and clearly uses query order / anchor |
+| `udf_clearance(front)` | `1.5094` | `0.7012` | `0.7015` | still majority-code dominated |
+
+Control deltas vs `correct`:
+
+- `udf_distance`
+  - `no_context`: `delta_ce=+0.2059`, `delta_acc=-2.66pt`
+  - `shuffled_context`: `delta_ce=+0.0089`, `delta_acc=-0.22pt`
+  - `shuffled_query`: `delta_ce=+2.0393`, `delta_acc=-7.42pt`
+- `udf_clearance(front)`
+  - `no_context`: `delta_ce=+0.1315`, `delta_acc=+0.04pt`
+  - `shuffled_context`: `delta_ce=+0.0081`, `delta_acc=+0.02pt`
+  - `shuffled_query`: `delta_ce=+0.0008`, `delta_acc=+0.00pt`
+
+Interpretation:
+
+- this is the first CQA smoke where one task (`udf_distance`) is clearly
+  better than the same-slice majority baseline,
+- `udf_distance` is also much more query-sensitive than the previous
+  `mesh_visibility / udf_thickness` pair,
+- but `surf` context is still not being used strongly enough:
+  - `no_context` moves `udf_distance`, but not enough to call the task truly
+    context-conditioned,
+  - `shuffled_context` is almost a no-op,
+- `udf_clearance(front)` remains majority-like and should not be promoted to a
+  headline task yet.
+
+Decision:
+
+- keep `udf_distance` as the current best CQA task,
+- keep `udf_clearance(front)` only as a secondary / diagnostic task,
+- next run should be the paired diagnostic:
+  - `pc_bank -> udf_distance + udf_clearance(front)`
+- do **not** claim promptable cross-primitive answering from `C002`; this is
+  still a task-selection / conditioning readout.
+
+## 65. CQA `pc_bank` diagnostic completed; heterogeneous context did not strengthen conditioning (2026-03-15)
+
+Canonical sources:
+
+- ABCI log:
+  - `logs/cqa_pretrain/patchnepa_cqa_udfpcdiag_20260315/cqa_udfdist_clearfront_pcdiag_g2_s2000.pbs.log`
+- save root:
+  - `runs/cqa/patchnepa_cqa_udfpcdiag_20260315/cqa_udfdist_clearfront_pcdiag_g2_s2000`
+- control eval:
+  - `runs/cqa/patchnepa_cqa_udfpcdiag_20260315/cqa_udfdist_clearfront_pcdiag_g2_s2000/eval_controls_128.json`
+
+Scope:
+
+- config:
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfpcdiag.yaml`
+- tasks:
+  - `udf_distance`
+  - `udf_clearance` (`front` only in current code)
+- context:
+  - both use `context_source=pc_bank`
+- job:
+  - `113071`
+
+Teacher-forced token eval (`128` eval shapes / task):
+
+| control | overall `ce` | overall token acc |
+|---|---:|---:|
+| `correct` | `2.3758` | `0.4167` |
+| `no_context` | `2.5073` | `0.4058` |
+| `shuffled_context` | `2.3833` | `0.4167` |
+| `wrong_type` | `~1e9` | `0.0000` |
+| `shuffled_query` | `3.3341` | `0.3781` |
+
+Per-task `correct` control:
+
+| task | `ce` | token acc | same-slice majority baseline | read |
+|---|---:|---:|---:|---|
+| `udf_distance` | `3.3388` | `0.1110` | `0.0586` | still beats majority and remains query-sensitive |
+| `udf_clearance(front)` | `1.4128` | `0.7225` | `0.7015` | still majority-like despite slightly better fit |
+
+Control deltas vs `correct`:
+
+- `udf_distance`
+  - `no_context`: `delta_ce=+0.1396`, `delta_acc=-2.20pt`
+  - `shuffled_context`: `delta_ce=+0.0043`, `delta_acc=-0.01pt`
+  - `shuffled_query`: `delta_ce=+1.9143`, `delta_acc=-7.74pt`
+- `udf_clearance(front)`
+  - `no_context`: `delta_ce=+0.1236`, `delta_acc=+0.00pt`
+  - `shuffled_context`: `delta_ce=+0.0107`, `delta_acc=+0.00pt`
+  - `shuffled_query`: `delta_ce=+0.0023`, `delta_acc=+0.00pt`
+
+Comparison against the preceding `surf` diagnostic (`C002`):
+
+- `udf_distance` remains the only viable task,
+- but `pc_bank` did **not** increase context sensitivity:
+  - `no_context delta_ce` weakened from `+0.2059` (`surf`) to `+0.1396`
+  - `shuffled_context` remained near-zero in both settings
+  - `shuffled_query` remained the dominant perturbation in both settings
+- therefore the current branch still looks more **query-sensitive than
+  context-sensitive**.
+
+Decision:
+
+- keep `udf_distance` as the branch's best task,
+- keep `udf_clearance(front)` only as a secondary diagnostic,
+- do not promote `pc_bank` as evidence that heterogeneous context has become
+  useful,
+- next changes should target stronger context-conditioned tasks or task
+  definitions, not another immediate repeat of the same `pc_bank` diagnostic.
+
+## 66. CQA `udf_distance` single-task smoke completed; context use strengthened but shape-conditioning remains weak (2026-03-15)
+
+Canonical sources:
+
+- ABCI log:
+  - `logs/cqa_pretrain/patchnepa_cqa_udfdist_20260315/cqa_udfdist_g2_s2000.pbs.log`
+- save root:
+  - `runs/cqa/patchnepa_cqa_udfdist_20260315/cqa_udfdist_g2_s2000`
+- control eval:
+  - `runs/cqa/patchnepa_cqa_udfdist_20260315/cqa_udfdist_g2_s2000/eval_controls_128.json`
+
+Scope:
+
+- config:
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfdist.yaml`
+- task:
+  - `udf_distance` only
+- context:
+  - `context_source=surf`
+- job:
+  - `113102`
+
+Teacher-forced token eval (`128` eval shapes):
+
+| control | `ce` | token acc |
+|---|---:|---:|
+| `correct` | `2.9532` | `0.1552` |
+| `no_context` | `3.5771` | `0.1006` |
+| `wrong_shape` | `3.0633` | `0.1393` |
+| `shuffled_context` | `3.0657` | `0.1361` |
+| `wrong_type` | `~1e9` | `0.0000` |
+| `shuffled_query` | `7.0616` | `0.0314` |
+
+Per-task `correct` read:
+
+| task | `ce` | token acc | majority baseline | prediction spread |
+|---|---:|---:|---:|---|
+| `udf_distance` | `2.9532` | `0.1552` | `0.0586` | `pred_top1_share=0.1093`, `pred_unique_codes=31` |
+
+Control deltas vs `correct`:
+
+- `no_context`: `delta_ce=+0.6238`, `delta_acc=-5.46pt`
+- `wrong_shape`: `delta_ce=+0.1100`, `delta_acc=-1.59pt`
+- `shuffled_context`: `delta_ce=+0.1125`, `delta_acc=-1.90pt`
+- `shuffled_query`: `delta_ce=+4.1084`, `delta_acc=-12.38pt`
+
+Interpretation:
+
+- single-task `udf_distance` is the strongest CQA result so far:
+  - it clearly beats the same-slice majority baseline,
+  - it predicts across many bins rather than collapsing to one dominant code,
+  - `no_context` now hurts much more than in the earlier mixed-task smoke.
+- however, `wrong_shape` remains modest relative to `no_context`:
+  - the branch is becoming more clearly **context-using**,
+  - but it is still not strongly **shape-conditioned** yet.
+- `wrong_type` and `shuffled_query` still dominate the controls, so the branch
+  remains much more sensitive to the prompt/query side than to shape identity.
+
+Decision:
+
+- keep `udf_distance` as the main CQA task,
+- next gate should be the hard-query pass:
+  - `query_src_filter=near_surface`
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfdist_near.yaml`
+- do not rerun `pc_bank` yet; first test whether harder `udf_distance` queries
+  can convert the current context use into stronger shape-conditioned behavior.
+
+## 67. CQA `udf_distance` near-surface hard-query pass collapsed; the naive hard-query recipe is a negative result (2026-03-15)
+
+Canonical sources:
+
+- ABCI log:
+  - `logs/cqa_pretrain/patchnepa_cqa_udfdist_near_20260315/cqa_udfdist_near_g2_s2000.pbs.log`
+- save root:
+  - `runs/cqa/patchnepa_cqa_udfdist_near_20260315/cqa_udfdist_near_g2_s2000`
+- control eval:
+  - `runs/cqa/patchnepa_cqa_udfdist_near_20260315/cqa_udfdist_near_g2_s2000/eval_controls_128.json`
+
+Scope:
+
+- config:
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfdist_near.yaml`
+- task:
+  - `udf_distance` only
+- context:
+  - `context_source=surf`
+- query subset:
+  - `query_src_filter=near_surface`
+- job:
+  - `113125`
+
+Teacher-forced token eval (`128` eval shapes):
+
+| control | `ce` | token acc |
+|---|---:|---:|
+| `correct` | `3.6379` | `0.0417` |
+| `no_context` | `3.6387` | `0.0409` |
+| `wrong_shape` | `3.6377` | `0.0424` |
+| `shuffled_context` | `3.6377` | `0.0409` |
+| `wrong_type` | `~1e9` | `0.0000` |
+| `shuffled_query` | `3.6380` | `0.0437` |
+
+Per-task `correct` read:
+
+| task | `ce` | token acc | majority baseline | prediction spread |
+|---|---:|---:|---:|---|
+| `udf_distance` | `3.6379` | `0.0417` | `0.0439` | `pred_top1_share=0.3959`, `pred_unique_codes=6` |
+
+Control deltas vs `correct`:
+
+- `no_context`: `delta_ce=+0.0008`, `delta_acc=-0.09pt`
+- `wrong_shape`: `delta_ce=-0.0002`, `delta_acc=+0.06pt`
+- `shuffled_context`: `delta_ce=-0.0002`, `delta_acc=-0.09pt`
+- `shuffled_query`: `delta_ce=+0.0001`, `delta_acc=+0.20pt`
+
+Interpretation:
+
+- the naive `near_surface` hard-query pass is a clear negative result:
+  - `udf_distance` no longer beats the same-slice majority baseline,
+  - prediction spread collapses from the full-range run's `31` codes to `6`,
+  - `wrong_shape`, `no_context`, and `shuffled_query` all become effectively
+    inert.
+- this does **not** mean `udf_distance` is fundamentally dead:
+  - the full-range single-task run remains healthy,
+  - but the current `query_src_filter=near_surface` recipe is not a useful way
+    to increase context dependence.
+
+Decision:
+
+- keep the full-range single-task `udf_distance` result as the CQA branch's
+  best evidence,
+- record the naive `near_surface` filter as a negative task-spec result,
+- only run the delayed `pc_bank` retry to confirm whether heterogeneous
+  context can rescue this setting; do not promote it as a mainline candidate.
+
+## 68. CQA `pc_bank` retry under near-surface queries is also negative; heterogeneous context still does not rescue the branch (2026-03-15)
+
+Canonical sources:
+
+- ABCI log:
+  - `logs/cqa_pretrain/patchnepa_cqa_udfdist_near_pcdiag_20260315/cqa_udfdist_near_pcdiag_g2_s2000.pbs.log`
+- save root:
+  - `runs/cqa/patchnepa_cqa_udfdist_near_pcdiag_20260315/cqa_udfdist_near_pcdiag_g2_s2000`
+- control eval:
+  - `runs/cqa/patchnepa_cqa_udfdist_near_pcdiag_20260315/cqa_udfdist_near_pcdiag_g2_s2000/eval_controls_128.json`
+
+Scope:
+
+- config:
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfdist_near_pcdiag.yaml`
+- task:
+  - `udf_distance` only
+- context:
+  - `context_source=pc_bank`
+- query subset:
+  - `query_src_filter=near_surface`
+- job:
+  - `113127`
+
+Teacher-forced token eval (`128` eval shapes):
+
+| control | `ce` | token acc |
+|---|---:|---:|
+| `correct` | `3.6426` | `0.0433` |
+| `no_context` | `3.6432` | `0.0442` |
+| `wrong_shape` | `3.6427` | `0.0435` |
+| `shuffled_context` | `3.6427` | `0.0442` |
+| `wrong_type` | `~1e9` | `0.0000` |
+| `shuffled_query` | `3.6426` | `0.0431` |
+
+Per-task `correct` read:
+
+| task | `ce` | token acc | majority baseline | prediction spread |
+|---|---:|---:|---:|---|
+| `udf_distance` | `3.6426` | `0.0433` | `0.0441` | `pred_top1_share=0.4690`, `pred_unique_codes=7` |
+
+Control deltas vs `correct`:
+
+- `no_context`: `delta_ce=+0.0005`, `delta_acc=+0.09pt`
+- `wrong_shape`: `delta_ce=+0.0001`, `delta_acc=+0.01pt`
+- `shuffled_context`: `delta_ce=+0.0001`, `delta_acc=+0.09pt`
+- `shuffled_query`: `delta_ce=-0.0000`, `delta_acc=-0.02pt`
+
+Interpretation:
+
+- `pc_bank` does not rescue the failed `near_surface` setting:
+  - `udf_distance` remains below majority,
+  - prediction spread is even more concentrated than the `surf` hard-query run,
+  - all context/query controls except `wrong_type` are effectively inert.
+- therefore the current negative read is not specific to the `surf` carrier:
+  - the problem is the present hard-query/task recipe itself,
+  - not merely the lack of heterogeneous context.
+
+Decision:
+
+- stop repeating `pc_bank` diagnostics on the current CQA task recipe,
+- keep full-range single-task `udf_distance` as the only viable CQA task so
+  far,
+- any next CQA iteration should change task/target design before revisiting
+  heterogeneous context claims.
+
+## 69. `world_v3` freeze sprint completed on the existing `worldvis` cache; no full rebuild is justified yet (2026-03-16)
+
+Canonical sources:
+
+- freeze log:
+  - `logs/preprocess/world_v3_freeze/world_v3_freeze_20260316_qc/world_v3_freeze_20260316_qc.out`
+- augmentation summary:
+  - `results/data_freeze/world_v3_freeze_20260316_qc/augment_world_v3_summary.json`
+- audit summary:
+  - `results/data_freeze/world_v3_freeze_20260316_qc/world_v3_audit_summary.json`
+- clean-subset manifest:
+  - `results/data_freeze/world_v3_freeze_20260316_qc/subset_watertight_manifest.json`
+- clean-subset summary:
+  - `results/data_freeze/world_v3_freeze_20260316_qc/subset_watertight_summary.json`
+- schema spec:
+  - `nepa3d/docs/patch_nepa/spec_world_v3_schema.md`
+
+Scope:
+
+- existing cache:
+  - `data/shapenet_cache_v2_20260311_worldvis`
+- worker:
+  - `scripts/preprocess/freeze_shapenet_world_v3_qc.sh`
+- submit wrapper:
+  - `scripts/preprocess/submit_world_v3_freeze_qc.sh`
+- ABCI CPU job:
+  - `113209`
+
+Summary:
+
+- `world_v3` augmentation completed in place with no recorded errors:
+  - `updated=39761`
+  - `skipped=12550`
+  - `errors=[]`
+- shape-quality audit on the frozen cache:
+  - `total shapes = 52311`
+  - `watertight_rate = 0.002409`
+  - `winding_consistent_rate = 0.586263`
+  - `visibility_fallback_used_rate = 0.0`
+- task-validity means:
+  - `udf_surf_hit_out_rate_mean = 0.744845`
+  - `udf_clear_front_valid_rate_mean = 0.744845`
+  - `udf_clear_back_valid_rate_mean = 0.773156`
+  - `udf_probe_valid_rate_mean = 1.0`
+- strict clean subset (`watertight + winding_consistent`) is tiny:
+  - `kept = 119 / 52311`
+  - `train = 108`
+  - `test = 11`
+
+Interpretation:
+
+- the existing `worldvis` cache is good enough to freeze as `world_v3`;
+  contract-level defects did **not** appear in the freeze sprint.
+- therefore a full corpus rebuild is not the right next move.
+- the strict watertight subset is far too small to replace the main corpus:
+  it should be treated as a future pivot / clean-subset manifest, not as the
+  main training cache.
+- from this point onward, CQA and recon results should be described against the
+  fixed `world_v3` contract rather than an implicitly moving cache schema.
+
+Decision:
+
+- mark Phase 1 dataset freeze as complete,
+- keep `data/shapenet_cache_v2_20260311_worldvis` as the base source cache,
+- use the strict clean subset only as a side manifest for future watertight /
+  neural-field pivots,
+- do not escalate to a full rebuild unless a future task requires fields that
+  the `world_v3` contract cannot support.
+
+## 70. Frozen-`world_v3` CQA revalidation is positive; `udf_distance` is now the canonical surviving branch task (2026-03-16)
+
+Canonical sources:
+
+- rerun save root:
+  - `runs/cqa/patchnepa_cqa_udfdist_worldv3_reval_20260316/cqa_udfdist_worldv3_g2_s2000`
+- rerun eval:
+  - `runs/cqa/patchnepa_cqa_udfdist_worldv3_reval_20260316/cqa_udfdist_worldv3_g2_s2000/eval_controls_128.json`
+- curve save root:
+  - `runs/cqa/patchnepa_cqa_udfdist_worldv3_curve_20260316/cqa_udfdist_worldv3_g2_s10000`
+- curve final eval:
+  - `runs/cqa/patchnepa_cqa_udfdist_worldv3_curve_20260316/cqa_udfdist_worldv3_g2_s10000/eval_controls_128.json`
+- curve checkpoints:
+  - `runs/cqa/patchnepa_cqa_udfdist_worldv3_curve_20260316/cqa_udfdist_worldv3_g2_s10000/eval_curve_128/curve_summary.json`
+
+Key read:
+
+- `C008` exact rerun reproduced the branch on frozen `world_v3`:
+  - `acc=0.1064` vs majority `0.0376`
+  - `pred_top1_share=0.2118`
+  - `pred_unique_codes=33`
+  - `delta_ce(no_context)=+1.0599`
+  - `delta_ce(wrong_shape_same_synset)=+0.3193`
+  - `delta_ce(wrong_shape_other_synset)=+1.1527`
+- `C009` 10k run strengthened the same task substantially:
+  - final `acc=0.3173` vs majority `0.0376`
+  - `pred_top1_share=0.1339`
+  - `pred_unique_codes=40`
+  - `delta_ce(no_context)=+6.5064`
+  - `delta_ce(wrong_shape_same_synset)=+4.1433`
+  - `delta_ce(wrong_shape_other_synset)=+10.2148`
+- query-source breakdown:
+  - `uniform` is already easy (`acc=0.5597`)
+  - `near_surface` remains much weaker (`acc=0.0818`)
+
+Interpretation:
+
+- the earlier positive `udf_distance` signal was **not** a provisional
+  pre-freeze artifact; it reproduces on the fixed `world_v3` contract.
+- more importantly, the 10k curve crosses the earlier barrier:
+  the branch is no longer merely `query-conditioned` or weakly
+  `context-conditioned`; the `wrong_shape_same/other_synset` controls now move
+  strongly, so shape-conditioned use is genuinely emerging.
+- this does **not** promote CQA above `recong2/composite`, but it upgrades
+  `udf_distance` from a fragile side signal to a real surviving branch.
+
+Decision:
+
+- keep `recong2/composite` as the paper mainline,
+- keep CQA alive with `udf_distance` as the only canonical task for now,
+- do **not** reopen `mesh_visibility`, `udf_thickness`, `clearance(front)`, or
+  naive `near_surface` as headline tasks yet,
+- any next CQA step should build on the frozen `world_v3` contract and the
+  now-positive `udf_distance` branch rather than restarting from broader task
+  sweeps.
+
+## 71. Zero-shot `pc_bank -> udf_distance` off-diagonal transfer is positive on frozen `world_v3` (2026-03-16)
+
+Canonical sources:
+
+- off-diagonal eval root:
+  - `results/cqa_eval/patchnepa_cqa_udfdist_offdiag_20260316_171008`
+- eval json:
+  - `results/cqa_eval/patchnepa_cqa_udfdist_offdiag_20260316_171008/cqa_udfdist_offdiag_eval.json`
+- log:
+  - `logs/cqa_eval/patchnepa_cqa_udfdist_offdiag_20260316_171008/cqa_udfdist_offdiag_eval.pbs.log`
+
+Key read:
+
+- eval-only zero-shot off-diagonal (`train=surf`, `eval=pc_bank`) stays well above
+  the held-out majority baseline:
+  - `acc=0.1766` vs majority `0.0397`
+  - `pred_top1_share=0.0757`
+  - `pred_unique_codes=39`
+- controls remain meaningfully positive:
+  - `delta_ce(no_context)=+4.4730`
+  - `delta_ce(wrong_shape_same_synset)=+1.8570`
+  - `delta_ce(wrong_shape_other_synset)=+4.6121`
+  - `delta_ce(shuffled_query)=+5.8515`
+- query-source breakdown:
+  - `uniform acc=0.3169`
+  - `near_surface acc=0.0338`
+
+Interpretation:
+
+- this is the first clean off-diagonal result for the CQA branch:
+  the `surf -> udf_distance` checkpoint transfers zero-shot to `pc_bank`
+  without paired cross-primitive training.
+- the transfer is not broad across all query regimes, because `near_surface`
+  remains weak, but the off-diagonal signal itself is now real rather than
+  speculative.
+- therefore the branch is no longer just "same/oracle context only":
+  shared-context transfer exists, albeit on the easier broad query regime.
+
+Decision:
+
+- promote zero-shot `pc_bank -> udf_distance` as the next canonical CQA result,
+- keep paired `pc_bank -> udf_distance` training as a later upper-bound
+  diagnostic rather than a mainline move,
+- continue to treat `near_surface` as a failure mode rather than reopening it
+  immediately.
+
+## 72. Dense-grid `udf_distance` completion pilot is positive; CQA now has method-native completion evidence (2026-03-16)
+
+Canonical sources:
+
+- completion root:
+  - `results/cqa_completion/patchnepa_cqa_udfdist_completion_20260316_171008`
+- completion json:
+  - `results/cqa_completion/patchnepa_cqa_udfdist_completion_20260316_171008/cqa_udfdist_completion_grid12.json`
+- log:
+  - `logs/cqa_completion/patchnepa_cqa_udfdist_completion_20260316_171008/cqa_udfdist_completion_grid12.pbs.log`
+
+Key read:
+
+- dense-grid pilot on `16` held-out shapes (`grid_res=12`) is stable:
+  - `MAE = 0.0479 +- 0.0103`
+  - `RMSE = 0.0638 +- 0.0132`
+  - `IoU@0.01 = 0.0814`
+  - `IoU@0.02 = 0.1850`
+  - `IoU@0.05 = 0.5712`
+- shape-level spread is non-trivial but sane:
+  - `MAE min/max = 0.0308 / 0.0674`
+  - `RMSE min/max = 0.0476 / 0.0899`
+
+Interpretation:
+
+- `udf_distance` CQA is no longer only a token-accuracy story.
+  The same checkpoint can be decoded back into a dense field with meaningful
+  completion metrics on held-out shapes.
+- this is still a modest pilot (`grid_res=12`, no mesh-level MC metrics yet),
+  but it is enough to establish method-native answering/completion rather than
+  a purely probe-style readout.
+
+Decision:
+
+- keep `udf_distance` as the only canonical CQA task for now,
+- treat dense-grid completion as established pilot evidence,
+- postpone larger-grid or mesh-level sweeps until the paper-story placement is
+  finalized.
+
+## 73. `udf_distance` mainline and zero-shot off-diagonal reads reproduce across seeds; CQA is no longer a single-seed branch (2026-03-16)
+
+Canonical sources:
+
+- seed `1` mainline:
+  - `runs/cqa/patchnepa_cqa_udfdist_seedpack_20260316_173222_curve_seed1/cqa_udfdist_worldv3_g2_s10000_seed1`
+  - `runs/cqa/patchnepa_cqa_udfdist_seedpack_20260316_173222_curve_seed1/cqa_udfdist_worldv3_g2_s10000_seed1/eval_controls_128.json`
+- seed `2` mainline:
+  - `runs/cqa/patchnepa_cqa_udfdist_seedpack_20260316_173222_curve_seed2/cqa_udfdist_worldv3_g2_s10000_seed2`
+  - `runs/cqa/patchnepa_cqa_udfdist_seedpack_20260316_173222_curve_seed2/cqa_udfdist_worldv3_g2_s10000_seed2/eval_controls_128.json`
+- seed `1` off-diagonal:
+  - `results/cqa_eval/patchnepa_cqa_udfdist_seedpack_20260316_173222_offdiag_seed1/cqa_udfdist_offdiag_eval_seed1.json`
+- seed `2` off-diagonal:
+  - `results/cqa_eval/patchnepa_cqa_udfdist_seedpack_20260316_173222_offdiag_seed2/cqa_udfdist_offdiag_eval_seed2.json`
+
+Key read:
+
+- mainline `surf -> udf_distance` reproduces strongly on both new seeds:
+  - seed `1`: `acc=0.3330` vs majority `0.0385`, `pred_top1_share=0.1210`,
+    `pred_unique_codes=41`
+  - seed `2`: `acc=0.3446` vs majority `0.0383`, `pred_top1_share=0.1404`,
+    `pred_unique_codes=40`
+- same-shape controls remain strongly positive:
+  - seed `1`: `delta_ce(no_context)=+8.3455`,
+    `delta_ce(wrong_shape_same)=+4.5927`,
+    `delta_ce(wrong_shape_other)=+10.9698`
+  - seed `2`: `delta_ce(no_context)=+6.2504`,
+    `delta_ce(wrong_shape_same)=+4.2873`,
+    `delta_ce(wrong_shape_other)=+10.7701`
+- zero-shot `pc_bank -> udf_distance` off-diagonal also reproduces:
+  - seed `1`: `acc=0.1584` vs majority `0.0402`, `pred_top1_share=0.0654`,
+    `pred_unique_codes=41`
+  - seed `2`: `acc=0.1620` vs majority `0.0379`, `pred_top1_share=0.0834`,
+    `pred_unique_codes=40`
+- off-diagonal controls remain clearly positive:
+  - seed `1`: `delta_ce(no_context)=+6.2622`,
+    `delta_ce(wrong_shape_same)=+1.7640`,
+    `delta_ce(wrong_shape_other)=+4.6542`
+  - seed `2`: `delta_ce(no_context)=+3.9062`,
+    `delta_ce(wrong_shape_same)=+1.6813`,
+    `delta_ce(wrong_shape_other)=+4.0375`
+
+Interpretation:
+
+- the `udf_distance` branch is no longer supported by a single favorable run.
+  Seed `0` (`C009/C010`) and seeds `1/2` now all agree on the same read:
+  strong same-context learning, positive shape-conditioned controls, and
+  reproducible zero-shot off-diagonal transfer to `pc_bank`.
+- this removes the main reason to immediately launch paired
+  `pc_bank -> udf_distance` training. A paired upper bound remains useful as a
+  reviewer-facing diagnostic, but it is no longer the next default step.
+
+Decision:
+
+- promote `udf_distance` CQA from a promising single-seed branch to a stable
+  paper-method branch,
+- keep zero-shot off-diagonal transfer as canonical evidence rather than
+  replacing it with paired cross-primitive training,
+- defer the paired `pc_bank` upper bound until a later reviewer/diagnostic need
+  rather than treating it as the next mandatory experiment.
+
+## 74. Paired `pc_bank -> udf_distance` upper bound is positive, but it stays a diagnostic rather than the main claim (2026-03-16)
+
+Canonical sources:
+
+- paired upper-bound root:
+  - `runs/cqa/patchnepa_cqa_udfdist_pcbank_upper_20260316_182341/cqa_udfdist_pcbank_upper_g2_s10000`
+- final eval:
+  - `runs/cqa/patchnepa_cqa_udfdist_pcbank_upper_20260316_182341/cqa_udfdist_pcbank_upper_g2_s10000/eval_controls_128.json`
+- curve summary:
+  - `runs/cqa/patchnepa_cqa_udfdist_pcbank_upper_20260316_182341/cqa_udfdist_pcbank_upper_g2_s10000/eval_curve_128/curve_summary.json`
+
+Key read:
+
+- paired `pc_bank -> udf_distance` is strongly above majority:
+  - `acc=0.2533` vs majority `0.0375`
+  - `pred_top1_share=0.1112`
+  - `pred_unique_codes=41`
+- controls remain meaningfully positive:
+  - `delta_ce(no_context)=+5.5981`
+  - `delta_ce(wrong_shape_same)=+1.8220`
+  - `delta_ce(wrong_shape_other)=+4.5715`
+  - `delta_ce(shuffled_query)=+7.8943`
+- query-source breakdown:
+  - `uniform acc=0.4417`
+  - `near_surface acc=0.0676`
+
+Interpretation:
+
+- the paired upper bound behaves as expected: it improves over the zero-shot
+  off-diagonal checkpoint (`0.2533` vs `0.1766`) and shows that the
+  `pc_bank -> udf_distance` task itself is learnable under the same model and
+  recipe.
+- however, this does **not** replace the cleaner zero-shot story. The paired
+  result is best used as a diagnostic ceiling and reviewer-facing reference,
+  not as the central evidence for shared-context transfer.
+
+Decision:
+
+- keep zero-shot `surf-trained -> pc_bank eval-only` as the main off-diagonal
+  claim,
+- retain paired `pc_bank -> udf_distance` as an upper-bound / diagnostic row in
+  tables or appendix,
+- do not let the paired result pre-empt the cleaner transfer narrative.

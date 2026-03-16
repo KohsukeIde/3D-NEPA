@@ -81,6 +81,15 @@ qvars=(
   "WANDB_MODE=${WANDB_MODE:-online}"
   "WANDB_LOG_EVERY=${WANDB_LOG_EVERY:-10}"
   "WANDB_DIR=${WANDB_DIR:-${WORKDIR}/wandb_cqa}"
+  "RUN_EVAL_CONTROLS=${RUN_EVAL_CONTROLS:-1}"
+  "RUN_EVAL_CURVE=${RUN_EVAL_CURVE:-0}"
+  "EVAL_BATCH=${EVAL_BATCH:-128}"
+  "EVAL_NUM_WORKERS=${EVAL_NUM_WORKERS:-4}"
+  "EVAL_MAX_SAMPLES_PER_TASK=${EVAL_MAX_SAMPLES_PER_TASK:-128}"
+  "EVAL_SPLIT_OVERRIDE=${EVAL_SPLIT_OVERRIDE:-}"
+  "EVAL_TASK_FILTER=${EVAL_TASK_FILTER:-}"
+  "EVAL_SAMPLE_MODE=${EVAL_SAMPLE_MODE:-random}"
+  "EVAL_CONTROLS=${EVAL_CONTROLS:-correct,no_context,wrong_shape_same_synset,wrong_shape_other_synset,wrong_type,shuffled_query}"
 )
 ENV_FILE="${ENV_FILE:-${ENV_DIR}/${RUN_TAG}.env}"
 write_env_file "${ENV_FILE}" "${qvars[@]}"
@@ -94,6 +103,9 @@ cmd=(
   -o "${PBS_LOG_PATH}"
   -v "WORKDIR=${WORKDIR},ENV_FILE=${ENV_FILE}"
 )
+if [[ -n "${QSUB_DEPEND:-}" ]]; then
+  cmd+=( -W "depend=${QSUB_DEPEND}" )
+fi
 cmd+=( "${SCRIPT}" )
 
 job_id="$("${cmd[@]}")"

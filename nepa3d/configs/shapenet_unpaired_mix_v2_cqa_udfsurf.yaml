@@ -4,20 +4,20 @@ replacement: true
 mix_seed: 0
 
 datasets:
-  # Initial additive CQA wiring smoke only.
-  # Surface-aligned tasks use surf_xyz as the shared query carrier.
-  - name: mesh_visibility
-    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
-    split: train_mesh
-    backend: mesh
-    weight: 1.0
-    task_name: mesh_visibility
-    context_source: surf
-
-  - name: udf_thickness
+  # Mainline CQA follow-up: keep the shared surface context, but move to
+  # higher-entropy UDF tasks. Note that current `udf_clearance` is front-only.
+  - name: udf_distance
     cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
     split: train_udf
     backend: udf
     weight: 1.0
-    task_name: udf_thickness
+    task_name: udf_distance
+    context_source: surf
+
+  - name: udf_clearance
+    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
+    split: train_udf
+    backend: udf
+    weight: 1.0
+    task_name: udf_clearance
     context_source: surf

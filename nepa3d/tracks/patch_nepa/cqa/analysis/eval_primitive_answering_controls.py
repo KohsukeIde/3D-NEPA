@@ -26,10 +26,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max_samples_per_task", type=int, default=256)
     p.add_argument("--split_override", type=str, default="")
     p.add_argument("--task_filter", type=str, default="")
+    p.add_argument("--eval_sample_mode", type=str, default="head", choices=["head", "random"])
     p.add_argument(
         "--controls",
         type=str,
-        default="correct,no_context,shuffled_context,wrong_type,shuffled_query",
+        default="correct,no_context,wrong_shape_same_synset,wrong_shape_other_synset,wrong_type,shuffled_query",
         help="Comma-separated subset of controls.",
     )
     p.add_argument("--output_json", type=str, default="")
@@ -55,6 +56,7 @@ def main() -> None:
         max_samples_per_task=int(args.max_samples_per_task),
         split_override=(str(args.split_override).strip() or None),
         task_filter=_parse_task_filter(str(args.task_filter)),
+        eval_sample_mode=str(args.eval_sample_mode),
     )
     by_control = {control: run_token_eval(control=control, **common) for control in requested}
     baseline = by_control.get("correct", None)

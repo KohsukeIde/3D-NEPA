@@ -86,6 +86,16 @@ def _sample_surface(mesh: "trimesh.Trimesh", n: int, rng: np.random.RandomState)
     return pts.astype(np.float32), face_idx.astype(np.int64)
 
 
+def _normalize_params(mesh: "trimesh.Trimesh") -> Tuple[np.ndarray, np.ndarray]:
+    v = np.asarray(mesh.vertices, dtype=np.float32)
+    center = ((v.max(axis=0) + v.min(axis=0)) * 0.5).astype(np.float32)
+    shifted = v - center
+    scale = float(np.max(np.linalg.norm(shifted, axis=1)))
+    if scale < 1e-9:
+        scale = 1.0
+    return center.astype(np.float32), np.asarray([scale], dtype=np.float32)
+
+
 def _surface_barycentric(mesh: "trimesh.Trimesh", pts: np.ndarray, face_idx: np.ndarray) -> np.ndarray:
     tri = np.asarray(mesh.triangles[face_idx], dtype=np.float32)  # [N,3,3]
     a = tri[:, 0, :]
@@ -182,6 +192,44 @@ def _visibility_signature(
     vis_count = vis.sum(axis=1, keepdims=True).astype(np.float32)
     ao = (1.0 - vis.mean(axis=1, keepdims=True)).astype(np.float32)
     return vis.astype(np.float32), vis_count, ao
+
+
+def _visibility_exact_available(mesh: "trimesh.Trimesh") -> bool:
+    try:
+        intersector = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
+        ray_o = np.asarray([[2.0, 0.0, 0.0]], dtype=np.float32)
+        ray_d = np.asarray([[-1.0, 0.0, 0.0]], dtype=np.float32)
+        intersector.intersects_location(ray_o, ray_d, multiple_hits=False)
+        return True
+    except Exception:
+        return False
+
+
+def _vis_allzero_rate(vis_sig: np.ndarray) -> np.ndarray:
+    vis = np.asarray(vis_sig, dtype=np.float32)
+    if vis.ndim == 1:
+        vis = vis.reshape(-1, 1)
+    rate = float((np.abs(vis).sum(axis=1) <= 1e-8).mean()) if vis.size > 0 else 1.0
+    return np.asarray([rate], dtype=np.float32)
+
+
+def _finite_rate(*arrs: np.ndarray) -> np.ndarray:
+    if not arrs:
+        return np.asarray([0.0], dtype=np.float32)
+    keep = np.ones_like(np.asarray(arrs[0], dtype=np.float32), dtype=np.bool_)
+    for arr in arrs:
+        keep &= np.isfinite(np.asarray(arr, dtype=np.float32))
+    return np.asarray([float(keep.mean())], dtype=np.float32)
+
+
+def _positive_rate(arr: np.ndarray, thresh: float = 0.5) -> np.ndarray:
+    x = np.asarray(arr, dtype=np.float32)
+    return np.asarray([float((x > float(thresh)).mean())], dtype=np.float32)
+
+
+def _lt_rate(arr: np.ndarray, upper: float) -> np.ndarray:
+    x = np.asarray(arr, dtype=np.float32)
+    return np.asarray([float((x < float(upper)).mean())], dtype=np.float32)
 
 
 def _make_pc_ctx_bank(
@@ -721,6 +769,7 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
         mesh = trimesh.load(mesh_path, force="mesh", process=False)
         if not isinstance(mesh, trimesh.Trimesh):
             mesh = mesh.dump().sum()
+        norm_center, norm_scale = _normalize_params(mesh)
         mesh = normalize_mesh(mesh)
         if mesh.faces.shape[0] == 0 or mesh.vertices.shape[0] == 0:
             return f"empty mesh: {mesh_path}"
@@ -745,6 +794,10 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
         else:
             surf_xyz, surf_face_idx = _sample_surface(mesh, int(cfg.n_surf), rng)
             surf_bary = _surface_barycentric(mesh, surf_xyz, surf_face_idx)
+
+        visibility_fallback_used = np.asarray(
+            [0 if _visibility_exact_available(mesh) else 1], dtype=np.int32
+        )
 
         # --- mesh query set ---
         if {"mesh_qry_xyz", "mesh_qry_face_idx", "mesh_qry_bary", "mesh_qry_n", "mesh_qry_curv"}.issubset(existing.keys()):
@@ -897,6 +950,17 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
             udf_surf_probe_thickness = np.zeros((n_s, n_probe), dtype=np.float32)
             udf_grid_local = None
 
+        mesh_surf_vis_allzero_rate = _vis_allzero_rate(mesh_surf_vis_sig)
+        mesh_qry_vis_allzero_rate = _vis_allzero_rate(mesh_qry_vis_sig)
+        udf_surf_hit_out_rate = _positive_rate(udf_surf_hit_out)
+        udf_clear_front_valid_rate = _positive_rate(udf_surf_hit_out)
+        udf_clear_back_valid_rate = _lt_rate(
+            udf_surf_t_in, float(cfg.surf_udf_max_t) - float(cfg.surf_udf_tol)
+        )
+        udf_probe_valid_rate = _finite_rate(
+            udf_surf_probe_front, udf_surf_probe_back, udf_surf_probe_thickness
+        )
+
         # --- rays (optional) ---
         if {"ray_o", "ray_d", "ray_t", "ray_hit", "ray_n", "ray_hit_xyz", "ray_face_idx"}.issubset(existing.keys()):
             ray_o = np.asarray(existing["ray_o"], dtype=np.float32)
@@ -928,9 +992,12 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
         payload.update(
             {
                 "v2": np.int32(2),
+                "world_v3": np.int32(1),
                 "synset": np.bytes_(synset),
                 "model_id": np.bytes_(model_id),
                 "mesh_source_path": np.bytes_(mesh_path),
+                "norm_center": norm_center.astype(np.float32),
+                "norm_scale": norm_scale.astype(np.float32),
                 "bbox_min": bbox_min,
                 "bbox_max": bbox_max,
                 "surface_area": np.asarray([surface_area], dtype=np.float32),
@@ -939,6 +1006,14 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
                 "is_winding_consistent": np.asarray([is_winding_consistent], dtype=np.int32),
                 "vertex_count": np.asarray([vertex_count], dtype=np.int32),
                 "face_count": np.asarray([face_count], dtype=np.int32),
+                "visibility_fallback_used": visibility_fallback_used.astype(np.int32),
+                "mesh_surf_vis_allzero_rate": mesh_surf_vis_allzero_rate.astype(np.float32),
+                "mesh_qry_vis_allzero_rate": mesh_qry_vis_allzero_rate.astype(np.float32),
+                "udf_surf_max_t": np.asarray([float(cfg.surf_udf_max_t)], dtype=np.float32),
+                "udf_surf_hit_out_rate": udf_surf_hit_out_rate.astype(np.float32),
+                "udf_clear_front_valid_rate": udf_clear_front_valid_rate.astype(np.float32),
+                "udf_clear_back_valid_rate": udf_clear_back_valid_rate.astype(np.float32),
+                "udf_probe_valid_rate": udf_probe_valid_rate.astype(np.float32),
                 # shared surface master set
                 "surf_xyz": surf_xyz.astype(np.float32),
                 "surf_face_idx": surf_face_idx.reshape(-1, 1).astype(np.int64),
