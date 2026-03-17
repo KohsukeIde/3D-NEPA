@@ -82,6 +82,15 @@ def _mesh_from_udf_grid(udf_grid: np.ndarray, *, level: float) -> tuple[np.ndarr
     return verts.astype(np.float32, copy=False), faces.astype(np.int64, copy=False)
 
 
+def _safe_mesh_from_udf_grid(udf_grid: np.ndarray, *, level: float) -> tuple[np.ndarray, np.ndarray]:
+    udf = np.asarray(udf_grid, dtype=np.float32)
+    lo = float(np.min(udf))
+    hi = float(np.max(udf))
+    if not (lo <= float(level) <= hi):
+        raise ValueError(f"mc_level={level:.6f} outside udf range [{lo:.6f}, {hi:.6f}]")
+    return _mesh_from_udf_grid(udf, level=level)
+
+
 def _predict_distance_codes(
     model: torch.nn.Module,
     *,
@@ -117,6 +126,82 @@ def _aggregate(vals: List[float]) -> Dict[str, float]:
     }
 
 
+def _safe_name(text: str) -> str:
+    out = []
+    for ch in str(text):
+        if ch.isalnum() or ch in {"-", "_"}:
+            out.append(ch)
+        else:
+            out.append("_")
+    return "".join(out).strip("_") or "item"
+
+
+def _make_asset_dir(root: Path, sample: Dict[str, Any], shape_idx: int) -> Path:
+    synset = _safe_name(sample.get("synset", "na"))
+    shape_id = _safe_name(Path(str(sample["path"])).stem)
+    ctx = _safe_name(sample.get("context_source", "ctx"))
+    asset_dir = root / f"{shape_idx:04d}_{synset}_{shape_id}_{ctx}"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    return asset_dir
+
+
+def _export_point_cloud(path: Path, xyz: np.ndarray) -> None:
+    xyz = np.asarray(xyz, dtype=np.float32).reshape(-1, 3)
+    trimesh.points.PointCloud(xyz).export(path)
+
+
+def _export_mesh(path: Path, vertices: np.ndarray, faces: np.ndarray) -> None:
+    mesh = trimesh.Trimesh(vertices=np.asarray(vertices, dtype=np.float32), faces=np.asarray(faces, dtype=np.int64), process=False)
+    mesh.export(path)
+
+
+def _json_ready(rec: Dict[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for k, v in rec.items():
+        if isinstance(v, (np.floating,)):
+            out[k] = float(v)
+        elif isinstance(v, (np.integer,)):
+            out[k] = int(v)
+        else:
+            out[k] = v
+    return out
+
+
+def _export_shape_assets(
+    *,
+    asset_dir: Path,
+    sample: Dict[str, Any],
+    rec: Dict[str, Any],
+    ctx_xyz: np.ndarray,
+    pred_udf: np.ndarray,
+    gt_udf: np.ndarray,
+    mc_level: float,
+    gt_mesh_source: trimesh.Trimesh,
+    pred_mesh_vf: tuple[np.ndarray, np.ndarray] | None,
+    gt_levelset_vf: tuple[np.ndarray, np.ndarray] | None,
+) -> None:
+    np.save(asset_dir / "context_xyz.npy", np.asarray(ctx_xyz, dtype=np.float32))
+    _export_point_cloud(asset_dir / "context_points.ply", ctx_xyz)
+    np.savez_compressed(
+        asset_dir / "fields.npz",
+        pred_udf=np.asarray(pred_udf, dtype=np.float32),
+        gt_udf=np.asarray(gt_udf, dtype=np.float32),
+        mc_level=np.asarray([float(mc_level)], dtype=np.float32),
+    )
+    _export_mesh(asset_dir / "gt_mesh.obj", np.asarray(gt_mesh_source.vertices, dtype=np.float32), np.asarray(gt_mesh_source.faces, dtype=np.int64))
+    if gt_levelset_vf is not None:
+        _export_mesh(asset_dir / "gt_levelset_mesh.obj", gt_levelset_vf[0], gt_levelset_vf[1])
+    if pred_mesh_vf is not None:
+        _export_mesh(asset_dir / "pred_mesh.obj", pred_mesh_vf[0], pred_mesh_vf[1])
+    meta = _json_ready(dict(rec))
+    meta["context_bank_idx"] = sample.get("context_bank_idx")
+    meta["query_src_filter"] = sample.get("query_src_filter")
+    meta["query_dist_min"] = sample.get("query_dist_min")
+    meta["query_dist_max"] = sample.get("query_dist_max")
+    meta["ctx_n_points"] = int(np.asarray(ctx_xyz).reshape(-1, 3).shape[0])
+    (asset_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser("completion_udfdist_cqa")
     p.add_argument("--ckpt", type=str, required=True)
@@ -136,6 +221,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--mesh_eval", type=int, default=0, choices=[0, 1])
     p.add_argument("--mc_level", type=float, default=0.02)
     p.add_argument("--mesh_num_samples", type=int, default=10000)
+    p.add_argument("--export_assets", type=int, default=0, choices=[0, 1])
+    p.add_argument("--assets_root", type=str, default="")
     p.add_argument("--output_json", type=str, required=True)
     return p.parse_args()
 
@@ -156,8 +243,19 @@ def main() -> None:
         eval_sample_mode=str(args.eval_sample_mode),
     )
     centers = grid_utils.make_grid_centers_np(int(args.grid_res)).reshape(-1, 3).astype(np.float32, copy=False)
+    out_path = Path(str(args.output_json))
+    export_assets = int(args.export_assets) == 1
+    assets_root = None
+    if export_assets:
+        if str(args.assets_root).strip():
+            assets_root = Path(str(args.assets_root))
+        else:
+            assets_root = out_path.with_suffix("")
+            assets_root = assets_root.parent / f"{assets_root.name}_assets"
+        assets_root.mkdir(parents=True, exist_ok=True)
 
     all_results: List[Dict[str, Any]] = []
+    shape_counter = 0
     for spec in specs:
         if spec.name != "udf_distance":
             continue
@@ -180,6 +278,8 @@ def main() -> None:
                 pred = pred_flat[bi].reshape(int(args.grid_res), int(args.grid_res), int(args.grid_res))
                 gt = gt_flat.reshape(int(args.grid_res), int(args.grid_res), int(args.grid_res))
                 err = pred - gt
+                pred_mesh_vf: tuple[np.ndarray, np.ndarray] | None = None
+                gt_levelset_vf: tuple[np.ndarray, np.ndarray] | None = None
                 rec: Dict[str, Any] = {
                     "path": path,
                     "synset": str(sample.get("synset", "")),
@@ -194,24 +294,41 @@ def main() -> None:
                     union = int(np.logical_or(pred_occ, gt_occ).sum())
                     rec[f"iou@{tau:g}"] = float(inter / max(union, 1))
 
-                if int(args.mesh_eval) == 1:
+                if int(args.mesh_eval) == 1 or export_assets:
                     try:
-                        v_pred, f_pred = _mesh_from_udf_grid(pred, level=float(args.mc_level))
-                        v_gt, f_gt = _mesh_from_udf_grid(gt, level=float(args.mc_level))
-                        mm = mesh_metrics(
-                            v_pred,
-                            f_pred,
-                            v_gt,
-                            f_gt,
-                            num_samples=int(args.mesh_num_samples),
-                            fscore_tau=float(tau_list[0]),
-                        )
-                        rec["mesh_chamfer_l2"] = float(mm.get("chamfer_l2", float("nan")))
-                        rec["mesh_chamfer_l1"] = float(mm.get("chamfer_l1", float("nan")))
-                        rec["mesh_fscore"] = float(mm.get("fscore", float("nan")))
+                        pred_mesh_vf = _safe_mesh_from_udf_grid(pred, level=float(args.mc_level))
+                        gt_levelset_vf = _safe_mesh_from_udf_grid(gt, level=float(args.mc_level))
+                        if int(args.mesh_eval) == 1:
+                            mm = mesh_metrics(
+                                pred_mesh_vf[0],
+                                pred_mesh_vf[1],
+                                gt_levelset_vf[0],
+                                gt_levelset_vf[1],
+                                n_samples=int(args.mesh_num_samples),
+                                taus=(float(tau_list[0]),),
+                            )
+                            rec["mesh_chamfer_l2"] = float(mm.get("chamfer_l2", float("nan")))
+                            rec["mesh_chamfer_l1"] = float(mm.get("chamfer_l1", float("nan")))
+                            rec["mesh_fscore"] = float(mm.get(f"fscore@{float(tau_list[0])}", float("nan")))
                     except Exception as e:
                         rec["mesh_error"] = str(e)
+                if export_assets and assets_root is not None:
+                    asset_dir = _make_asset_dir(assets_root, sample, shape_counter)
+                    _export_shape_assets(
+                        asset_dir=asset_dir,
+                        sample=sample,
+                        rec=rec,
+                        ctx_xyz=np.asarray(sample["ctx_xyz"].cpu().numpy(), dtype=np.float32),
+                        pred_udf=pred,
+                        gt_udf=gt,
+                        mc_level=float(args.mc_level),
+                        gt_mesh_source=gt_mesh,
+                        pred_mesh_vf=pred_mesh_vf,
+                        gt_levelset_vf=gt_levelset_vf,
+                    )
+                    rec["asset_dir"] = str(asset_dir)
                 per_shape.append(rec)
+                shape_counter += 1
 
         summary = {
             "task_name": spec.name,
@@ -246,9 +363,10 @@ def main() -> None:
         "chunk_n_query": int(args.chunk_n_query),
         "tau_list": tau_list,
         "mesh_eval": int(args.mesh_eval),
+        "export_assets": int(args.export_assets),
+        "assets_root": (None if assets_root is None else str(assets_root)),
         "results": all_results,
     }
-    out_path = Path(str(args.output_json))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2) + "\n")
     print(json.dumps(payload, indent=2))

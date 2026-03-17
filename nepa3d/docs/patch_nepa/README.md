@@ -78,6 +78,9 @@ An additive explicit-query CQA branch now exists alongside the current
 - fixed vocab spec: `spec_cqa_vocab.md`
 - minimal config: `nepa3d/configs/shapenet_unpaired_mix_v2_cqa.yaml`
 - target audit: `nepa3d/analysis/audit_cqa_targets.py`
+- classification utility wrapper: `scripts/eval/nepa3d_cqa_cls_qg.sh`
+- translation/completion wrapper: `scripts/analysis/nepa3d_cqa_udfdist_translation_qg.sh`
+- external baseline plan: `nepa3d/docs/patch_nepa/cqa_external_baseline_plan.md`
 - next smoke configs:
   - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfsurf.yaml`
   - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfpcdiag.yaml`

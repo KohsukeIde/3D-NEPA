@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Dict, List
 
@@ -28,6 +29,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--cache_root", type=str, required=True)
     p.add_argument("--train_split", type=str, default="train")
     p.add_argument("--val_split", type=str, default="test")
+    p.add_argument("--val_split_mode", type=str, default="pointmae", choices=["pointmae", "explicit"])
     p.add_argument("--ckpt", type=str, required=True)
     p.add_argument("--save_dir", type=str, default="runs/cqa_cls")
     p.add_argument("--run_name", type=str, default="ft_debug")
@@ -91,8 +93,20 @@ def main() -> None:
     accelerator = Accelerator(kwargs_handlers=[ddp])
     set_seed(int(args.seed))
 
-    train_paths = list_npz(args.cache_root, args.train_split)
-    val_paths = list_npz(args.cache_root, args.val_split)
+    cache_root_abs_l = os.path.abspath(str(args.cache_root)).lower()
+    resolved_train_split = str(args.train_split)
+    resolved_val_split = str(args.val_split)
+    resolved_val_split_mode = "explicit"
+    if str(args.val_split_mode) == "pointmae":
+        if "scanobjectnn" in cache_root_abs_l:
+            resolved_train_split = "train"
+            resolved_val_split = "test"
+            resolved_val_split_mode = "pointmae(test-as-val)"
+        else:
+            resolved_val_split_mode = "pointmae(fallback-explicit)"
+
+    train_paths = list_npz(args.cache_root, resolved_train_split)
+    val_paths = list_npz(args.cache_root, resolved_val_split)
     label_map = _build_label_map(train_paths + val_paths)
 
     aug_cfg = PointAugConfig(
@@ -132,10 +146,19 @@ def main() -> None:
     model, opt, train_loader, val_loader = accelerator.prepare(model, opt, train_loader, val_loader)
 
     save_dir = Path(args.save_dir) / args.run_name
+    save_args = dict(vars(args))
+    save_args["resolved_train_split"] = resolved_train_split
+    save_args["resolved_val_split"] = resolved_val_split
+    save_args["resolved_val_split_mode"] = resolved_val_split_mode
     if accelerator.is_main_process:
         save_dir.mkdir(parents=True, exist_ok=True)
         with open(save_dir / "args.json", "w") as f:
-            json.dump(vars(args), f, indent=2)
+            json.dump(save_args, f, indent=2)
+        print(
+            f"[protocol] cache_root={args.cache_root} "
+            f"train_split={resolved_train_split} val_split={resolved_val_split} "
+            f"val_split_mode={resolved_val_split_mode}"
+        )
 
     best = -1.0
     for ep in range(int(args.epochs)):
@@ -154,9 +177,9 @@ def main() -> None:
             print(f"[val] ep={ep:03d} acc={acc:.4f}")
             if acc > best:
                 best = acc
-                ckpt = {"model": accelerator.unwrap_model(model).state_dict(), "args": vars(args), "best_val_acc": best}
+                ckpt = {"model": accelerator.unwrap_model(model).state_dict(), "args": save_args, "best_val_acc": best}
                 torch.save(ckpt, save_dir / "ckpt_best.pt")
-            torch.save({"model": accelerator.unwrap_model(model).state_dict(), "args": vars(args), "best_val_acc": best}, save_dir / "ckpt_latest.pt")
+            torch.save({"model": accelerator.unwrap_model(model).state_dict(), "args": save_args, "best_val_acc": best}, save_dir / "ckpt_latest.pt")
 
 
 if __name__ == "__main__":
