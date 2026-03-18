@@ -61,9 +61,11 @@ export LOCAL_ENCODER="${LOCAL_ENCODER:-pointmae_conv}"
 export QUERY_TYPE_VOCAB="${QUERY_TYPE_VOCAB:-6}"
 export ANSWER_VOCAB="${ANSWER_VOCAB:-640}"
 export GENERATOR_DEPTH="${GENERATOR_DEPTH:-2}"
+export ANSWER_FACTORIZATION="${ANSWER_FACTORIZATION:-ar}"
 
 echo "[abci-cqa-pretrain] mix_config=${MIX_CONFIG}"
 echo "[abci-cqa-pretrain] save_dir=${SAVE_DIR}"
 echo "[abci-cqa-pretrain] log_root=${LOG_ROOT}"
+echo "[abci-cqa-pretrain] answer_factorization=${ANSWER_FACTORIZATION}"
 
 exec "${ROOT_DIR}/scripts/pretrain/submit_pretrain_primitive_answering_qf.sh"

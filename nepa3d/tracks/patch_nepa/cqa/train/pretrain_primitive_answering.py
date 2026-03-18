@@ -70,6 +70,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--answer_vocab", type=int, default=ANSWER_VOCAB_SIZE)
     p.add_argument("--query_type_vocab", type=int, default=QUERY_TYPE_VOCAB_SIZE)
     p.add_argument("--generator_depth", type=int, default=2)
+    p.add_argument(
+        "--answer_factorization",
+        type=str,
+        default="ar",
+        choices=["ar", "parallel"],
+        help="Answer decoding factorization: causal AR or non-AR parallel baseline.",
+    )
     return p.parse_args()
 
 
@@ -221,6 +228,7 @@ def main() -> None:
         query_type_vocab=int(args.query_type_vocab),
         answer_vocab=int(args.answer_vocab),
         generator_depth=int(args.generator_depth),
+        answer_factorization=str(args.answer_factorization),
     )
     opt = optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
     model, opt, loader = accelerator.prepare(model, opt, loader)

@@ -47,7 +47,14 @@ class PrimitiveAnsweringModel(nn.Module):
       [BOS, C_1..C_P, SEP_CQ, TYPE, Q_1..Q_N, SEP_A, A_1..A_N]
 
     Prompt block (BOS + C + SEP_CQ + TYPE + Q + SEP_A) is bidirectional.
-    Answer block is causal with full access to the prompt.
+
+    Answer block factorization:
+      - ``ar``: causal with teacher-forced answer-prefix inputs.
+      - ``parallel``: non-autoregressive answer slots that only see the prompt and
+        other answer slots, but never previous answer codes.
+
+    ``parallel`` is the minimal factorization baseline for testing whether the
+    gains come from the Q/A interface itself or specifically from AR decoding.
     """
 
     def __init__(
@@ -68,6 +75,7 @@ class PrimitiveAnsweringModel(nn.Module):
         query_type_vocab: int = 6,
         answer_vocab: int = 640,
         generator_depth: int = 2,
+        answer_factorization: str = "ar",
     ) -> None:
         super().__init__()
         self.d_model = int(d_model)
@@ -75,6 +83,11 @@ class PrimitiveAnsweringModel(nn.Module):
         self.query_type_vocab = int(query_type_vocab)
         self.num_groups = int(num_groups)
         self.group_size = int(group_size)
+        self.answer_factorization = str(answer_factorization).strip().lower()
+        if self.answer_factorization not in {"ar", "parallel"}:
+            raise ValueError(
+                f"answer_factorization must be 'ar' or 'parallel', got {answer_factorization!r}"
+            )
 
         self.ctx_patch = PointPatchEmbed(
             num_groups=int(num_groups),
@@ -118,12 +131,23 @@ class PrimitiveAnsweringModel(nn.Module):
         self.answer_head = _MLP(int(d_model), int(answer_vocab), hidden_dim=int(d_model), n_layers=2, dropout=float(dropout))
 
     @staticmethod
-    def _build_prompt_answer_mask(prompt_len: int, n_answer: int, device: torch.device) -> torch.Tensor:
+    def _build_prompt_answer_mask(
+        prompt_len: int,
+        n_answer: int,
+        device: torch.device,
+        *,
+        answer_factorization: str = "ar",
+    ) -> torch.Tensor:
         total = int(prompt_len) + int(n_answer)
         mask = torch.zeros((total, total), device=device, dtype=torch.bool)
         if int(n_answer) > 0:
-            tri = torch.triu(torch.ones((n_answer, n_answer), device=device, dtype=torch.bool), diagonal=1)
-            mask[int(prompt_len):, int(prompt_len):] = tri
+            if str(answer_factorization) == "ar":
+                tri = torch.triu(torch.ones((n_answer, n_answer), device=device, dtype=torch.bool), diagonal=1)
+                mask[int(prompt_len):, int(prompt_len):] = tri
+            elif str(answer_factorization) == "parallel":
+                pass
+            else:
+                raise KeyError(f"unknown answer_factorization={answer_factorization}")
             mask[:int(prompt_len), int(prompt_len):] = True
         return mask
 
@@ -143,9 +167,15 @@ class PrimitiveAnsweringModel(nn.Module):
         pos = self.query_embed(qry_xyz)
         if n <= 0:
             return pos.new_zeros((b, 0, self.d_model))
-        prev = self.answer_input_embed(answer_code[:, :-1]) if n > 1 else pos.new_zeros((b, 0, self.d_model))
-        first = self.ans_bos.expand(b, 1, -1)
-        return torch.cat([first, prev], dim=1) + pos
+        if self.answer_factorization == "ar":
+            prev = self.answer_input_embed(answer_code[:, :-1]) if n > 1 else pos.new_zeros((b, 0, self.d_model))
+            first = self.ans_bos.expand(b, 1, -1)
+            ans_tok = torch.cat([first, prev], dim=1)
+        else:
+            # Strong non-AR baseline: keep the same schema and query anchors,
+            # but remove previous-answer conditioning entirely.
+            ans_tok = self.ans_bos.expand(b, n, -1)
+        return ans_tok + pos
 
     def forward(
         self,
@@ -178,14 +208,22 @@ class PrimitiveAnsweringModel(nn.Module):
             dim=1,
         )
         prompt_len = 1 + ctx_tok.shape[1] + 1 + 1 + q_tok.shape[1] + 1
-        mask = self._build_prompt_answer_mask(prompt_len, ans_in.shape[1], seq.device)
+        mask = self._build_prompt_answer_mask(
+            prompt_len,
+            ans_in.shape[1],
+            seq.device,
+            answer_factorization=self.answer_factorization,
+        )
         h = self.backbone(seq, is_causal=False, attn_mask_override=mask)
         h_ans = h[:, prompt_len:, :]
         if self.generator is not None:
-            gen_mask = torch.triu(
-                torch.ones((h_ans.shape[1], h_ans.shape[1]), device=h_ans.device, dtype=torch.bool),
-                diagonal=1,
-            )
+            if self.answer_factorization == "ar":
+                gen_mask = torch.triu(
+                    torch.ones((h_ans.shape[1], h_ans.shape[1]), device=h_ans.device, dtype=torch.bool),
+                    diagonal=1,
+                )
+            else:
+                gen_mask = torch.zeros((h_ans.shape[1], h_ans.shape[1]), device=h_ans.device, dtype=torch.bool)
             h_ans = self.generator(h_ans, is_causal=False, attn_mask_override=gen_mask)
         logits = self.answer_head(h_ans)
         return PrimitiveAnsweringOutput(
@@ -204,6 +242,10 @@ class PrimitiveAnsweringModel(nn.Module):
         b = int(ctx_xyz.shape[0])
         n = int(qry_xyz.shape[1])
         out_codes = torch.zeros((b, n), device=ctx_xyz.device, dtype=torch.long)
+        if self.answer_factorization == "parallel":
+            cur = self.forward(ctx_xyz, qry_xyz, qry_type, out_codes)
+            step_logits = mask_logits_for_query_type(cur.logits, qry_type)
+            return step_logits.argmax(dim=-1)
         for i in range(n):
             cur = self.forward(ctx_xyz, qry_xyz[:, : i + 1, :], qry_type[:, : i + 1], out_codes[:, : i + 1])
             step_logits = mask_logits_for_query_type(cur.logits[:, i : i + 1, :], qry_type[:, i : i + 1])

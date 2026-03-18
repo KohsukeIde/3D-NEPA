@@ -95,6 +95,7 @@ def load_cqa_model(ckpt_path: str, device: torch.device) -> tuple[PrimitiveAnswe
         query_type_vocab=int(args.get("query_type_vocab", QUERY_TYPE_VOCAB_SIZE)),
         answer_vocab=int(args.get("answer_vocab", ANSWER_VOCAB_SIZE)),
         generator_depth=int(args.get("generator_depth", 2)),
+        answer_factorization=str(args.get("answer_factorization", "ar")),
     )
     model.load_state_dict(ckpt["model"], strict=True)
     model.to(device)
