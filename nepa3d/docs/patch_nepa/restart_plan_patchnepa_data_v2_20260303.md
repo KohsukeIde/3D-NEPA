@@ -2956,3 +2956,72 @@ Decision:
 - retain paired `pc_bank -> udf_distance` as an upper-bound / diagnostic row in
   tables or appendix,
 - do not let the paired result pre-empt the cleaner transfer narrative.
+
+## 75. Ordered-query `udf_distance` does not rescue AR; the main positive stays the Q/A interface rather than causal factorization (2026-03-21)
+
+Canonical sources:
+
+- ordered-AR mainline:
+  - `runs/cqa/patchnepa_cqa_udfdist_curve_orderedar_20260318/cqa_udfdist_worldv3_orderedar_g2_s10000`
+  - `runs/cqa/patchnepa_cqa_udfdist_curve_orderedar_20260318/cqa_udfdist_worldv3_orderedar_g2_s10000/eval_controls_128.json`
+- ordered-AR off-diagonal:
+  - `results/cqa_eval/patchnepa_cqa_udfdist_offdiag_orderedar_20260318/cqa_udfdist_offdiag_eval_orderedar.json`
+- ordered-AR completion:
+  - `results/cqa_completion/patchnepa_cqa_udfdist_translation_same_orderedar_20260318/cqa_udfdist_same_translation_g16_s64_orderedar_assets.json`
+  - `results/cqa_completion/patchnepa_cqa_udfdist_translation_offdiag_orderedar_20260318/cqa_udfdist_offdiag_translation_g16_s64_orderedar_assets.json`
+- ordered-parallel mainline:
+  - `runs/cqa/patchnepa_cqa_udfdist_curve_orderedparallel_20260318/cqa_udfdist_worldv3_orderedparallel_g2_s10000`
+  - `runs/cqa/patchnepa_cqa_udfdist_curve_orderedparallel_20260318/cqa_udfdist_worldv3_orderedparallel_g2_s10000/eval_controls_128.json`
+- ordered-parallel off-diagonal:
+  - `results/cqa_eval/patchnepa_cqa_udfdist_offdiag_orderedparallel_20260318/cqa_udfdist_offdiag_eval_orderedparallel.json`
+- ordered-parallel completion:
+  - `results/cqa_completion/patchnepa_cqa_udfdist_translation_same_orderedparallel_20260318/cqa_udfdist_same_translation_g16_s64_orderedparallel_assets.json`
+  - `results/cqa_completion/patchnepa_cqa_udfdist_translation_offdiag_orderedparallel_20260318/cqa_udfdist_offdiag_translation_g16_s64_orderedparallel_assets.json`
+
+Key read:
+
+- ordered-AR controls:
+  - same-context: `acc=0.3278`, `delta_ce(no_context)=+20.4050`,
+    `wrong_shape_same=+4.7665`, `wrong_shape_other=+11.8784`
+  - off-diagonal: `acc=0.1772`, `delta_ce(no_context)=+14.1574`,
+    `wrong_shape_same=+3.2089`, `wrong_shape_other=+7.6304`
+- ordered-parallel controls:
+  - same-context: `acc=0.3645`, `delta_ce(no_context)=+20.1633`,
+    `wrong_shape_same=+6.0456`, `wrong_shape_other=+13.4435`
+  - off-diagonal: `acc=0.2168`, `delta_ce(no_context)=+14.4392`,
+    `wrong_shape_same=+3.6370`, `wrong_shape_other=+8.0938`
+- completion means:
+  - ordered-AR same/offdiag:
+    - `MAE=0.0600 / 0.1154`
+    - `RMSE=0.0804 / 0.1633`
+    - `IoU@0.05=0.4985 / 0.3314`
+    - `mesh_fscore=0.0303 / 0.0282`
+  - ordered-parallel same/offdiag:
+    - `MAE=0.0296 / 0.1223`
+    - `RMSE=0.0415 / 0.1937`
+    - `IoU@0.05=0.6516 / 0.3928`
+    - `mesh_fscore=0.0808 / 0.0585`
+
+Interpretation:
+
+- introducing a simple ordered spatial query list (`ordered_xyz`) does **not**
+  overturn the existing shuffled read.
+- ordered AR improves control deltas and slightly raises same-context token acc,
+  but it does not materially improve off-diagonal token accuracy and it degrades
+  same-context completion relative to the shuffled AR checkpoint.
+- ordered parallel remains stronger than ordered AR on both same-context and
+  off-diagonal token accuracy, and the best overall completion row still
+  remains the shuffled-parallel checkpoint.
+- the safest causal read is now:
+  - the **Q/A schema** is doing the main work,
+  - AR is one viable factorization,
+  - but the current evidence does **not** show that AR becomes necessary once a
+    simple spatial ordering is restored.
+
+Decision:
+
+- keep `parallel udf_distance` as the strongest current CQA line,
+- write the ordered-query result as a reviewer-facing ablation showing that the
+  earlier `parallel > AR` read is **not** only an artifact of shuffled queries,
+- if AR is to be defended further, it will require a stronger ordering design
+  than the present lexicographic XYZ scan rather than just “turn shuffling off.”

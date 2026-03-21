@@ -19,7 +19,7 @@ from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
     QUERY_TYPE_VOCAB_SIZE,
     mask_logits_for_query_type,
 )
-from nepa3d.tracks.patch_nepa.cqa.data.dataset_cqa import cqa_collate_fn
+from nepa3d.tracks.patch_nepa.cqa.data.dataset_cqa import QUERY_ORDER_MODES, cqa_collate_fn
 from nepa3d.tracks.patch_nepa.cqa.data.mixed_pretrain_cqa import build_mixed_pretrain_cqa
 from nepa3d.tracks.patch_nepa.cqa.models.primitive_answering import PrimitiveAnsweringModel
 
@@ -54,6 +54,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--wandb_dir", type=str, default="")
     p.add_argument("--n_ctx", type=int, default=2048)
     p.add_argument("--n_qry", type=int, default=64)
+    p.add_argument(
+        "--query_order",
+        type=str,
+        default="shuffled",
+        choices=list(QUERY_ORDER_MODES),
+        help="Ordering applied to sampled queries before decoding.",
+    )
 
     p.add_argument("--d_model", type=int, default=384)
     p.add_argument("--n_layers", type=int, default=12)
@@ -201,6 +208,7 @@ def main() -> None:
         n_qry=int(args.n_qry),
         mode="train",
         eval_seed=int(args.seed),
+        query_order=str(args.query_order),
     )
     loader = DataLoader(
         dataset,

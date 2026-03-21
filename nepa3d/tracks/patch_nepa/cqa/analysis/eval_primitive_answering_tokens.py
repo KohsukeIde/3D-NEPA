@@ -20,6 +20,7 @@ from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
 )
 from nepa3d.tracks.patch_nepa.cqa.data.dataset_cqa import (
     QUERY_SRC_CODE_TO_NAME,
+    QUERY_ORDER_MODES,
     V2PrimitiveCQADataset,
     cqa_collate_fn,
 )
@@ -113,6 +114,7 @@ def build_eval_datasets(
     split_override: str | None,
     task_filter: set[str],
     eval_sample_mode: str,
+    query_order: str,
 ) -> List[EvalDatasetSpec]:
     specs, _cfg = load_mix_config(mix_config_path)
     out: List[EvalDatasetSpec] = []
@@ -140,6 +142,7 @@ def build_eval_datasets(
             query_src_filter=s.extra.get("query_src_filter", None),
             query_dist_min=s.extra.get("query_dist_min", None),
             query_dist_max=s.extra.get("query_dist_max", None),
+            query_order=str(query_order),
         )
         out.append(
             EvalDatasetSpec(
@@ -365,6 +368,7 @@ def evaluate_dataset(
         "cache_root": spec.cache_root,
         "context_source": spec.context_source,
         "eval_sample_mode": spec.eval_sample_mode,
+        "query_order": str(spec.dataset.query_order),
         "control": control,
         "query_type_id": qtype,
         "query_type_name": QUERY_TYPE_NAMES[qtype],
@@ -404,6 +408,7 @@ def run_token_eval(
     task_filter: set[str],
     control: str,
     eval_sample_mode: str,
+    query_order: str | None,
 ) -> Dict[str, Any]:
     torch_device = torch.device(device)
     model, ckpt, train_args = load_cqa_model(ckpt_path, torch_device)
@@ -411,6 +416,11 @@ def run_token_eval(
         n_ctx = int(train_args.get("n_ctx", 2048))
     if int(n_qry) <= 0:
         n_qry = int(train_args.get("n_qry", 64))
+    resolved_query_order = str(query_order or "").strip()
+    if not resolved_query_order:
+        resolved_query_order = str(train_args.get("query_order", "sampled"))
+    if resolved_query_order not in QUERY_ORDER_MODES:
+        raise KeyError(f"unknown query_order={resolved_query_order}")
     eval_specs = build_eval_datasets(
         mix_config_path,
         seed=int(seed),
@@ -420,6 +430,7 @@ def run_token_eval(
         split_override=split_override,
         task_filter=task_filter,
         eval_sample_mode=str(eval_sample_mode),
+        query_order=resolved_query_order,
     )
     results = [
         evaluate_dataset(
@@ -446,6 +457,7 @@ def run_token_eval(
         "train_run_name": str(train_args.get("run_name", "")),
         "train_global_step": int(ckpt.get("global_step", -1)),
         "eval_sample_mode": str(eval_sample_mode),
+        "query_order": str(resolved_query_order),
         "results": results,
         "overall": overall,
     }
@@ -465,6 +477,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--split_override", type=str, default="")
     p.add_argument("--task_filter", type=str, default="")
     p.add_argument("--eval_sample_mode", type=str, default="head", choices=["head", "random"])
+    p.add_argument("--query_order", type=str, default="", choices=["", *QUERY_ORDER_MODES])
     p.add_argument("--control", type=str, default="correct", choices=list(CONTROL_MODES))
     p.add_argument("--output_json", type=str, default="")
     return p.parse_args()
@@ -486,6 +499,7 @@ def main() -> None:
         task_filter=_parse_task_filter(str(args.task_filter)),
         control=str(args.control),
         eval_sample_mode=str(args.eval_sample_mode),
+        query_order=(str(args.query_order).strip() or None),
     )
     print(json.dumps(summary, indent=2))
     if str(args.output_json).strip():

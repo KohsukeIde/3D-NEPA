@@ -20,6 +20,8 @@ from .cqa_codec import (
     encode_answers_from_fields,
 )
 
+QUERY_ORDER_MODES = ("sampled", "shuffled", "ordered_xyz")
+
 
 def _choice(n: int, k: int, rng: Any) -> np.ndarray:
     if k >= n:
@@ -45,6 +47,41 @@ def _np_to_torch_f32(x: np.ndarray) -> torch.Tensor:
 
 def _np_to_torch_i64(x: np.ndarray) -> torch.Tensor:
     return torch.from_numpy(np.asarray(x, dtype=np.int64))
+
+
+def _resolve_query_order(query_order: Any, *, mode: str) -> str:
+    text = str(query_order or "").strip().lower()
+    if not text:
+        return "shuffled" if str(mode) == "train" else "sampled"
+    if text not in QUERY_ORDER_MODES:
+        raise KeyError(f"unknown query_order={query_order}")
+    return text
+
+
+def _ordered_xyz_perm(xyz: np.ndarray) -> np.ndarray:
+    xyz = np.asarray(xyz, dtype=np.float32).reshape(-1, 3)
+    return np.lexsort((xyz[:, 2], xyz[:, 1], xyz[:, 0])).astype(np.int64, copy=False)
+
+
+def _apply_query_order(
+    *,
+    qry_xyz: np.ndarray,
+    answer_code: np.ndarray,
+    qry_src_code: np.ndarray,
+    rng: Any,
+    query_order: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if int(qry_xyz.shape[0]) <= 1:
+        return qry_xyz, answer_code, qry_src_code
+    if query_order == "sampled":
+        return qry_xyz, answer_code, qry_src_code
+    if query_order == "shuffled":
+        perm = rng.permutation(int(qry_xyz.shape[0])).astype(np.int64)
+    elif query_order == "ordered_xyz":
+        perm = _ordered_xyz_perm(qry_xyz)
+    else:
+        raise KeyError(f"unknown query_order={query_order}")
+    return qry_xyz[perm], answer_code[perm], qry_src_code[perm]
 
 
 _QUERY_SRC_NAME_TO_CODE = {
@@ -151,6 +188,7 @@ class V2PrimitiveCQADataset(Dataset):
         query_src_filter: Any = None,
         query_dist_min: float | None = None,
         query_dist_max: float | None = None,
+        query_order: str | None = None,
     ) -> None:
         super().__init__()
         self.paths = list(paths)
@@ -165,6 +203,7 @@ class V2PrimitiveCQADataset(Dataset):
         self.query_src_filter = _normalize_query_src_filter(query_src_filter)
         self.query_dist_min = None if query_dist_min is None else float(query_dist_min)
         self.query_dist_max = None if query_dist_max is None else float(query_dist_max)
+        self.query_order = _resolve_query_order(query_order, mode=self.mode)
 
     def __len__(self) -> int:
         return len(self.paths)
@@ -226,12 +265,13 @@ class V2PrimitiveCQADataset(Dataset):
                 arr = np.asarray(npz[key], dtype=np.float32)
                 fields[alias] = arr[q_idx]
             answer_code = encode_answers_from_fields(self.task.query_type, fields)
-
-            if self.mode == "train":
-                perm = rng.permutation(int(qry_xyz.shape[0])).astype(np.int64)
-                qry_xyz = qry_xyz[perm]
-                answer_code = answer_code[perm]
-                qry_src_code = qry_src_code[perm]
+            qry_xyz, answer_code, qry_src_code = _apply_query_order(
+                qry_xyz=qry_xyz,
+                answer_code=answer_code,
+                qry_src_code=qry_src_code,
+                rng=rng,
+                query_order=self.query_order,
+            )
 
             path_obj = Path(path)
             out: Dict[str, Any] = {
@@ -249,6 +289,7 @@ class V2PrimitiveCQADataset(Dataset):
                 "query_src_filter": None if self.query_src_filter is None else list(self.query_src_filter),
                 "query_dist_min": self.query_dist_min,
                 "query_dist_max": self.query_dist_max,
+                "query_order": self.query_order,
                 "answer_vocab_size": int(ANSWER_VOCAB_SIZE),
                 "vocab_version": CQA_VOCAB_VERSION,
             }
@@ -271,6 +312,7 @@ def cqa_collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     out["query_src_filter"] = [b.get("query_src_filter") for b in batch]
     out["query_dist_min"] = [b.get("query_dist_min") for b in batch]
     out["query_dist_max"] = [b.get("query_dist_max") for b in batch]
+    out["query_order"] = [b.get("query_order") for b in batch]
     out["answer_vocab_size"] = int(batch[0].get("answer_vocab_size", ANSWER_VOCAB_SIZE))
     out["vocab_version"] = str(batch[0].get("vocab_version", CQA_VOCAB_VERSION))
     return out

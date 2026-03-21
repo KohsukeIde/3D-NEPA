@@ -33,6 +33,7 @@ MIN_LR="${MIN_LR:-1e-6}"
 MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
 N_CTX="${N_CTX:-2048}"
 N_QRY="${N_QRY:-64}"
+QUERY_ORDER="${QUERY_ORDER:-shuffled}"
 
 D_MODEL="${D_MODEL:-384}"
 N_LAYERS="${N_LAYERS:-12}"
@@ -67,6 +68,7 @@ EVAL_MAX_SAMPLES_PER_TASK="${EVAL_MAX_SAMPLES_PER_TASK:-128}"
 EVAL_SPLIT_OVERRIDE="${EVAL_SPLIT_OVERRIDE:-}"
 EVAL_TASK_FILTER="${EVAL_TASK_FILTER:-}"
 EVAL_SAMPLE_MODE="${EVAL_SAMPLE_MODE:-random}"
+EVAL_QUERY_ORDER="${EVAL_QUERY_ORDER:-${QUERY_ORDER}}"
 EVAL_CONTROLS="${EVAL_CONTROLS:-correct,no_context,wrong_shape_same_synset,wrong_shape_other_synset,wrong_type,shuffled_query}"
 
 LOG_PATH="${LOG_ROOT}/${RUN_TAG}.log"
@@ -99,6 +101,7 @@ echo "workdir=${WORKDIR}" | tee -a "${LOG_PATH}"
 echo "mix_config=${MIX_CONFIG}" | tee -a "${LOG_PATH}"
 echo "save_dir=${SAVE_DIR}" | tee -a "${LOG_PATH}"
 echo "epochs=${EPOCHS} batch=${BATCH} n_ctx=${N_CTX} n_qry=${N_QRY}" | tee -a "${LOG_PATH}"
+echo "query_order(train)=${QUERY_ORDER} query_order(eval)=${EVAL_QUERY_ORDER}" | tee -a "${LOG_PATH}"
 echo "max_steps=${MAX_STEPS} scheduler=${LR_SCHEDULER} warmup_steps=${WARMUP_STEPS} warmup_ratio=${WARMUP_RATIO} min_lr=${MIN_LR} clip=${MAX_GRAD_NORM}" | tee -a "${LOG_PATH}"
 echo "model=d${D_MODEL}/L${N_LAYERS}/H${N_HEADS} groups=${NUM_GROUPS} group_size=${GROUP_SIZE} gdepth=${GENERATOR_DEPTH} factorization=${ANSWER_FACTORIZATION}" | tee -a "${LOG_PATH}"
 echo "wandb: use=${USE_WANDB} project=${WANDB_PROJECT} run=${WANDB_RUN_NAME} group=${WANDB_GROUP} mode=${WANDB_MODE} dir=${WANDB_DIR}" | tee -a "${LOG_PATH}"
@@ -125,6 +128,7 @@ python -m nepa3d.train.pretrain_primitive_answering \
   --save_every_steps "${SAVE_EVERY_STEPS}" \
   --n_ctx "${N_CTX}" \
   --n_qry "${N_QRY}" \
+  --query_order "${QUERY_ORDER}" \
   --d_model "${D_MODEL}" \
   --n_layers "${N_LAYERS}" \
   --n_heads "${N_HEADS}" \
@@ -169,6 +173,7 @@ if [[ "${RUN_EVAL_CONTROLS}" == "1" ]] && [[ -f "${FINAL_CKPT}" ]]; then
     --split_override "${EVAL_SPLIT_OVERRIDE}" \
     --task_filter "${EVAL_TASK_FILTER}" \
     --eval_sample_mode "${EVAL_SAMPLE_MODE}" \
+    --query_order "${EVAL_QUERY_ORDER}" \
     --controls "${EVAL_CONTROLS}" \
     --output_json "${EVAL_JSON}" \
     2>&1 | tee -a "${LOG_PATH}"
@@ -201,6 +206,7 @@ if [[ "${RUN_EVAL_CURVE}" == "1" ]] && [[ -f "${FINAL_CKPT}" ]]; then
         --split_override "${EVAL_SPLIT_OVERRIDE}" \
         --task_filter "${EVAL_TASK_FILTER}" \
         --eval_sample_mode "${EVAL_SAMPLE_MODE}" \
+        --query_order "${EVAL_QUERY_ORDER}" \
         --controls "${EVAL_CONTROLS}" \
         --output_json "${out_json}" \
         2>&1 | tee -a "${LOG_PATH}"

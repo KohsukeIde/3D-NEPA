@@ -293,6 +293,11 @@ This means:
 - `udf_distance` CQA also now has method-native dense-grid completion evidence:
   a held-out `grid_res=12` pilot gives `MAE=0.0479`, `RMSE=0.0638`,
   `IoU@0.05=0.5712`.
+- ordered-query ablations now show that simply restoring a spatial query order
+  does **not** rescue AR:
+  ordered AR stays below ordered parallel, and the strongest completion row is
+  still shuffled-parallel. The safest read is that the primitive-native Q/A
+  interface matters more than causal factorization under the current design.
 - Point-MAE is the protocol sanity / benchmark context.
 - PointGPT is the reconstruction-style reference for the next causal tests.
 

@@ -7244,3 +7244,62 @@ Operational interpretation:
 - this is useful as a diagnostic upper bound and reviewer-facing ceiling.
 - the main scientific story should still center the zero-shot off-diagonal
   transfer, because that is the cleaner evidence for shared-context generality.
+
+## 167. Ordered-query ablation does not rescue AR; shuffled queries were not the whole story (2026-03-21)
+
+Lineage:
+
+- ordered-AR train/eval chain:
+  - train `114405`
+  - offdiag `114406`
+  - same completion `114407`
+  - offdiag completion `114408`
+- ordered-parallel train/eval chain:
+  - train `114409`
+  - offdiag `114410`
+  - same completion `114411`
+  - offdiag completion `114412`
+
+Summary:
+
+- ordered-AR controls:
+  - same-context: `acc=0.327759`, `ce=2.216774`
+  - off-diagonal: `acc=0.177246`, `ce=7.278724`
+  - deltas:
+    - same: `no_context=+20.404953`, `wrong_shape_same=+4.766537`,
+      `wrong_shape_other=+11.878389`
+    - offdiag: `no_context=+14.157351`, `wrong_shape_same=+3.208929`,
+      `wrong_shape_other=+7.630381`
+- ordered-parallel controls:
+  - same-context: `acc=0.364502`, `ce=2.040040`
+  - off-diagonal: `acc=0.216797`, `ce=7.217139`
+  - deltas:
+    - same: `no_context=+20.163294`, `wrong_shape_same=+6.045631`,
+      `wrong_shape_other=+13.443542`
+    - offdiag: `no_context=+14.439228`, `wrong_shape_same=+3.636963`,
+      `wrong_shape_other=+8.093796`
+- ordered completion means:
+  - ordered-AR same/offdiag:
+    - `MAE=0.060016 / 0.115406`
+    - `RMSE=0.080399 / 0.163262`
+    - `IoU@0.05=0.498508 / 0.331447`
+    - `mesh_fscore=0.030321 / 0.028158`
+  - ordered-parallel same/offdiag:
+    - `MAE=0.029590 / 0.122251`
+    - `RMSE=0.041486 / 0.193677`
+    - `IoU@0.05=0.651563 / 0.392847`
+    - `mesh_fscore=0.080819 / 0.058457`
+
+Operational interpretation:
+
+- turning off shuffling with a simple lexicographic XYZ order does **not**
+  reverse the earlier `parallel > AR` read.
+- ordered AR improves control sensitivity and slightly improves same-context
+  token accuracy over shuffled AR, but it does not materially improve
+  off-diagonal token accuracy and it worsens same-context completion.
+- ordered parallel remains stronger than ordered AR, and the best overall CQA
+  completion row still comes from shuffled-parallel.
+- the current safe claim is therefore:
+  - the main gain comes from the primitive-native **Q/A interface**,
+  - AR is viable but not yet shown to be necessary,
+  - shuffled queries are not the sole reason AR underperforms.

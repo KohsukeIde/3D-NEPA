@@ -215,6 +215,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--split_override", type=str, default="eval")
     p.add_argument("--task_filter", type=str, default="udf_distance")
     p.add_argument("--eval_sample_mode", type=str, default="random", choices=["head", "random"])
+    p.add_argument("--query_order", type=str, default="sampled")
     p.add_argument("--grid_res", type=int, default=12)
     p.add_argument("--chunk_n_query", type=int, default=64)
     p.add_argument("--tau_list", type=str, default="0.01,0.02,0.05")
@@ -241,6 +242,7 @@ def main() -> None:
         split_override=(str(args.split_override).strip() or None),
         task_filter=_parse_task_filter(str(args.task_filter)),
         eval_sample_mode=str(args.eval_sample_mode),
+        query_order=str(args.query_order),
     )
     centers = grid_utils.make_grid_centers_np(int(args.grid_res)).reshape(-1, 3).astype(np.float32, copy=False)
     out_path = Path(str(args.output_json))

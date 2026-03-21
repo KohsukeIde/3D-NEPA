@@ -27,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--split_override", type=str, default="")
     p.add_argument("--task_filter", type=str, default="")
     p.add_argument("--eval_sample_mode", type=str, default="head", choices=["head", "random"])
+    p.add_argument("--query_order", type=str, default="")
     p.add_argument(
         "--controls",
         type=str,
@@ -57,6 +58,7 @@ def main() -> None:
         split_override=(str(args.split_override).strip() or None),
         task_filter=_parse_task_filter(str(args.task_filter)),
         eval_sample_mode=str(args.eval_sample_mode),
+        query_order=(str(args.query_order).strip() or None),
     )
     by_control = {control: run_token_eval(control=control, **common) for control in requested}
     baseline = by_control.get("correct", None)

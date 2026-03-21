@@ -35,6 +35,7 @@ MAX_SAMPLES="${MAX_SAMPLES:-256}"
 SPLIT_OVERRIDE="${SPLIT_OVERRIDE:-eval}"
 TASK_FILTER="${TASK_FILTER:-udf_distance}"
 EVAL_SAMPLE_MODE="${EVAL_SAMPLE_MODE:-random}"
+QUERY_ORDER="${QUERY_ORDER:-sampled}"
 CONTROLS="${CONTROLS:-correct,no_context,wrong_shape_same_synset,wrong_shape_other_synset,wrong_type,shuffled_query}"
 
 mkdir -p "${LOG_ROOT}" "$(dirname "${OUT_JSON}")"
@@ -57,6 +58,7 @@ echo "pbs_jobid=${PBS_JOBID:-}" | tee -a "${LOG_PATH}"
 echo "ckpt=${CKPT}" | tee -a "${LOG_PATH}"
 echo "mix_config=${MIX_CONFIG}" | tee -a "${LOG_PATH}"
 echo "split_override=${SPLIT_OVERRIDE}" | tee -a "${LOG_PATH}"
+echo "query_order=${QUERY_ORDER}" | tee -a "${LOG_PATH}"
 echo "out_json=${OUT_JSON}" | tee -a "${LOG_PATH}"
 echo | tee -a "${LOG_PATH}"
 
@@ -73,6 +75,7 @@ python -u -m nepa3d.tracks.patch_nepa.cqa.analysis.eval_primitive_answering_cont
   --split_override "${SPLIT_OVERRIDE}" \
   --task_filter "${TASK_FILTER}" \
   --eval_sample_mode "${EVAL_SAMPLE_MODE}" \
+  --query_order "${QUERY_ORDER}" \
   --controls "${CONTROLS}" \
   --output_json "${OUT_JSON}" \
   2>&1 | tee -a "${LOG_PATH}"

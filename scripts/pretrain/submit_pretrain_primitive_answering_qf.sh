@@ -57,6 +57,7 @@ qvars=(
   "MAX_GRAD_NORM=${MAX_GRAD_NORM:-1.0}"
   "N_CTX=${N_CTX:-2048}"
   "N_QRY=${N_QRY:-64}"
+  "QUERY_ORDER=${QUERY_ORDER:-shuffled}"
   "D_MODEL=${D_MODEL:-384}"
   "N_LAYERS=${N_LAYERS:-12}"
   "N_HEADS=${N_HEADS:-6}"
@@ -90,6 +91,7 @@ qvars=(
   "EVAL_SPLIT_OVERRIDE=${EVAL_SPLIT_OVERRIDE:-}"
   "EVAL_TASK_FILTER=${EVAL_TASK_FILTER:-}"
   "EVAL_SAMPLE_MODE=${EVAL_SAMPLE_MODE:-random}"
+  "EVAL_QUERY_ORDER=${EVAL_QUERY_ORDER:-${QUERY_ORDER:-shuffled}}"
   "EVAL_CONTROLS=${EVAL_CONTROLS:-correct,no_context,wrong_shape_same_synset,wrong_shape_other_synset,wrong_type,shuffled_query}"
 )
 ENV_FILE="${ENV_FILE:-${ENV_DIR}/${RUN_TAG}.env}"

@@ -16,6 +16,7 @@ def build_mixed_pretrain_cqa(
     n_qry: int,
     mode: str = "train",
     eval_seed: int = 0,
+    query_order: str | None = None,
 ) -> Tuple[MixedPretrainDataset, MixtureSampler, Dict[str, Any]]:
     specs, cfg = load_mix_config(mix_config_path)
 
@@ -39,6 +40,7 @@ def build_mixed_pretrain_cqa(
             query_src_filter=s.extra.get("query_src_filter", None),
             query_dist_min=s.extra.get("query_dist_min", None),
             query_dist_max=s.extra.get("query_dist_max", None),
+            query_order=query_order,
         )
         datasets.append(ds)
         names.append(s.name)

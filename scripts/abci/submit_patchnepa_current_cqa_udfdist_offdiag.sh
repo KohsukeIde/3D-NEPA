@@ -33,6 +33,7 @@ MAX_SAMPLES="${MAX_SAMPLES:-256}"
 SPLIT_OVERRIDE="${SPLIT_OVERRIDE:-eval}"
 TASK_FILTER="${TASK_FILTER:-udf_distance}"
 EVAL_SAMPLE_MODE="${EVAL_SAMPLE_MODE:-random}"
+QUERY_ORDER="${QUERY_ORDER:-sampled}"
 CONTROLS="${CONTROLS:-correct,no_context,wrong_shape_same_synset,wrong_shape_other_synset,wrong_type,shuffled_query}"
 OUT_JSON="${OUT_JSON:-${RESULTS_ROOT}/${RUN_TAG}.json}"
 
@@ -71,6 +72,7 @@ qvars=(
   "SPLIT_OVERRIDE=${SPLIT_OVERRIDE}"
   "TASK_FILTER=${TASK_FILTER}"
   "EVAL_SAMPLE_MODE=${EVAL_SAMPLE_MODE}"
+  "QUERY_ORDER=${QUERY_ORDER}"
   "CONTROLS=${CONTROLS}"
 )
 ENV_FILE="${ENV_FILE:-${ENV_DIR}/${RUN_TAG}.env}"
