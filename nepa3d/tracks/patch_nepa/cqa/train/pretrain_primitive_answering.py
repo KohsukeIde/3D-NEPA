@@ -81,8 +81,8 @@ def parse_args() -> argparse.Namespace:
         "--answer_factorization",
         type=str,
         default="ar",
-        choices=["ar", "parallel"],
-        help="Answer decoding factorization: causal AR or non-AR parallel baseline.",
+        choices=["ar", "parallel", "independent"],
+        help="Answer decoding factorization: causal AR, joint non-AR, or strictly independent non-AR.",
     )
     return p.parse_args()
 

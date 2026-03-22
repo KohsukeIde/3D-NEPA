@@ -50,11 +50,14 @@ class PrimitiveAnsweringModel(nn.Module):
 
     Answer block factorization:
       - ``ar``: causal with teacher-forced answer-prefix inputs.
-      - ``parallel``: non-autoregressive answer slots that only see the prompt and
-        other answer slots, but never previous answer codes.
+      - ``parallel``: joint non-AR answer block; slots see the prompt and other
+        answer slots, but never previous answer codes.
+      - ``independent``: strictly slot-wise non-AR answer block; each slot sees
+        only the prompt and itself.
 
-    ``parallel`` is the minimal factorization baseline for testing whether the
-    gains come from the Q/A interface itself or specifically from AR decoding.
+    ``parallel`` and ``independent`` separate two questions:
+      - does the gain come from the Q/A interface rather than AR decoding?
+      - do answer slots need to interact with each other at all?
     """
 
     def __init__(
@@ -84,9 +87,10 @@ class PrimitiveAnsweringModel(nn.Module):
         self.num_groups = int(num_groups)
         self.group_size = int(group_size)
         self.answer_factorization = str(answer_factorization).strip().lower()
-        if self.answer_factorization not in {"ar", "parallel"}:
+        if self.answer_factorization not in {"ar", "parallel", "independent"}:
             raise ValueError(
-                f"answer_factorization must be 'ar' or 'parallel', got {answer_factorization!r}"
+                "answer_factorization must be 'ar', 'parallel', or "
+                f"'independent', got {answer_factorization!r}"
             )
 
         self.ctx_patch = PointPatchEmbed(
@@ -146,6 +150,10 @@ class PrimitiveAnsweringModel(nn.Module):
                 mask[int(prompt_len):, int(prompt_len):] = tri
             elif str(answer_factorization) == "parallel":
                 pass
+            elif str(answer_factorization) == "independent":
+                offdiag = torch.ones((n_answer, n_answer), device=device, dtype=torch.bool)
+                offdiag.fill_diagonal_(False)
+                mask[int(prompt_len):, int(prompt_len):] = offdiag
             else:
                 raise KeyError(f"unknown answer_factorization={answer_factorization}")
             mask[:int(prompt_len), int(prompt_len):] = True
@@ -172,8 +180,8 @@ class PrimitiveAnsweringModel(nn.Module):
             first = self.ans_bos.expand(b, 1, -1)
             ans_tok = torch.cat([first, prev], dim=1)
         else:
-            # Strong non-AR baseline: keep the same schema and query anchors,
-            # but remove previous-answer conditioning entirely.
+            # Non-AR baselines keep the same query anchors but remove any
+            # previous-answer conditioning from the input side.
             ans_tok = self.ans_bos.expand(b, n, -1)
         return ans_tok + pos
 
@@ -222,8 +230,11 @@ class PrimitiveAnsweringModel(nn.Module):
                     torch.ones((h_ans.shape[1], h_ans.shape[1]), device=h_ans.device, dtype=torch.bool),
                     diagonal=1,
                 )
-            else:
+            elif self.answer_factorization == "parallel":
                 gen_mask = torch.zeros((h_ans.shape[1], h_ans.shape[1]), device=h_ans.device, dtype=torch.bool)
+            else:
+                gen_mask = torch.ones((h_ans.shape[1], h_ans.shape[1]), device=h_ans.device, dtype=torch.bool)
+                gen_mask.fill_diagonal_(False)
             h_ans = self.generator(h_ans, is_causal=False, attn_mask_override=gen_mask)
         logits = self.answer_head(h_ans)
         return PrimitiveAnsweringOutput(
@@ -242,7 +253,7 @@ class PrimitiveAnsweringModel(nn.Module):
         b = int(ctx_xyz.shape[0])
         n = int(qry_xyz.shape[1])
         out_codes = torch.zeros((b, n), device=ctx_xyz.device, dtype=torch.long)
-        if self.answer_factorization == "parallel":
+        if self.answer_factorization in {"parallel", "independent"}:
             cur = self.forward(ctx_xyz, qry_xyz, qry_type, out_codes)
             step_logits = mask_logits_for_query_type(cur.logits, qry_type)
             return step_logits.argmax(dim=-1)
