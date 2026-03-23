@@ -1,6 +1,6 @@
 # Patch-NEPA Runlog (2026-02)
 
-Last updated: 2026-03-23
+Last updated: 2026-03-24
 
 Track note:
 
@@ -7445,3 +7445,74 @@ Operational interpretation:
   `mesh_normal` in a useful way,
 - so continuous target design remains task-specific for now rather than a
   shared multi-type replacement.
+
+## 172. `DISTANCE + NORMAL_UNSIGNED` rescues the shared mesh branch (2026-03-24)
+
+Lineage:
+
+- train `116068`
+- same/offdiag suite `116069`
+- TYPE-switch export `116070`
+
+Summary:
+
+- same-context:
+  - `udf_distance`: `acc=0.387695` vs majority `0.037903`
+  - `mesh_normal_unsigned`: `acc=0.577332` vs majority `0.306641`
+- off-diagonal:
+  - `udf_distance`: `acc=0.200500` vs majority `0.039673`
+  - `mesh_normal_unsigned`: `acc=0.383179` vs majority `0.306763`
+- same `mesh_normal_unsigned` controls:
+  - `delta_ce(no_context)=+2.827228`
+  - `delta_ce(wrong_shape_same)=+0.883803`
+  - `delta_ce(wrong_shape_other)=+2.904422`
+- offdiag `mesh_normal_unsigned` controls:
+  - `delta_ce(no_context)=+1.801807`
+  - `delta_ce(wrong_shape_same)=+0.475568`
+  - `delta_ce(wrong_shape_other)=+1.685428`
+- TYPE-switch pack:
+  - first exported shapes now show unsigned-normal `mean_cos` roughly
+    `0.46-0.68`, clearly stronger than the prior signed-normal pack.
+
+Operational interpretation:
+
+- canonical hemisphere folding is enough to materially improve the shared
+  `DISTANCE + NORMAL` line.
+- the signed-normal weakness was therefore mostly target pathology rather than
+  evidence against mesh-family prompting itself.
+- `udf_distance` remains stable while `mesh_normal_unsigned` becomes a viable
+  shared mesh task.
+
+## 173. Unsigned normals rescue the shared continuous branch as well (2026-03-24)
+
+Lineage:
+
+- train `116094`
+- same/offdiag suite `116095`
+
+Summary:
+
+- same-context:
+  - `udf_distance`: `MAE=0.030454`, `RMSE=0.043400`, `IoU@0.05=0.734362`
+  - `mesh_normal_unsigned`: `mean_cos=0.795400`, `angle_deg=27.850449`
+- off-diagonal:
+  - `udf_distance`: `MAE=0.122904`, `RMSE=0.196361`, `IoU@0.05=0.451584`
+  - `mesh_normal_unsigned`: `mean_cos=0.682940`, `angle_deg=39.644447`
+- same `mesh_normal_unsigned` controls:
+  - `delta_mean_cos(no_context)=-0.314132`
+  - `delta_mean_cos(wrong_shape_same)=-0.160481`
+  - `delta_mean_cos(wrong_shape_other)=-0.334846`
+- offdiag `mesh_normal_unsigned` controls:
+  - `delta_mean_cos(no_context)=-0.206259`
+  - `delta_mean_cos(wrong_shape_same)=-0.097945`
+  - `delta_mean_cos(wrong_shape_other)=-0.219145`
+
+Operational interpretation:
+
+- signed-vs-unsigned is the decisive factor for continuous normals:
+  the signed shared continuous row was nearly random, while unsigned
+  continuous normals are geometrically strong on both same-context and
+  off-diagonal evaluation.
+- `udf_distance` remains alive at the same time.
+- keep this as strong support for continuous target design, but the discrete
+  unsigned shared line remains the safer canonical multi-type mainline.

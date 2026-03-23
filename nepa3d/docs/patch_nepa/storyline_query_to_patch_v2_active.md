@@ -1,6 +1,6 @@
 # QueryNEPA -> PatchNEPA v2 Storyline
 
-Last updated: 2026-03-23
+Last updated: 2026-03-24
 
 ## 1. Purpose
 
@@ -320,6 +320,31 @@ First shared multi-type gate (`DISTANCE + NORMAL`, discrete):
 - however, the current `mesh_normal` qualitative quality is too weak for a
   paper-face figure.
 
+Unsigned-normal rescue (`DISTANCE + NORMAL_UNSIGNED`, discrete):
+
+- simple hemisphere folding rescues the mesh branch substantially:
+  - same/offdiag `mesh_normal_unsigned acc = 0.5773 / 0.3832`
+  - versus signed `mesh_normal acc = 0.3181 / 0.2119`
+- `udf_distance` stays stable at the same time:
+  - same/offdiag `acc = 0.3877 / 0.2005`
+- TYPE-switch assets become visibly stronger for the mesh task, so the
+  first shared multi-type line is no longer bottlenecked mainly by signed
+  winding noise.
+
+Unsigned-normal rescue (`DISTANCE + NORMAL_UNSIGNED`, continuous):
+
+- the same sign fix also rescues the shared continuous branch:
+  - `mesh_normal_unsigned mean_cos = 0.7954 / 0.6829`
+    on same/offdiag
+  - versus signed shared continuous `mesh_normal mean_cos = 0.0023 / 0.0084`
+- `udf_distance` stays viable at the same time
+  (`same/offdiag MAE = 0.0305 / 0.1229`).
+- interpretation:
+  - signed-target pathology, not continuous regression itself, was the main
+    reason the earlier shared continuous `mesh_normal` line failed.
+  - however, the discrete unsigned shared line is still the cleaner current
+    mainline for multi-type promptability.
+
 Shared continuous `DISTANCE + NORMAL`:
 
 - `udf_distance` stays alive,
@@ -330,9 +355,11 @@ Shared continuous `DISTANCE + NORMAL`:
 Current safest CQA read:
 
 - strongest single line: `independent + shuffled + full_q` on `udf_distance`,
-- first multi-type gate: `DISTANCE + NORMAL` discrete shared checkpoint,
-- current limitation: multi-type promptability exists, but `mesh_normal` is not
-  yet strong enough to carry the paper-face headline by itself.
+- first multi-type gate: `DISTANCE + NORMAL_UNSIGNED` discrete shared checkpoint,
+- current limitation: multi-type promptability is now real, but the mesh side
+  still needs figure-quality polishing and likely an additional mesh-family
+  answer beyond unsigned normals; continuous multi-type is now supportive
+  rather than negative, but not yet the canonical mainline.
 
 ## 6. Practical Delta: PatchNEPA v2 vs PointGPT
 

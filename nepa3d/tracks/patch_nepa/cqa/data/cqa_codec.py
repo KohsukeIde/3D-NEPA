@@ -71,7 +71,35 @@ def _fibonacci_dirs(n: int) -> np.ndarray:
     return d
 
 
+def _hemisphere_dirs(n: int) -> np.ndarray:
+    n = int(max(n, 1))
+    i = np.arange(n, dtype=np.float32)
+    phi = math.pi * (3.0 - math.sqrt(5.0))
+    z = (i + np.float32(0.5)) / np.float32(n)
+    r = np.sqrt(np.clip(1.0 - z * z, 0.0, 1.0))
+    theta = phi * i
+    x = np.cos(theta) * r
+    y = np.sin(theta) * r
+    d = np.stack([x, y, z], axis=1).astype(np.float32)
+    d /= np.linalg.norm(d, axis=1, keepdims=True) + 1e-8
+    return d
+
+
+def canonicalize_normals_unsigned(normals: np.ndarray) -> np.ndarray:
+    n = np.asarray(normals, dtype=np.float32).reshape(-1, 3).copy()
+    n /= np.linalg.norm(n, axis=1, keepdims=True) + 1e-8
+    eps = np.float32(1e-8)
+    flip = (n[:, 2] < 0.0)
+    tie_z = np.abs(n[:, 2]) <= eps
+    flip |= tie_z & (n[:, 1] < 0.0)
+    tie_zy = tie_z & (np.abs(n[:, 1]) <= eps)
+    flip |= tie_zy & (n[:, 0] < 0.0)
+    n[flip] *= np.float32(-1.0)
+    return n.astype(np.float32, copy=False)
+
+
 _NORMAL_DIRS = _fibonacci_dirs(ANSWER_RANGES["mesh_normal"][1] - ANSWER_RANGES["mesh_normal"][0])
+_NORMAL_UNSIGNED_DIRS = _hemisphere_dirs(ANSWER_RANGES["mesh_normal"][1] - ANSWER_RANGES["mesh_normal"][0])
 _CURV_SPEC = ScalarBinning(n_bins=64, vmin=-0.5, vmax=0.5, log=False)
 _THICK_SPEC = ScalarBinning(n_bins=64, vmin=1e-3, vmax=1.0, log=True)
 _CLEAR_SPEC = ScalarBinning(n_bins=64, vmin=1e-3, vmax=1.0, log=True)
@@ -165,6 +193,14 @@ def quantize_normals_to_vocab(normals: np.ndarray) -> np.ndarray:
     n = np.asarray(normals, dtype=np.float32)
     n = n / (np.linalg.norm(n, axis=1, keepdims=True) + 1e-8)
     dots = n @ _NORMAL_DIRS.T
+    idx = np.argmax(dots, axis=1).astype(np.int64)
+    off, _ = ANSWER_RANGES["mesh_normal"]
+    return idx + int(off)
+
+
+def quantize_normals_unsigned_to_vocab(normals: np.ndarray) -> np.ndarray:
+    n = canonicalize_normals_unsigned(normals)
+    dots = n @ _NORMAL_UNSIGNED_DIRS.T
     idx = np.argmax(dots, axis=1).astype(np.int64)
     off, _ = ANSWER_RANGES["mesh_normal"]
     return idx + int(off)

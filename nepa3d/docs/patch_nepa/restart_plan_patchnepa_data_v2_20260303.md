@@ -1,6 +1,6 @@
 # Patch-NEPA Restart Plan (Data-v2 + CPAC Alignment)
 
-Last updated: 2026-03-23
+Last updated: 2026-03-24
 
 ## 1. Purpose
 
@@ -3192,3 +3192,101 @@ Decision:
 - do not promote shared continuous multi-type,
 - keep continuous target design limited to task-specific ablations until a
   substantially better `mesh_normal` recipe exists.
+
+## 80. Unsigned normals rescue the first shared mesh branch without hurting `udf_distance` (2026-03-24)
+
+Canonical sources:
+
+- train:
+  - `runs/cqa/patchnepa_cqa_distnorm_unsigned_shared_20260323_223425/cqa_distnorm_unsigned_independent_g2_s10000`
+- same/offdiag suite:
+  - `results/cqa_multitype/patchnepa_cqa_distnorm_unsigned_shared_20260323_223425_suite/cqa_distnorm_unsigned_suite.json`
+- TYPE-switch assets:
+  - `results/cqa_multitype/patchnepa_cqa_distnorm_unsigned_shared_20260323_223425_typeswitch/cqa_distnorm_unsigned_type_switch_pc/index.json`
+
+Key read:
+
+- same-context:
+  - `udf_distance`: `acc=0.3877` vs majority `0.0379`
+  - `mesh_normal_unsigned`: `acc=0.5773` vs majority `0.3066`
+- off-diagonal:
+  - `udf_distance`: `acc=0.2005` vs majority `0.0397`
+  - `mesh_normal_unsigned`: `acc=0.3832` vs majority `0.3068`
+- signed-vs-unsigned normal comparison:
+  - signed shared `mesh_normal` had only `same/offdiag acc=0.3181/0.2119`
+  - unsigned rescue raises this to `0.5773/0.3832`
+- controls remain positive:
+  - same `mesh_normal_unsigned`:
+    - `delta_ce(no_context)=+2.8272`
+    - `delta_ce(wrong_shape_same)=+0.8838`
+    - `delta_ce(wrong_shape_other)=+2.9044`
+  - offdiag `mesh_normal_unsigned`:
+    - `delta_ce(no_context)=+1.8018`
+    - `delta_ce(wrong_shape_same)=+0.4756`
+    - `delta_ce(wrong_shape_other)=+1.6854`
+- TYPE-switch pack is visibly stronger than the signed-normal pack:
+  - first exported shapes now show `mean_cos` around `0.46-0.68`
+    instead of near-zero / sign-flipped behavior.
+
+Interpretation:
+
+- the earlier weakness of `mesh_normal` was largely a target-pathology issue,
+  not evidence that mesh-family prompting is intrinsically weak.
+- simple hemisphere folding is enough to recover a materially stronger shared
+  `DISTANCE + NORMAL` checkpoint.
+- `udf_distance` is not harmed by this rescue pass.
+
+Decision:
+
+- treat `mesh_normal_unsigned` as the new default mesh-normal target for the
+  shared discrete CQA line.
+- keep winding-subset filtering, bin-coarsening, and AO/viscount as follow-up
+  improvements rather than immediate blockers.
+
+## 81. Unsigned normals also rescue the shared continuous branch, but not enough to replace the discrete mainline (2026-03-24)
+
+Canonical sources:
+
+- train:
+  - `runs/cqa/patchnepa_cqa_distnorm_unsigned_continuous_20260324_012238/cqa_distnorm_unsigned_continuous_independent_g2_s10000`
+- same/offdiag suite:
+  - `results/cqa_multitype/patchnepa_cqa_distnorm_unsigned_continuous_20260324_012238_suite/cqa_distnorm_continuous_suite.json`
+
+Key read:
+
+- same-context:
+  - `udf_distance`: `MAE=0.0305`, `RMSE=0.0434`, `IoU@0.05=0.7344`
+  - `mesh_normal_unsigned`: `mean_cos=0.7954`, `angle_deg=27.85`
+- off-diagonal:
+  - `udf_distance`: `MAE=0.1229`, `RMSE=0.1964`, `IoU@0.05=0.4516`
+  - `mesh_normal_unsigned`: `mean_cos=0.6829`, `angle_deg=39.64`
+- controls remain clearly positive:
+  - same `mesh_normal_unsigned`:
+    - `delta_mean_cos(no_context)=-0.3141`
+    - `delta_mean_cos(wrong_shape_same)=-0.1605`
+    - `delta_mean_cos(wrong_shape_other)=-0.3348`
+  - offdiag `mesh_normal_unsigned`:
+    - `delta_mean_cos(no_context)=-0.2063`
+    - `delta_mean_cos(wrong_shape_same)=-0.0979`
+    - `delta_mean_cos(wrong_shape_other)=-0.2191`
+- signed-vs-unsigned continuous comparison:
+  - signed shared continuous `mesh_normal` was effectively dead
+    (`mean_cos=0.0023/0.0084`)
+  - unsigned rescue raises this to `0.7954/0.6829`
+
+Interpretation:
+
+- the earlier shared continuous failure on normals was largely due to signed
+  target pathology rather than a total incompatibility between continuous target
+  design and mesh-family prompting.
+- however, the safest mainline does not change yet:
+  - unsigned continuous normals are geometrically strong,
+  - but the shared discrete unsigned line is still the cleaner canonical
+    multi-type branch for current paper claims.
+
+Decision:
+
+- keep unsigned continuous as a strong supporting ablation and evidence that
+  continuous target design is viable once the sign pathology is removed.
+- do not replace the discrete unsigned shared line as the canonical
+  multi-type mainline yet.

@@ -15,7 +15,12 @@ from torch.utils.data import DataLoader
 from nepa3d.data.mixed_pretrain import load_mix_config
 from nepa3d.data.modelnet40_index import list_npz
 from nepa3d.tracks.patch_nepa.cqa.analysis.eval_primitive_answering_tokens import apply_control
-from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import ASK_DISTANCE, ASK_NORMAL, encode_answers_from_fields
+from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
+    ASK_DISTANCE,
+    ASK_NORMAL,
+    encode_answers_from_fields,
+    quantize_normals_unsigned_to_vocab,
+)
 from nepa3d.tracks.patch_nepa.cqa.data.dataset_cqa_continuous import (
     V2PrimitiveCQAContinuousDataset,
     cqa_continuous_collate_fn,
@@ -140,16 +145,22 @@ def _distance_metrics(y_true: np.ndarray, y_pred: np.ndarray, tau: float) -> Dic
     }
 
 
-def _normal_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+def _normal_metrics(y_true: np.ndarray, y_pred: np.ndarray, *, unsigned: bool = False) -> Dict[str, float]:
     y_true = np.asarray(y_true, dtype=np.float32).reshape(-1, 3)
     y_pred = np.asarray(y_pred, dtype=np.float32).reshape(-1, 3)
     y_true = y_true / (np.linalg.norm(y_true, axis=1, keepdims=True) + 1e-8)
     y_pred = y_pred / (np.linalg.norm(y_pred, axis=1, keepdims=True) + 1e-8)
     cos = np.sum(y_true * y_pred, axis=1)
+    if bool(unsigned):
+        cos = np.abs(cos)
     cos = np.clip(cos, -1.0, 1.0)
     angle = np.degrees(np.arccos(cos))
-    pred_code = encode_answers_from_fields(ASK_NORMAL, {"normal": y_pred})
-    tgt_code = encode_answers_from_fields(ASK_NORMAL, {"normal": y_true})
+    if bool(unsigned):
+        pred_code = quantize_normals_unsigned_to_vocab(y_pred)
+        tgt_code = quantize_normals_unsigned_to_vocab(y_true)
+    else:
+        pred_code = encode_answers_from_fields(ASK_NORMAL, {"normal": y_pred})
+        tgt_code = encode_answers_from_fields(ASK_NORMAL, {"normal": y_true})
     pred_code = np.asarray(pred_code, dtype=np.int64).reshape(-1)
     tgt_code = np.asarray(tgt_code, dtype=np.int64).reshape(-1)
     tgt_hist = np.bincount(tgt_code, minlength=640)
@@ -211,6 +222,10 @@ def _evaluate_dataset(
         y_true = y_true[eff]
         y_pred = y_pred[eff]
         out = _normal_metrics(y_true, y_pred)
+    elif spec.name == "mesh_normal_unsigned":
+        y_true = y_true[eff]
+        y_pred = y_pred[eff]
+        out = _normal_metrics(y_true, y_pred, unsigned=True)
     else:
         raise KeyError(f"unsupported continuous task={spec.name}")
     out.update(
@@ -289,7 +304,7 @@ def _run_controls(
                         f"delta_iou@{float(tau):g}": float(row[f"iou@{float(tau):g}"]) - float(base[f"iou@{float(tau):g}"]),
                         "delta_code_acc_proxy": float(row["code_acc_proxy"]) - float(base["code_acc_proxy"]),
                     }
-                elif row["task_name"] == "mesh_normal":
+                elif row["task_name"] in {"mesh_normal", "mesh_normal_unsigned"}:
                     task_delta[row["task_name"]] = {
                         "delta_mean_cos": float(row["mean_cos"]) - float(base["mean_cos"]),
                         "delta_angle_deg": float(row["angle_deg"]) - float(base["angle_deg"]),

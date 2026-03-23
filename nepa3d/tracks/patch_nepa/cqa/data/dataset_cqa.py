@@ -18,6 +18,7 @@ from .cqa_codec import (
     ANSWER_VOCAB_SIZE,
     CQA_VOCAB_VERSION,
     encode_answers_from_fields,
+    quantize_normals_unsigned_to_vocab,
 )
 
 QUERY_ORDER_MODES = ("sampled", "shuffled", "ordered_xyz")
@@ -133,6 +134,12 @@ TASK_REGISTRY: Dict[str, CQATaskSpec] = {
     # Surface-aligned tasks always use surf_xyz as carrier.
     "mesh_normal": CQATaskSpec(
         name="mesh_normal",
+        query_type=ASK_NORMAL,
+        query_xyz_key="surf_xyz",
+        field_keys={"normal": "mesh_surf_n"},
+    ),
+    "mesh_normal_unsigned": CQATaskSpec(
+        name="mesh_normal_unsigned",
         query_type=ASK_NORMAL,
         query_xyz_key="surf_xyz",
         field_keys={"normal": "mesh_surf_n"},
@@ -264,7 +271,10 @@ class V2PrimitiveCQADataset(Dataset):
             for alias, key in self.task.field_keys.items():
                 arr = np.asarray(npz[key], dtype=np.float32)
                 fields[alias] = arr[q_idx]
-            answer_code = encode_answers_from_fields(self.task.query_type, fields)
+            if self.task.name == "mesh_normal_unsigned":
+                answer_code = quantize_normals_unsigned_to_vocab(fields["normal"])
+            else:
+                answer_code = encode_answers_from_fields(self.task.query_type, fields)
             qry_xyz, answer_code, qry_src_code = _apply_query_order(
                 qry_xyz=qry_xyz,
                 answer_code=answer_code,

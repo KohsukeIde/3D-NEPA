@@ -7,7 +7,12 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import ASK_DISTANCE, ASK_NORMAL, CQA_VOCAB_VERSION
+from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
+    ASK_DISTANCE,
+    ASK_NORMAL,
+    CQA_VOCAB_VERSION,
+    canonicalize_normals_unsigned,
+)
 from nepa3d.tracks.patch_nepa.cqa.data.dataset_cqa import (
     QUERY_ORDER_MODES,
     TASK_REGISTRY,
@@ -50,11 +55,12 @@ def _apply_query_order_continuous(
 
 
 class V2PrimitiveCQAContinuousDataset(Dataset):
-    """Continuous typed-answer dataset for `mesh_normal` and `udf_distance`.
+    """Continuous typed-answer dataset for `mesh_normal`, `mesh_normal_unsigned`, and `udf_distance`.
 
     The output target is a shared 3D vector with a mask:
       - `udf_distance`: `[dist, 0, 0]`, mask `[1, 0, 0]`
       - `mesh_normal` : `[nx, ny, nz]`, mask `[1, 1, 1]`
+      - `mesh_normal_unsigned` : canonical-hemisphere `[nx, ny, nz]`, mask `[1, 1, 1]`
     """
 
     def __init__(
@@ -74,8 +80,10 @@ class V2PrimitiveCQAContinuousDataset(Dataset):
     ) -> None:
         super().__init__()
         self.paths = list(paths)
-        if task_name not in {"mesh_normal", "udf_distance"}:
-            raise KeyError(f"continuous dataset only supports mesh_normal/udf_distance, got {task_name}")
+        if task_name not in {"mesh_normal", "mesh_normal_unsigned", "udf_distance"}:
+            raise KeyError(
+                f"continuous dataset only supports mesh_normal/mesh_normal_unsigned/udf_distance, got {task_name}"
+            )
         self.task = TASK_REGISTRY[task_name]
         self.context_source = str(context_source)
         self.n_ctx = int(n_ctx)
@@ -152,6 +160,8 @@ class V2PrimitiveCQAContinuousDataset(Dataset):
             elif self.task.query_type == ASK_NORMAL:
                 normal = np.asarray(npz["mesh_surf_n"], dtype=np.float32)[q_idx]
                 normal = normal / (np.linalg.norm(normal, axis=1, keepdims=True) + 1e-8)
+                if self.task.name == "mesh_normal_unsigned":
+                    normal = canonicalize_normals_unsigned(normal)
                 target_vec = normal.astype(np.float32, copy=False)
                 target_mask = np.ones_like(target_vec, dtype=np.float32)
             else:

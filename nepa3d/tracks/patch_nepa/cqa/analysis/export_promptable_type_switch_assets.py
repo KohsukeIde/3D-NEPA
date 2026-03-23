@@ -91,6 +91,16 @@ def _decode_normal(code: np.ndarray) -> np.ndarray:
     return vec.reshape(*code.shape, 3).astype(np.float32, copy=False)
 
 
+def _decode_normal_unsigned(code: np.ndarray) -> np.ndarray:
+    from nepa3d.tracks.patch_nepa.cqa.data import cqa_codec as codec
+
+    code = np.asarray(code, dtype=np.int64)
+    lo, hi = ANSWER_RANGES["mesh_normal"]
+    idx = np.clip(code.reshape(-1) - int(lo), 0, int(hi - lo) - 1)
+    vec = np.asarray(codec._NORMAL_UNSIGNED_DIRS, dtype=np.float32)[idx]
+    return vec.reshape(*code.shape, 3).astype(np.float32, copy=False)
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser("export_promptable_type_switch_assets")
     p.add_argument("--ckpt", type=str, required=True)
@@ -204,14 +214,19 @@ def main() -> None:
             np.save(shape_dir / f"{task_name}_pred_code.npy", pred_code)
             np.save(shape_dir / f"{task_name}_gt_code.npy", gt_code)
 
-            if task_name == "mesh_normal":
-                gt_val = _decode_normal(gt_code)
-                pred_val = _decode_normal(pred_code)
+            if task_name in {"mesh_normal", "mesh_normal_unsigned"}:
+                if task_name == "mesh_normal_unsigned":
+                    gt_val = _decode_normal_unsigned(gt_code)
+                    pred_val = _decode_normal_unsigned(pred_code)
+                    cos = np.abs(np.sum(pred_val * gt_val, axis=1))
+                else:
+                    gt_val = _decode_normal(gt_code)
+                    pred_val = _decode_normal(pred_code)
+                    cos = np.sum(pred_val * gt_val, axis=1)
                 np.save(shape_dir / f"{task_name}_pred_vec.npy", pred_val)
                 np.save(shape_dir / f"{task_name}_gt_vec.npy", gt_val)
                 _export_pc(shape_dir / f"{task_name}_pred_points.ply", q_xyz, colors=_normal_colors(pred_val))
                 _export_pc(shape_dir / f"{task_name}_gt_points.ply", q_xyz, colors=_normal_colors(gt_val))
-                cos = np.sum(pred_val * gt_val, axis=1)
                 mean_cos = float(np.mean(np.clip(cos, -1.0, 1.0)))
                 shape_summary["tasks"][task_name] = {
                     "token_acc": float(np.mean(pred_code.reshape(-1) == gt_code.reshape(-1))),
