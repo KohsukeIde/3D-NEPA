@@ -67,6 +67,7 @@ def _load_pretrained_model(ckpt_path: str) -> PrimitiveAnsweringModel:
         answer_vocab=int(args.get("answer_vocab", ANSWER_VOCAB_SIZE)),
         generator_depth=int(args.get("generator_depth", 2)),
         answer_factorization=str(args.get("answer_factorization", "ar")),
+        query_interface_mode=str(args.get("query_interface_mode", "full_q")),
     )
     model.load_state_dict(ckpt["model"], strict=False)
     return model

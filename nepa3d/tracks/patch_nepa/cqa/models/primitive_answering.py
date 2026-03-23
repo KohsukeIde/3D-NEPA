@@ -45,6 +45,8 @@ class PrimitiveAnsweringModel(nn.Module):
 
     Sequence:
       [BOS, C_1..C_P, SEP_CQ, TYPE, Q_1..Q_N, SEP_A, A_1..A_N]
+      or, when ``query_interface_mode='no_q'``:
+      [BOS, C_1..C_P, SEP_CQ, TYPE, SEP_A, A_1..A_N]
 
     Prompt block (BOS + C + SEP_CQ + TYPE + Q + SEP_A) is bidirectional.
 
@@ -58,6 +60,11 @@ class PrimitiveAnsweringModel(nn.Module):
     ``parallel`` and ``independent`` separate two questions:
       - does the gain come from the Q/A interface rather than AR decoding?
       - do answer slots need to interact with each other at all?
+
+    ``query_interface_mode`` separates a third question:
+      - ``full_q``: answer slots can read the full query block
+      - ``self_q``: answer slot ``A_i`` can read only ``Q_i``
+      - ``no_q``  : there is no explicit query block, only the per-slot query anchor
     """
 
     def __init__(
@@ -79,6 +86,7 @@ class PrimitiveAnsweringModel(nn.Module):
         answer_vocab: int = 640,
         generator_depth: int = 2,
         answer_factorization: str = "ar",
+        query_interface_mode: str = "full_q",
     ) -> None:
         super().__init__()
         self.d_model = int(d_model)
@@ -91,6 +99,12 @@ class PrimitiveAnsweringModel(nn.Module):
             raise ValueError(
                 "answer_factorization must be 'ar', 'parallel', or "
                 f"'independent', got {answer_factorization!r}"
+            )
+        self.query_interface_mode = str(query_interface_mode).strip().lower()
+        if self.query_interface_mode not in {"full_q", "self_q", "no_q"}:
+            raise ValueError(
+                "query_interface_mode must be 'full_q', 'self_q', or 'no_q', "
+                f"got {query_interface_mode!r}"
             )
 
         self.ctx_patch = PointPatchEmbed(
@@ -136,14 +150,19 @@ class PrimitiveAnsweringModel(nn.Module):
 
     @staticmethod
     def _build_prompt_answer_mask(
-        prompt_len: int,
+        *,
+        ctx_len: int,
+        n_query: int,
         n_answer: int,
         device: torch.device,
-        *,
         answer_factorization: str = "ar",
+        query_interface_mode: str = "full_q",
     ) -> torch.Tensor:
+        prompt_len = 1 + int(ctx_len) + 1 + 1 + int(n_query) + 1
         total = int(prompt_len) + int(n_answer)
         mask = torch.zeros((total, total), device=device, dtype=torch.bool)
+        query_start = 1 + int(ctx_len) + 1 + 1
+        query_end = query_start + int(n_query)
         if int(n_answer) > 0:
             if str(answer_factorization) == "ar":
                 tri = torch.triu(torch.ones((n_answer, n_answer), device=device, dtype=torch.bool), diagonal=1)
@@ -157,6 +176,20 @@ class PrimitiveAnsweringModel(nn.Module):
             else:
                 raise KeyError(f"unknown answer_factorization={answer_factorization}")
             mask[:int(prompt_len), int(prompt_len):] = True
+            if int(n_query) > 0:
+                if str(query_interface_mode) == "full_q":
+                    pass
+                elif str(query_interface_mode) == "self_q":
+                    qmask = torch.ones((n_answer, n_query), device=device, dtype=torch.bool)
+                    diag = min(int(n_answer), int(n_query))
+                    if diag > 0:
+                        idx = torch.arange(diag, device=device)
+                        qmask[idx, idx] = False
+                    mask[int(prompt_len):, int(query_start):int(query_end)] = qmask
+                elif str(query_interface_mode) == "no_q":
+                    pass
+                else:
+                    raise KeyError(f"unknown query_interface_mode={query_interface_mode}")
         return mask
 
     def encode_context(self, ctx_xyz: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -203,24 +236,30 @@ class PrimitiveAnsweringModel(nn.Module):
             type_scalar = qry_type
         type_tok = self.query_type_embed(type_scalar).unsqueeze(1)
 
+        if self.query_interface_mode == "no_q":
+            q_tok_seq = q_tok[:, :0, :]
+        else:
+            q_tok_seq = q_tok
         seq = torch.cat(
             [
                 self.bos.expand(b, 1, -1),
                 ctx_tok,
                 self.sep_cq.expand(b, 1, -1),
                 type_tok,
-                q_tok,
+                q_tok_seq,
                 self.sep_a.expand(b, 1, -1),
                 ans_in,
             ],
             dim=1,
         )
-        prompt_len = 1 + ctx_tok.shape[1] + 1 + 1 + q_tok.shape[1] + 1
+        prompt_len = 1 + ctx_tok.shape[1] + 1 + 1 + q_tok_seq.shape[1] + 1
         mask = self._build_prompt_answer_mask(
-            prompt_len,
-            ans_in.shape[1],
-            seq.device,
+            ctx_len=int(ctx_tok.shape[1]),
+            n_query=int(q_tok_seq.shape[1]),
+            n_answer=int(ans_in.shape[1]),
+            device=seq.device,
             answer_factorization=self.answer_factorization,
+            query_interface_mode=self.query_interface_mode,
         )
         h = self.backbone(seq, is_causal=False, attn_mask_override=mask)
         h_ans = h[:, prompt_len:, :]
@@ -242,7 +281,7 @@ class PrimitiveAnsweringModel(nn.Module):
             hidden=h,
             ctx_tokens=ctx_tok,
             ctx_centers=ctx_centers,
-            query_tokens=q_tok,
+            query_tokens=q_tok_seq,
             answer_hidden=h_ans,
             sequence=seq,
             attn_mask=mask,

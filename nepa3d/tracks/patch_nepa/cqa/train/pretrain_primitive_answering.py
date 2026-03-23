@@ -84,6 +84,13 @@ def parse_args() -> argparse.Namespace:
         choices=["ar", "parallel", "independent"],
         help="Answer decoding factorization: causal AR, joint non-AR, or strictly independent non-AR.",
     )
+    p.add_argument(
+        "--query_interface_mode",
+        type=str,
+        default="full_q",
+        choices=["full_q", "self_q", "no_q"],
+        help="How answer slots can access the query block: full list, self-only, or no explicit query block.",
+    )
     return p.parse_args()
 
 
@@ -237,6 +244,7 @@ def main() -> None:
         answer_vocab=int(args.answer_vocab),
         generator_depth=int(args.generator_depth),
         answer_factorization=str(args.answer_factorization),
+        query_interface_mode=str(args.query_interface_mode),
     )
     opt = optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
     model, opt, loader = accelerator.prepare(model, opt, loader)
