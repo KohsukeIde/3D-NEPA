@@ -1,6 +1,6 @@
 # QueryNEPA -> PatchNEPA v2 Storyline
 
-Last updated: 2026-03-14
+Last updated: 2026-03-23
 
 ## 1. Purpose
 
@@ -47,7 +47,7 @@ Important 2026-03-14 correction:
 | PatchNEPA v2 cosine path | ShapeNet-family token-path branch | latent cosine with QA stream | repeated `cos_tgt ~= cos_prev`, tiny gap, high copy-win | no evidence it beats v1 | active negative result |
 | PatchNEPA v2 recon `g0` full300 | ShapeNet-family token-path branch | `ctx(chamfer)+q/a(mse)` composite recon | positive `recon_lift_q/a` survives full run | historical file-split FT readout `0.8399 / 0.8348 / 0.8102`; official rerun pending | validated no-generator reconstruction baseline |
 | PatchNEPA v2 recon `g2` full300 | ShapeNet-family token-path branch | composite recon + generator depth `2` | strongest current pretrain/transfer line | historical file-split FT readout `0.8485 / 0.8589 / 0.8140`; official rerun pending | current main reconstruction line, benchmark under revalidation |
-| PatchNEPA v2 explicit-query CQA | worldvis-derived additive branch | answer-only CE over typed queries | wiring is valid; full-range single-task `udf_distance` beats the majority baseline, but near-surface and `pc_bank` diagnostics collapse and no cross-primitive headline exists yet | no valid cross-primitive headline yet | experimental branch, not headline-safe yet |
+| PatchNEPA v2 explicit-query CQA | frozen `world_v3` CQA branch | typed primitive-conditioned answering / completion | `udf_distance` is now stable on same-context, zero-shot off-diagonal, dense completion, and factorization/format ablations; strongest row is `independent + shuffled`, with `DISTANCE + NORMAL` as the first shared multi-type gate | ScanObjectNN utility is paper-safe; Q-block and continuous ablations show shared context + per-query fixed-target answering is the main driver | active method branch; strongest new line, but multi-type headline is still stabilizing |
 | Point-MAE | external baseline | masked point-patch modeling | protocol sanity and benchmark context | use benchmark page only | external benchmark context |
 | PointGPT | ShapeNet control line | causal reconstruction with generator | healthy reconstruction-style learning curve | use as pretrain/control reference, not a direct benchmark row here | reconstruction reference |
 
@@ -98,7 +98,11 @@ This is the active research line. The main result split is now:
 - cosine-family path: repeatedly collapses in cosine-space diagnostics,
 - reconstruction-family path: shows positive objective-aligned lift, and the
   full300 `g2` line now exceeds the historical v1 FT reference on all three
-  ScanObjectNN variants.
+  ScanObjectNN variants,
+- explicit-query CQA path: `udf_distance` now supports same-context,
+  zero-shot off-diagonal transfer, dense completion, and systematic
+  factorization/format ablations, with `independent` prompting as the strongest
+  current setting.
 
 ### 4.4 Point-MAE
 
@@ -245,6 +249,90 @@ Interpretation:
   or "PatchNEPA forgot to add CD-L12 logging".
 - the main unresolved differences are now objective/task structure and generator
   usage.
+
+### 5.6 Explicit-Query CQA: `udf_distance` Is Now a Real Method Line, and `independent` Is the Strongest Factorization
+
+What is now established on frozen `world_v3`:
+
+- same-context `udf_distance` is stable and well above majority,
+- zero-shot off-diagonal `surf -> pc_bank` transfer is real,
+- dense completion and mesh-side readout are both meaningful,
+- the seed-pack confirms the read is not a single-seed artifact.
+
+Factorization and ordering study:
+
+- shuffled:
+  - `AR`: same/offdiag token acc `0.3173 / 0.1766`
+  - `joint non-AR ("parallel")`: `0.3790 / 0.2057`
+  - `independent`: `0.3898 / 0.2235`
+- ordered-query ablation does **not** rescue AR:
+  - ordered AR remains below ordered parallel,
+  - shuffled parallel still gives the best overall completion row.
+
+Interpretation:
+
+- the primitive-native **Q/A schema** is doing the main work,
+- AR is viable, but the current evidence does **not** show it is necessary,
+- answer-to-answer interaction is also not necessary under the present
+  `udf_distance` setup.
+
+### 5.7 Q-Block and Target-Design Ablations Narrow the Minimal Interface
+
+Query-block ablation (`full_q / self_q / no_q`) under `independent`:
+
+- `full_q` remains the best row,
+- but `self_q` and even `no_q` stay close on same/offdiag controls and
+  completion,
+- therefore the strongest current read is:
+  - shared context + per-query anchor is the main mechanism,
+  - full query-list conditioning helps only marginally.
+
+Continuous target-design ablation (`udf_distance` only):
+
+- continuous scalar regression does **not** collapse,
+- same-context field metrics are very strong,
+- but off-diagonal and mesh-side metrics are mixed versus the discrete
+  independent line.
+
+Interpretation:
+
+- fixed-target promptable answering does not inherently require discrete CE,
+- but continuous target design is currently best treated as a serious ablation,
+  not yet as the canonical mainline.
+
+### 5.8 Format Baselines and the First Shared Multi-Type Gate
+
+Format baselines:
+
+- both `k-plane` and `tri-plane` can solve the task under the same
+  `world_v3 + udf_distance` protocol,
+- but the strongest completion row still belongs to CQA,
+- the best P4a baseline is currently `tri-plane` on MAE/RMSE and `k-plane` on
+  IoU, not a full replacement for CQA.
+
+First shared multi-type gate (`DISTANCE + NORMAL`, discrete):
+
+- the shared checkpoint is alive on both tasks:
+  - `udf_distance` stays strong,
+  - `mesh_normal` stays above majority on same/offdiag, though weaker.
+- the TYPE-switch asset path also works technically from the same frozen model
+  and same context.
+- however, the current `mesh_normal` qualitative quality is too weak for a
+  paper-face figure.
+
+Shared continuous `DISTANCE + NORMAL`:
+
+- `udf_distance` stays alive,
+- `mesh_normal` effectively fails,
+- so typed continuous regression is currently task-specific rather than a ready
+  shared multi-type replacement.
+
+Current safest CQA read:
+
+- strongest single line: `independent + shuffled + full_q` on `udf_distance`,
+- first multi-type gate: `DISTANCE + NORMAL` discrete shared checkpoint,
+- current limitation: multi-type promptability exists, but `mesh_normal` is not
+  yet strong enough to carry the paper-face headline by itself.
 
 ## 6. Practical Delta: PatchNEPA v2 vs PointGPT
 

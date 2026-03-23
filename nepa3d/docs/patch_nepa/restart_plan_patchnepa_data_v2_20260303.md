@@ -3025,3 +3025,170 @@ Decision:
   earlier `parallel > AR` read is **not** only an artifact of shuffled queries,
 - if AR is to be defended further, it will require a stronger ordering design
   than the present lexicographic XYZ scan rather than just “turn shuffling off.”
+
+## 76. First `DISTANCE + NORMAL` shared checkpoint passes the minimal multi-type gate, but the figure pack is not headline-ready yet (2026-03-23)
+
+Canonical sources:
+
+- shared train/eval suite:
+  - `runs/cqa/patchnepa_cqa_distnorm_shared_20260323_163842/cqa_distnorm_independent_g2_s10000`
+  - `results/cqa_multitype/patchnepa_cqa_multitype_suite_20260323_163842/cqa_distnorm_suite.json`
+- TYPE-switch asset export:
+  - `results/cqa_multitype/patchnepa_cqa_type_switch_20260323_163842/cqa_distnorm_type_switch_pc/index.json`
+
+Key read:
+
+- same-context:
+  - `udf_distance`: `acc=0.3765` vs majority `0.0379`,
+    `delta_ce(no_context)=+19.1205`,
+    `wrong_shape_same=+3.7672`,
+    `wrong_shape_other=+13.4272`
+  - `mesh_normal`: `acc=0.3181` vs majority `0.1602`,
+    `delta_ce(no_context)=+3.0356`,
+    `wrong_shape_same=+0.8193`,
+    `wrong_shape_other=+2.9917`
+- off-diagonal (`pc_bank`):
+  - `udf_distance`: `acc=0.1959` vs majority `0.0397`,
+    `delta_ce(no_context)=+15.2049`
+  - `mesh_normal`: `acc=0.2119` vs majority `0.1561`,
+    `delta_ce(no_context)=+2.0808`
+
+Interpretation:
+
+- the first shared `DISTANCE + NORMAL` checkpoint is scientifically alive on
+  both tasks; `mesh_normal` is weaker than `udf_distance`, but it is still
+  above majority and context-sensitive on same and offdiag.
+- the TYPE-switch export path also works technically: one frozen checkpoint and
+  one fixed `pc_bank` context can emit task-distinct `udf_distance` and
+  `mesh_normal` artifacts.
+- however, the current `mesh_normal` qualitative quality is not strong enough
+  for a paper-face Figure 1, so this should be treated as a working asset pack,
+  not yet as a finished headline visual.
+
+Decision:
+
+- keep `DISTANCE + NORMAL` as the first passed multi-type gate,
+- keep `THICKNESS` deferred,
+- do not yet claim that the TYPE-switch figure is publishable.
+
+## 77. Continuous `udf_distance` is viable under independent prompting, but it does not yet replace the discrete mainline (2026-03-23)
+
+Canonical sources:
+
+- train:
+  - `runs/cqa/patchnepa_cqa_udfdist_continuous_20260323_180210/cqa_udfdist_continuous_independent_g2_s10000`
+- same/offdiag controls:
+  - `runs/cqa/patchnepa_cqa_udfdist_continuous_20260323_180210/cqa_udfdist_continuous_independent_g2_s10000/eval_controls_128.json`
+  - `results/cqa_eval/patchnepa_cqa_udfdist_continuous_20260323_180210_offdiag/cqa_udfdist_continuous_offdiag_eval.json`
+- same/offdiag completion:
+  - `results/cqa_completion/patchnepa_cqa_udfdist_continuous_20260323_180210_same_completion/cqa_udfdist_continuous_same_translation_g16_s64.json`
+  - `results/cqa_completion/patchnepa_cqa_udfdist_continuous_20260323_180210_offdiag_completion/cqa_udfdist_continuous_offdiag_translation_g16_s64.json`
+
+Key read:
+
+- same controls:
+  - `MAE=0.01225`, `RMSE=0.01670`, `IoU@0.05=0.8793`
+  - `delta_mae(no_context)=+0.4949`
+  - `delta_mae(wrong_shape_same)=+0.0896`
+  - `delta_mae(wrong_shape_other)=+0.1888`
+- same completion:
+  - `MAE=0.01319`, `RMSE=0.01773`, `IoU@0.05=0.7575`,
+    `mesh_chamfer_l2=0.00429`, `mesh_fscore=0.1617`
+- offdiag completion:
+  - `MAE=0.13625`, `RMSE=0.22313`, `IoU@0.05=0.4043`,
+    `mesh_chamfer_l2=0.09090`, `mesh_fscore=0.0865`
+
+Interpretation:
+
+- continuous scalar regression does **not** collapse under the current
+  independent CQA schema.
+- same-context field metrics are very strong and competitive with the discrete
+  independent line.
+- however, off-diagonal transfer and mesh-side metrics are mixed relative to
+  the discrete mainline, so the result is best used as a target-design
+  ablation, not as an immediate mainline replacement.
+
+Decision:
+
+- keep continuous `udf_distance` alive as a serious ablation axis,
+- keep discrete `independent/full_q` as the canonical mainline for now.
+
+## 78. Full query-list conditioning is secondary; `self_q` and even `no_q` stay close to the strongest line (2026-03-23)
+
+Canonical sources:
+
+- `full_q` baseline:
+  - `runs/cqa/patchnepa_cqa_udfdist_curve_independent_20260322/cqa_udfdist_worldv3_independent_g2_s10000/eval_controls_128.json`
+  - `results/cqa_eval/patchnepa_cqa_udfdist_offdiag_independent_20260322/cqa_udfdist_offdiag_eval_independent.json`
+- `self_q`:
+  - `runs/cqa/patchnepa_cqa_udfdist_qblockpack_20260323_181049_selfq/cqa_udfdist_worldv3_independent_selfq_g2_s10000/eval_controls_128.json`
+  - `results/cqa_eval/patchnepa_cqa_udfdist_qblockpack_20260323_181049_selfq_offdiag/cqa_udfdist_offdiag_eval_selfq.json`
+- `no_q`:
+  - `runs/cqa/patchnepa_cqa_udfdist_qblockpack_20260323_181049_noq/cqa_udfdist_worldv3_independent_noq_g2_s10000/eval_controls_128.json`
+  - `results/cqa_eval/patchnepa_cqa_udfdist_qblockpack_20260323_181049_noq_offdiag/cqa_udfdist_offdiag_eval_noq.json`
+
+Key read:
+
+- same token accuracy:
+  - `full_q=0.3898`
+  - `self_q=0.3777`
+  - `no_q=0.3772`
+- offdiag token accuracy:
+  - `full_q=0.2235`
+  - `self_q=0.2286`
+  - `no_q=0.2157`
+- same completion MAE / IoU@0.05 / F-score:
+  - `full_q=0.0207 / 0.7537 / 0.1702`
+  - `self_q=0.0211 / 0.7343 / 0.1627`
+  - `no_q=0.0213 / 0.7314 / 0.1601`
+
+Interpretation:
+
+- `full_q` is still the single strongest row, but the gap to `self_q` and even
+  `no_q` is small.
+- strong `no_context` and `wrong_shape_*` controls remain under all three
+  interfaces.
+- the main mechanism is therefore shared context plus per-query anchoring,
+  rather than heavy dependence on the full query list.
+
+Decision:
+
+- keep `full_q` as the canonical strongest implementation,
+- but update the scientific read: full query-set conditioning is helpful only
+  marginally and is **not** the main explanation for the CQA gain.
+
+## 79. Shared continuous `DISTANCE + NORMAL` keeps distance alive but fails on normals (2026-03-23)
+
+Canonical sources:
+
+- train:
+  - `runs/cqa/patchnepa_cqa_distnorm_continuous_20260323_205137/cqa_distnorm_continuous_independent_g2_s10000`
+- suite:
+  - `results/cqa_multitype/patchnepa_cqa_distnorm_continuous_20260323_205137_suite/cqa_distnorm_continuous_suite.json`
+
+Key read:
+
+- same-context:
+  - `udf_distance`: `MAE=0.0274`, `RMSE=0.0380`, `IoU@0.05=0.7403`,
+    `code_acc_proxy=0.2347` vs majority `0.0378`
+  - `mesh_normal`: `mean_cos=0.0023`, `angle_deg=89.85`,
+    `code_acc_proxy=0.0049` vs majority `0.1491`
+- off-diagonal:
+  - `udf_distance`: `MAE=0.1372`, `RMSE=0.2229`, `IoU@0.05=0.4168`,
+    `code_acc_proxy=0.1376` vs majority `0.0383`
+  - `mesh_normal`: `mean_cos=0.0084`, `angle_deg=89.48`,
+    `code_acc_proxy=0.0045` vs majority `0.1518`
+
+Interpretation:
+
+- typed continuous regression can preserve the `udf_distance` branch.
+- however, under the current shared `DISTANCE + NORMAL` recipe, `mesh_normal`
+  is effectively not learned.
+- this means continuous target design is presently task-specific rather than a
+  ready shared multi-type replacement.
+
+Decision:
+
+- do not promote shared continuous multi-type,
+- keep continuous target design limited to task-specific ablations until a
+  substantially better `mesh_normal` recipe exists.

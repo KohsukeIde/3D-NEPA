@@ -7303,3 +7303,145 @@ Operational interpretation:
   - the main gain comes from the primitive-native **Q/A interface**,
   - AR is viable but not yet shown to be necessary,
   - shuffled queries are not the sole reason AR underperforms.
+
+## 168. First `DISTANCE + NORMAL` shared checkpoint stays alive on both tasks; TYPE-switch assets land but are not yet paper-face (2026-03-23)
+
+Lineage:
+
+- shared train / suite:
+  - train `115782`
+  - suite `115783`
+- TYPE-switch asset export:
+  - `115784`
+
+Summary:
+
+- same-context:
+  - `udf_distance`: `acc=0.376526`, majority `=0.037903`,
+    `delta_ce(no_context)=+19.120546`
+  - `mesh_normal`: `acc=0.318115`, majority `=0.160217`,
+    `delta_ce(no_context)=+3.035598`
+- off-diagonal (`pc_bank`):
+  - `udf_distance`: `acc=0.195862`, majority `=0.039673`,
+    `delta_ce(no_context)=+15.204853`
+  - `mesh_normal`: `acc=0.211914`, majority `=0.156067`,
+    `delta_ce(no_context)=+2.080836`
+- TYPE-switch asset pack:
+  - same frozen checkpoint and same `pc_bank` context can emit
+    `context_points.ply`, `mesh_normal_{pred,gt}_points.ply`,
+    `udf_distance_fields.npz`, and `udf_distance_{pred,gt_levelset}_mesh.obj`.
+
+Operational interpretation:
+
+- the first `DISTANCE + NORMAL` shared checkpoint passes the minimal scientific
+  gate: both tasks are above majority and context-sensitive on same/offdiag.
+- however, the qualitative `mesh_normal` outputs are still weak, so the
+  TYPE-switch asset pack is technically valid but not yet a paper-face figure.
+
+## 169. Continuous `udf_distance` remains viable without collapse, but discrete stays the canonical mainline (2026-03-23)
+
+Lineage:
+
+- train `115851`
+- offdiag controls `115852`
+- same completion `115853`
+- offdiag completion `115854`
+
+Summary:
+
+- same controls:
+  - `MAE=0.012248`
+  - `RMSE=0.016697`
+  - `IoU@0.05=0.879288`
+  - `delta_mae(no_context)=+0.494854`
+  - `delta_mae(wrong_shape_same)=+0.089588`
+  - `delta_mae(wrong_shape_other)=+0.188842`
+- same completion:
+  - `MAE=0.013186`
+  - `RMSE=0.017733`
+  - `IoU@0.05=0.757485`
+  - `mesh_chamfer_l2=0.004287`
+  - `mesh_fscore=0.161704`
+- offdiag completion:
+  - `MAE=0.136251`
+  - `RMSE=0.223132`
+  - `IoU@0.05=0.404277`
+  - `mesh_chamfer_l2=0.090904`
+  - `mesh_fscore=0.086477`
+
+Operational interpretation:
+
+- continuous scalar regression for `udf_distance` does **not** collapse under
+  the current independent CQA schema.
+- same-context field metrics are strong, but off-diagonal and mesh-side reads
+  are mixed relative to the discrete independent row.
+- keep continuous target design as a serious ablation axis, not as the new
+  canonical mainline.
+
+## 170. Query-block ablation shows that full query-list conditioning helps only marginally (2026-03-23)
+
+Lineage:
+
+- `self_q` chain:
+  - train `115858`
+  - offdiag `115859`
+  - same completion `115860`
+  - offdiag completion `115861`
+- `no_q` chain:
+  - train `115862`
+  - offdiag `115863`
+  - same completion `115864`
+  - offdiag completion `115865`
+- baseline:
+  - `full_q` = `C019`
+
+Summary:
+
+- same token accuracy:
+  - `full_q=0.389771`
+  - `self_q=0.377686`
+  - `no_q=0.377197`
+- offdiag token accuracy:
+  - `full_q=0.223511`
+  - `self_q=0.228577`
+  - `no_q=0.215698`
+- same completion (`MAE / IoU@0.05 / mesh_fscore`):
+  - `full_q=0.020696 / 0.753730 / 0.170162`
+  - `self_q=0.021140 / 0.734338 / 0.162727`
+  - `no_q=0.021348 / 0.731425 / 0.160111`
+
+Operational interpretation:
+
+- `full_q` remains the best single row, but the gap to `self_q` and `no_q` is
+  small.
+- strong controls survive all three settings.
+- the main gain comes from shared context plus per-query anchoring; the full
+  query list is helpful but not the dominant source of performance.
+
+## 171. Shared continuous `DISTANCE + NORMAL` keeps distance alive but fails on normals (2026-03-23)
+
+Lineage:
+
+- train `115972`
+- same/offdiag suite `115973`
+
+Summary:
+
+- same-context:
+  - `udf_distance`: `MAE=0.027435`, `RMSE=0.037976`, `IoU@0.05=0.740323`,
+    `code_acc_proxy=0.234741` vs majority `0.037781`
+  - `mesh_normal`: `mean_cos=0.002258`, `angle_deg=89.849701`,
+    `code_acc_proxy=0.004883` vs majority `0.149109`
+- off-diagonal:
+  - `udf_distance`: `MAE=0.137208`, `RMSE=0.222924`, `IoU@0.05=0.416787`,
+    `code_acc_proxy=0.137634` vs majority `0.038330`
+  - `mesh_normal`: `mean_cos=0.008406`, `angle_deg=89.479912`,
+    `code_acc_proxy=0.004517` vs majority `0.151794`
+
+Operational interpretation:
+
+- shared typed continuous regression can preserve `udf_distance`,
+- but under the current `DISTANCE + NORMAL` recipe it does not learn
+  `mesh_normal` in a useful way,
+- so continuous target design remains task-specific for now rather than a
+  shared multi-type replacement.
