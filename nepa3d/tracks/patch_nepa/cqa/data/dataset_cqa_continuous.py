@@ -10,6 +10,7 @@ from torch.utils.data import Dataset
 from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
     ASK_DISTANCE,
     ASK_NORMAL,
+    ASK_VISIBILITY,
     CQA_VOCAB_VERSION,
     canonicalize_normals_unsigned,
 )
@@ -55,10 +56,11 @@ def _apply_query_order_continuous(
 
 
 class V2PrimitiveCQAContinuousDataset(Dataset):
-    """Continuous typed-answer dataset for `mesh_normal`, `mesh_normal_unsigned`, and `udf_distance`.
+    """Continuous typed-answer dataset for scalar/norm CQA tasks.
 
     The output target is a shared 3D vector with a mask:
       - `udf_distance`: `[dist, 0, 0]`, mask `[1, 0, 0]`
+      - `mesh_ao` : `[ao, 0, 0]`, mask `[1, 0, 0]`
       - `mesh_normal` : `[nx, ny, nz]`, mask `[1, 1, 1]`
       - `mesh_normal_unsigned` : canonical-hemisphere `[nx, ny, nz]`, mask `[1, 1, 1]`
     """
@@ -80,9 +82,11 @@ class V2PrimitiveCQAContinuousDataset(Dataset):
     ) -> None:
         super().__init__()
         self.paths = list(paths)
-        if task_name not in {"mesh_normal", "mesh_normal_unsigned", "udf_distance"}:
+        if task_name not in {"mesh_normal", "mesh_normal_unsigned", "udf_distance", "mesh_ao"}:
             raise KeyError(
-                f"continuous dataset only supports mesh_normal/mesh_normal_unsigned/udf_distance, got {task_name}"
+                "continuous dataset only supports "
+                "mesh_normal/mesh_normal_unsigned/mesh_ao/udf_distance, "
+                f"got {task_name}"
             )
         self.task = TASK_REGISTRY[task_name]
         self.context_source = str(context_source)
@@ -155,6 +159,13 @@ class V2PrimitiveCQAContinuousDataset(Dataset):
                 dist = np.asarray(npz["udf_qry_dist"], dtype=np.float32).reshape(-1)[q_idx]
                 target_vec = np.zeros((int(q_idx.shape[0]), 3), dtype=np.float32)
                 target_vec[:, 0] = dist
+                target_mask = np.zeros_like(target_vec)
+                target_mask[:, 0] = 1.0
+            elif self.task.query_type == ASK_VISIBILITY and self.task.name == "mesh_ao":
+                ao = np.asarray(npz["mesh_surf_ao"], dtype=np.float32).reshape(-1)[q_idx]
+                ao = np.clip(ao, 0.0, 1.0)
+                target_vec = np.zeros((int(q_idx.shape[0]), 3), dtype=np.float32)
+                target_vec[:, 0] = ao
                 target_mask = np.zeros_like(target_vec)
                 target_mask[:, 0] = 1.0
             elif self.task.query_type == ASK_NORMAL:

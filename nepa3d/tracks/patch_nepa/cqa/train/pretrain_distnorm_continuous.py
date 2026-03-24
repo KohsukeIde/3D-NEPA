@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import ASK_DISTANCE, ASK_NORMAL
+from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import ASK_DISTANCE, ASK_NORMAL, ASK_VISIBILITY
 from nepa3d.tracks.patch_nepa.cqa.data.dataset_cqa_continuous import cqa_continuous_collate_fn
 from nepa3d.tracks.patch_nepa.cqa.data.mixed_pretrain_cqa_continuous import build_mixed_pretrain_cqa_continuous
 from nepa3d.tracks.patch_nepa.cqa.models.primitive_answering_distnorm_continuous import (
@@ -161,6 +161,7 @@ def main() -> None:
         model.train()
         losses = []
         dist_maes = []
+        ao_maes = []
         norm_coses = []
         for batch in loader:
             ctx_xyz = batch["ctx_xyz"].to(device=device, dtype=torch.float32, non_blocking=True)
@@ -179,6 +180,14 @@ def main() -> None:
                 dist_loss = F.mse_loss(dist_pred, dist_tgt)
                 task_losses.append(dist_loss)
                 dist_maes.append(float((dist_pred.detach() - dist_tgt.detach()).abs().mean().cpu().item()))
+
+            ao_mask = qry_type == int(ASK_VISIBILITY)
+            if bool(ao_mask.any()):
+                ao_pred = pred[..., 0][ao_mask]
+                ao_tgt = target_vec[..., 0][ao_mask]
+                ao_loss = F.mse_loss(ao_pred, ao_tgt)
+                task_losses.append(ao_loss)
+                ao_maes.append(float((ao_pred.detach() - ao_tgt.detach()).abs().mean().cpu().item()))
 
             norm_mask = qry_type == int(ASK_NORMAL)
             if bool(norm_mask.any()):
@@ -204,10 +213,12 @@ def main() -> None:
             if global_step % 100 == 0:
                 lr_now = float(opt.param_groups[0]["lr"])
                 dist_mae_val = float(np.mean(dist_maes[-1:])) if dist_maes else float("nan")
+                ao_mae_val = float(np.mean(ao_maes[-1:])) if ao_maes else float("nan")
                 norm_cos_val = float(np.mean(norm_coses[-1:])) if norm_coses else float("nan")
                 print(
                     f"ep={ep} step={global_step} loss={loss_val:.6f} "
-                    f"dist_mae={dist_mae_val:.6f} norm_cos={norm_cos_val:.6f} lr={lr_now:.8f}"
+                    f"dist_mae={dist_mae_val:.6f} ao_mae={ao_mae_val:.6f} "
+                    f"norm_cos={norm_cos_val:.6f} lr={lr_now:.8f}"
                 )
 
             global_step += 1
@@ -218,8 +229,12 @@ def main() -> None:
                 break
         ep_loss = float(np.mean(losses)) if losses else float("nan")
         ep_dist_mae = float(np.mean(dist_maes)) if dist_maes else float("nan")
+        ep_ao_mae = float(np.mean(ao_maes)) if ao_maes else float("nan")
         ep_norm_cos = float(np.mean(norm_coses)) if norm_coses else float("nan")
-        print(f"[epoch] ep={ep} loss_mean={ep_loss:.6f} dist_mae_mean={ep_dist_mae:.6f} norm_cos_mean={ep_norm_cos:.6f}")
+        print(
+            f"[epoch] ep={ep} loss_mean={ep_loss:.6f} dist_mae_mean={ep_dist_mae:.6f} "
+            f"ao_mae_mean={ep_ao_mae:.6f} norm_cos_mean={ep_norm_cos:.6f}"
+        )
         if (ep % max(1, int(args.save_every)) == 0) or stop or (ep == int(args.epochs) - 1):
             _save_ckpt(model=model, args=args, save_dir=save_dir, epoch=ep, global_step=global_step, name=f"ckpt_ep{ep:03d}.pt")
             _save_ckpt(model=model, args=args, save_dir=save_dir, epoch=ep, global_step=global_step, name="ckpt_final.pt")

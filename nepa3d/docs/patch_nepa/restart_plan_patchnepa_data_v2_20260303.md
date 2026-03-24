@@ -3400,3 +3400,60 @@ Decision:
 - if the project wants a second mesh-family quantity beyond
   `mesh_normal_unsigned`, revisit `AO` and/or continuous scalar readouts rather
   than promoting this first-pass discrete viscount task.
+
+## 84. `mesh_ao` survives as the first useful smooth scalar mesh-family answer (2026-03-24)
+
+Canonical sources:
+
+- train:
+  - `runs/cqa/patchnepa_cqa_meshao_continuous_20260324_142309/cqa_meshao_continuous_independent_g2_s10000`
+- same/offdiag suite:
+  - `results/cqa_multitype/patchnepa_cqa_meshao_continuous_20260324_142309_r1_suite/cqa_meshao_continuous_suite.json`
+
+Implementation note:
+
+- `mesh_ao` is treated as a continuous scalar mesh-family task on the
+  `ASK_VISIBILITY` carrier.
+- output head uses the shared continuous scalar branch with `sigmoid` decoding
+  into `[0, 1]`.
+- the first suite attempt (`116360`) only exposed a reporting bug because
+  scalar AO has no `code_acc_proxy`; the scientific read comes from the rerun
+  suite `116362`.
+
+Key read:
+
+- same-context:
+  - `MAE=0.1821`, `RMSE=0.2037`
+  - `pred_mean=0.8234`, `pred_std=0.0681`
+  - `target_mean=0.8299`, `target_std=0.2147`
+- off-diagonal (`pc_bank`):
+  - `MAE=0.1985`, `RMSE=0.2170`
+  - `pred_mean=0.7915`, `pred_std=0.0658`
+  - `target_mean=0.8266`, `target_std=0.2150`
+- controls stay positive:
+  - same:
+    - `delta_mae(no_context)=+0.0334`
+    - `delta_mae(wrong_shape_same)=+0.0220`
+    - `delta_mae(wrong_shape_other)=+0.0322`
+  - offdiag:
+    - `delta_mae(no_context)=+0.0164`
+    - `delta_mae(wrong_shape_same)=+0.0145`
+    - `delta_mae(wrong_shape_other)=+0.0185`
+
+Interpretation:
+
+- `mesh_ao` does not collapse to a trivial constant:
+  - predictions have non-zero variance,
+  - context removal measurably worsens MAE,
+  - and `wrong_shape_other` hurts more than `wrong_shape_same`.
+- this makes AO a materially better second mesh-family candidate than the
+  failed discrete `mesh_viscount` branch.
+- however, the variance is still compressed relative to the target, so this is
+  a viable first pass rather than a fully mature headline task.
+
+Decision:
+
+- keep `mesh_ao` alive as the best current second mesh-family answer candidate.
+- the next principled gate is shared
+  `DISTANCE + NORMAL_UNSIGNED + AO`, not a return to bitpacked visibility or
+  naive viscount.

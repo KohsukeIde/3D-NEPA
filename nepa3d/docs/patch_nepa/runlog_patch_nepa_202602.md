@@ -7594,3 +7594,43 @@ Operational interpretation:
   naive discrete viscount count is not enough.
 - if a second mesh-family answer is still needed, revisit `AO` or continuous
   scalar variants instead of promoting this task as-is.
+
+## 176. `mesh_ao` continuous first pass is positive (2026-03-24)
+
+Lineage:
+
+- train `116359`
+- first suite `116360` failed only on a scalar-formatting assumption
+- suite rerun `116362`
+
+Summary:
+
+- same-context:
+  - `MAE=0.182056`
+  - `RMSE=0.203659`
+  - `pred_mean=0.823413`, `pred_std=0.068097`
+  - `target_mean=0.829857`, `target_std=0.214702`
+- off-diagonal:
+  - `MAE=0.198499`
+  - `RMSE=0.217016`
+  - `pred_mean=0.791543`, `pred_std=0.065753`
+  - `target_mean=0.826576`, `target_std=0.215035`
+- controls:
+  - same:
+    - `delta_mae(no_context)=+0.033359`
+    - `delta_mae(wrong_shape_same)=+0.022004`
+    - `delta_mae(wrong_shape_other)=+0.032168`
+  - offdiag:
+    - `delta_mae(no_context)=+0.016377`
+    - `delta_mae(wrong_shape_same)=+0.014481`
+    - `delta_mae(wrong_shape_other)=+0.018489`
+
+Operational interpretation:
+
+- `mesh_ao` is the first smooth mesh-family scalar that survives the current
+  continuous promptable recipe without immediately collapsing.
+- it is clearly better-positioned than discrete `mesh_viscount`, because the
+  controls are positive and `wrong_shape_other > wrong_shape_same` on both same
+  and offdiag.
+- the output variance is still smaller than the target variance, so this is a
+  positive first pass rather than a fully solved mesh-family scalar task.

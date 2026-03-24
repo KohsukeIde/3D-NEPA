@@ -382,12 +382,29 @@ Thickness rescue (`DISTANCE + THICKNESS_VALID_QBIN`, discrete):
     answer;
   - AO and/or continuous scalar mesh answers remain better next candidates.
 
+`mesh_ao` first pass (continuous scalar):
+
+- unlike `mesh_viscount`, AO survives its first same/offdiag control screen:
+  - same/offdiag `MAE = 0.1821 / 0.1985`
+  - positive `no_context` deltas on both settings
+  - `wrong_shape_other > wrong_shape_same` on both settings
+- interpretation:
+  - AO is the first smooth mesh-family scalar that looks scientifically alive
+    under the current promptable recipe;
+  - it is therefore the best current candidate for the second mesh-family
+    answer after `normal_unsigned`.
+  - however, its prediction variance is still compressed relative to the
+    target, so it should be treated as a positive first pass rather than a
+    fully mature headline row.
+
 Current safest CQA read:
 
 - strongest single line: `independent + shuffled + full_q` on `udf_distance`,
 - first multi-type gate: `DISTANCE + NORMAL_UNSIGNED` discrete shared checkpoint,
 - viable second UDF-family candidate:
   `DISTANCE + THICKNESS_VALID_QBIN`,
+- viable second mesh-family candidate:
+  continuous `mesh_ao`,
 - current limitation: multi-type promptability is now real, but the mesh side
   still needs figure-quality polishing and an additional mesh-family
   answer beyond unsigned normals; continuous multi-type is now supportive

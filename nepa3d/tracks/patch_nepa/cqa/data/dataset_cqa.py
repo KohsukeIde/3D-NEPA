@@ -178,6 +178,12 @@ TASK_REGISTRY: Dict[str, CQATaskSpec] = {
         field_keys={"viscount": "mesh_surf_viscount"},
         encode_mode="mesh_viscount",
     ),
+    "mesh_ao": CQATaskSpec(
+        name="mesh_ao",
+        query_type=ASK_VISIBILITY,
+        query_xyz_key="surf_xyz",
+        field_keys={"ao": "mesh_surf_ao"},
+    ),
     "udf_thickness": CQATaskSpec(
         name="udf_thickness",
         query_type=ASK_THICKNESS,

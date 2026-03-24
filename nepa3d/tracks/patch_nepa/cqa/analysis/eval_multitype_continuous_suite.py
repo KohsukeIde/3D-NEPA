@@ -18,6 +18,7 @@ from nepa3d.tracks.patch_nepa.cqa.analysis.eval_primitive_answering_tokens impor
 from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
     ASK_DISTANCE,
     ASK_NORMAL,
+    ASK_VISIBILITY,
     encode_answers_from_fields,
     quantize_normals_unsigned_to_vocab,
 )
@@ -145,6 +146,20 @@ def _distance_metrics(y_true: np.ndarray, y_pred: np.ndarray, tau: float) -> Dic
     }
 
 
+def _scalar_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+    y_true = np.asarray(y_true, dtype=np.float32).reshape(-1)
+    y_pred = np.asarray(y_pred, dtype=np.float32).reshape(-1)
+    return {
+        "mae": float(np.mean(np.abs(y_pred - y_true))),
+        "rmse": float(np.sqrt(np.mean((y_pred - y_true) ** 2))),
+        "pred_mean": float(np.mean(y_pred)),
+        "pred_std": float(np.std(y_pred)),
+        "target_mean": float(np.mean(y_true)),
+        "target_std": float(np.std(y_true)),
+        "n_tokens": int(y_true.size),
+    }
+
+
 def _normal_metrics(y_true: np.ndarray, y_pred: np.ndarray, *, unsigned: bool = False) -> Dict[str, float]:
     y_true = np.asarray(y_true, dtype=np.float32).reshape(-1, 3)
     y_pred = np.asarray(y_pred, dtype=np.float32).reshape(-1, 3)
@@ -226,6 +241,10 @@ def _evaluate_dataset(
         y_true = y_true[eff]
         y_pred = y_pred[eff]
         out = _normal_metrics(y_true, y_pred, unsigned=True)
+    elif spec.name == "mesh_ao":
+        y_true = y_true[eff, :, 0]
+        y_pred = y_pred[eff, :, 0]
+        out = _scalar_metrics(y_true, y_pred)
     else:
         raise KeyError(f"unsupported continuous task={spec.name}")
     out.update(
@@ -304,6 +323,12 @@ def _run_controls(
                         f"delta_iou@{float(tau):g}": float(row[f"iou@{float(tau):g}"]) - float(base[f"iou@{float(tau):g}"]),
                         "delta_code_acc_proxy": float(row["code_acc_proxy"]) - float(base["code_acc_proxy"]),
                     }
+                elif row["task_name"] == "mesh_ao":
+                    task_delta[row["task_name"]] = {
+                        "delta_mae": float(row["mae"]) - float(base["mae"]),
+                        "delta_rmse": float(row["rmse"]) - float(base["rmse"]),
+                        "delta_pred_std": float(row["pred_std"]) - float(base["pred_std"]),
+                    }
                 elif row["task_name"] in {"mesh_normal", "mesh_normal_unsigned"}:
                     task_delta[row["task_name"]] = {
                         "delta_mean_cos": float(row["mean_cos"]) - float(base["mean_cos"]),
@@ -324,11 +349,15 @@ def _flatten(tag: str, payload: dict[str, Any], controls: list[str]) -> list[dic
             "task": task,
             "context_source": row["context_source"],
             "n_tokens": int(row["n_tokens"]),
-            "code_acc_proxy": float(row["code_acc_proxy"]),
-            "majority_code_acc": float(row["majority_code_acc"]),
-            "pred_top1_share": float(row["pred_top1_share"]),
-            "pred_unique_codes": int(row["pred_unique_codes"]),
         }
+        if "code_acc_proxy" in row:
+            item["code_acc_proxy"] = float(row["code_acc_proxy"])
+        if "majority_code_acc" in row:
+            item["majority_code_acc"] = float(row["majority_code_acc"])
+        if "pred_top1_share" in row:
+            item["pred_top1_share"] = float(row["pred_top1_share"])
+        if "pred_unique_codes" in row:
+            item["pred_unique_codes"] = int(row["pred_unique_codes"])
         if task == "udf_distance":
             item.update(
                 {
@@ -342,6 +371,24 @@ def _flatten(tag: str, payload: dict[str, Any], controls: list[str]) -> list[dic
                 {
                     "mean_cos": float(row["mean_cos"]),
                     "angle_deg": float(row["angle_deg"]),
+                }
+            )
+        elif task == "mesh_normal_unsigned":
+            item.update(
+                {
+                    "mean_cos": float(row["mean_cos"]),
+                    "angle_deg": float(row["angle_deg"]),
+                }
+            )
+        elif task == "mesh_ao":
+            item.update(
+                {
+                    "mae": float(row["mae"]),
+                    "rmse": float(row["rmse"]),
+                    "pred_mean": float(row["pred_mean"]),
+                    "pred_std": float(row["pred_std"]),
+                    "target_mean": float(row["target_mean"]),
+                    "target_std": float(row["target_std"]),
                 }
             )
         for c in controls:

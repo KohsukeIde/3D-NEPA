@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 from nepa3d.core.models.causal_transformer import CausalTransformer
 from nepa3d.core.models.point_patch_embed import PointPatchEmbed
-from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import ASK_DISTANCE, ASK_NORMAL
+from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import ASK_DISTANCE, ASK_NORMAL, ASK_VISIBILITY
 
 
 class _MLP(nn.Module):
@@ -44,13 +44,18 @@ class DistNormContinuousOutput:
 
 
 class PrimitiveAnsweringDistNormContinuousModel(nn.Module):
-    """Shared continuous typed-answer model for `mesh_normal` + `udf_distance`.
+    """Shared continuous typed-answer model for scalar/norm CQA tasks.
 
     This keeps the current strongest CQA skeleton:
       - shared context encoder
       - typed query tokens in the prompt
       - independent answer slots
     but replaces the discrete answer vocab with a shared 3D regression head.
+
+    Current typed decoding:
+      - `ASK_DISTANCE`   -> positive scalar via `softplus`
+      - `ASK_VISIBILITY` -> `[0,1]` scalar via `sigmoid` (used by `mesh_ao`)
+      - `ASK_NORMAL`     -> normalized 3D vector
     """
 
     def __init__(
@@ -132,11 +137,18 @@ class PrimitiveAnsweringDistNormContinuousModel(nn.Module):
     def _decode_typed(raw_answer: torch.Tensor, qry_type: torch.Tensor, distance_floor: float) -> torch.Tensor:
         pred = torch.zeros_like(raw_answer)
         dist_mask = qry_type == int(ASK_DISTANCE)
+        vis_mask = qry_type == int(ASK_VISIBILITY)
         norm_mask = qry_type == int(ASK_NORMAL)
         if bool(dist_mask.any()):
             pred[..., 0] = torch.where(
                 dist_mask,
                 F.softplus(raw_answer[..., 0]) + float(distance_floor),
+                pred[..., 0],
+            )
+        if bool(vis_mask.any()):
+            pred[..., 0] = torch.where(
+                vis_mask,
+                torch.sigmoid(raw_answer[..., 0]),
                 pred[..., 0],
             )
         if bool(norm_mask.any()):
