@@ -397,6 +397,24 @@ Thickness rescue (`DISTANCE + THICKNESS_VALID_QBIN`, discrete):
     target, so it should be treated as a positive first pass rather than a
     fully mature headline row.
 
+Shared continuous `DISTANCE + NORMAL_UNSIGNED + AO`:
+
+- the first mesh-two-answer shared line now survives:
+  - same-context:
+    - `udf_distance MAE = 0.0360`, `IoU@0.05 = 0.7030`
+    - `mesh_normal_unsigned mean_cos = 0.7776`
+    - `mesh_ao MAE = 0.1927`
+  - off-diagonal:
+    - `udf_distance MAE = 0.0948`, `IoU@0.05 = 0.4858`
+    - `mesh_normal_unsigned mean_cos = 0.6828`
+    - `mesh_ao MAE = 0.1988`
+- interpretation:
+  - adding AO slightly weakens same-context `DISTANCE + NORMAL_UNSIGNED`,
+    but does not collapse the existing UDF or mesh-normal reads;
+  - AO itself remains context-sensitive inside the shared checkpoint;
+  - this makes the branch the first viable shared line with two mesh-family
+    answers, even if it is not yet the safest publishable mainline.
+
 Current safest CQA read:
 
 - strongest single line: `independent + shuffled + full_q` on `udf_distance`,
@@ -405,10 +423,13 @@ Current safest CQA read:
   `DISTANCE + THICKNESS_VALID_QBIN`,
 - viable second mesh-family candidate:
   continuous `mesh_ao`,
+- first viable mesh-two-answer shared expansion:
+  continuous `DISTANCE + NORMAL_UNSIGNED + AO`,
 - current limitation: multi-type promptability is now real, but the mesh side
   still needs figure-quality polishing and an additional mesh-family
-  answer beyond unsigned normals; continuous multi-type is now supportive
-  rather than negative, but not yet the canonical mainline.
+  answer beyond unsigned normals; continuous multi-type is now clearly
+  supportive rather than negative, but the discrete shared
+  `DISTANCE + NORMAL_UNSIGNED` branch is still the safer canonical mainline.
 
 ## 6. Practical Delta: PatchNEPA v2 vs PointGPT
 

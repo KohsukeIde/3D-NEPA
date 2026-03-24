@@ -3457,3 +3457,66 @@ Decision:
 - the next principled gate is shared
   `DISTANCE + NORMAL_UNSIGNED + AO`, not a return to bitpacked visibility or
   naive viscount.
+
+## 85. Shared continuous `DISTANCE + NORMAL_UNSIGNED + AO` survives as the first mesh-two-answer line (2026-03-24)
+
+Canonical sources:
+
+- train:
+  - `runs/cqa/patchnepa_cqa_distnormao_continuous_20260324_181908/cqa_distnormao_continuous_independent_g2_s10000`
+- same/offdiag suite:
+  - `results/cqa_multitype/patchnepa_cqa_distnormao_continuous_20260324_181908_suite/cqa_distnormao_continuous_suite.json`
+
+Key read:
+
+- same-context:
+  - `udf_distance`: `MAE=0.0360`, `RMSE=0.0528`, `IoU@0.05=0.7030`
+  - `mesh_normal_unsigned`: `mean_cos=0.7776`, `angle_deg=29.97`
+  - `mesh_ao`: `MAE=0.1927`, `RMSE=0.2115`
+- off-diagonal (`pc_bank`):
+  - `udf_distance`: `MAE=0.0948`, `RMSE=0.1492`, `IoU@0.05=0.4858`
+  - `mesh_normal_unsigned`: `mean_cos=0.6828`, `angle_deg=39.91`
+  - `mesh_ao`: `MAE=0.1988`, `RMSE=0.2149`
+- controls stay positive:
+  - same:
+    - `mesh_ao delta_mae(no_context)=+0.0283`
+    - `mesh_ao wrong_shape_other - correct = +0.0196`
+    - `mesh_ao wrong_shape_same - correct = +0.0099`
+  - offdiag:
+    - `mesh_ao delta_mae(no_context)=+0.0209`
+    - `mesh_ao wrong_shape_other - correct = +0.0143`
+    - `mesh_ao wrong_shape_same - correct = +0.0067`
+
+Comparison against earlier gates:
+
+- versus the shared continuous `DISTANCE + NORMAL_UNSIGNED` pair:
+  - same-context regresses slightly:
+    - `udf_distance MAE 0.0360` vs `0.0305`
+    - `mesh_normal_unsigned mean_cos 0.7776` vs `0.7954`
+  - off-diagonal is preserved or improved:
+    - `udf_distance MAE 0.0948` vs `0.1229`
+    - `IoU@0.05 0.4858` vs `0.4516`
+    - `mesh_normal_unsigned mean_cos 0.6828` vs `0.6829`
+- versus single-task `mesh_ao`:
+  - AO itself largely survives co-training:
+    - same `MAE 0.1927` vs `0.1821`
+    - offdiag `MAE 0.1988` vs `0.1985`
+
+Interpretation:
+
+- this is the first shared line with two mesh-family answers that stays
+  scientifically alive under the current continuous promptable recipe.
+- adding `mesh_ao` does cost some same-context quality on the existing
+  `DISTANCE + NORMAL_UNSIGNED` branch, but it does not collapse either task and
+  it improves the off-diagonal `udf_distance` read.
+- `mesh_ao` remains context-sensitive inside the shared checkpoint, so the
+  positive single-task AO result was not just an isolated artifact.
+
+Decision:
+
+- keep the `DISTANCE + NORMAL_UNSIGNED + AO` shared continuous branch alive as
+  the first viable mesh-two-answer line.
+- still treat the discrete shared `DISTANCE + NORMAL_UNSIGNED` checkpoint as
+  the safer publishable multi-type anchor today.
+- next choice point is whether to add rescued `THICKNESS_VALID_QBIN` to this
+  family or keep UDF and mesh answer expansion on separate branches.

@@ -7634,3 +7634,45 @@ Operational interpretation:
   and offdiag.
 - the output variance is still smaller than the target variance, so this is a
   positive first pass rather than a fully solved mesh-family scalar task.
+
+## 177. Shared continuous `DISTANCE + NORMAL_UNSIGNED + AO` survives (2026-03-24)
+
+Lineage:
+
+- train `116610`
+- same/offdiag suite `116611`
+
+Summary:
+
+- same-context:
+  - `udf_distance`: `MAE=0.035967`, `RMSE=0.052790`, `IoU@0.05=0.703036`
+  - `mesh_normal_unsigned`: `mean_cos=0.777556`, `angle_deg=29.971821`
+  - `mesh_ao`: `MAE=0.192707`, `RMSE=0.211452`
+- off-diagonal:
+  - `udf_distance`: `MAE=0.094833`, `RMSE=0.149223`, `IoU@0.05=0.485845`
+  - `mesh_normal_unsigned`: `mean_cos=0.682783`, `angle_deg=39.912544`
+  - `mesh_ao`: `MAE=0.198809`, `RMSE=0.214946`
+- AO controls remain positive:
+  - same:
+    - `delta_mae(no_context)=+0.028260`
+    - `delta_mae(wrong_shape_same)=+0.009917`
+    - `delta_mae(wrong_shape_other)=+0.019592`
+  - offdiag:
+    - `delta_mae(no_context)=+0.020928`
+    - `delta_mae(wrong_shape_same)=+0.006663`
+    - `delta_mae(wrong_shape_other)=+0.014282`
+
+Operational interpretation:
+
+- the first shared line with two mesh-family answers is now alive:
+  `DISTANCE + NORMAL_UNSIGNED + AO` does not collapse under shared continuous
+  training.
+- there is a real tradeoff:
+  - same-context `udf_distance` and `mesh_normal_unsigned` are a bit worse than
+    the earlier shared continuous pair without AO,
+  - but off-diagonal `udf_distance` improves materially and `mesh_ao` itself
+    survives nearly intact.
+- treat this as a surviving branch rather than the new default headline:
+  discrete shared `DISTANCE + NORMAL_UNSIGNED` is still the safer publishable
+  multi-type checkpoint today, while the AO branch is the first viable
+  mesh-two-answer expansion.

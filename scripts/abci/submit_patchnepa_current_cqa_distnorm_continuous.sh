@@ -8,6 +8,7 @@ cd "${ROOT_DIR}" || exit 1
 STAMP="${STAMP:-$(date +%Y%m%d_%H%M%S)}"
 RUN_SET="${RUN_SET:-patchnepa_cqa_distnorm_continuous_${STAMP}}"
 TRAIN_RUN_TAG="${TRAIN_RUN_TAG:-cqa_distnorm_continuous_independent_g2_s10000}"
+SUITE_RUN_TAG="${SUITE_RUN_TAG:-cqa_distnorm_continuous_suite}"
 
 submit_and_capture_job() {
   local cmd="$1"
@@ -48,7 +49,7 @@ CKPT_PATH="runs/cqa/${RUN_SET}/${TRAIN_RUN_TAG}/ckpt_final.pt"
 
 suite_cmd=$(
   cat <<EOF
-env RUN_SET="${RUN_SET}_suite" RUN_TAG="cqa_distnorm_continuous_suite" \
+env RUN_SET="${RUN_SET}_suite" RUN_TAG="${SUITE_RUN_TAG}" \
 CKPT="${CKPT_PATH}" QSUB_DEPEND="afterok:${train_job}" \
 SAME_MIX_CONFIG="${SAME_MIX_CONFIG:-nepa3d/configs/shapenet_unpaired_mix_v2_cqa_dist_norm_continuous.yaml}" \
 OFFDIAG_MIX_CONFIG="${OFFDIAG_MIX_CONFIG:-nepa3d/configs/shapenet_unpaired_mix_v2_cqa_dist_norm_continuous_pcbank_eval.yaml}" \
