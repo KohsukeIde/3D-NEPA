@@ -3290,3 +3290,113 @@ Decision:
   continuous target design is viable once the sign pathology is removed.
 - do not replace the discrete unsigned shared line as the canonical
   multi-type mainline yet.
+
+## 82. Thickness rescue succeeds under strict valid support + quantile bins (2026-03-24)
+
+Canonical sources:
+
+- local rescue audit:
+  - `results/cqa_audit/patchnepa_cqa_rescue_audit_20260324/summary.json`
+- train:
+  - `runs/cqa/patchnepa_cqa_distthick_valid_shared_20260324_r1/cqa_distthick_valid_independent_g2_s10000`
+- same/offdiag suite:
+  - `results/cqa_multitype/patchnepa_cqa_distthick_valid_shared_20260324_r1_suite/cqa_distthick_valid_suite.json`
+
+Rescue definition:
+
+- new task: `udf_thickness_valid_qbin`
+- valid support requires:
+  - `udf_surf_hit_out > 0.5`
+  - `udf_surf_thickness > 1e-4`
+  - `udf_surf_t_in > 1e-4`, `udf_surf_t_out > 1e-4`
+  - `udf_surf_t_in < 1.999`, `udf_surf_t_out < 1.999`
+- codebook rebuilt on the valid support only using quantile bins
+- filtered query pools are padded by replacement so the training batch shape
+  remains fixed at `n_qry=64`
+
+Key read:
+
+- rescue audit on `256` shapes:
+  - `majority_baseline_acc=0.0564`
+  - `entropy_bits=5.4502`
+  - `unique_codes=64`
+  - support rate `0.1063`
+- same-context shared run:
+  - `udf_distance`: `acc=0.3531` vs majority `0.0379`
+  - `udf_thickness_valid_qbin`: `acc=0.0921` vs majority `0.0241`
+  - `udf_thickness_valid_qbin` controls:
+    - `delta_ce(no_context)=+4.5633`
+    - `delta_ce(wrong_shape_same)=+0.5413`
+    - `delta_ce(wrong_shape_other)=+1.5433`
+- off-diagonal shared run:
+  - `udf_distance`: `acc=0.1890` vs majority `0.0397`
+  - `udf_thickness_valid_qbin`: `acc=0.0449` vs majority `0.0236`
+  - `udf_thickness_valid_qbin` controls:
+    - `delta_ce(no_context)=+3.9108`
+    - `delta_ce(wrong_shape_same)=+0.3254`
+    - `delta_ce(wrong_shape_other)=+1.0267`
+
+Interpretation:
+
+- the original `udf_thickness` failure was dominated by support/coding
+  pathology rather than proving that thickness is a bad UDF-family answer.
+- once the trivially-zero and trace-saturated points are removed and the bins
+  are rebuilt on positive support, thickness becomes a real promptable answer:
+  above-majority on same/offdiag, with positive context- and shape-dependent
+  controls.
+- `udf_distance` stays alive in the same shared checkpoint, so the rescue does
+  not destroy the anchor UDF task.
+
+Decision:
+
+- promote `udf_thickness_valid_qbin` as the current viable second UDF-family
+  answer candidate.
+- keep further polish options open (continuous thickness, probe-thickness, or
+  alternate valid-support definitions), but the branch is no longer blocked by
+  the old zero-dominant pathology.
+
+## 83. `mesh_viscount` does not survive the first shared smoke (2026-03-24)
+
+Canonical sources:
+
+- local rescue audit:
+  - `results/cqa_audit/patchnepa_cqa_rescue_audit_20260324/summary.json`
+- train:
+  - `runs/cqa/patchnepa_cqa_distnormviscount_shared_20260324/cqa_distnormviscount_independent_g2_s2000`
+- same/offdiag suite:
+  - `results/cqa_multitype/patchnepa_cqa_distnormviscount_shared_20260324_suite/cqa_distnormviscount_suite.json`
+
+Key read:
+
+- audit:
+  - `mesh_viscount` already starts majority-heavy:
+    - `majority_baseline_acc=0.5854`
+    - `entropy_bits=1.7393`
+    - `6` active codes
+- same-context short smoke:
+  - `udf_distance`: `acc=0.1552` vs majority `0.0379`
+  - `mesh_normal_unsigned`: `acc=0.4744` vs majority `0.3066`
+  - `mesh_viscount`: `acc=0.5363` vs majority `0.5361`
+  - `mesh_viscount delta_ce(no_context)=+0.0925`
+- off-diagonal short smoke:
+  - `udf_distance`: `acc=0.1156` vs majority `0.0397`
+  - `mesh_normal_unsigned`: `acc=0.4337` vs majority `0.3068`
+  - `mesh_viscount`: `acc=0.5340` vs majority `0.5364`
+  - `mesh_viscount delta_ce(no_context)=+0.0722`
+
+Interpretation:
+
+- `mesh_viscount` does not separate itself from its majority baseline and its
+  controls are almost inert.
+- this is therefore not a useful replacement for the brittle bitpacked
+  visibility task, at least not in the current discrete-count formulation.
+- the short shared smoke is still useful because it shows the `DISTANCE +
+  NORMAL_UNSIGNED` sub-branch survives while `mesh_viscount` itself does not
+  become a headline-safe answer.
+
+Decision:
+
+- demote `mesh_viscount` as a mainline mesh-family answer.
+- if the project wants a second mesh-family quantity beyond
+  `mesh_normal_unsigned`, revisit `AO` and/or continuous scalar readouts rather
+  than promoting this first-pass discrete viscount task.

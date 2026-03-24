@@ -104,6 +104,77 @@ _CURV_SPEC = ScalarBinning(n_bins=64, vmin=-0.5, vmax=0.5, log=False)
 _THICK_SPEC = ScalarBinning(n_bins=64, vmin=1e-3, vmax=1.0, log=True)
 _CLEAR_SPEC = ScalarBinning(n_bins=64, vmin=1e-3, vmax=1.0, log=True)
 _DIST_SPEC = ScalarBinning(n_bins=64, vmin=1e-3, vmax=1.0, log=True)
+_THICK_VALID_QBIN_EDGES = np.asarray(
+    [
+        2.001892e-04,
+        8.393233e-03,
+        1.180632e-02,
+        1.504406e-02,
+        2.287071e-02,
+        2.869686e-02,
+        2.971412e-02,
+        3.019239e-02,
+        3.046930e-02,
+        3.067061e-02,
+        3.172112e-02,
+        4.372009e-02,
+        4.553617e-02,
+        4.603876e-02,
+        4.628205e-02,
+        4.642287e-02,
+        4.828371e-02,
+        6.025374e-02,
+        6.155672e-02,
+        6.192845e-02,
+        6.219119e-02,
+        7.502553e-02,
+        7.719006e-02,
+        7.759085e-02,
+        7.940852e-02,
+        9.233747e-02,
+        9.317222e-02,
+        9.578139e-02,
+        1.082942e-01,
+        1.089104e-01,
+        1.221686e-01,
+        1.244741e-01,
+        1.370316e-01,
+        1.400667e-01,
+        1.511735e-01,
+        1.557561e-01,
+        1.706998e-01,
+        1.779892e-01,
+        1.870876e-01,
+        2.025662e-01,
+        2.181361e-01,
+        2.338913e-01,
+        2.562042e-01,
+        2.785491e-01,
+        2.962603e-01,
+        3.166968e-01,
+        3.432651e-01,
+        3.744523e-01,
+        4.046624e-01,
+        4.347535e-01,
+        4.660084e-01,
+        4.992469e-01,
+        5.404418e-01,
+        5.776073e-01,
+        6.240864e-01,
+        6.697433e-01,
+        7.037844e-01,
+        7.647385e-01,
+        8.241761e-01,
+        8.958294e-01,
+        9.890134e-01,
+        1.092821e00,
+        1.249365e00,
+        1.475450e00,
+        2.451169e00,
+    ],
+    dtype=np.float32,
+)
+_VISCOUNT_MAX = 8
 
 
 def answer_range_for_query_name(query_name: str) -> Tuple[int, int]:
@@ -175,6 +246,16 @@ def _quantize_scalar(x: np.ndarray, spec: ScalarBinning) -> np.ndarray:
     return np.clip(idx, 0, int(spec.n_bins) - 1)
 
 
+def _quantize_scalar_by_edges(x: np.ndarray, edges: np.ndarray) -> np.ndarray:
+    values = np.asarray(x, dtype=np.float32).reshape(-1)
+    ed = np.asarray(edges, dtype=np.float32).reshape(-1)
+    if ed.size < 2:
+        raise ValueError("bin edges must contain at least two values")
+    inner = ed[1:-1]
+    idx = np.digitize(values, inner, right=False).astype(np.int64)
+    return np.clip(idx, 0, int(ed.size) - 2)
+
+
 def _decode_scalar_indices(idx: np.ndarray, spec: ScalarBinning) -> np.ndarray:
     idx = np.asarray(idx, dtype=np.int64).reshape(-1)
     idx = np.clip(idx, 0, int(spec.n_bins) - 1)
@@ -235,6 +316,12 @@ def quantize_thickness_to_vocab(thickness: np.ndarray) -> np.ndarray:
     return idx + int(off)
 
 
+def quantize_thickness_valid_qbin_to_vocab(thickness: np.ndarray) -> np.ndarray:
+    idx = _quantize_scalar_by_edges(thickness, _THICK_VALID_QBIN_EDGES)
+    off, _ = ANSWER_RANGES["udf_thickness"]
+    return idx + int(off)
+
+
 def quantize_clearance_to_vocab(clearance: np.ndarray) -> np.ndarray:
     idx = _quantize_scalar(clearance, _CLEAR_SPEC)
     off, _ = ANSWER_RANGES["udf_clearance"]
@@ -244,6 +331,14 @@ def quantize_clearance_to_vocab(clearance: np.ndarray) -> np.ndarray:
 def quantize_distance_to_vocab(dist: np.ndarray) -> np.ndarray:
     idx = _quantize_scalar(dist, _DIST_SPEC)
     off, _ = ANSWER_RANGES["udf_distance"]
+    return idx + int(off)
+
+
+def quantize_viscount_to_vocab(viscount: np.ndarray) -> np.ndarray:
+    values = np.asarray(viscount, dtype=np.float32).reshape(-1)
+    idx = np.rint(values).astype(np.int64)
+    idx = np.clip(idx, 0, _VISCOUNT_MAX)
+    off, _ = ANSWER_RANGES["mesh_visibility"]
     return idx + int(off)
 
 

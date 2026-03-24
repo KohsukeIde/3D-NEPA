@@ -19,6 +19,8 @@ from .cqa_codec import (
     CQA_VOCAB_VERSION,
     encode_answers_from_fields,
     quantize_normals_unsigned_to_vocab,
+    quantize_thickness_valid_qbin_to_vocab,
+    quantize_viscount_to_vocab,
 )
 
 QUERY_ORDER_MODES = ("sampled", "shuffled", "ordered_xyz")
@@ -28,6 +30,16 @@ def _choice(n: int, k: int, rng: Any) -> np.ndarray:
     if k >= n:
         return np.arange(n, dtype=np.int64)
     return rng.choice(n, size=k, replace=False).astype(np.int64)
+
+
+def _choice_with_replacement_if_needed(n: int, k: int, rng: Any) -> np.ndarray:
+    if int(n) <= 0:
+        raise ValueError("cannot sample from an empty pool")
+    if int(k) <= int(n):
+        return _choice(int(n), int(k), rng)
+    base = np.arange(int(n), dtype=np.int64)
+    extra = rng.choice(int(n), size=int(k) - int(n), replace=True).astype(np.int64)
+    return np.concatenate([base, extra], axis=0)
 
 
 def _select_optional_bank(arr: np.ndarray, rng: Any, mode: str, *, fallback_seed: int = 0):
@@ -128,6 +140,8 @@ class CQATaskSpec:
     query_type: int
     query_xyz_key: str
     field_keys: Dict[str, str]
+    encode_mode: str | None = None
+    query_pool_mode: str | None = None
 
 
 TASK_REGISTRY: Dict[str, CQATaskSpec] = {
@@ -143,6 +157,7 @@ TASK_REGISTRY: Dict[str, CQATaskSpec] = {
         query_type=ASK_NORMAL,
         query_xyz_key="surf_xyz",
         field_keys={"normal": "mesh_surf_n"},
+        encode_mode="normal_unsigned",
     ),
     "mesh_visibility": CQATaskSpec(
         name="mesh_visibility",
@@ -156,11 +171,26 @@ TASK_REGISTRY: Dict[str, CQATaskSpec] = {
         query_xyz_key="surf_xyz",
         field_keys={"curvature": "mesh_surf_curv"},
     ),
+    "mesh_viscount": CQATaskSpec(
+        name="mesh_viscount",
+        query_type=ASK_VISIBILITY,
+        query_xyz_key="surf_xyz",
+        field_keys={"viscount": "mesh_surf_viscount"},
+        encode_mode="mesh_viscount",
+    ),
     "udf_thickness": CQATaskSpec(
         name="udf_thickness",
         query_type=ASK_THICKNESS,
         query_xyz_key="surf_xyz",
         field_keys={"thickness": "udf_surf_thickness"},
+    ),
+    "udf_thickness_valid_qbin": CQATaskSpec(
+        name="udf_thickness_valid_qbin",
+        query_type=ASK_THICKNESS,
+        query_xyz_key="surf_xyz",
+        field_keys={"thickness": "udf_surf_thickness"},
+        encode_mode="udf_thickness_valid_qbin",
+        query_pool_mode="udf_thickness_valid_qbin",
     ),
     "udf_clearance": CQATaskSpec(
         name="udf_clearance",
@@ -250,17 +280,44 @@ class V2PrimitiveCQADataset(Dataset):
                     if self.query_dist_max is not None:
                         keep &= dist <= float(self.query_dist_max)
                     q_pool = q_pool[keep[q_pool]]
+            if self.task.query_pool_mode == "udf_thickness_valid_qbin":
+                thick = np.asarray(npz["udf_surf_thickness"], dtype=np.float32).reshape(-1)
+                hit_out = np.asarray(npz["udf_surf_hit_out"], dtype=np.float32).reshape(-1)
+                t_in = np.asarray(npz["udf_surf_t_in"], dtype=np.float32).reshape(-1)
+                t_out = np.asarray(npz["udf_surf_t_out"], dtype=np.float32).reshape(-1)
+                eps = np.float32(1e-4)
+                max_t = np.float32(1.999)
+                keep = (
+                    (hit_out > np.float32(0.5))
+                    & (thick > eps)
+                    & (t_in > eps)
+                    & (t_out > eps)
+                    & (t_in < max_t)
+                    & (t_out < max_t)
+                )
+                q_pool = q_pool[keep[q_pool]]
+                if int(q_pool.shape[0]) <= 0:
+                    relaxed = (
+                        (hit_out > np.float32(0.5))
+                        & (thick > eps)
+                        & (t_in > eps)
+                        & (t_out > eps)
+                    )
+                    q_pool = np.arange(int(qry_all.shape[0]), dtype=np.int64)[relaxed]
             if int(q_pool.shape[0]) <= 0:
                 raise RuntimeError(
                     f"empty query pool after filtering: task={self.task.name} path={path} "
                     f"query_src_filter={self.query_src_filter} query_dist_min={self.query_dist_min} "
                     f"query_dist_max={self.query_dist_max}"
                 )
-            if self.n_qry >= int(q_pool.shape[0]):
-                q_idx = q_pool
-            else:
-                take = _choice(int(q_pool.shape[0]), self.n_qry, rng)
+            if self.n_qry > 0:
+                if int(q_pool.shape[0]) >= self.n_qry:
+                    take = _choice(int(q_pool.shape[0]), self.n_qry, rng)
+                else:
+                    take = _choice_with_replacement_if_needed(int(q_pool.shape[0]), self.n_qry, rng)
                 q_idx = q_pool[take]
+            else:
+                q_idx = q_pool
             qry_xyz = np.asarray(qry_all[q_idx], dtype=np.float32)
             if qry_src_code_all is None:
                 qry_src_code = np.full((int(q_idx.shape[0]),), -1, dtype=np.int64)
@@ -271,8 +328,12 @@ class V2PrimitiveCQADataset(Dataset):
             for alias, key in self.task.field_keys.items():
                 arr = np.asarray(npz[key], dtype=np.float32)
                 fields[alias] = arr[q_idx]
-            if self.task.name == "mesh_normal_unsigned":
+            if self.task.encode_mode == "normal_unsigned":
                 answer_code = quantize_normals_unsigned_to_vocab(fields["normal"])
+            elif self.task.encode_mode == "mesh_viscount":
+                answer_code = quantize_viscount_to_vocab(fields["viscount"])
+            elif self.task.encode_mode == "udf_thickness_valid_qbin":
+                answer_code = quantize_thickness_valid_qbin_to_vocab(fields["thickness"])
             else:
                 answer_code = encode_answers_from_fields(self.task.query_type, fields)
             qry_xyz, answer_code, qry_src_code = _apply_query_order(

@@ -7516,3 +7516,81 @@ Operational interpretation:
 - `udf_distance` remains alive at the same time.
 - keep this as strong support for continuous target design, but the discrete
   unsigned shared line remains the safer canonical multi-type mainline.
+
+## 174. `udf_thickness` rescue via valid support + quantile bins (2026-03-24)
+
+Lineage:
+
+- local rescue audit
+- first train attempt `116098` failed because filtered query pools became
+  variable-length
+- dataset fix: replacement-padding short valid pools back to `n_qry=64`
+- rerun train `116102`
+- same/offdiag suite `116103`
+
+Summary:
+
+- rescue audit:
+  - `udf_thickness_valid_qbin majority_baseline_acc=0.056445`
+  - `entropy_bits=5.450215`
+  - `unique_codes=64`
+  - support rate `0.106314`
+- same-context:
+  - `udf_distance`: `acc=0.353149` vs majority `0.037903`
+  - `udf_thickness_valid_qbin`: `acc=0.092102` vs majority `0.024109`
+  - thickness controls:
+    - `delta_ce(no_context)=+4.563337`
+    - `delta_ce(wrong_shape_same)=+0.541254`
+    - `delta_ce(wrong_shape_other)=+1.543304`
+- off-diagonal:
+  - `udf_distance`: `acc=0.189026` vs majority `0.039673`
+  - `udf_thickness_valid_qbin`: `acc=0.044861` vs majority `0.023621`
+  - thickness controls:
+    - `delta_ce(no_context)=+3.910803`
+    - `delta_ce(wrong_shape_same)=+0.325445`
+    - `delta_ce(wrong_shape_other)=+1.026723`
+
+Operational interpretation:
+
+- the old thickness failure was mainly a target-support / codec problem.
+- strict valid-support filtering plus quantile bins turns thickness into a real
+  second UDF-family answer that is above majority and context-sensitive on both
+  same-context and off-diagonal evaluation.
+- `udf_distance` remains healthy in the same shared checkpoint.
+
+## 175. `mesh_viscount` short smoke is negative (2026-03-24)
+
+Lineage:
+
+- local rescue audit
+- short shared train `116100`
+- same/offdiag suite `116101`
+
+Summary:
+
+- audit:
+  - `mesh_viscount majority_baseline_acc=0.585449`
+  - `entropy_bits=1.739299`
+  - `6` active codes
+- same-context:
+  - `mesh_viscount`: `acc=0.536316` vs majority `0.536072`
+  - `delta_ce(no_context)=+0.092534`
+  - `delta_ce(wrong_shape_same)=+0.033681`
+  - `delta_ce(wrong_shape_other)=+0.101607`
+- off-diagonal:
+  - `mesh_viscount`: `acc=0.534018` vs majority `0.536438`
+  - `delta_ce(no_context)=+0.072159`
+  - `delta_ce(wrong_shape_same)=+0.025449`
+  - `delta_ce(wrong_shape_other)=+0.070234`
+- the other shared tasks stay alive in the same short smoke:
+  - `udf_distance`: `same/offdiag acc=0.155151/0.115601`
+  - `mesh_normal_unsigned`: `same/offdiag acc=0.474365/0.433716`
+
+Operational interpretation:
+
+- `mesh_viscount` does not meaningfully beat majority and its controls are too
+  weak for a headline-safe mesh-family answer.
+- keep this as a useful negative result: replacing visibility bitpack with a
+  naive discrete viscount count is not enough.
+- if a second mesh-family answer is still needed, revisit `AO` or continuous
+  scalar variants instead of promoting this task as-is.

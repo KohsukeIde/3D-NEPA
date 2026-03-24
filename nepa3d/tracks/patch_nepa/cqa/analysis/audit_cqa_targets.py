@@ -94,14 +94,14 @@ def _raw_summary(task_name: str, paths: List[str]) -> Dict[str, Any]:
 
     for path in paths:
         with np.load(path, allow_pickle=False) as npz:
-            if task_name == "mesh_visibility":
+            if task_name in {"mesh_visibility", "mesh_viscount"}:
                 vis = np.asarray(npz["mesh_surf_vis_sig"], dtype=np.float32)
                 vis_sig_all.append(vis)
                 if "mesh_surf_viscount" in npz:
                     arrays["mesh_surf_viscount"].append(np.asarray(npz["mesh_surf_viscount"], dtype=np.float32))
                 if "mesh_surf_ao" in npz:
                     arrays["mesh_surf_ao"].append(np.asarray(npz["mesh_surf_ao"], dtype=np.float32))
-            elif task_name == "udf_thickness":
+            elif task_name in {"udf_thickness", "udf_thickness_valid_qbin"}:
                 for key in ("udf_surf_thickness", "udf_surf_t_in", "udf_surf_t_out", "udf_surf_hit_out"):
                     if key in npz:
                         arrays[key].append(np.asarray(npz[key], dtype=np.float32))
@@ -117,7 +117,7 @@ def _raw_summary(task_name: str, paths: List[str]) -> Dict[str, Any]:
                 raise KeyError(f"unsupported audit task={task_name}")
 
     out: Dict[str, Any] = {"fields": {}}
-    if task_name == "mesh_visibility":
+    if task_name in {"mesh_visibility", "mesh_viscount"}:
         if vis_sig_all:
             vis = np.concatenate(vis_sig_all, axis=0)
             bits = (vis > 0.5).astype(np.int64)
@@ -148,6 +148,31 @@ def _raw_summary(task_name: str, paths: List[str]) -> Dict[str, Any]:
             out["fields"]["udf_qry_src_code"] = {
                 "counts": {str(int(k)): int(v) for k, v in sorted(cnt.items())}
             }
+        return out
+
+    if task_name == "udf_thickness_valid_qbin":
+        thick = np.concatenate(arrays["udf_surf_thickness"]).reshape(-1)
+        t_in = np.concatenate(arrays["udf_surf_t_in"]).reshape(-1)
+        t_out = np.concatenate(arrays["udf_surf_t_out"]).reshape(-1)
+        hit_out = np.concatenate(arrays["udf_surf_hit_out"]).reshape(-1)
+        eps = np.float32(1e-4)
+        max_t = np.float32(1.999)
+        keep = (
+            (hit_out > np.float32(0.5))
+            & (thick > eps)
+            & (t_in > eps)
+            & (t_out > eps)
+            & (t_in < max_t)
+            & (t_out < max_t)
+        )
+        out["fields"]["udf_thickness_valid_support"] = {
+            "support_rate": float(keep.mean()),
+            "quantiles": _quantiles(thick[keep]) if bool(keep.any()) else {},
+        }
+        out["fields"]["udf_surf_hit_out"] = {
+            "mean": float(hit_out.mean()),
+            "positive_rate": float((hit_out > 0.5).mean()),
+        }
         return out
 
     for key, chunks in arrays.items():

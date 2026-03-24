@@ -352,12 +352,44 @@ Shared continuous `DISTANCE + NORMAL`:
 - so typed continuous regression is currently task-specific rather than a ready
   shared multi-type replacement.
 
+Thickness rescue (`DISTANCE + THICKNESS_VALID_QBIN`, discrete):
+
+- strict valid-support filtering plus quantile bins fixes the old thickness
+  pathology:
+  - rescue audit drops the old majority-heavy target to
+    `majority_baseline_acc=0.0564`, `entropy_bits=5.45`, `unique_codes=64`
+  - same/offdiag shared run then gives
+    `udf_thickness_valid_qbin acc = 0.0921 / 0.0449`
+    versus majority `0.0241 / 0.0236`
+- `udf_distance` remains healthy in the same shared checkpoint
+  (`same/offdiag acc = 0.3531 / 0.1890`).
+- interpretation:
+  - thickness is no longer blocked by zero-dominant support;
+  - it is now a viable second UDF-family answer candidate, even though it
+    remains weaker than `udf_distance`.
+
+`mesh_viscount` first pass (`DISTANCE + NORMAL_UNSIGNED + VISCOUNT`, discrete):
+
+- the short shared smoke is negative for `mesh_viscount` itself:
+  - same/offdiag `acc = 0.5363 / 0.5340`
+    versus majority `0.5361 / 0.5364`
+  - control deltas are almost inert
+    (`delta_ce(no_context) = +0.0925 / +0.0722`)
+- `udf_distance` and `mesh_normal_unsigned` stay alive in the same smoke, so
+  the failure is specific to viscount rather than the rest of the branch.
+- interpretation:
+  - naive discrete viscount is not yet a headline-safe second mesh-family
+    answer;
+  - AO and/or continuous scalar mesh answers remain better next candidates.
+
 Current safest CQA read:
 
 - strongest single line: `independent + shuffled + full_q` on `udf_distance`,
 - first multi-type gate: `DISTANCE + NORMAL_UNSIGNED` discrete shared checkpoint,
+- viable second UDF-family candidate:
+  `DISTANCE + THICKNESS_VALID_QBIN`,
 - current limitation: multi-type promptability is now real, but the mesh side
-  still needs figure-quality polishing and likely an additional mesh-family
+  still needs figure-quality polishing and an additional mesh-family
   answer beyond unsigned normals; continuous multi-type is now supportive
   rather than negative, but not yet the canonical mainline.
 
@@ -432,11 +464,12 @@ This means:
 - whether FT-side recipe follow-ups such as rotation materially change the
   current external-gap readout,
 - whether the explicit-query CQA branch can turn the current full-range
-  `udf_distance` signal into a broader task family beyond its current single
-  surviving branch,
+  `udf_distance` signal into a broader task family beyond its current anchor
+  + rescued-thickness UDF branch,
 - whether a redesigned task/target definition can increase context dependence
   without repeating the negative `near_surface` collapse or the negative
-  `pc_bank` retry,
+  `pc_bank` retry, especially for second mesh-family answers beyond
+  `mesh_normal_unsigned`,
 - how far the positive off-diagonal `pc_bank -> udf_distance` read survives
   under stronger completion settings and broader query regimes,
 - how to package the current cosine/reconstruction diagnostics into a stable
