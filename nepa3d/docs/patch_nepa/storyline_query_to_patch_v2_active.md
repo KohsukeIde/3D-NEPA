@@ -487,8 +487,9 @@ This means:
   majority at `2k` and then strengthens sharply by `10k`, including strong
   `wrong_shape_same/other_synset` controls.
 - a first discrete encoder-decoder CQA branch is now implemented and
-  scientifically alive under the same `cqa_v2` interface, but it falls clearly
-  below the current prefixlm line on the main `udf_distance` token/completion
+  scientifically alive under the same `cqa_v2` interface, but a strict
+  `prefixlm + cqa_v2` rerun confirms that prefixlm still wins the first
+  architecture-controlled compare on the main `udf_distance` token/completion
   reads and on utility classification; the only approximately tied read is
   off-diagonal `mesh_normal_unsigned`.
 - the same `surf`-trained `udf_distance` checkpoint now transfers zero-shot to

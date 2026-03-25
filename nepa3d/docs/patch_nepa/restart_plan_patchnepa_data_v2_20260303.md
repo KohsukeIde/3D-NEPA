@@ -3733,3 +3733,64 @@ Decision:
 - retain the enc-dec branch as a negative-but-informative architecture ablation.
 - if encoder-decoder is revisited later, the next lever should be training
   scale or decoder/query design, not replacing the current prefixlm story now.
+
+## 88. Strict `prefixlm + cqa_v2` confirms the architecture read against enc-dec (2026-03-26)
+
+Canonical sources:
+
+- train:
+  - `runs/cqa/patchnepa_cqa_v2_distnorm_unsigned_prefixlm_20260325_234124/cqa_v2_distnorm_unsigned_prefixlm_independent_g2_s10000/ckpt_final.pt`
+- token suite:
+  - `results/cqa_multitype/patchnepa_cqa_v2_distnorm_unsigned_prefixlm_20260325_234124_suite/cqa_v2_distnorm_unsigned_prefixlm_suite.json`
+- distance completion:
+  - `results/cqa_completion/patchnepa_cqa_v2_distnorm_unsigned_prefixlm_20260325_234124_same_completion/cqa_v2_distnorm_unsigned_prefixlm_same_translation_g16_s64.json`
+  - `results/cqa_completion/patchnepa_cqa_v2_distnorm_unsigned_prefixlm_20260325_234124_offdiag_completion/cqa_v2_distnorm_unsigned_prefixlm_offdiag_translation_g16_s64.json`
+- utility classification:
+  - `runs/cqa_cls/patchnepa_cqa_v2_distnorm_unsigned_prefixlm_20260325_234124_obj_bg_cls/cqa_v2_distnorm_unsigned_prefixlm_obj_bg_seed0/ckpt_best.pt`
+  - `runs/cqa_cls/patchnepa_cqa_v2_distnorm_unsigned_prefixlm_20260325_234124_obj_only_cls/cqa_v2_distnorm_unsigned_prefixlm_obj_only_seed0/ckpt_best.pt`
+  - `runs/cqa_cls/patchnepa_cqa_v2_distnorm_unsigned_prefixlm_20260325_234124_pb_t50_rs_cls/cqa_v2_distnorm_unsigned_prefixlm_pb_t50_rs_seed0/ckpt_best.pt`
+- comparison target:
+  - `C033` enc-dec pack
+
+Key read:
+
+- token eval:
+  - same:
+    - `udf_distance acc=0.1745`
+    - `mesh_normal_unsigned acc=0.5495`
+  - offdiag:
+    - `udf_distance acc=0.0797`
+    - `mesh_normal_unsigned acc=0.3566`
+- versus enc-dec:
+  - prefixlm remains better on
+    - same/offdiag `udf_distance`
+    - same `mesh_normal_unsigned`
+  - enc-dec keeps only a small edge on offdiag `mesh_normal_unsigned`
+    (`0.3917` vs `0.3566`)
+- distance completion favors prefixlm overall:
+  - same:
+    - prefixlm `MAE=0.0192`, `IoU@0.05=0.7030`, `mesh_fscore=0.1196`
+    - enc-dec `0.0437 / 0.5012 / 0.0470`
+  - offdiag:
+    - prefixlm `MAE=0.1249`, `IoU@0.05=0.3814`, `mesh_fscore=0.0700`
+    - enc-dec `0.1061 / 0.3362 / 0.0252`
+- utility is run under the same `pointmae(test-as-val)` protocol and also
+  favors prefixlm:
+  - prefixlm:
+    - `obj_bg=0.8399`
+    - `obj_only=0.8503`
+    - `pb_t50_rs=0.7679`
+  - enc-dec:
+    - `0.8038 / 0.8158 / 0.7595`
+
+Interpretation:
+
+- the weaker enc-dec read is not just a `cqa_v1` vs `cqa_v2` mismatch artifact.
+- once prefixlm is rerun under the same `cqa_v2` codec and the same dependent
+  completion / utility protocol, it still wins the architecture comparison.
+
+Decision:
+
+- freeze the architecture read:
+  - prefixlm remains the mainline,
+  - enc-dec stays a negative-but-informative ablation.

@@ -7849,3 +7849,49 @@ Decision:
   ablation.
 - if the architecture is revisited, tune training/query-decoder design first
   rather than promoting this branch directly.
+
+## 181. Strict `prefixlm + cqa_v2` still beats enc-dec on the first architecture-controlled compare (2026-03-26)
+
+Lineage:
+
+- train `117412`
+- suite `117413`
+- same/offdiag completion `117414-117415`
+- utility classification `117416-117418`
+
+Summary:
+
+- token eval:
+  - same:
+    - `udf_distance acc=0.174500` vs majority `0.015869`
+    - `mesh_normal_unsigned acc=0.549500` vs majority `0.297119`
+  - offdiag:
+    - `udf_distance acc=0.079712` vs majority `0.017273`
+    - `mesh_normal_unsigned acc=0.356567` vs majority `0.297302`
+- versus enc-dec (`C033`):
+  - prefixlm wins on same/offdiag `udf_distance`
+  - prefixlm wins on same `mesh_normal_unsigned`
+  - enc-dec retains only a small edge on offdiag `mesh_normal_unsigned`
+- distance completion:
+  - same:
+    - prefixlm `MAE=0.0192`, `IoU@0.05=0.7030`, `mesh_fscore=0.1196`
+  - offdiag:
+    - prefixlm `MAE=0.1249`, `IoU@0.05=0.3814`, `mesh_fscore=0.0700`
+  - this is still better overall than enc-dec, despite enc-dec having a
+    slightly lower offdiag MAE
+- utility is also stronger, under the same `pointmae(test-as-val)` protocol:
+  - `obj_bg=0.8399`
+  - `obj_only=0.8503`
+  - `pb_t50_rs=0.7679`
+
+Operational interpretation:
+
+- the `C033` loss was not mainly caused by codec mismatch.
+- once prefixlm is rerun with the same `cqa_v2` codec and the same completion /
+  utility chain, it still comes out ahead.
+
+Decision:
+
+- freeze the architecture read:
+  - prefixlm stays mainline,
+  - enc-dec stays a negative-but-informative branch.
