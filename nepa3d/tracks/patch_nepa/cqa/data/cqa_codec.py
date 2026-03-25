@@ -1,7 +1,8 @@
-"""Fixed discrete answer-language codec for explicit-query CQA.
+"""Versioned discrete answer-language codec for explicit-query CQA.
 
-The vocabulary is intentionally versioned and fixed in code so checkpoints,
-evaluation, and visualization stay compatible across runs.
+The vocabulary is intentionally fixed in code so checkpoints, evaluation, and
+visualization stay compatible across runs. ``cqa_v1`` remains the historical
+layout. ``cqa_v2`` is a new profile for the current multi-answer CE mainline.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import numpy as np
 import torch
 
 # -----------------------------------------------------------------------------
-# Versioned query / answer vocabulary spec
+# Historical defaults / legacy constants
 # -----------------------------------------------------------------------------
 
 CQA_VOCAB_VERSION = "cqa_v1"
@@ -25,8 +26,11 @@ ASK_CURVATURE = 2
 ASK_THICKNESS = 3
 ASK_CLEARANCE = 4
 ASK_DISTANCE = 5
-QUERY_TYPE_VOCAB_SIZE = 6
+ASK_AO = 6
 
+# Keep legacy constants for existing code / checkpoints. Version-aware helpers
+# below should be used for new paths.
+QUERY_TYPE_VOCAB_SIZE = 6
 QUERY_TYPE_NAMES = {
     ASK_NORMAL: "mesh_normal",
     ASK_VISIBILITY: "mesh_visibility",
@@ -36,8 +40,6 @@ QUERY_TYPE_NAMES = {
     ASK_DISTANCE: "udf_distance",
 }
 QUERY_NAME_TO_ID = {v: k for k, v in QUERY_TYPE_NAMES.items()}
-
-# Shared answer vocab with fixed reserved ranges.
 ANSWER_RANGES: Dict[str, Tuple[int, int]] = {
     "mesh_normal": (0, 128),
     "mesh_visibility": (128, 384),
@@ -48,6 +50,46 @@ ANSWER_RANGES: Dict[str, Tuple[int, int]] = {
 }
 ANSWER_VOCAB_SIZE = 640
 
+# -----------------------------------------------------------------------------
+# Version profiles
+# -----------------------------------------------------------------------------
+
+_SUPPORTED_CODEC_VERSIONS = {"cqa_v1", "cqa_v2"}
+
+_QUERY_TYPE_NAMES_V1 = dict(QUERY_TYPE_NAMES)
+_QUERY_NAME_TO_ID_V1 = {
+    **QUERY_NAME_TO_ID,
+    "mesh_normal_unsigned": ASK_NORMAL,
+    "mesh_viscount": ASK_VISIBILITY,
+    "udf_thickness_valid_qbin": ASK_THICKNESS,
+}
+_ANSWER_RANGES_V1: Dict[str, Tuple[int, int]] = {
+    **ANSWER_RANGES,
+    "mesh_normal_unsigned": ANSWER_RANGES["mesh_normal"],
+    "mesh_viscount": ANSWER_RANGES["mesh_visibility"],
+    "udf_thickness_valid_qbin": ANSWER_RANGES["udf_thickness"],
+}
+
+# cqa_v2 keeps the audited 64-bin thickness rescue as-is, while increasing the
+# resolution of the mainline distance / unsigned-normal branches and adding AO.
+_QUERY_TYPE_NAMES_V2 = {
+    ASK_NORMAL: "mesh_normal_unsigned",
+    ASK_THICKNESS: "udf_thickness_valid_qbin",
+    ASK_DISTANCE: "udf_distance",
+    ASK_AO: "mesh_ao",
+}
+_QUERY_NAME_TO_ID_V2 = {
+    **{v: k for k, v in _QUERY_TYPE_NAMES_V2.items()},
+    "udf_thickness": ASK_THICKNESS,
+}
+_ANSWER_RANGES_V2: Dict[str, Tuple[int, int]] = {
+    "mesh_normal_unsigned": (0, 256),
+    "mesh_ao": (256, 384),
+    "udf_thickness_valid_qbin": (384, 448),
+    "udf_thickness": (384, 448),
+    "udf_distance": (448, 704),
+}
+
 
 @dataclass(frozen=True)
 class ScalarBinning:
@@ -55,6 +97,47 @@ class ScalarBinning:
     vmin: float
     vmax: float
     log: bool = False
+
+
+# -----------------------------------------------------------------------------
+# Common helpers
+# -----------------------------------------------------------------------------
+
+
+def _require_codec_version(codec_version: str) -> str:
+    v = str(codec_version or CQA_VOCAB_VERSION)
+    if v not in _SUPPORTED_CODEC_VERSIONS:
+        raise KeyError(f"unsupported codec_version={codec_version}")
+    return v
+
+
+def query_type_names(codec_version: str = CQA_VOCAB_VERSION) -> Dict[int, str]:
+    v = _require_codec_version(codec_version)
+    return dict(_QUERY_TYPE_NAMES_V1 if v == "cqa_v1" else _QUERY_TYPE_NAMES_V2)
+
+
+def query_name_to_id(codec_version: str = CQA_VOCAB_VERSION) -> Dict[str, int]:
+    v = _require_codec_version(codec_version)
+    return dict(_QUERY_NAME_TO_ID_V1 if v == "cqa_v1" else _QUERY_NAME_TO_ID_V2)
+
+
+def answer_ranges(codec_version: str = CQA_VOCAB_VERSION) -> Dict[str, Tuple[int, int]]:
+    v = _require_codec_version(codec_version)
+    return dict(_ANSWER_RANGES_V1 if v == "cqa_v1" else _ANSWER_RANGES_V2)
+
+
+def query_type_id_list(codec_version: str = CQA_VOCAB_VERSION) -> list[int]:
+    return sorted(int(k) for k in query_type_names(codec_version).keys())
+
+
+def query_type_vocab_size(codec_version: str = CQA_VOCAB_VERSION) -> int:
+    ids = query_type_id_list(codec_version)
+    return int(max(ids) + 1 if ids else 0)
+
+
+def answer_vocab_size(codec_version: str = CQA_VOCAB_VERSION) -> int:
+    ranges = answer_ranges(codec_version)
+    return int(max(hi for _lo, hi in ranges.values()))
 
 
 def _fibonacci_dirs(n: int) -> np.ndarray:
@@ -98,12 +181,20 @@ def canonicalize_normals_unsigned(normals: np.ndarray) -> np.ndarray:
     return n.astype(np.float32, copy=False)
 
 
-_NORMAL_DIRS = _fibonacci_dirs(ANSWER_RANGES["mesh_normal"][1] - ANSWER_RANGES["mesh_normal"][0])
-_NORMAL_UNSIGNED_DIRS = _hemisphere_dirs(ANSWER_RANGES["mesh_normal"][1] - ANSWER_RANGES["mesh_normal"][0])
+_NORMAL_DIRS_V1 = _fibonacci_dirs(ANSWER_RANGES["mesh_normal"][1] - ANSWER_RANGES["mesh_normal"][0])
+_NORMAL_UNSIGNED_DIRS_V1 = _hemisphere_dirs(ANSWER_RANGES["mesh_normal"][1] - ANSWER_RANGES["mesh_normal"][0])
+_NORMAL_UNSIGNED_DIRS_V2 = _hemisphere_dirs(_ANSWER_RANGES_V2["mesh_normal_unsigned"][1] - _ANSWER_RANGES_V2["mesh_normal_unsigned"][0])
+
+# Keep the historical names for legacy utilities such as type-switch export.
+_NORMAL_DIRS = _NORMAL_DIRS_V1
+_NORMAL_UNSIGNED_DIRS = _NORMAL_UNSIGNED_DIRS_V1
+
 _CURV_SPEC = ScalarBinning(n_bins=64, vmin=-0.5, vmax=0.5, log=False)
 _THICK_SPEC = ScalarBinning(n_bins=64, vmin=1e-3, vmax=1.0, log=True)
 _CLEAR_SPEC = ScalarBinning(n_bins=64, vmin=1e-3, vmax=1.0, log=True)
 _DIST_SPEC = ScalarBinning(n_bins=64, vmin=1e-3, vmax=1.0, log=True)
+_DIST_SPEC_V2 = ScalarBinning(n_bins=256, vmin=1e-3, vmax=1.0, log=True)
+
 _THICK_VALID_QBIN_EDGES = np.asarray(
     [
         2.001892e-04,
@@ -175,30 +266,44 @@ _THICK_VALID_QBIN_EDGES = np.asarray(
     dtype=np.float32,
 )
 _VISCOUNT_MAX = 8
+# AO is currently derived from 8-ray visibility, so the raw support is already
+# discrete at multiples of 1/8. Keep the v2 range large enough for future
+# densification, but map the current support levels cleanly.
+_AO_LEVELS = np.asarray([i / 8.0 for i in range(9)], dtype=np.float32)
+_AO_CODEBOOK_V2 = np.rint(np.linspace(0, 127, _AO_LEVELS.size)).astype(np.int64)
 
 
-def answer_range_for_query_name(query_name: str) -> Tuple[int, int]:
-    if query_name not in ANSWER_RANGES:
-        raise KeyError(f"unknown query_name={query_name}")
-    return ANSWER_RANGES[str(query_name)]
+def answer_range_for_query_name(query_name: str, codec_version: str = CQA_VOCAB_VERSION) -> Tuple[int, int]:
+    ranges = answer_ranges(codec_version)
+    key = str(query_name)
+    if key not in ranges:
+        raise KeyError(f"unknown query_name={query_name} for codec_version={codec_version}")
+    return ranges[key]
 
 
-def answer_range_for_query_type(query_type: int) -> Tuple[int, int]:
+def answer_range_for_query_type(query_type: int, codec_version: str = CQA_VOCAB_VERSION) -> Tuple[int, int]:
     qt = int(query_type)
-    if qt not in QUERY_TYPE_NAMES:
-        raise KeyError(f"unknown query_type={qt}")
-    return answer_range_for_query_name(QUERY_TYPE_NAMES[qt])
+    qtypes = query_type_names(codec_version)
+    if qt not in qtypes:
+        raise KeyError(f"unknown query_type={qt} for codec_version={codec_version}")
+    return answer_range_for_query_name(qtypes[qt], codec_version=codec_version)
 
 
-def valid_answer_mask_for_query_type(query_type: torch.Tensor, *, vocab_size: int = ANSWER_VOCAB_SIZE) -> torch.Tensor:
+def valid_answer_mask_for_query_type(
+    query_type: torch.Tensor,
+    *,
+    codec_version: str = CQA_VOCAB_VERSION,
+    vocab_size: int | None = None,
+) -> torch.Tensor:
     qt = torch.as_tensor(query_type, dtype=torch.long)
     if qt.dim() == 0:
         qt = qt.view(1)
     if qt.dim() > 1:
         qt = qt.reshape(-1)
-    mask = torch.zeros((int(qt.shape[0]), int(vocab_size)), device=qt.device, dtype=torch.bool)
+    resolved_vocab = int(answer_vocab_size(codec_version) if vocab_size is None else vocab_size)
+    mask = torch.zeros((int(qt.shape[0]), resolved_vocab), device=qt.device, dtype=torch.bool)
     for i, qti in enumerate(qt.tolist()):
-        lo, hi = answer_range_for_query_type(int(qti))
+        lo, hi = answer_range_for_query_type(int(qti), codec_version=codec_version)
         mask[i, int(lo) : int(hi)] = True
     return mask
 
@@ -207,13 +312,15 @@ def mask_logits_for_query_type(
     logits: torch.Tensor,
     query_type: torch.Tensor,
     *,
-    vocab_size: int = ANSWER_VOCAB_SIZE,
+    codec_version: str = CQA_VOCAB_VERSION,
+    vocab_size: int | None = None,
     invalid_fill: float = -1e9,
 ) -> torch.Tensor:
     if logits.dim() != 3:
         raise ValueError(f"expected logits with shape (B,N,V), got {tuple(logits.shape)}")
-    if int(logits.shape[-1]) != int(vocab_size):
-        raise ValueError(f"logits vocab mismatch: got V={int(logits.shape[-1])}, expected {int(vocab_size)}")
+    resolved_vocab = int(answer_vocab_size(codec_version) if vocab_size is None else vocab_size)
+    if int(logits.shape[-1]) != resolved_vocab:
+        raise ValueError(f"logits vocab mismatch: got V={int(logits.shape[-1])}, expected {resolved_vocab}")
 
     qt = torch.as_tensor(query_type, device=logits.device, dtype=torch.long)
     if qt.dim() == 1:
@@ -224,8 +331,8 @@ def mask_logits_for_query_type(
     else:
         raise ValueError(f"expected query_type with shape (B,) or (B,N), got {tuple(qt.shape)}")
 
-    flat_mask = valid_answer_mask_for_query_type(qt.reshape(-1), vocab_size=int(vocab_size))
-    mask = flat_mask.view(int(logits.shape[0]), int(logits.shape[1]), int(vocab_size))
+    flat_mask = valid_answer_mask_for_query_type(qt.reshape(-1), codec_version=codec_version, vocab_size=resolved_vocab)
+    mask = flat_mask.view(int(logits.shape[0]), int(logits.shape[1]), resolved_vocab)
     fill = torch.full_like(logits, float(invalid_fill))
     return torch.where(mask, logits, fill)
 
@@ -270,25 +377,35 @@ def _decode_scalar_indices(idx: np.ndarray, spec: ScalarBinning) -> np.ndarray:
     return (np.float32(lo) + frac * np.float32(hi - lo)).astype(np.float32, copy=False)
 
 
-def quantize_normals_to_vocab(normals: np.ndarray) -> np.ndarray:
+def quantize_normals_to_vocab(normals: np.ndarray, *, codec_version: str = CQA_VOCAB_VERSION) -> np.ndarray:
+    if _require_codec_version(codec_version) != "cqa_v1":
+        raise KeyError("signed mesh_normal is only supported in cqa_v1")
     n = np.asarray(normals, dtype=np.float32)
     n = n / (np.linalg.norm(n, axis=1, keepdims=True) + 1e-8)
-    dots = n @ _NORMAL_DIRS.T
+    dots = n @ _NORMAL_DIRS_V1.T
     idx = np.argmax(dots, axis=1).astype(np.int64)
-    off, _ = ANSWER_RANGES["mesh_normal"]
+    off, _ = answer_range_for_query_name("mesh_normal", codec_version=codec_version)
     return idx + int(off)
 
 
-def quantize_normals_unsigned_to_vocab(normals: np.ndarray) -> np.ndarray:
+def quantize_normals_unsigned_to_vocab(normals: np.ndarray, *, codec_version: str = CQA_VOCAB_VERSION) -> np.ndarray:
     n = canonicalize_normals_unsigned(normals)
-    dots = n @ _NORMAL_UNSIGNED_DIRS.T
+    v = _require_codec_version(codec_version)
+    if v == "cqa_v1":
+        dirs = _NORMAL_UNSIGNED_DIRS_V1
+        key = "mesh_normal_unsigned"
+    else:
+        dirs = _NORMAL_UNSIGNED_DIRS_V2
+        key = "mesh_normal_unsigned"
+    dots = n @ dirs.T
     idx = np.argmax(dots, axis=1).astype(np.int64)
-    off, _ = ANSWER_RANGES["mesh_normal"]
+    off, _ = answer_range_for_query_name(key, codec_version=codec_version)
     return idx + int(off)
 
 
-def quantize_visibility_to_vocab(vis_sig: np.ndarray) -> np.ndarray:
-    """Bit-pack an 8-d visibility signature into the reserved 256-code range."""
+def quantize_visibility_to_vocab(vis_sig: np.ndarray, *, codec_version: str = CQA_VOCAB_VERSION) -> np.ndarray:
+    if _require_codec_version(codec_version) != "cqa_v1":
+        raise KeyError("mesh_visibility bitpack is only supported in cqa_v1")
     v = np.asarray(vis_sig, dtype=np.float32)
     if v.ndim == 1:
         v = v.reshape(-1, 1)
@@ -300,68 +417,117 @@ def quantize_visibility_to_vocab(vis_sig: np.ndarray) -> np.ndarray:
     bits = (v > 0.5).astype(np.int64)
     weights = (1 << np.arange(8, dtype=np.int64)).reshape(1, 8)
     code = np.sum(bits * weights, axis=1).astype(np.int64)
-    off, _ = ANSWER_RANGES["mesh_visibility"]
+    off, _ = answer_range_for_query_name("mesh_visibility", codec_version=codec_version)
     return code + int(off)
 
 
-def quantize_curvature_to_vocab(curv: np.ndarray) -> np.ndarray:
+def quantize_curvature_to_vocab(curv: np.ndarray, *, codec_version: str = CQA_VOCAB_VERSION) -> np.ndarray:
+    if _require_codec_version(codec_version) != "cqa_v1":
+        raise KeyError("mesh_curvature is only supported in cqa_v1")
     idx = _quantize_scalar(curv, _CURV_SPEC)
-    off, _ = ANSWER_RANGES["mesh_curvature"]
+    off, _ = answer_range_for_query_name("mesh_curvature", codec_version=codec_version)
     return idx + int(off)
 
 
-def quantize_thickness_to_vocab(thickness: np.ndarray) -> np.ndarray:
+def quantize_thickness_to_vocab(thickness: np.ndarray, *, codec_version: str = CQA_VOCAB_VERSION) -> np.ndarray:
+    if _require_codec_version(codec_version) != "cqa_v1":
+        raise KeyError("historical udf_thickness is only supported in cqa_v1")
     idx = _quantize_scalar(thickness, _THICK_SPEC)
-    off, _ = ANSWER_RANGES["udf_thickness"]
+    off, _ = answer_range_for_query_name("udf_thickness", codec_version=codec_version)
     return idx + int(off)
 
 
-def quantize_thickness_valid_qbin_to_vocab(thickness: np.ndarray) -> np.ndarray:
+def quantize_thickness_valid_qbin_to_vocab(thickness: np.ndarray, *, codec_version: str = CQA_VOCAB_VERSION) -> np.ndarray:
     idx = _quantize_scalar_by_edges(thickness, _THICK_VALID_QBIN_EDGES)
-    off, _ = ANSWER_RANGES["udf_thickness"]
+    off, _ = answer_range_for_query_name("udf_thickness_valid_qbin", codec_version=codec_version)
     return idx + int(off)
 
 
-def quantize_clearance_to_vocab(clearance: np.ndarray) -> np.ndarray:
+def quantize_clearance_to_vocab(clearance: np.ndarray, *, codec_version: str = CQA_VOCAB_VERSION) -> np.ndarray:
+    if _require_codec_version(codec_version) != "cqa_v1":
+        raise KeyError("udf_clearance is only supported in cqa_v1")
     idx = _quantize_scalar(clearance, _CLEAR_SPEC)
-    off, _ = ANSWER_RANGES["udf_clearance"]
+    off, _ = answer_range_for_query_name("udf_clearance", codec_version=codec_version)
     return idx + int(off)
 
 
-def quantize_distance_to_vocab(dist: np.ndarray) -> np.ndarray:
-    idx = _quantize_scalar(dist, _DIST_SPEC)
-    off, _ = ANSWER_RANGES["udf_distance"]
+def quantize_distance_to_vocab(dist: np.ndarray, *, codec_version: str = CQA_VOCAB_VERSION) -> np.ndarray:
+    spec = _DIST_SPEC if _require_codec_version(codec_version) == "cqa_v1" else _DIST_SPEC_V2
+    idx = _quantize_scalar(dist, spec)
+    off, _ = answer_range_for_query_name("udf_distance", codec_version=codec_version)
     return idx + int(off)
 
 
-def quantize_viscount_to_vocab(viscount: np.ndarray) -> np.ndarray:
+def quantize_viscount_to_vocab(viscount: np.ndarray, *, codec_version: str = CQA_VOCAB_VERSION) -> np.ndarray:
+    if _require_codec_version(codec_version) != "cqa_v1":
+        raise KeyError("mesh_viscount is only supported in cqa_v1")
     values = np.asarray(viscount, dtype=np.float32).reshape(-1)
     idx = np.rint(values).astype(np.int64)
     idx = np.clip(idx, 0, _VISCOUNT_MAX)
-    off, _ = ANSWER_RANGES["mesh_visibility"]
+    off, _ = answer_range_for_query_name("mesh_visibility", codec_version=codec_version)
     return idx + int(off)
 
 
-def decode_distance_from_vocab(code: np.ndarray) -> np.ndarray:
+def quantize_ao_to_vocab(ao: np.ndarray, *, codec_version: str = CQA_VOCAB_VERSION) -> np.ndarray:
+    if _require_codec_version(codec_version) != "cqa_v2":
+        raise KeyError("mesh_ao discrete codec is only supported in cqa_v2")
+    values = np.asarray(ao, dtype=np.float32).reshape(-1)
+    idx = np.argmin(np.abs(values[:, None] - _AO_LEVELS[None, :]), axis=1).astype(np.int64)
+    code = _AO_CODEBOOK_V2[idx]
+    off, _ = answer_range_for_query_name("mesh_ao", codec_version=codec_version)
+    return code + int(off)
+
+
+def decode_distance_from_vocab(code: np.ndarray, *, codec_version: str = CQA_VOCAB_VERSION) -> np.ndarray:
     code = np.asarray(code, dtype=np.int64)
-    off, hi = ANSWER_RANGES["udf_distance"]
+    off, hi = answer_range_for_query_name("udf_distance", codec_version=codec_version)
     idx = np.clip(code.reshape(-1) - int(off), 0, int(hi - off) - 1)
-    out = _decode_scalar_indices(idx, _DIST_SPEC)
+    spec = _DIST_SPEC if _require_codec_version(codec_version) == "cqa_v1" else _DIST_SPEC_V2
+    out = _decode_scalar_indices(idx, spec)
     return out.reshape(code.shape).astype(np.float32, copy=False)
 
 
-def encode_answers_from_fields(query_type: int, fields: Dict[str, np.ndarray]) -> np.ndarray:
-    qt = int(query_type)
-    if qt == ASK_NORMAL:
-        return quantize_normals_to_vocab(fields["normal"])
-    if qt == ASK_VISIBILITY:
-        return quantize_visibility_to_vocab(fields["visibility"])
-    if qt == ASK_CURVATURE:
-        return quantize_curvature_to_vocab(fields["curvature"])
-    if qt == ASK_THICKNESS:
-        return quantize_thickness_to_vocab(fields["thickness"])
-    if qt == ASK_CLEARANCE:
-        return quantize_clearance_to_vocab(fields["clearance"])
-    if qt == ASK_DISTANCE:
-        return quantize_distance_to_vocab(fields["distance"])
-    raise KeyError(f"unsupported query_type={query_type}")
+def encode_answers_from_fields(
+    query_name_or_type: str | int,
+    fields: Dict[str, np.ndarray],
+    *,
+    codec_version: str = CQA_VOCAB_VERSION,
+    encode_mode: str | None = None,
+) -> np.ndarray:
+    if encode_mode == "normal_unsigned":
+        return quantize_normals_unsigned_to_vocab(fields["normal"], codec_version=codec_version)
+    if encode_mode == "mesh_viscount":
+        return quantize_viscount_to_vocab(fields["viscount"], codec_version=codec_version)
+    if encode_mode == "udf_thickness_valid_qbin":
+        return quantize_thickness_valid_qbin_to_vocab(fields["thickness"], codec_version=codec_version)
+    if encode_mode == "mesh_ao":
+        return quantize_ao_to_vocab(fields["ao"], codec_version=codec_version)
+
+    if isinstance(query_name_or_type, str):
+        query_name = str(query_name_or_type)
+    else:
+        qtypes = query_type_names(codec_version)
+        qt = int(query_name_or_type)
+        if qt not in qtypes:
+            raise KeyError(f"unsupported query_type={qt} for codec_version={codec_version}")
+        query_name = qtypes[qt]
+
+    if query_name == "mesh_normal":
+        return quantize_normals_to_vocab(fields["normal"], codec_version=codec_version)
+    if query_name == "mesh_normal_unsigned":
+        return quantize_normals_unsigned_to_vocab(fields["normal"], codec_version=codec_version)
+    if query_name == "mesh_visibility":
+        return quantize_visibility_to_vocab(fields["visibility"], codec_version=codec_version)
+    if query_name == "mesh_curvature":
+        return quantize_curvature_to_vocab(fields["curvature"], codec_version=codec_version)
+    if query_name == "mesh_ao":
+        return quantize_ao_to_vocab(fields["ao"], codec_version=codec_version)
+    if query_name == "udf_thickness":
+        return quantize_thickness_to_vocab(fields["thickness"], codec_version=codec_version)
+    if query_name == "udf_thickness_valid_qbin":
+        return quantize_thickness_valid_qbin_to_vocab(fields["thickness"], codec_version=codec_version)
+    if query_name == "udf_clearance":
+        return quantize_clearance_to_vocab(fields["clearance"], codec_version=codec_version)
+    if query_name == "udf_distance":
+        return quantize_distance_to_vocab(fields["distance"], codec_version=codec_version)
+    raise KeyError(f"unsupported query_name={query_name} for codec_version={codec_version}")

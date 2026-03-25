@@ -1,0 +1,38 @@
+dataset_version: v2_cqa
+codec_version: cqa_v2
+mix_num_samples: 4096
+replacement: false
+mix_seed: 0
+
+datasets:
+  - name: udf_distance
+    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
+    split: eval
+    backend: udf
+    weight: 1.0
+    task_name: udf_distance
+    context_source: pc_bank
+
+  - name: mesh_normal_unsigned
+    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
+    split: eval
+    backend: mesh
+    weight: 1.0
+    task_name: mesh_normal_unsigned
+    context_source: pc_bank
+
+  - name: udf_thickness_valid_qbin
+    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
+    split: eval
+    backend: udf
+    weight: 1.0
+    task_name: udf_thickness_valid_qbin
+    context_source: pc_bank
+
+  - name: mesh_ao
+    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
+    split: eval
+    backend: mesh
+    weight: 1.0
+    task_name: mesh_ao
+    context_source: pc_bank

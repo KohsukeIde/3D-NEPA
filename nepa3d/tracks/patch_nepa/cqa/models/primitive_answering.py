@@ -7,7 +7,7 @@ import torch.nn as nn
 
 from nepa3d.core.models.causal_transformer import CausalTransformer
 from nepa3d.core.models.point_patch_embed import PointPatchEmbed
-from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import mask_logits_for_query_type
+from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import CQA_VOCAB_VERSION, mask_logits_for_query_type
 
 
 class _MLP(nn.Module):
@@ -85,6 +85,7 @@ class PrimitiveAnsweringModel(nn.Module):
         query_type_vocab: int = 6,
         answer_vocab: int = 640,
         generator_depth: int = 2,
+        codec_version: str = CQA_VOCAB_VERSION,
         answer_factorization: str = "ar",
         query_interface_mode: str = "full_q",
     ) -> None:
@@ -92,6 +93,7 @@ class PrimitiveAnsweringModel(nn.Module):
         self.d_model = int(d_model)
         self.answer_vocab = int(answer_vocab)
         self.query_type_vocab = int(query_type_vocab)
+        self.codec_version = str(codec_version or CQA_VOCAB_VERSION)
         self.num_groups = int(num_groups)
         self.group_size = int(group_size)
         self.answer_factorization = str(answer_factorization).strip().lower()
@@ -294,11 +296,21 @@ class PrimitiveAnsweringModel(nn.Module):
         out_codes = torch.zeros((b, n), device=ctx_xyz.device, dtype=torch.long)
         if self.answer_factorization in {"parallel", "independent"}:
             cur = self.forward(ctx_xyz, qry_xyz, qry_type, out_codes)
-            step_logits = mask_logits_for_query_type(cur.logits, qry_type)
+            step_logits = mask_logits_for_query_type(
+                cur.logits,
+                qry_type,
+                codec_version=self.codec_version,
+                vocab_size=int(self.answer_vocab),
+            )
             return step_logits.argmax(dim=-1)
         for i in range(n):
             cur = self.forward(ctx_xyz, qry_xyz[:, : i + 1, :], qry_type[:, : i + 1], out_codes[:, : i + 1])
-            step_logits = mask_logits_for_query_type(cur.logits[:, i : i + 1, :], qry_type[:, i : i + 1])
+            step_logits = mask_logits_for_query_type(
+                cur.logits[:, i : i + 1, :],
+                qry_type[:, i : i + 1],
+                codec_version=self.codec_version,
+                vocab_size=int(self.answer_vocab),
+            )
             out_codes[:, i] = step_logits[:, 0, :].argmax(dim=-1)
         return out_codes
 

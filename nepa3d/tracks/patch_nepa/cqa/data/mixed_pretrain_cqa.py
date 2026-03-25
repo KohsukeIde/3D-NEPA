@@ -6,6 +6,7 @@ from torch.utils.data import Dataset
 
 from nepa3d.data.mixed_pretrain import MixedPretrainDataset, MixtureSampler, load_mix_config
 from nepa3d.data.modelnet40_index import list_npz
+from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import CQA_VOCAB_VERSION
 from nepa3d.tracks.patch_nepa.cqa.data.dataset_cqa import V2PrimitiveCQADataset
 
 
@@ -17,18 +18,22 @@ def build_mixed_pretrain_cqa(
     mode: str = "train",
     eval_seed: int = 0,
     query_order: str | None = None,
+    codec_version: str | None = None,
 ) -> Tuple[MixedPretrainDataset, MixtureSampler, Dict[str, Any]]:
     specs, cfg = load_mix_config(mix_config_path)
+    default_codec = str(codec_version or cfg.get("codec_version", CQA_VOCAB_VERSION))
 
     datasets: List[Dataset] = []
     names: List[str] = []
     weights: List[float] = []
+    codec_versions: List[str] = []
     for s in specs:
         paths = list_npz(s.cache_root, s.split)
         if len(paths) == 0:
             raise FileNotFoundError(f"no npz found: cache_root={s.cache_root} split={s.split}")
         task_name = str(s.extra.get("task_name", s.name))
         context_source = str(s.extra.get("context_source", "surf"))
+        ds_codec = str(s.extra.get("codec_version", default_codec))
         ds = V2PrimitiveCQADataset(
             paths,
             task_name=task_name,
@@ -41,10 +46,16 @@ def build_mixed_pretrain_cqa(
             query_dist_min=s.extra.get("query_dist_min", None),
             query_dist_max=s.extra.get("query_dist_max", None),
             query_order=query_order,
+            codec_version=ds_codec,
         )
         datasets.append(ds)
         names.append(s.name)
         weights.append(float(s.weight))
+        codec_versions.append(ds_codec)
+
+    unique_codecs = sorted(set(codec_versions))
+    if len(unique_codecs) != 1:
+        raise ValueError(f"mixed codec versions in one run are not supported: {unique_codecs}")
 
     mixed = MixedPretrainDataset(datasets, names)
     num_samples = int(cfg.get("mix_num_samples", len(mixed)))
@@ -64,5 +75,7 @@ def build_mixed_pretrain_cqa(
         "num_samples": num_samples,
         "replacement": replacement,
         "seed": seed,
+        "codec_versions": codec_versions,
+        "codec_version": unique_codecs[0],
     }
     return mixed, sampler, info

@@ -17,7 +17,12 @@ from nepa3d.tracks.patch_nepa.cqa.analysis.completion_udfdist_cqa import (
     _safe_mesh_from_udf_grid,
 )
 from nepa3d.tracks.patch_nepa.cqa.analysis.eval_primitive_answering_tokens import load_cqa_model
-from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import ANSWER_RANGES
+from nepa3d.tracks.patch_nepa.cqa.data import cqa_codec as codec
+from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
+    CQA_VOCAB_VERSION,
+    answer_range_for_query_name,
+    query_name_to_id,
+)
 from nepa3d.tracks.patch_nepa.cqa.data.dataset_cqa import V2PrimitiveCQADataset
 from nepa3d.utils import grid as grid_utils
 
@@ -67,6 +72,7 @@ def _build_single(
     n_ctx: int,
     n_qry: int,
     seed: int,
+    codec_version: str,
 ) -> dict[str, Any]:
     ds = V2PrimitiveCQADataset(
         [path],
@@ -77,27 +83,30 @@ def _build_single(
         seed=int(seed),
         mode="eval",
         query_order="sampled",
+        codec_version=codec_version,
     )
     return ds[0]
 
 
-def _decode_normal(code: np.ndarray) -> np.ndarray:
-    from nepa3d.tracks.patch_nepa.cqa.data import cqa_codec as codec
-
+def _decode_normal(code: np.ndarray, *, codec_version: str) -> np.ndarray:
+    if str(codec_version) != "cqa_v1":
+        raise KeyError(f"signed mesh_normal decode is only supported in cqa_v1, got {codec_version}")
     code = np.asarray(code, dtype=np.int64)
-    lo, hi = ANSWER_RANGES["mesh_normal"]
+    lo, hi = answer_range_for_query_name("mesh_normal", codec_version=codec_version)
     idx = np.clip(code.reshape(-1) - int(lo), 0, int(hi - lo) - 1)
     vec = np.asarray(codec._NORMAL_DIRS, dtype=np.float32)[idx]
     return vec.reshape(*code.shape, 3).astype(np.float32, copy=False)
 
 
-def _decode_normal_unsigned(code: np.ndarray) -> np.ndarray:
-    from nepa3d.tracks.patch_nepa.cqa.data import cqa_codec as codec
-
+def _decode_normal_unsigned(code: np.ndarray, *, codec_version: str) -> np.ndarray:
     code = np.asarray(code, dtype=np.int64)
-    lo, hi = ANSWER_RANGES["mesh_normal"]
+    lo, hi = answer_range_for_query_name("mesh_normal_unsigned", codec_version=codec_version)
     idx = np.clip(code.reshape(-1) - int(lo), 0, int(hi - lo) - 1)
-    vec = np.asarray(codec._NORMAL_UNSIGNED_DIRS, dtype=np.float32)[idx]
+    if str(codec_version) == "cqa_v2":
+        dirs = np.asarray(codec._NORMAL_UNSIGNED_DIRS_V2, dtype=np.float32)
+    else:
+        dirs = np.asarray(codec._NORMAL_UNSIGNED_DIRS, dtype=np.float32)
+    vec = dirs[idx]
     return vec.reshape(*code.shape, 3).astype(np.float32, copy=False)
 
 
@@ -124,7 +133,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     device = torch.device(str(args.device))
-    model, _ckpt, _train_args = load_cqa_model(str(args.ckpt), device)
+    model, _ckpt, train_args = load_cqa_model(str(args.ckpt), device)
+    codec_version = str(train_args.get("codec_version", CQA_VOCAB_VERSION))
     tasks = [t.strip() for t in str(args.tasks).split(",") if t.strip()]
     paths = _pick_paths(
         str(args.cache_root),
@@ -138,6 +148,7 @@ def main() -> None:
     index: list[dict[str, Any]] = []
 
     centers = grid_utils.make_grid_centers_np(int(args.distance_grid_res)).reshape(-1, 3).astype(np.float32, copy=False)
+    distance_query_type = int(query_name_to_id(codec_version)["udf_distance"])
 
     for i, path in enumerate(paths):
         shape_id = _safe_name(Path(path).stem)
@@ -150,6 +161,7 @@ def main() -> None:
             n_ctx=int(args.n_ctx),
             n_qry=int(args.n_qry_surface),
             seed=int(args.seed) + i,
+            codec_version=codec_version,
         )
         ctx_xyz = sample_ref["ctx_xyz"].numpy()
         _export_pc(shape_dir / "context_points.ply", ctx_xyz)
@@ -158,6 +170,7 @@ def main() -> None:
         shape_summary: dict[str, Any] = {
             "path": path,
             "context_source": str(args.context_source),
+            "codec_version": codec_version,
             "tasks": {},
         }
         gt_mesh = _load_normalized_mesh(path)
@@ -169,6 +182,8 @@ def main() -> None:
                     ctx_xyz=torch.from_numpy(ctx_xyz[None]).to(device=device, dtype=torch.float32),
                     centers=centers,
                     chunk_n_query=int(args.distance_chunk_n_query),
+                    query_type_id=distance_query_type,
+                    codec_version=codec_version,
                 )[0]
                 gt_flat = _closest_distance(gt_mesh, centers)
                 pred_grid = pred_flat.reshape(int(args.distance_grid_res), int(args.distance_grid_res), int(args.distance_grid_res))
@@ -200,6 +215,7 @@ def main() -> None:
                 n_ctx=int(args.n_ctx),
                 n_qry=int(args.n_qry_surface),
                 seed=int(args.seed) + i,
+                codec_version=codec_version,
             )
             q_xyz = sample["qry_xyz"].numpy()
             q_type = sample["qry_type"].unsqueeze(0).to(device=device, dtype=torch.long)
@@ -216,12 +232,12 @@ def main() -> None:
 
             if task_name in {"mesh_normal", "mesh_normal_unsigned"}:
                 if task_name == "mesh_normal_unsigned":
-                    gt_val = _decode_normal_unsigned(gt_code)
-                    pred_val = _decode_normal_unsigned(pred_code)
+                    gt_val = _decode_normal_unsigned(gt_code, codec_version=codec_version)
+                    pred_val = _decode_normal_unsigned(pred_code, codec_version=codec_version)
                     cos = np.abs(np.sum(pred_val * gt_val, axis=1))
                 else:
-                    gt_val = _decode_normal(gt_code)
-                    pred_val = _decode_normal(pred_code)
+                    gt_val = _decode_normal(gt_code, codec_version=codec_version)
+                    pred_val = _decode_normal(pred_code, codec_version=codec_version)
                     cos = np.sum(pred_val * gt_val, axis=1)
                 np.save(shape_dir / f"{task_name}_pred_vec.npy", pred_val)
                 np.save(shape_dir / f"{task_name}_gt_vec.npy", gt_val)

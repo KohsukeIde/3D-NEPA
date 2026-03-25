@@ -17,7 +17,9 @@ from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
     ANSWER_VOCAB_SIZE,
     CQA_VOCAB_VERSION,
     QUERY_TYPE_VOCAB_SIZE,
+    answer_vocab_size,
     mask_logits_for_query_type,
+    query_type_vocab_size,
 )
 from nepa3d.tracks.patch_nepa.cqa.data.dataset_cqa import QUERY_ORDER_MODES, cqa_collate_fn
 from nepa3d.tracks.patch_nepa.cqa.data.mixed_pretrain_cqa import build_mixed_pretrain_cqa
@@ -74,8 +76,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--patch_center_mode", type=str, default="fps", choices=["fps", "first"])
     p.add_argument("--patch_fps_random_start", type=int, default=1, choices=[0, 1])
     p.add_argument("--local_encoder", type=str, default="pointmae_conv", choices=["mlp", "pointmae_conv"])
-    p.add_argument("--answer_vocab", type=int, default=ANSWER_VOCAB_SIZE)
-    p.add_argument("--query_type_vocab", type=int, default=QUERY_TYPE_VOCAB_SIZE)
+    p.add_argument("--codec_version", type=str, default="", help="If empty, infer from mix_config_path.")
+    p.add_argument("--answer_vocab", type=int, default=0, help="If <=0, resolve from codec_version.")
+    p.add_argument("--query_type_vocab", type=int, default=0, help="If <=0, resolve from codec_version.")
     p.add_argument("--generator_depth", type=int, default=2)
     p.add_argument(
         "--answer_factorization",
@@ -122,8 +125,20 @@ def _scheduler_scale(step: int, args: argparse.Namespace, max_steps: int, warmup
     return min_scale + (1.0 - min_scale) * cosv
 
 
-def _masked_ce_metrics(logits: torch.Tensor, target: torch.Tensor, qry_type: torch.Tensor) -> dict[str, torch.Tensor]:
-    masked_logits = mask_logits_for_query_type(logits, qry_type)
+def _masked_ce_metrics(
+    logits: torch.Tensor,
+    target: torch.Tensor,
+    qry_type: torch.Tensor,
+    *,
+    codec_version: str,
+    answer_vocab: int,
+) -> dict[str, torch.Tensor]:
+    masked_logits = mask_logits_for_query_type(
+        logits,
+        qry_type,
+        codec_version=str(codec_version),
+        vocab_size=int(answer_vocab),
+    )
     flat_logits = masked_logits.reshape(-1, int(masked_logits.shape[-1]))
     flat_target = target.reshape(-1)
     loss = F.cross_entropy(flat_logits, flat_target)
@@ -156,7 +171,7 @@ def _save_ckpt(
         "args": vars(args),
         "epoch": int(epoch),
         "global_step": int(global_step),
-        "vocab_version": CQA_VOCAB_VERSION,
+        "vocab_version": str(args.codec_version),
     }
     torch.save(ckpt, save_dir / name)
 
@@ -216,7 +231,14 @@ def main() -> None:
         mode="train",
         eval_seed=int(args.seed),
         query_order=str(args.query_order),
+        codec_version=(str(args.codec_version).strip() or None),
     )
+    args.codec_version = str(str(args.codec_version).strip() or info.get("codec_version", CQA_VOCAB_VERSION))
+    if int(args.answer_vocab) <= 0:
+        args.answer_vocab = int(answer_vocab_size(str(args.codec_version)))
+    if int(args.query_type_vocab) <= 0:
+        args.query_type_vocab = int(query_type_vocab_size(str(args.codec_version)))
+
     loader = DataLoader(
         dataset,
         batch_size=int(args.batch_size),
@@ -243,6 +265,7 @@ def main() -> None:
         query_type_vocab=int(args.query_type_vocab),
         answer_vocab=int(args.answer_vocab),
         generator_depth=int(args.generator_depth),
+        codec_version=str(args.codec_version),
         answer_factorization=str(args.answer_factorization),
         query_interface_mode=str(args.query_interface_mode),
     )
@@ -263,42 +286,33 @@ def main() -> None:
         save_dir.mkdir(parents=True, exist_ok=True)
         with open(save_dir / "args.json", "w") as f:
             json.dump(vars(args), f, indent=2)
-        with open(save_dir / "mix_info.json", "w") as f:
+        with open(save_dir / "dataset_mix_info.json", "w") as f:
             json.dump(info, f, indent=2)
         with open(save_dir / "vocab_spec.json", "w") as f:
             json.dump(
                 {
-                    "vocab_version": CQA_VOCAB_VERSION,
+                    "vocab_version": str(args.codec_version),
                     "answer_vocab_size": int(args.answer_vocab),
                     "query_type_vocab": int(args.query_type_vocab),
                 },
                 f,
                 indent=2,
             )
-        with open(save_dir / "train_runtime.json", "w") as f:
-            json.dump(
-                {
-                    "steps_per_epoch": int(steps_per_epoch),
-                    "effective_max_steps": int(max_steps),
-                    "warmup_steps": int(warmup_steps),
-                    "lr_scheduler": str(args.lr_scheduler),
-                    "max_grad_norm": float(args.max_grad_norm),
-                },
-                f,
-                indent=2,
-            )
+        accelerator.print(f"[dataset] steps_per_epoch={steps_per_epoch} max_steps={max_steps} warmup_steps={warmup_steps}")
+        accelerator.print(f"[dataset] mix_info={json.dumps(info)}")
+
     wandb_run = _init_wandb(args, accelerator)
-    wandb_log_every = max(1, int(args.wandb_log_every))
 
     global_step = 0
-    last_epoch = 0
-    stop = False
+    best_loss = float("inf")
+    stop_training = False
     for ep in range(int(args.epochs)):
-        last_epoch = int(ep + 1)
-        if hasattr(loader.sampler, "set_epoch"):
-            loader.sampler.set_epoch(ep)
         model.train()
         pbar = tqdm(loader, disable=not accelerator.is_main_process, desc=f"ep {ep:03d}")
+        loss_sum = 0.0
+        tok_sum = 0.0
+        ent_sum = 0.0
+        batch_count = 0
         for batch in pbar:
             out = model(
                 ctx_xyz=batch["ctx_xyz"],
@@ -306,7 +320,13 @@ def main() -> None:
                 qry_type=batch["qry_type"],
                 answer_code=batch["answer_code"],
             )
-            metrics = _masked_ce_metrics(out.logits, batch["answer_code"], batch["qry_type"])
+            metrics = _masked_ce_metrics(
+                out.logits,
+                batch["answer_code"],
+                batch["qry_type"],
+                codec_version=str(args.codec_version),
+                answer_vocab=int(args.answer_vocab),
+            )
             loss = metrics["loss"]
             accelerator.backward(loss)
             if float(args.max_grad_norm) > 0:
@@ -315,63 +335,93 @@ def main() -> None:
             if scheduler is not None:
                 scheduler.step()
             opt.zero_grad(set_to_none=True)
+
+            batch_count += 1
             global_step += 1
+            loss_val = float(loss.detach().cpu())
+            tok_val = float(metrics["token_acc"].detach().cpu())
+            ent_val = float(metrics["entropy"].detach().cpu())
+            lr_val = float(opt.param_groups[0]["lr"])
+            loss_sum += loss_val
+            tok_sum += tok_val
+            ent_sum += ent_val
             if accelerator.is_main_process:
-                cur_lr = float(opt.param_groups[0]["lr"])
-                pbar.set_postfix(
-                    loss=float(loss.detach().cpu()),
-                    acc=float(metrics["token_acc"].detach().cpu()),
-                    ent=float(metrics["entropy"].detach().cpu()),
-                    lr=cur_lr,
+                pbar.set_postfix(loss=loss_val, acc=tok_val, ent=ent_val, lr=lr_val, step=global_step)
+            if wandb_run is not None and accelerator.is_main_process and (global_step % max(1, int(args.wandb_log_every)) == 0):
+                wandb_run.log(
+                    {
+                        "train/loss": loss_val,
+                        "train/token_acc": tok_val,
+                        "train/answer_entropy": ent_val,
+                        "train/lr": lr_val,
+                        "train/epoch": float(ep),
+                        "train/global_step": int(global_step),
+                    },
                     step=int(global_step),
                 )
-                if wandb_run is not None and (global_step % wandb_log_every == 0):
-                    wandb_run.log(
-                        {
-                            "train/loss": float(loss.detach().cpu()),
-                            "train/token_acc": float(metrics["token_acc"].detach().cpu()),
-                            "train/answer_entropy": float(metrics["entropy"].detach().cpu()),
-                            "train/lr": cur_lr,
-                            "train/epoch": float(ep + 1),
-                        },
-                        step=int(global_step),
-                    )
-
-            if accelerator.is_main_process and int(args.save_every_steps) > 0 and (global_step % int(args.save_every_steps) == 0):
+            if int(args.save_every_steps) > 0 and global_step % int(args.save_every_steps) == 0 and accelerator.is_main_process:
                 _save_ckpt(
                     accelerator=accelerator,
                     model=model,
                     args=args,
                     save_dir=save_dir,
-                    epoch=int(ep),
-                    global_step=int(global_step),
-                    name=f"ckpt_step{global_step:06d}.pt",
+                    epoch=ep,
+                    global_step=global_step,
+                    name=f"ckpt_step{global_step:07d}.pt",
                 )
-
-            if int(global_step) >= int(max_steps):
-                stop = True
+                _save_ckpt(
+                    accelerator=accelerator,
+                    model=model,
+                    args=args,
+                    save_dir=save_dir,
+                    epoch=ep,
+                    global_step=global_step,
+                    name="ckpt_latest.pt",
+                )
+            if global_step >= max_steps:
+                stop_training = True
                 break
 
-        if accelerator.is_main_process and ((ep + 1) % int(args.save_every) == 0 or (ep + 1) == int(args.epochs)):
-            _save_ckpt(
-                accelerator=accelerator,
-                model=model,
-                args=args,
-                save_dir=save_dir,
-                epoch=int(ep + 1),
-                global_step=int(global_step),
-                name=f"ckpt_ep{ep+1:04d}.pt",
+        mean_loss = loss_sum / max(1, batch_count)
+        mean_acc = tok_sum / max(1, batch_count)
+        mean_ent = ent_sum / max(1, batch_count)
+        if accelerator.is_main_process:
+            print(
+                f"[train] ep={ep:03d} global_step={global_step} "
+                f"loss={mean_loss:.4f} acc={mean_acc:.4f} ent={mean_ent:.4f}"
             )
-            _save_ckpt(
-                accelerator=accelerator,
-                model=model,
-                args=args,
-                save_dir=save_dir,
-                epoch=int(ep + 1),
-                global_step=int(global_step),
-                name="ckpt_latest.pt",
-            )
-        if stop:
+            if mean_loss < best_loss:
+                best_loss = mean_loss
+                _save_ckpt(
+                    accelerator=accelerator,
+                    model=model,
+                    args=args,
+                    save_dir=save_dir,
+                    epoch=ep,
+                    global_step=global_step,
+                    name="ckpt_best.pt",
+                )
+            if ((ep + 1) % max(1, int(args.save_every)) == 0) or stop_training:
+                _save_ckpt(
+                    accelerator=accelerator,
+                    model=model,
+                    args=args,
+                    save_dir=save_dir,
+                    epoch=ep,
+                    global_step=global_step,
+                    name="ckpt_latest.pt",
+                )
+            if wandb_run is not None:
+                wandb_run.log(
+                    {
+                        "epoch/loss": mean_loss,
+                        "epoch/token_acc": mean_acc,
+                        "epoch/answer_entropy": mean_ent,
+                        "epoch/global_step": int(global_step),
+                    },
+                    step=int(global_step),
+                )
+        if stop_training:
             break
 
     if accelerator.is_main_process:
@@ -380,21 +430,12 @@ def main() -> None:
             model=model,
             args=args,
             save_dir=save_dir,
-            epoch=int(last_epoch),
-            global_step=int(global_step),
+            epoch=max(0, ep),
+            global_step=global_step,
             name="ckpt_final.pt",
         )
-        _save_ckpt(
-            accelerator=accelerator,
-            model=model,
-            args=args,
-            save_dir=save_dir,
-            epoch=int(last_epoch),
-            global_step=int(global_step),
-            name="ckpt_latest.pt",
-        )
-        if wandb_run is not None:
-            wandb_run.finish()
+    if wandb_run is not None and accelerator.is_main_process:
+        wandb_run.finish()
 
 
 if __name__ == "__main__":

@@ -17,10 +17,9 @@ from .cqa_codec import (
     ASK_VISIBILITY,
     ANSWER_VOCAB_SIZE,
     CQA_VOCAB_VERSION,
+    answer_vocab_size,
     encode_answers_from_fields,
-    quantize_normals_unsigned_to_vocab,
-    quantize_thickness_valid_qbin_to_vocab,
-    quantize_viscount_to_vocab,
+    query_name_to_id,
 )
 
 QUERY_ORDER_MODES = ("sampled", "shuffled", "ordered_xyz")
@@ -137,6 +136,7 @@ def _normalize_query_src_filter(v: Any) -> tuple[int, ...] | None:
 @dataclass(frozen=True)
 class CQATaskSpec:
     name: str
+    query_name: str
     query_type: int
     query_xyz_key: str
     field_keys: Dict[str, str]
@@ -148,12 +148,14 @@ TASK_REGISTRY: Dict[str, CQATaskSpec] = {
     # Surface-aligned tasks always use surf_xyz as carrier.
     "mesh_normal": CQATaskSpec(
         name="mesh_normal",
+        query_name="mesh_normal",
         query_type=ASK_NORMAL,
         query_xyz_key="surf_xyz",
         field_keys={"normal": "mesh_surf_n"},
     ),
     "mesh_normal_unsigned": CQATaskSpec(
         name="mesh_normal_unsigned",
+        query_name="mesh_normal_unsigned",
         query_type=ASK_NORMAL,
         query_xyz_key="surf_xyz",
         field_keys={"normal": "mesh_surf_n"},
@@ -161,18 +163,21 @@ TASK_REGISTRY: Dict[str, CQATaskSpec] = {
     ),
     "mesh_visibility": CQATaskSpec(
         name="mesh_visibility",
+        query_name="mesh_visibility",
         query_type=ASK_VISIBILITY,
         query_xyz_key="surf_xyz",
         field_keys={"visibility": "mesh_surf_vis_sig"},
     ),
     "mesh_curvature": CQATaskSpec(
         name="mesh_curvature",
+        query_name="mesh_curvature",
         query_type=ASK_CURVATURE,
         query_xyz_key="surf_xyz",
         field_keys={"curvature": "mesh_surf_curv"},
     ),
     "mesh_viscount": CQATaskSpec(
         name="mesh_viscount",
+        query_name="mesh_visibility",
         query_type=ASK_VISIBILITY,
         query_xyz_key="surf_xyz",
         field_keys={"viscount": "mesh_surf_viscount"},
@@ -180,18 +185,22 @@ TASK_REGISTRY: Dict[str, CQATaskSpec] = {
     ),
     "mesh_ao": CQATaskSpec(
         name="mesh_ao",
+        query_name="mesh_ao",
         query_type=ASK_VISIBILITY,
         query_xyz_key="surf_xyz",
         field_keys={"ao": "mesh_surf_ao"},
+        encode_mode="mesh_ao",
     ),
     "udf_thickness": CQATaskSpec(
         name="udf_thickness",
+        query_name="udf_thickness",
         query_type=ASK_THICKNESS,
         query_xyz_key="surf_xyz",
         field_keys={"thickness": "udf_surf_thickness"},
     ),
     "udf_thickness_valid_qbin": CQATaskSpec(
         name="udf_thickness_valid_qbin",
+        query_name="udf_thickness_valid_qbin",
         query_type=ASK_THICKNESS,
         query_xyz_key="surf_xyz",
         field_keys={"thickness": "udf_surf_thickness"},
@@ -200,6 +209,7 @@ TASK_REGISTRY: Dict[str, CQATaskSpec] = {
     ),
     "udf_clearance": CQATaskSpec(
         name="udf_clearance",
+        query_name="udf_clearance",
         query_type=ASK_CLEARANCE,
         query_xyz_key="surf_xyz",
         # Current task semantics are front-clearance only.
@@ -208,6 +218,7 @@ TASK_REGISTRY: Dict[str, CQATaskSpec] = {
     # Explicit off-surface query task.
     "udf_distance": CQATaskSpec(
         name="udf_distance",
+        query_name="udf_distance",
         query_type=ASK_DISTANCE,
         query_xyz_key="udf_qry_xyz",
         field_keys={"distance": "udf_qry_dist"},
@@ -232,12 +243,21 @@ class V2PrimitiveCQADataset(Dataset):
         query_dist_min: float | None = None,
         query_dist_max: float | None = None,
         query_order: str | None = None,
+        codec_version: str = CQA_VOCAB_VERSION,
     ) -> None:
         super().__init__()
         self.paths = list(paths)
         if task_name not in TASK_REGISTRY:
             raise KeyError(f"unknown task_name={task_name}")
         self.task = TASK_REGISTRY[task_name]
+        self.codec_version = str(codec_version or CQA_VOCAB_VERSION)
+        qname_to_id = query_name_to_id(self.codec_version)
+        if self.task.query_name not in qname_to_id:
+            raise KeyError(
+                f"task={task_name} query_name={self.task.query_name} is not supported "
+                f"under codec_version={self.codec_version}"
+            )
+        self.query_type = int(qname_to_id[self.task.query_name])
         self.context_source = str(context_source)
         self.n_ctx = int(n_ctx)
         self.n_qry = int(n_qry)
@@ -334,14 +354,12 @@ class V2PrimitiveCQADataset(Dataset):
             for alias, key in self.task.field_keys.items():
                 arr = np.asarray(npz[key], dtype=np.float32)
                 fields[alias] = arr[q_idx]
-            if self.task.encode_mode == "normal_unsigned":
-                answer_code = quantize_normals_unsigned_to_vocab(fields["normal"])
-            elif self.task.encode_mode == "mesh_viscount":
-                answer_code = quantize_viscount_to_vocab(fields["viscount"])
-            elif self.task.encode_mode == "udf_thickness_valid_qbin":
-                answer_code = quantize_thickness_valid_qbin_to_vocab(fields["thickness"])
-            else:
-                answer_code = encode_answers_from_fields(self.task.query_type, fields)
+            answer_code = encode_answers_from_fields(
+                self.task.query_name,
+                fields,
+                codec_version=self.codec_version,
+                encode_mode=self.task.encode_mode,
+            )
             qry_xyz, answer_code, qry_src_code = _apply_query_order(
                 qry_xyz=qry_xyz,
                 answer_code=answer_code,
@@ -354,7 +372,7 @@ class V2PrimitiveCQADataset(Dataset):
             out: Dict[str, Any] = {
                 "ctx_xyz": _np_to_torch_f32(ctx_xyz),
                 "qry_xyz": _np_to_torch_f32(qry_xyz),
-                "qry_type": torch.full((int(qry_xyz.shape[0]),), int(self.task.query_type), dtype=torch.long),
+                "qry_type": torch.full((int(qry_xyz.shape[0]),), int(self.query_type), dtype=torch.long),
                 "answer_code": _np_to_torch_i64(answer_code),
                 "qry_src_code": _np_to_torch_i64(qry_src_code),
                 "task_name": self.task.name,
@@ -367,8 +385,8 @@ class V2PrimitiveCQADataset(Dataset):
                 "query_dist_min": self.query_dist_min,
                 "query_dist_max": self.query_dist_max,
                 "query_order": self.query_order,
-                "answer_vocab_size": int(ANSWER_VOCAB_SIZE),
-                "vocab_version": CQA_VOCAB_VERSION,
+                "answer_vocab_size": int(answer_vocab_size(self.codec_version)),
+                "vocab_version": self.codec_version,
             }
             return out
 

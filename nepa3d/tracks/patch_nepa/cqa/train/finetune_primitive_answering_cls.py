@@ -14,8 +14,14 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from nepa3d.data.cls_patch_dataset import PatchClsPointDataset, PointAugConfig
-from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import ANSWER_VOCAB_SIZE, QUERY_TYPE_VOCAB_SIZE
 from nepa3d.data.modelnet40_index import list_npz
+from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
+    ANSWER_VOCAB_SIZE,
+    CQA_VOCAB_VERSION,
+    QUERY_TYPE_VOCAB_SIZE,
+    answer_vocab_size,
+    query_type_vocab_size,
+)
 from nepa3d.tracks.patch_nepa.cqa.models.primitive_answering import PrimitiveAnsweringClassifier, PrimitiveAnsweringModel
 
 
@@ -49,7 +55,14 @@ def parse_args() -> argparse.Namespace:
 
 def _load_pretrained_model(ckpt_path: str) -> PrimitiveAnsweringModel:
     ckpt = torch.load(ckpt_path, map_location="cpu")
-    args = ckpt.get("args", {})
+    args = dict(ckpt.get("args", {}))
+    codec_version = str(ckpt.get("vocab_version", args.get("codec_version", CQA_VOCAB_VERSION)))
+    answer_vocab = int(args.get("answer_vocab", 0))
+    query_type_vocab = int(args.get("query_type_vocab", 0))
+    if answer_vocab <= 0:
+        answer_vocab = int(answer_vocab_size(codec_version))
+    if query_type_vocab <= 0:
+        query_type_vocab = int(query_type_vocab_size(codec_version))
     model = PrimitiveAnsweringModel(
         d_model=int(args.get("d_model", 384)),
         n_layers=int(args.get("n_layers", 12)),
@@ -63,9 +76,10 @@ def _load_pretrained_model(ckpt_path: str) -> PrimitiveAnsweringModel:
         patch_center_mode=str(args.get("patch_center_mode", "fps")),
         patch_fps_random_start=bool(args.get("patch_fps_random_start", 1)),
         local_encoder=str(args.get("local_encoder", "pointmae_conv")),
-        query_type_vocab=int(args.get("query_type_vocab", QUERY_TYPE_VOCAB_SIZE)),
-        answer_vocab=int(args.get("answer_vocab", ANSWER_VOCAB_SIZE)),
+        query_type_vocab=query_type_vocab,
+        answer_vocab=answer_vocab,
         generator_depth=int(args.get("generator_depth", 2)),
+        codec_version=codec_version,
         answer_factorization=str(args.get("answer_factorization", "ar")),
         query_interface_mode=str(args.get("query_interface_mode", "full_q")),
     )

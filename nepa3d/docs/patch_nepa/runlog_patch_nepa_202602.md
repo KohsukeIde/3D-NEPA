@@ -7676,3 +7676,44 @@ Operational interpretation:
   discrete shared `DISTANCE + NORMAL_UNSIGNED` is still the safer publishable
   multi-type checkpoint today, while the AO branch is the first viable
   mesh-two-answer expansion.
+
+## 178. Loss balancing improves same-context fit but costs off-diagonal robustness (2026-03-24)
+
+Lineage:
+
+- baseline shared AO branch `116610/116611`
+- fixed-weight rerun `116670/116672`
+- EMA-normalized rerun `116671/116673`
+
+Summary:
+
+- same-context `udf_distance` improves strongly under balancing:
+  - baseline: `MAE=0.035967`, `IoU@0.05=0.703036`
+  - fixed: `MAE=0.020634`, `IoU@0.05=0.791936`
+  - `ema_norm`: `MAE=0.015475`, `IoU@0.05=0.832734`
+- same-context `mesh_normal_unsigned` stays roughly flat:
+  - baseline / fixed / EMA `mean_cos = 0.7776 / 0.7789 / 0.7707`
+- `mesh_ao` stays alive in all three:
+  - same `MAE = 0.1927 / 0.1922 / 0.1908`
+  - positive `no_context` delta stays positive
+- off-diagonal gets worse under balancing:
+  - `udf_distance MAE = 0.0948 / 0.1215 / 0.1295`
+  - `mesh_normal_unsigned mean_cos = 0.6828 / 0.6439 / 0.6212`
+
+Operational interpretation:
+
+- the earlier same-context regression in the raw shared AO branch was indeed
+  largely a task-loss scale issue.
+- however, the unbalanced baseline appears to regularize for better
+  off-diagonal transfer, while the balanced variants push the model harder
+  toward same-context fit.
+- fixed weights are the safer balancing recipe:
+  - they recover most of the same-context gain,
+  - and lose less off-diagonal performance than `ema_norm`.
+
+Decision:
+
+- keep these runs as a positive explanation, not a mainline switch.
+- current safest branch split is:
+  - raw shared AO branch for off-diagonal robustness,
+  - balanced variants as evidence that task-scale mismatch was real.

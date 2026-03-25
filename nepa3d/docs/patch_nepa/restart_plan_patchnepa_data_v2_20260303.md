@@ -3520,3 +3520,71 @@ Decision:
   the safer publishable multi-type anchor today.
 - next choice point is whether to add rescued `THICKNESS_VALID_QBIN` to this
   family or keep UDF and mesh answer expansion on separate branches.
+
+## 86. Loss balancing explains the same-context regression, but weakens off-diagonal robustness (2026-03-24)
+
+Canonical sources:
+
+- baseline shared AO branch:
+  - `results/cqa_multitype/patchnepa_cqa_distnormao_continuous_20260324_181908_suite/cqa_distnormao_continuous_suite.json`
+- EMA-normalized rerun:
+  - `results/cqa_multitype/patchnepa_cqa_distnormao_continuous_emanorm_20260324_215126_suite/cqa_distnormao_continuous_emanorm_suite.json`
+- fixed-weight rerun:
+  - `results/cqa_multitype/patchnepa_cqa_distnormao_continuous_fixedw_20260324_215126_suite/cqa_distnormao_continuous_fixedw_suite.json`
+
+Implementation note:
+
+- the original shared continuous trainer was averaging raw task losses with no
+  scale correction:
+  - `distance = MSE`
+  - `AO = MSE`
+  - `normal = 1 - cos`
+- `C031` added two balancing modes:
+  - `ema_norm`: divide each active task loss by a running EMA
+  - `fixed`: manual weights (`distance=10.0`, `AO=1.0`, `normal=0.3`)
+
+Key comparison:
+
+- same-context:
+  - baseline:
+    - `udf_distance MAE=0.0360`, `mesh_normal_unsigned mean_cos=0.7776`
+  - `ema_norm`:
+    - `udf_distance MAE=0.0155`, `IoU@0.05=0.8327`
+    - `mesh_normal_unsigned mean_cos=0.7707`
+    - `mesh_ao MAE=0.1908`
+  - fixed:
+    - `udf_distance MAE=0.0206`, `IoU@0.05=0.7919`
+    - `mesh_normal_unsigned mean_cos=0.7789`
+    - `mesh_ao MAE=0.1922`
+- off-diagonal:
+  - baseline:
+    - `udf_distance MAE=0.0948`, `IoU@0.05=0.4858`
+    - `mesh_normal_unsigned mean_cos=0.6828`
+  - `ema_norm`:
+    - `udf_distance MAE=0.1295`, `IoU@0.05=0.4393`
+    - `mesh_normal_unsigned mean_cos=0.6212`
+  - fixed:
+    - `udf_distance MAE=0.1215`, `IoU@0.05=0.4457`
+    - `mesh_normal_unsigned mean_cos=0.6439`
+
+Interpretation:
+
+- yes, the original same-context regression was substantially a task-loss scale
+  issue:
+  - both balancing schemes recover `udf_distance` fit strongly on same-context
+    while leaving `mesh_ao` alive.
+- but the price is lower off-diagonal robustness:
+  - the unbalanced baseline remains best on off-diagonal `udf_distance`,
+  - and also best on off-diagonal `mesh_normal_unsigned`.
+- fixed weights are safer than pure EMA normalization:
+  - they keep more of the baseline off-diagonal read while still recovering
+    most of the same-context `udf_distance` loss.
+
+Decision:
+
+- keep `C031` as positive explanatory evidence that task-scale mismatch was
+  real.
+- do not replace the raw shared AO branch with the balanced variants as the
+  default branch yet.
+- if the project wants a tuned shared AO line later, start from the fixed
+  weighting variant rather than EMA normalization.

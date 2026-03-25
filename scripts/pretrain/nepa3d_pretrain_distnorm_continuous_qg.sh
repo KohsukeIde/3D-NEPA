@@ -51,6 +51,12 @@ LOCAL_ENCODER="${LOCAL_ENCODER:-pointmae_conv}"
 QUERY_TYPE_VOCAB="${QUERY_TYPE_VOCAB:-6}"
 GENERATOR_DEPTH="${GENERATOR_DEPTH:-2}"
 DISTANCE_FLOOR="${DISTANCE_FLOOR:-0.0}"
+TASK_LOSS_BALANCE="${TASK_LOSS_BALANCE:-mean}"
+LOSS_EMA_MOMENTUM="${LOSS_EMA_MOMENTUM:-0.99}"
+LOSS_EMA_EPS="${LOSS_EMA_EPS:-1e-6}"
+LOSS_WEIGHT_DISTANCE="${LOSS_WEIGHT_DISTANCE:-1.0}"
+LOSS_WEIGHT_AO="${LOSS_WEIGHT_AO:-1.0}"
+LOSS_WEIGHT_NORMAL="${LOSS_WEIGHT_NORMAL:-1.0}"
 
 LOG_PATH="${LOG_ROOT}/${RUN_TAG}.log"
 
@@ -82,6 +88,7 @@ echo "workdir=${WORKDIR}" | tee -a "${LOG_PATH}"
 echo "mix_config=${MIX_CONFIG}" | tee -a "${LOG_PATH}"
 echo "save_dir=${SAVE_DIR}" | tee -a "${LOG_PATH}"
 echo "epochs=${EPOCHS} batch=${BATCH} n_ctx=${N_CTX} n_qry=${N_QRY} query_order=${QUERY_ORDER}" | tee -a "${LOG_PATH}"
+echo "loss_balance=${TASK_LOSS_BALANCE} ema_m=${LOSS_EMA_MOMENTUM} w=(dist=${LOSS_WEIGHT_DISTANCE},ao=${LOSS_WEIGHT_AO},norm=${LOSS_WEIGHT_NORMAL})" | tee -a "${LOG_PATH}"
 echo | tee -a "${LOG_PATH}"
 
 python -u -m nepa3d.tracks.patch_nepa.cqa.train.pretrain_distnorm_continuous \
@@ -121,6 +128,12 @@ python -u -m nepa3d.tracks.patch_nepa.cqa.train.pretrain_distnorm_continuous \
   --query_type_vocab "${QUERY_TYPE_VOCAB}" \
   --generator_depth "${GENERATOR_DEPTH}" \
   --distance_floor "${DISTANCE_FLOOR}" \
+  --task_loss_balance "${TASK_LOSS_BALANCE}" \
+  --loss_ema_momentum "${LOSS_EMA_MOMENTUM}" \
+  --loss_ema_eps "${LOSS_EMA_EPS}" \
+  --loss_weight_distance "${LOSS_WEIGHT_DISTANCE}" \
+  --loss_weight_ao "${LOSS_WEIGHT_AO}" \
+  --loss_weight_normal "${LOSS_WEIGHT_NORMAL}" \
   2>&1 | tee -a "${LOG_PATH}"
 
 echo "[done] log=${LOG_PATH}" | tee -a "${LOG_PATH}"

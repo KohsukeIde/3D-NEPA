@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -16,7 +15,11 @@ from nepa3d.tracks.patch_nepa.cqa.analysis.eval_primitive_answering_tokens impor
     build_eval_datasets,
     load_cqa_model,
 )
-from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import ASK_DISTANCE, decode_distance_from_vocab
+from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
+    CQA_VOCAB_VERSION,
+    decode_distance_from_vocab,
+    query_name_to_id,
+)
 from nepa3d.utils import grid as grid_utils
 
 
@@ -97,6 +100,8 @@ def _predict_distance_codes(
     ctx_xyz: torch.Tensor,
     centers: np.ndarray,
     chunk_n_query: int,
+    query_type_id: int,
+    codec_version: str,
 ) -> np.ndarray:
     device = ctx_xyz.device
     b = int(ctx_xyz.shape[0])
@@ -107,10 +112,10 @@ def _predict_distance_codes(
         e = min(n_total, s + qbs)
         q_np = np.repeat(centers[None, s:e, :], b, axis=0).astype(np.float32, copy=False)
         q_t = torch.from_numpy(q_np).to(device)
-        t_t = torch.full((b, int(e - s)), int(ASK_DISTANCE), device=device, dtype=torch.long)
+        t_t = torch.full((b, int(e - s)), int(query_type_id), device=device, dtype=torch.long)
         with torch.no_grad():
             code = model.generate(ctx_xyz, q_t, t_t)
-        out[:, s:e] = decode_distance_from_vocab(code.detach().cpu().numpy())
+        out[:, s:e] = decode_distance_from_vocab(code.detach().cpu().numpy(), codec_version=codec_version)
     return out
 
 
@@ -231,7 +236,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     device = torch.device(str(args.device))
-    model, ckpt, _model_args = load_cqa_model(str(args.ckpt), device)
+    model, ckpt, model_args = load_cqa_model(str(args.ckpt), device)
+    codec_version = str(model_args.get("codec_version", CQA_VOCAB_VERSION))
+    distance_query_type = int(query_name_to_id(codec_version)["udf_distance"])
     tau_list = _parse_tau_list(str(args.tau_list))
     specs = build_eval_datasets(
         str(args.mix_config_path),
@@ -243,6 +250,7 @@ def main() -> None:
         task_filter=_parse_task_filter(str(args.task_filter)),
         eval_sample_mode=str(args.eval_sample_mode),
         query_order=str(args.query_order),
+        codec_version=codec_version,
     )
     centers = grid_utils.make_grid_centers_np(int(args.grid_res)).reshape(-1, 3).astype(np.float32, copy=False)
     out_path = Path(str(args.output_json))
@@ -272,6 +280,8 @@ def main() -> None:
                 ctx_xyz=ctx_batch,
                 centers=centers,
                 chunk_n_query=int(args.chunk_n_query),
+                query_type_id=distance_query_type,
+                codec_version=codec_version,
             )
             for bi, sample in enumerate(batch_samples):
                 path = str(sample["path"])
@@ -286,6 +296,7 @@ def main() -> None:
                     "path": path,
                     "synset": str(sample.get("synset", "")),
                     "context_source": str(sample.get("context_source", spec.context_source)),
+                    "codec_version": codec_version,
                     "mae": float(np.mean(np.abs(err))),
                     "rmse": float(np.sqrt(np.mean(err ** 2))),
                 }
@@ -337,6 +348,7 @@ def main() -> None:
             "context_source": spec.context_source,
             "split": spec.split,
             "cache_root": spec.cache_root,
+            "codec_version": codec_version,
             "num_shapes": int(len(per_shape)),
             "grid_res": int(args.grid_res),
             "chunk_n_query": int(args.chunk_n_query),
@@ -358,6 +370,7 @@ def main() -> None:
         "ckpt": str(args.ckpt),
         "train_global_step": int(ckpt.get("global_step", -1)),
         "mix_config_path": str(args.mix_config_path),
+        "codec_version": codec_version,
         "split_override": str(args.split_override),
         "task_filter": str(args.task_filter),
         "eval_sample_mode": str(args.eval_sample_mode),

@@ -415,6 +415,19 @@ Shared continuous `DISTANCE + NORMAL_UNSIGNED + AO`:
   - this makes the branch the first viable shared line with two mesh-family
     answers, even if it is not yet the safest publishable mainline.
 
+Loss-balanced shared AO reruns:
+
+- balancing the shared continuous losses confirms that task-scale mismatch was
+  real:
+  - both `ema_norm` and fixed weights recover same-context `udf_distance`
+    strongly relative to the raw shared AO branch.
+- but they pay for it on off-diagonal transfer:
+  - the raw branch remains best on off-diagonal `udf_distance`,
+  - and also best on off-diagonal `mesh_normal_unsigned`.
+- among the balanced variants, fixed weights are safer than `ema_norm`:
+  - they keep more of the off-diagonal read while still recovering most of the
+    same-context loss.
+
 Current safest CQA read:
 
 - strongest single line: `independent + shuffled + full_q` on `udf_distance`,
@@ -425,6 +438,9 @@ Current safest CQA read:
   continuous `mesh_ao`,
 - first viable mesh-two-answer shared expansion:
   continuous `DISTANCE + NORMAL_UNSIGNED + AO`,
+- current best explanation of the AO tradeoff:
+  task-loss scale mismatch is real, but the raw unbalanced branch still gives
+  the best off-diagonal robustness,
 - current limitation: multi-type promptability is now real, but the mesh side
   still needs figure-quality polishing and an additional mesh-family
   answer beyond unsigned normals; continuous multi-type is now clearly

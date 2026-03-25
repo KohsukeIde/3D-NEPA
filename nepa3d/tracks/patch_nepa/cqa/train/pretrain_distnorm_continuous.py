@@ -20,6 +20,51 @@ from nepa3d.tracks.patch_nepa.cqa.models.primitive_answering_distnorm_continuous
 from nepa3d.utils.seed import set_seed
 
 
+class TaskLossBalancer:
+    def __init__(
+        self,
+        *,
+        mode: str = "mean",
+        ema_momentum: float = 0.99,
+        ema_eps: float = 1e-6,
+        weights: dict[str, float] | None = None,
+    ) -> None:
+        self.mode = str(mode)
+        self.ema_momentum = float(ema_momentum)
+        self.ema_eps = float(ema_eps)
+        self.weights = dict(weights or {})
+        self.ema = {k: 1.0 for k in self.weights.keys()}
+
+    def combine(self, loss_map: dict[str, torch.Tensor]) -> torch.Tensor:
+        active = {k: v for k, v in loss_map.items() if v is not None}
+        if not active:
+            raise RuntimeError("empty active loss map")
+        if self.mode == "mean":
+            return torch.stack(list(active.values())).mean()
+        if self.mode == "fixed":
+            terms = []
+            weights = []
+            for key, loss in active.items():
+                w = float(self.weights.get(key, 1.0))
+                terms.append(loss * w)
+                weights.append(w)
+            return torch.stack(terms).sum() / float(max(sum(weights), self.ema_eps))
+        if self.mode == "ema_norm":
+            terms = []
+            weights = []
+            for key, loss in active.items():
+                with torch.no_grad():
+                    prev = float(self.ema.get(key, 1.0))
+                    cur = float(loss.detach().cpu().item())
+                    self.ema[key] = self.ema_momentum * prev + (1.0 - self.ema_momentum) * cur
+                denom = float(max(self.ema.get(key, 1.0), self.ema_eps))
+                w = float(self.weights.get(key, 1.0))
+                terms.append((loss / denom) * w)
+                weights.append(w)
+            return torch.stack(terms).sum() / float(max(sum(weights), self.ema_eps))
+        raise ValueError(f"unknown task loss balance mode: {self.mode}")
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser("pretrain_distnorm_continuous")
     p.add_argument("--mix_config_path", type=str, required=True)
@@ -58,6 +103,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--query_type_vocab", type=int, default=6)
     p.add_argument("--generator_depth", type=int, default=2)
     p.add_argument("--distance_floor", type=float, default=0.0)
+    p.add_argument("--task_loss_balance", type=str, default="mean", choices=["mean", "ema_norm", "fixed"])
+    p.add_argument("--loss_ema_momentum", type=float, default=0.99)
+    p.add_argument("--loss_ema_eps", type=float, default=1e-6)
+    p.add_argument("--loss_weight_distance", type=float, default=1.0)
+    p.add_argument("--loss_weight_ao", type=float, default=1.0)
+    p.add_argument("--loss_weight_normal", type=float, default=1.0)
     return p.parse_args()
 
 
@@ -149,6 +200,16 @@ def main() -> None:
             opt,
             lr_lambda=lambda st: _scheduler_scale(int(st), args, max_steps, warmup_steps),
         )
+    loss_balancer = TaskLossBalancer(
+        mode=str(args.task_loss_balance),
+        ema_momentum=float(args.loss_ema_momentum),
+        ema_eps=float(args.loss_ema_eps),
+        weights={
+            "distance": float(args.loss_weight_distance),
+            "ao": float(args.loss_weight_ao),
+            "normal": float(args.loss_weight_normal),
+        },
+    )
 
     save_dir = Path(str(args.save_dir)) / str(args.run_name)
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -172,13 +233,17 @@ def main() -> None:
             opt.zero_grad(set_to_none=True)
             pred = model(ctx_xyz, qry_xyz, qry_type).pred_answer
 
-            task_losses = []
+            task_loss_map: dict[str, torch.Tensor | None] = {
+                "distance": None,
+                "ao": None,
+                "normal": None,
+            }
             dist_mask = qry_type == int(ASK_DISTANCE)
             if bool(dist_mask.any()):
                 dist_pred = pred[..., 0][dist_mask]
                 dist_tgt = target_vec[..., 0][dist_mask]
                 dist_loss = F.mse_loss(dist_pred, dist_tgt)
-                task_losses.append(dist_loss)
+                task_loss_map["distance"] = dist_loss
                 dist_maes.append(float((dist_pred.detach() - dist_tgt.detach()).abs().mean().cpu().item()))
 
             ao_mask = qry_type == int(ASK_VISIBILITY)
@@ -186,7 +251,7 @@ def main() -> None:
                 ao_pred = pred[..., 0][ao_mask]
                 ao_tgt = target_vec[..., 0][ao_mask]
                 ao_loss = F.mse_loss(ao_pred, ao_tgt)
-                task_losses.append(ao_loss)
+                task_loss_map["ao"] = ao_loss
                 ao_maes.append(float((ao_pred.detach() - ao_tgt.detach()).abs().mean().cpu().item()))
 
             norm_mask = qry_type == int(ASK_NORMAL)
@@ -195,12 +260,13 @@ def main() -> None:
                 norm_tgt = target_vec[norm_mask]
                 norm_cos = F.cosine_similarity(norm_pred, norm_tgt, dim=-1, eps=1e-8)
                 norm_loss = (1.0 - norm_cos).mean()
-                task_losses.append(norm_loss)
+                task_loss_map["normal"] = norm_loss
                 norm_coses.append(float(norm_cos.detach().mean().cpu().item()))
 
-            if not task_losses:
+            active_losses = {k: v for k, v in task_loss_map.items() if v is not None}
+            if not active_losses:
                 raise RuntimeError("empty task loss in distnorm continuous train batch")
-            loss = torch.stack(task_losses).mean()
+            loss = loss_balancer.combine(active_losses)
             loss.backward()
             if float(args.max_grad_norm) > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), float(args.max_grad_norm))

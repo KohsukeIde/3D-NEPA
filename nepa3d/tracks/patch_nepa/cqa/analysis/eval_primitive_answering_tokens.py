@@ -4,28 +4,32 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, List
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from nepa3d.data.mixed_pretrain import load_mix_config
+from nepa3d.data.modelnet40_index import list_npz
 from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
     ANSWER_VOCAB_SIZE,
-    QUERY_TYPE_NAMES,
+    CQA_VOCAB_VERSION,
     QUERY_TYPE_VOCAB_SIZE,
     answer_range_for_query_type,
+    answer_vocab_size,
     mask_logits_for_query_type,
+    query_type_id_list,
+    query_type_names,
+    query_type_vocab_size,
 )
 from nepa3d.tracks.patch_nepa.cqa.data.dataset_cqa import (
-    QUERY_SRC_CODE_TO_NAME,
     QUERY_ORDER_MODES,
+    QUERY_SRC_CODE_TO_NAME,
     V2PrimitiveCQADataset,
     cqa_collate_fn,
 )
-from nepa3d.data.mixed_pretrain import load_mix_config
-from nepa3d.data.modelnet40_index import list_npz
 from nepa3d.tracks.patch_nepa.cqa.models.primitive_answering import PrimitiveAnsweringModel
 
 CONTROL_MODES = (
@@ -80,6 +84,12 @@ def _stable_int_seed(text: str) -> int:
 def load_cqa_model(ckpt_path: str, device: torch.device) -> tuple[PrimitiveAnsweringModel, Dict[str, Any], Dict[str, Any]]:
     ckpt = torch.load(ckpt_path, map_location="cpu")
     args = dict(ckpt.get("args", {}))
+    codec_version = str(ckpt.get("vocab_version", args.get("codec_version", CQA_VOCAB_VERSION)))
+    if int(args.get("answer_vocab", 0)) <= 0:
+        args["answer_vocab"] = int(answer_vocab_size(codec_version))
+    if int(args.get("query_type_vocab", 0)) <= 0:
+        args["query_type_vocab"] = int(query_type_vocab_size(codec_version))
+    args["codec_version"] = codec_version
     model = PrimitiveAnsweringModel(
         d_model=int(args.get("d_model", 384)),
         n_layers=int(args.get("n_layers", 12)),
@@ -96,6 +106,7 @@ def load_cqa_model(ckpt_path: str, device: torch.device) -> tuple[PrimitiveAnswe
         query_type_vocab=int(args.get("query_type_vocab", QUERY_TYPE_VOCAB_SIZE)),
         answer_vocab=int(args.get("answer_vocab", ANSWER_VOCAB_SIZE)),
         generator_depth=int(args.get("generator_depth", 2)),
+        codec_version=codec_version,
         answer_factorization=str(args.get("answer_factorization", "ar")),
         query_interface_mode=str(args.get("query_interface_mode", "full_q")),
     )
@@ -116,6 +127,7 @@ def build_eval_datasets(
     task_filter: set[str],
     eval_sample_mode: str,
     query_order: str,
+    codec_version: str,
 ) -> List[EvalDatasetSpec]:
     specs, _cfg = load_mix_config(mix_config_path)
     out: List[EvalDatasetSpec] = []
@@ -144,6 +156,7 @@ def build_eval_datasets(
             query_dist_min=s.extra.get("query_dist_min", None),
             query_dist_max=s.extra.get("query_dist_max", None),
             query_order=str(query_order),
+            codec_version=str(s.extra.get("codec_version", codec_version)),
         )
         out.append(
             EvalDatasetSpec(
@@ -189,6 +202,17 @@ def _swap_indices(batch: Dict[str, Any], predicate) -> tuple[torch.Tensor, torch
     return torch.as_tensor(perm, dtype=torch.long), effective
 
 
+def _rotate_query_type_tensor(qry_type: torch.Tensor, *, codec_version: str) -> torch.Tensor:
+    active = query_type_id_list(codec_version)
+    if len(active) <= 1:
+        return qry_type.clone()
+    mapping = {int(src): int(active[(i + 1) % len(active)]) for i, src in enumerate(active)}
+    out = qry_type.clone()
+    for src, dst in mapping.items():
+        out[qry_type == int(src)] = int(dst)
+    return out
+
+
 def apply_control(batch: Dict[str, Any], control: str) -> Dict[str, Any]:
     control = str(control)
     if control not in CONTROL_MODES:
@@ -226,7 +250,14 @@ def apply_control(batch: Dict[str, Any], control: str) -> Dict[str, Any]:
         out["ctx_xyz"] = torch.flip(out["ctx_xyz"], dims=[1])
         return out
     if control == "wrong_type":
-        out["qry_type"] = (out["qry_type"] + 1) % int(QUERY_TYPE_VOCAB_SIZE)
+        codec_version = str(out.get("vocab_version", CQA_VOCAB_VERSION))
+        rotated = _rotate_query_type_tensor(out["qry_type"], codec_version=codec_version)
+        if out["qry_type"].dim() == 2:
+            eff = (rotated != out["qry_type"]).any(dim=1)
+        else:
+            eff = rotated != out["qry_type"]
+        out["qry_type"] = rotated
+        out["control_effective_mask"] = eff.to(dtype=torch.bool)
         return out
     if control == "shuffled_query":
         out["qry_xyz"] = torch.flip(out["qry_xyz"], dims=[1])
@@ -253,14 +284,16 @@ def evaluate_dataset(
         drop_last=False,
     )
 
+    codec_version = str(spec.dataset.codec_version)
+    eval_answer_vocab = int(answer_vocab_size(codec_version))
     total_tokens = 0
     total_loss = 0.0
     total_acc = 0.0
     total_entropy = 0.0
     total_samples = 0
     total_effective_samples = 0
-    pred_hist = torch.zeros((ANSWER_VOCAB_SIZE,), dtype=torch.long)
-    target_hist = torch.zeros((ANSWER_VOCAB_SIZE,), dtype=torch.long)
+    pred_hist = torch.zeros((eval_answer_vocab,), dtype=torch.long)
+    target_hist = torch.zeros((eval_answer_vocab,), dtype=torch.long)
     src_stats: Dict[int, Dict[str, Any]] = {}
     pbar = tqdm(loader, desc=f"{spec.name}:{control}", leave=False)
     with torch.inference_mode():
@@ -274,7 +307,12 @@ def evaluate_dataset(
             control_effective_mask = batch["control_effective_mask"]
 
             out = model(ctx_xyz=ctx_xyz, qry_xyz=qry_xyz, qry_type=qry_type, answer_code=answer_code)
-            masked_logits = mask_logits_for_query_type(out.logits, qry_type)
+            masked_logits = mask_logits_for_query_type(
+                out.logits,
+                qry_type,
+                codec_version=codec_version,
+                vocab_size=eval_answer_vocab,
+            )
             flat_logits = masked_logits.reshape(-1, int(masked_logits.shape[-1]))
             flat_target = answer_code.reshape(-1)
             per_token_loss = torch.nn.functional.cross_entropy(flat_logits, flat_target, reduction="none").reshape_as(
@@ -283,7 +321,7 @@ def evaluate_dataset(
             loss = per_token_loss.sum()
 
             pred = masked_logits.argmax(dim=-1)
-            correct_mask = (pred == answer_code)
+            correct_mask = pred == answer_code
             correct = correct_mask.sum()
             probs = masked_logits.softmax(dim=-1)
             per_token_entropy = -(probs * probs.clamp_min(1e-12).log()).sum(dim=-1)
@@ -296,8 +334,8 @@ def evaluate_dataset(
             total_entropy += float(entropy.detach().cpu())
             total_samples += int(answer_code.shape[0])
             total_effective_samples += int(control_effective_mask.sum().item())
-            pred_hist += torch.bincount(pred.reshape(-1).detach().cpu(), minlength=ANSWER_VOCAB_SIZE)
-            target_hist += torch.bincount(answer_code.reshape(-1).detach().cpu(), minlength=ANSWER_VOCAB_SIZE)
+            pred_hist += torch.bincount(pred.reshape(-1).detach().cpu(), minlength=eval_answer_vocab)
+            target_hist += torch.bincount(answer_code.reshape(-1).detach().cpu(), minlength=eval_answer_vocab)
             for code in torch.unique(qry_src_code).tolist():
                 key = int(code)
                 mask = qry_src_code == key
@@ -310,18 +348,18 @@ def evaluate_dataset(
                         "loss_sum": 0.0,
                         "acc_sum": 0.0,
                         "entropy_sum": 0.0,
-                        "pred_hist": torch.zeros((ANSWER_VOCAB_SIZE,), dtype=torch.long),
-                        "target_hist": torch.zeros((ANSWER_VOCAB_SIZE,), dtype=torch.long),
+                        "pred_hist": torch.zeros((eval_answer_vocab,), dtype=torch.long),
+                        "target_hist": torch.zeros((eval_answer_vocab,), dtype=torch.long),
                     }
                 st = src_stats[key]
                 st["n_tokens"] += n_tok_src
                 st["loss_sum"] += float(per_token_loss[mask].sum().detach().cpu())
                 st["acc_sum"] += float(correct_mask[mask].sum().detach().cpu())
                 st["entropy_sum"] += float(per_token_entropy[mask].sum().detach().cpu())
-                st["pred_hist"] += torch.bincount(pred[mask].reshape(-1).detach().cpu(), minlength=ANSWER_VOCAB_SIZE)
+                st["pred_hist"] += torch.bincount(pred[mask].reshape(-1).detach().cpu(), minlength=eval_answer_vocab)
                 st["target_hist"] += torch.bincount(
                     answer_code[mask].reshape(-1).detach().cpu(),
-                    minlength=ANSWER_VOCAB_SIZE,
+                    minlength=eval_answer_vocab,
                 )
 
             if total_tokens > 0:
@@ -332,8 +370,9 @@ def evaluate_dataset(
 
     if total_tokens <= 0:
         raise RuntimeError(f"empty eval dataset for task={spec.name} split={spec.split}")
-    qtype = int(spec.dataset.task.query_type)
-    lo, hi = answer_range_for_query_type(qtype)
+    qtype = int(spec.dataset.query_type)
+    lo, hi = answer_range_for_query_type(qtype, codec_version=codec_version)
+    qtype_names = query_type_names(codec_version)
     nonzero_hist = {int(i): int(v) for i, v in enumerate(pred_hist.tolist()) if int(v) > 0}
     nonzero_target_hist = {int(i): int(v) for i, v in enumerate(target_hist.tolist()) if int(v) > 0}
     pred_unique = int((pred_hist > 0).sum().item())
@@ -370,10 +409,12 @@ def evaluate_dataset(
         "context_source": spec.context_source,
         "eval_sample_mode": spec.eval_sample_mode,
         "query_order": str(spec.dataset.query_order),
+        "codec_version": codec_version,
         "control": control,
         "query_type_id": qtype,
-        "query_type_name": QUERY_TYPE_NAMES[qtype],
+        "query_type_name": qtype_names[qtype],
         "answer_range": [int(lo), int(hi)],
+        "answer_vocab_size": eval_answer_vocab,
         "n_samples": int(len(spec.dataset)),
         "effective_control_samples": int(total_effective_samples),
         "effective_control_sample_frac": float(total_effective_samples) / float(max(1, total_samples)),
@@ -413,6 +454,7 @@ def run_token_eval(
 ) -> Dict[str, Any]:
     torch_device = torch.device(device)
     model, ckpt, train_args = load_cqa_model(ckpt_path, torch_device)
+    codec_version = str(train_args.get("codec_version", CQA_VOCAB_VERSION))
     if int(n_ctx) <= 0:
         n_ctx = int(train_args.get("n_ctx", 2048))
     if int(n_qry) <= 0:
@@ -432,6 +474,7 @@ def run_token_eval(
         task_filter=task_filter,
         eval_sample_mode=str(eval_sample_mode),
         query_order=resolved_query_order,
+        codec_version=codec_version,
     )
     results = [
         evaluate_dataset(
@@ -454,6 +497,9 @@ def run_token_eval(
     return {
         "ckpt": str(ckpt_path),
         "mix_config_path": str(mix_config_path),
+        "codec_version": codec_version,
+        "answer_vocab_size": int(train_args.get("answer_vocab", answer_vocab_size(codec_version))),
+        "query_type_vocab": int(train_args.get("query_type_vocab", query_type_vocab_size(codec_version))),
         "control": str(control),
         "train_run_name": str(train_args.get("run_name", "")),
         "train_global_step": int(ckpt.get("global_step", -1)),
