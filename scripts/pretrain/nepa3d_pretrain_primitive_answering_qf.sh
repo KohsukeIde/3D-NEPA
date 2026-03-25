@@ -34,6 +34,7 @@ MAX_GRAD_NORM="${MAX_GRAD_NORM:-1.0}"
 N_CTX="${N_CTX:-2048}"
 N_QRY="${N_QRY:-64}"
 QUERY_ORDER="${QUERY_ORDER:-shuffled}"
+CODEC_VERSION="${CODEC_VERSION:-}"
 
 D_MODEL="${D_MODEL:-384}"
 N_LAYERS="${N_LAYERS:-12}"
@@ -47,9 +48,11 @@ GROUP_SIZE="${GROUP_SIZE:-32}"
 PATCH_CENTER_MODE="${PATCH_CENTER_MODE:-fps}"
 PATCH_FPS_RANDOM_START="${PATCH_FPS_RANDOM_START:-1}"
 LOCAL_ENCODER="${LOCAL_ENCODER:-pointmae_conv}"
-QUERY_TYPE_VOCAB="${QUERY_TYPE_VOCAB:-6}"
-ANSWER_VOCAB="${ANSWER_VOCAB:-640}"
+QUERY_TYPE_VOCAB="${QUERY_TYPE_VOCAB:-0}"
+ANSWER_VOCAB="${ANSWER_VOCAB:-0}"
 GENERATOR_DEPTH="${GENERATOR_DEPTH:-2}"
+MODEL_ARCH="${MODEL_ARCH:-prefixlm}"
+DECODER_LAYERS="${DECODER_LAYERS:-4}"
 ANSWER_FACTORIZATION="${ANSWER_FACTORIZATION:-ar}"
 QUERY_INTERFACE_MODE="${QUERY_INTERFACE_MODE:-full_q}"
 USE_WANDB="${USE_WANDB:-1}"
@@ -100,17 +103,19 @@ echo "host=$(hostname)" | tee -a "${LOG_PATH}"
 echo "pbs_jobid=${PBS_JOBID:-}" | tee -a "${LOG_PATH}"
 echo "workdir=${WORKDIR}" | tee -a "${LOG_PATH}"
 echo "mix_config=${MIX_CONFIG}" | tee -a "${LOG_PATH}"
+echo "codec_version=${CODEC_VERSION}" | tee -a "${LOG_PATH}"
 echo "save_dir=${SAVE_DIR}" | tee -a "${LOG_PATH}"
 echo "epochs=${EPOCHS} batch=${BATCH} n_ctx=${N_CTX} n_qry=${N_QRY}" | tee -a "${LOG_PATH}"
 echo "query_order(train)=${QUERY_ORDER} query_order(eval)=${EVAL_QUERY_ORDER}" | tee -a "${LOG_PATH}"
 echo "max_steps=${MAX_STEPS} scheduler=${LR_SCHEDULER} warmup_steps=${WARMUP_STEPS} warmup_ratio=${WARMUP_RATIO} min_lr=${MIN_LR} clip=${MAX_GRAD_NORM}" | tee -a "${LOG_PATH}"
-echo "model=d${D_MODEL}/L${N_LAYERS}/H${N_HEADS} groups=${NUM_GROUPS} group_size=${GROUP_SIZE} gdepth=${GENERATOR_DEPTH} factorization=${ANSWER_FACTORIZATION} query_if=${QUERY_INTERFACE_MODE}" | tee -a "${LOG_PATH}"
+echo "model_arch=${MODEL_ARCH} model=d${D_MODEL}/L${N_LAYERS}/H${N_HEADS} groups=${NUM_GROUPS} group_size=${GROUP_SIZE} gdepth=${GENERATOR_DEPTH} decoder_layers=${DECODER_LAYERS} factorization=${ANSWER_FACTORIZATION} query_if=${QUERY_INTERFACE_MODE}" | tee -a "${LOG_PATH}"
 echo "wandb: use=${USE_WANDB} project=${WANDB_PROJECT} run=${WANDB_RUN_NAME} group=${WANDB_GROUP} mode=${WANDB_MODE} dir=${WANDB_DIR}" | tee -a "${LOG_PATH}"
 echo "eval: final=${RUN_EVAL_CONTROLS} curve=${RUN_EVAL_CURVE} sample_mode=${EVAL_SAMPLE_MODE} max_samples=${EVAL_MAX_SAMPLES_PER_TASK} task_filter=${EVAL_TASK_FILTER}" | tee -a "${LOG_PATH}"
 echo | tee -a "${LOG_PATH}"
 
 python -m nepa3d.train.pretrain_primitive_answering \
   --mix_config_path "${MIX_CONFIG}" \
+  --codec_version "${CODEC_VERSION}" \
   --save_dir "$(dirname "${SAVE_DIR}")" \
   --run_name "$(basename "${SAVE_DIR}")" \
   --epochs "${EPOCHS}" \
@@ -145,6 +150,8 @@ python -m nepa3d.train.pretrain_primitive_answering \
   --query_type_vocab "${QUERY_TYPE_VOCAB}" \
   --answer_vocab "${ANSWER_VOCAB}" \
   --generator_depth "${GENERATOR_DEPTH}" \
+  --model_arch "${MODEL_ARCH}" \
+  --decoder_layers "${DECODER_LAYERS}" \
   --answer_factorization "${ANSWER_FACTORIZATION}" \
   --query_interface_mode "${QUERY_INTERFACE_MODE}" \
   --use_wandb "${USE_WANDB}" \

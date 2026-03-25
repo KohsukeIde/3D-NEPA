@@ -1,6 +1,6 @@
 # QueryNEPA -> PatchNEPA v2 Storyline
 
-Last updated: 2026-03-24
+Last updated: 2026-03-25
 
 ## 1. Purpose
 
@@ -434,6 +434,9 @@ Current safest CQA read:
 - first multi-type gate: `DISTANCE + NORMAL_UNSIGNED` discrete shared checkpoint,
 - viable second UDF-family candidate:
   `DISTANCE + THICKNESS_VALID_QBIN`,
+- thickness-128 codec check (`cqa_v3`) is informative but not promotable:
+  it raises rescued-thickness entropy, yet the shared `DISTANCE + THICKNESS`
+  line becomes worse than the current 64-bin rescue and should not replace it,
 - viable second mesh-family candidate:
   continuous `mesh_ao`,
 - first viable mesh-two-answer shared expansion:
@@ -483,6 +486,11 @@ This means:
   frozen-`world_v3` full-range single-task `udf_distance` reproduces above
   majority at `2k` and then strengthens sharply by `10k`, including strong
   `wrong_shape_same/other_synset` controls.
+- a first discrete encoder-decoder CQA branch is now implemented and
+  scientifically alive under the same `cqa_v2` interface, but it falls clearly
+  below the current prefixlm line on the main `udf_distance` token/completion
+  reads and on utility classification; the only approximately tied read is
+  off-diagonal `mesh_normal_unsigned`.
 - the same `surf`-trained `udf_distance` checkpoint now transfers zero-shot to
   `pc_bank -> udf_distance` at eval time only, still above majority and with
   positive `no_context` / `wrong_shape_other_synset` deltas.
@@ -519,7 +527,11 @@ This means:
   current external-gap readout,
 - whether the explicit-query CQA branch can turn the current full-range
   `udf_distance` signal into a broader task family beyond its current anchor
-  + rescued-thickness UDF branch,
+  + rescued-thickness UDF branch, without destabilizing the distance anchor
+  when thickness resolution is increased,
+- whether encoder-decoder can be made competitive with the current prefixlm
+  mainline once training scale or decoder/query design is tuned, or whether
+  architecture is genuinely secondary to the typed Q/A interface here,
 - whether a redesigned task/target definition can increase context dependence
   without repeating the negative `near_surface` collapse or the negative
   `pc_bank` retry, especially for second mesh-family answers beyond

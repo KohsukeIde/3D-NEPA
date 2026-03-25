@@ -1,0 +1,22 @@
+dataset_version: v2_cqa
+codec_version: cqa_v3
+mix_num_samples: 47445
+replacement: true
+mix_seed: 0
+
+datasets:
+  - name: udf_distance
+    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
+    split: train_udf
+    backend: udf
+    weight: 1.0
+    task_name: udf_distance
+    context_source: surf
+
+  - name: udf_thickness_valid_qbin
+    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1
+    split: train_udf
+    backend: udf
+    weight: 1.0
+    task_name: udf_thickness_valid_qbin
+    context_source: surf

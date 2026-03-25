@@ -15,14 +15,10 @@ from tqdm import tqdm
 
 from nepa3d.data.cls_patch_dataset import PatchClsPointDataset, PointAugConfig
 from nepa3d.data.modelnet40_index import list_npz
-from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
-    ANSWER_VOCAB_SIZE,
-    CQA_VOCAB_VERSION,
-    QUERY_TYPE_VOCAB_SIZE,
-    answer_vocab_size,
-    query_type_vocab_size,
+from nepa3d.tracks.patch_nepa.cqa.models.factory import (
+    build_cqa_classifier,
+    load_cqa_model_from_ckpt,
 )
-from nepa3d.tracks.patch_nepa.cqa.models.primitive_answering import PrimitiveAnsweringClassifier, PrimitiveAnsweringModel
 
 
 def _build_label_map(paths: List[str]) -> Dict[str, int]:
@@ -53,37 +49,8 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def _load_pretrained_model(ckpt_path: str) -> PrimitiveAnsweringModel:
-    ckpt = torch.load(ckpt_path, map_location="cpu")
-    args = dict(ckpt.get("args", {}))
-    codec_version = str(ckpt.get("vocab_version", args.get("codec_version", CQA_VOCAB_VERSION)))
-    answer_vocab = int(args.get("answer_vocab", 0))
-    query_type_vocab = int(args.get("query_type_vocab", 0))
-    if answer_vocab <= 0:
-        answer_vocab = int(answer_vocab_size(codec_version))
-    if query_type_vocab <= 0:
-        query_type_vocab = int(query_type_vocab_size(codec_version))
-    model = PrimitiveAnsweringModel(
-        d_model=int(args.get("d_model", 384)),
-        n_layers=int(args.get("n_layers", 12)),
-        n_heads=int(args.get("n_heads", 6)),
-        mlp_ratio=float(args.get("mlp_ratio", 4.0)),
-        dropout=float(args.get("dropout", 0.0)),
-        drop_path=float(args.get("drop_path", 0.0)),
-        backbone_impl=str(args.get("backbone_impl", "nepa2d")),
-        num_groups=int(args.get("num_groups", 64)),
-        group_size=int(args.get("group_size", 32)),
-        patch_center_mode=str(args.get("patch_center_mode", "fps")),
-        patch_fps_random_start=bool(args.get("patch_fps_random_start", 1)),
-        local_encoder=str(args.get("local_encoder", "pointmae_conv")),
-        query_type_vocab=query_type_vocab,
-        answer_vocab=answer_vocab,
-        generator_depth=int(args.get("generator_depth", 2)),
-        codec_version=codec_version,
-        answer_factorization=str(args.get("answer_factorization", "ar")),
-        query_interface_mode=str(args.get("query_interface_mode", "full_q")),
-    )
-    model.load_state_dict(ckpt["model"], strict=False)
+def _load_pretrained_model(ckpt_path: str) -> torch.nn.Module:
+    model, _ckpt, _args = load_cqa_model_from_ckpt(ckpt_path, device="cpu")
     return model
 
 
@@ -157,7 +124,7 @@ def main() -> None:
     val_loader = DataLoader(val_set, batch_size=int(args.batch_size), shuffle=False, num_workers=int(args.num_workers), pin_memory=True)
 
     pretrained = _load_pretrained_model(args.ckpt)
-    model = PrimitiveAnsweringClassifier(pretrained, n_cls=len(label_map), pool=str(args.pool))
+    model = build_cqa_classifier(pretrained, n_cls=len(label_map), pool=str(args.pool))
     opt = torch.optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
     model, opt, train_loader, val_loader = accelerator.prepare(model, opt, train_loader, val_loader)
 

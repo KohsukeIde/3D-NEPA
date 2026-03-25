@@ -1,6 +1,6 @@
 # Patch-NEPA Runlog (2026-02)
 
-Last updated: 2026-03-24
+Last updated: 2026-03-25
 
 Track note:
 
@@ -7717,3 +7717,135 @@ Decision:
 - current safest branch split is:
   - raw shared AO branch for off-diagonal robustness,
   - balanced variants as evidence that task-scale mismatch was real.
+
+## 179. `cqa_v3` thickness-128 survives alone but weakens the shared UDF line (2026-03-25)
+
+Lineage:
+
+- local audit:
+  - `results/cqa_audit/patchnepa_cqa_v3_thick128_audit_20260325/summary.json`
+- thickness-only:
+  - train `117019`
+  - suite `117022`
+- shared `DISTANCE + THICKNESS@128`:
+  - train `117020`
+  - suite `117021`
+
+Summary:
+
+- local audit:
+  - `majority_baseline_acc=0.010681`
+  - `entropy_bits=6.9855`
+  - `unique_codes=128`
+- thickness-only:
+  - same:
+    - `acc=0.179199`
+    - majority `0.136536`
+    - `ce=3.729228`
+  - offdiag:
+    - `acc=0.149475`
+    - majority `0.136230`
+    - `ce=4.039802`
+- shared `DISTANCE + THICKNESS@128`:
+  - same:
+    - `udf_distance acc=0.151855` vs majority `0.015869`
+    - `udf_thickness_valid_qbin acc=0.167786` vs majority `0.136536`
+  - offdiag:
+    - `udf_distance acc=0.072205` vs majority `0.017273`
+    - `udf_thickness_valid_qbin acc=0.123291` vs majority `0.136230`
+- 64-bin comparison baseline (`C027`):
+  - same:
+    - `udf_distance acc=0.353149`
+    - `udf_thickness_valid_qbin acc=0.092102`
+  - offdiag:
+    - `udf_distance acc=0.189026`
+    - `udf_thickness_valid_qbin acc=0.044861`
+
+Operational interpretation:
+
+- the 128-bin rescued thickness codec is scientifically alive:
+  - alone, it stays above majority on same/offdiag and remains context
+    sensitive.
+- but it is not a better shared mainline:
+  - `udf_distance` degrades badly when paired with `thickness@128`,
+  - and the apparent thickness gain is offset by a much higher eval majority
+    baseline, especially off-diagonal where it slips below majority.
+
+Decision:
+
+- do not promote `cqa_v3` over the current 64-bin rescue.
+- keep `cqa_v2` thickness-64 as the safer UDF-family mainline.
+- retain `cqa_v3` only as a negative-but-informative codec-ceiling ablation.
+
+## 180. The first discrete encoder-decoder CQA compare pack lands below prefixlm (2026-03-25)
+
+Lineage:
+
+- train `117334`
+- suite `117335`
+- same/offdiag completion `117336-117337`
+- utility classification `117338-117340`
+
+Recipe:
+
+- `model_arch=encdec`
+- encoder input `[BOS, C...]`
+- decoder input `query_embed(xyz) + type_embed(type)`
+- decoder self-attention mode `independent`
+- `answer_factorization=independent`
+- `query_interface_mode=no_q`
+- `decoder_layers=4`
+- codec `cqa_v2`
+- tasks `udf_distance + mesh_normal_unsigned`
+- utility classifier = encoder-only, `mean` pool
+
+Summary:
+
+- token eval is alive but weaker than prefixlm:
+  - same:
+    - `udf_distance acc=0.098145` vs majority `0.015869`
+    - `mesh_normal_unsigned acc=0.492188` vs majority `0.297119`
+  - offdiag:
+    - `udf_distance acc=0.050110` vs majority `0.017273`
+    - `mesh_normal_unsigned acc=0.391724` vs majority `0.297302`
+- relative to the discrete prefixlm unsigned-normal baseline:
+  - same:
+    - `udf_distance 0.0981` vs `0.3877`
+    - `mesh_normal_unsigned 0.4922` vs `0.5773`
+  - offdiag:
+    - `udf_distance 0.0501` vs `0.2005`
+    - `mesh_normal_unsigned 0.3917` vs `0.3832`
+- distance completion is also weaker than the canonical prefixlm
+  `udf_distance` branch:
+  - same:
+    - enc-dec `MAE=0.0437`, `IoU@0.05=0.5012`, `mesh_fscore=0.0470`
+    - prefixlm `MAE=0.0207`, `IoU@0.05=0.7537`, `mesh_fscore=0.1702`
+  - offdiag:
+    - enc-dec `MAE=0.1061`, `IoU@0.05=0.3362`, `mesh_fscore=0.0252`
+    - prefixlm `MAE=0.1239`, `IoU@0.05=0.3861`, `mesh_fscore=0.1014`
+- utility remains paper-safe but below the current CQA utility reference:
+  - `obj_bg=0.8038`
+  - `obj_only=0.8158`
+  - `pb_t50_rs=0.7595`
+  - versus `C014`: `0.8399 / 0.8468 / 0.7765`
+
+Operational interpretation:
+
+- the first enc-dec branch is scientifically alive:
+  - it beats majority,
+  - keeps positive context/shape controls,
+  - and supports downstream utility.
+- but the current implementation does not justify replacing prefixlm:
+  - the main `udf_distance` token line drops sharply,
+  - completion quality is materially worse,
+  - utility also regresses.
+- off-diagonal `mesh_normal_unsigned` is the only read that is roughly tied or
+  slightly better than prefixlm.
+
+Decision:
+
+- keep discrete prefixlm `DISTANCE + NORMAL_UNSIGNED` as the mainline.
+- record the enc-dec branch as a negative-but-informative architecture
+  ablation.
+- if the architecture is revisited, tune training/query-decoder design first
+  rather than promoting this branch directly.

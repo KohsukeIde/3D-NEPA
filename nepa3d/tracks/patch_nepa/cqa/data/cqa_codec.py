@@ -3,6 +3,8 @@
 The vocabulary is intentionally fixed in code so checkpoints, evaluation, and
 visualization stay compatible across runs. ``cqa_v1`` remains the historical
 layout. ``cqa_v2`` is a new profile for the current multi-answer CE mainline.
+``cqa_v3`` keeps the same task set as v2 but promotes rescued thickness from
+64 to 128 quantile bins.
 """
 
 from __future__ import annotations
@@ -54,7 +56,7 @@ ANSWER_VOCAB_SIZE = 640
 # Version profiles
 # -----------------------------------------------------------------------------
 
-_SUPPORTED_CODEC_VERSIONS = {"cqa_v1", "cqa_v2"}
+_SUPPORTED_CODEC_VERSIONS = {"cqa_v1", "cqa_v2", "cqa_v3"}
 
 _QUERY_TYPE_NAMES_V1 = dict(QUERY_TYPE_NAMES)
 _QUERY_NAME_TO_ID_V1 = {
@@ -90,6 +92,16 @@ _ANSWER_RANGES_V2: Dict[str, Tuple[int, int]] = {
     "udf_distance": (448, 704),
 }
 
+_QUERY_TYPE_NAMES_V3 = dict(_QUERY_TYPE_NAMES_V2)
+_QUERY_NAME_TO_ID_V3 = dict(_QUERY_NAME_TO_ID_V2)
+_ANSWER_RANGES_V3: Dict[str, Tuple[int, int]] = {
+    "mesh_normal_unsigned": (0, 256),
+    "mesh_ao": (256, 384),
+    "udf_thickness_valid_qbin": (384, 512),
+    "udf_thickness": (384, 512),
+    "udf_distance": (512, 768),
+}
+
 
 @dataclass(frozen=True)
 class ScalarBinning:
@@ -113,17 +125,29 @@ def _require_codec_version(codec_version: str) -> str:
 
 def query_type_names(codec_version: str = CQA_VOCAB_VERSION) -> Dict[int, str]:
     v = _require_codec_version(codec_version)
-    return dict(_QUERY_TYPE_NAMES_V1 if v == "cqa_v1" else _QUERY_TYPE_NAMES_V2)
+    if v == "cqa_v1":
+        return dict(_QUERY_TYPE_NAMES_V1)
+    if v == "cqa_v2":
+        return dict(_QUERY_TYPE_NAMES_V2)
+    return dict(_QUERY_TYPE_NAMES_V3)
 
 
 def query_name_to_id(codec_version: str = CQA_VOCAB_VERSION) -> Dict[str, int]:
     v = _require_codec_version(codec_version)
-    return dict(_QUERY_NAME_TO_ID_V1 if v == "cqa_v1" else _QUERY_NAME_TO_ID_V2)
+    if v == "cqa_v1":
+        return dict(_QUERY_NAME_TO_ID_V1)
+    if v == "cqa_v2":
+        return dict(_QUERY_NAME_TO_ID_V2)
+    return dict(_QUERY_NAME_TO_ID_V3)
 
 
 def answer_ranges(codec_version: str = CQA_VOCAB_VERSION) -> Dict[str, Tuple[int, int]]:
     v = _require_codec_version(codec_version)
-    return dict(_ANSWER_RANGES_V1 if v == "cqa_v1" else _ANSWER_RANGES_V2)
+    if v == "cqa_v1":
+        return dict(_ANSWER_RANGES_V1)
+    if v == "cqa_v2":
+        return dict(_ANSWER_RANGES_V2)
+    return dict(_ANSWER_RANGES_V3)
 
 
 def query_type_id_list(codec_version: str = CQA_VOCAB_VERSION) -> list[int]:
@@ -184,6 +208,7 @@ def canonicalize_normals_unsigned(normals: np.ndarray) -> np.ndarray:
 _NORMAL_DIRS_V1 = _fibonacci_dirs(ANSWER_RANGES["mesh_normal"][1] - ANSWER_RANGES["mesh_normal"][0])
 _NORMAL_UNSIGNED_DIRS_V1 = _hemisphere_dirs(ANSWER_RANGES["mesh_normal"][1] - ANSWER_RANGES["mesh_normal"][0])
 _NORMAL_UNSIGNED_DIRS_V2 = _hemisphere_dirs(_ANSWER_RANGES_V2["mesh_normal_unsigned"][1] - _ANSWER_RANGES_V2["mesh_normal_unsigned"][0])
+_NORMAL_UNSIGNED_DIRS_V3 = _hemisphere_dirs(_ANSWER_RANGES_V3["mesh_normal_unsigned"][1] - _ANSWER_RANGES_V3["mesh_normal_unsigned"][0])
 
 # Keep the historical names for legacy utilities such as type-switch export.
 _NORMAL_DIRS = _NORMAL_DIRS_V1
@@ -262,6 +287,140 @@ _THICK_VALID_QBIN_EDGES = np.asarray(
         1.249365e00,
         1.475450e00,
         2.451169e00,
+    ],
+    dtype=np.float32,
+)
+_THICK_VALID_QBIN128_EDGES = np.asarray(
+    [
+        4.021325e-04,
+        4.558492e-03,
+        6.060358e-03,
+        7.241583e-03,
+        8.216125e-03,
+        9.120226e-03,
+        9.949663e-03,
+        1.079437e-02,
+        1.158885e-02,
+        1.234929e-02,
+        1.309567e-02,
+        1.389801e-02,
+        1.474561e-02,
+        1.579792e-02,
+        1.738603e-02,
+        1.993513e-02,
+        2.360811e-02,
+        2.648791e-02,
+        2.782968e-02,
+        2.853952e-02,
+        2.904814e-02,
+        2.942120e-02,
+        2.969665e-02,
+        2.991809e-02,
+        3.009855e-02,
+        3.024453e-02,
+        3.036252e-02,
+        3.046403e-02,
+        3.055506e-02,
+        3.064263e-02,
+        3.072882e-02,
+        3.084526e-02,
+        3.109938e-02,
+        3.188213e-02,
+        3.412814e-02,
+        3.828637e-02,
+        4.281968e-02,
+        4.455600e-02,
+        4.525267e-02,
+        4.564634e-02,
+        4.591155e-02,
+        4.610870e-02,
+        4.624873e-02,
+        4.635796e-02,
+        4.646849e-02,
+        4.668411e-02,
+        4.717572e-02,
+        4.896954e-02,
+        5.265784e-02,
+        5.817359e-02,
+        6.056018e-02,
+        6.133099e-02,
+        6.169835e-02,
+        6.192733e-02,
+        6.208714e-02,
+        6.263406e-02,
+        6.463882e-02,
+        6.872021e-02,
+        7.454013e-02,
+        7.667884e-02,
+        7.732449e-02,
+        7.763962e-02,
+        7.823356e-02,
+        8.040971e-02,
+        8.505759e-02,
+        9.145039e-02,
+        9.280278e-02,
+        9.322483e-02,
+        9.386696e-02,
+        9.651419e-02,
+        1.016586e-01,
+        1.076213e-01,
+        1.086135e-01,
+        1.089848e-01,
+        1.105780e-01,
+        1.155176e-01,
+        1.216744e-01,
+        1.240561e-01,
+        1.246027e-01,
+        1.257985e-01,
+        1.296374e-01,
+        1.345428e-01,
+        1.388498e-01,
+        1.400023e-01,
+        1.407656e-01,
+        1.424833e-01,
+        1.460871e-01,
+        1.501950e-01,
+        1.537081e-01,
+        1.553624e-01,
+        1.559743e-01,
+        1.570019e-01,
+        1.586779e-01,
+        1.622103e-01,
+        1.664217e-01,
+        1.694596e-01,
+        1.709857e-01,
+        1.715426e-01,
+        1.722866e-01,
+        1.731450e-01,
+        1.749666e-01,
+        1.775239e-01,
+        1.811913e-01,
+        1.850376e-01,
+        1.867594e-01,
+        1.875125e-01,
+        1.893061e-01,
+        1.925588e-01,
+        1.973159e-01,
+        2.018841e-01,
+        2.026665e-01,
+        2.045015e-01,
+        2.091944e-01,
+        2.162183e-01,
+        2.185643e-01,
+        2.217163e-01,
+        2.312028e-01,
+        2.338154e-01,
+        2.377729e-01,
+        2.494719e-01,
+        2.637297e-01,
+        2.798127e-01,
+        3.048303e-01,
+        3.359771e-01,
+        3.747080e-01,
+        4.206318e-01,
+        4.874778e-01,
+        6.573749e-01,
+        2.015502e00,
     ],
     dtype=np.float32,
 )
@@ -394,8 +553,11 @@ def quantize_normals_unsigned_to_vocab(normals: np.ndarray, *, codec_version: st
     if v == "cqa_v1":
         dirs = _NORMAL_UNSIGNED_DIRS_V1
         key = "mesh_normal_unsigned"
-    else:
+    elif v == "cqa_v2":
         dirs = _NORMAL_UNSIGNED_DIRS_V2
+        key = "mesh_normal_unsigned"
+    else:
+        dirs = _NORMAL_UNSIGNED_DIRS_V3
         key = "mesh_normal_unsigned"
     dots = n @ dirs.T
     idx = np.argmax(dots, axis=1).astype(np.int64)
@@ -438,7 +600,9 @@ def quantize_thickness_to_vocab(thickness: np.ndarray, *, codec_version: str = C
 
 
 def quantize_thickness_valid_qbin_to_vocab(thickness: np.ndarray, *, codec_version: str = CQA_VOCAB_VERSION) -> np.ndarray:
-    idx = _quantize_scalar_by_edges(thickness, _THICK_VALID_QBIN_EDGES)
+    v = _require_codec_version(codec_version)
+    edges = _THICK_VALID_QBIN_EDGES if v in {"cqa_v1", "cqa_v2"} else _THICK_VALID_QBIN128_EDGES
+    idx = _quantize_scalar_by_edges(thickness, edges)
     off, _ = answer_range_for_query_name("udf_thickness_valid_qbin", codec_version=codec_version)
     return idx + int(off)
 
@@ -469,8 +633,8 @@ def quantize_viscount_to_vocab(viscount: np.ndarray, *, codec_version: str = CQA
 
 
 def quantize_ao_to_vocab(ao: np.ndarray, *, codec_version: str = CQA_VOCAB_VERSION) -> np.ndarray:
-    if _require_codec_version(codec_version) != "cqa_v2":
-        raise KeyError("mesh_ao discrete codec is only supported in cqa_v2")
+    if _require_codec_version(codec_version) not in {"cqa_v2", "cqa_v3"}:
+        raise KeyError("mesh_ao discrete codec is only supported in cqa_v2/cqa_v3")
     values = np.asarray(ao, dtype=np.float32).reshape(-1)
     idx = np.argmin(np.abs(values[:, None] - _AO_LEVELS[None, :]), axis=1).astype(np.int64)
     code = _AO_CODEBOOK_V2[idx]

@@ -194,6 +194,7 @@ def audit_task(
     cache_root: str,
     task_name: str,
     split: str,
+    codec_version: str,
     max_shapes: int,
     n_ctx: int,
     n_qry: int,
@@ -212,11 +213,13 @@ def audit_task(
         n_qry=int(n_qry),
         seed=int(seed),
         mode="eval",
+        codec_version=str(codec_version),
     )
     return {
         "task_name": str(task_name),
         "split": str(split),
         "cache_root": str(cache_root),
+        "codec_version": str(codec_version),
         "n_paths": int(len(paths)),
         "codec": _codec_summary(ds),
         "raw": _raw_summary(task_name, list(paths)),
@@ -231,6 +234,7 @@ def main() -> None:
     ap.add_argument("--n-ctx", type=int, default=2048)
     ap.add_argument("--n-qry", type=int, default=64)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--codec-version", default="cqa_v1")
     ap.add_argument("--out-json", default="")
     args = ap.parse_args()
 
@@ -241,6 +245,7 @@ def main() -> None:
         "n_ctx": int(args.n_ctx),
         "n_qry": int(args.n_qry),
         "seed": int(args.seed),
+        "codec_version": str(args.codec_version),
         "tasks": {},
     }
     for task_name in tasks:
@@ -249,6 +254,7 @@ def main() -> None:
             cache_root=str(args.cache_root),
             task_name=str(task_name),
             split=split,
+            codec_version=str(args.codec_version),
             max_shapes=int(args.max_shapes),
             n_ctx=int(args.n_ctx),
             n_qry=int(args.n_qry),

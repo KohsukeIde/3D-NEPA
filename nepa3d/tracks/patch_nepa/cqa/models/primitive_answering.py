@@ -90,6 +90,7 @@ class PrimitiveAnsweringModel(nn.Module):
         query_interface_mode: str = "full_q",
     ) -> None:
         super().__init__()
+        self.model_arch = "prefixlm"
         self.d_model = int(d_model)
         self.answer_vocab = int(answer_vocab)
         self.query_type_vocab = int(query_type_vocab)

@@ -1,6 +1,6 @@
 # Patch-NEPA Restart Plan (Data-v2 + CPAC Alignment)
 
-Last updated: 2026-03-24
+Last updated: 2026-03-25
 
 ## 1. Purpose
 
@@ -3521,6 +3521,62 @@ Decision:
 - next choice point is whether to add rescued `THICKNESS_VALID_QBIN` to this
   family or keep UDF and mesh answer expansion on separate branches.
 
+## 87. `cqa_v3` thickness-128 raises codec entropy, but does not beat the 64-bin rescue in shared training (2026-03-25)
+
+Canonical sources:
+
+- local audit:
+  - `results/cqa_audit/patchnepa_cqa_v3_thick128_audit_20260325/summary.json`
+- thickness-only suite:
+  - `results/cqa_multitype/patchnepa_cqa_v3_thick128_single_20260325_160504_suite/cqa_v3_thick128_suite.json`
+- shared `DISTANCE + THICKNESS` suite:
+  - `results/cqa_multitype/patchnepa_cqa_v3_distthick128_20260325_160504_suite/cqa_v3_distthick128_suite.json`
+- comparison baseline:
+  - `results/cqa_multitype/patchnepa_cqa_distthick_valid_shared_20260324_r1_suite/cqa_distthick_valid_suite.json`
+
+Implementation note:
+
+- `cqa_v3` only changes the rescued thickness branch:
+  - `mesh_normal_unsigned = 256 bins`
+  - `mesh_ao = 128 bins`
+  - `udf_distance = 256 bins`
+  - `udf_thickness_valid_qbin = 128 bins`
+- total answer vocab becomes `768`.
+- raw cache is unchanged; the change is only the audited quantile-edge codec.
+
+Key read:
+
+- local audit is strongly positive:
+  - `majority_baseline_acc=0.01068`
+  - `entropy_bits=6.99`
+  - `unique_codes=128`
+- thickness-only train/eval is viable:
+  - same/offdiag `acc=0.1792 / 0.1495`
+  - majority `0.1365 / 0.1362`
+  - positive `no_context` / `wrong_shape_*` deltas remain
+- but shared `DISTANCE + THICKNESS@128` is worse than the existing 64-bin line:
+  - `udf_distance` drops from `0.3531 / 0.1890` to `0.1519 / 0.0722`
+  - `udf_thickness_valid_qbin` rises in raw accuracy (`0.1678 / 0.1233`), but
+    the eval majority also rises sharply to `0.1365 / 0.1362`
+  - off-diagonal thickness is now below majority
+
+Interpretation:
+
+- increasing rescued thickness from 64 to 128 does raise codec entropy and
+  proves the 64-bin rescue was not the only possible discretization.
+- however, the extra resolution does not translate into a better shared UDF
+  branch under the current training recipe.
+- the practical effect is negative for mainline selection because the distance
+  anchor regresses heavily.
+
+Decision:
+
+- keep `cqa_v2` thickness-64 as the safer canonical UDF-family branch.
+- treat `cqa_v3` thickness-128 as a useful ceiling check / codec ablation,
+  not a promotion candidate.
+- if thickness is revisited again, the next lever should be training balance or
+  sampling, not simply increasing the rescued thickness bin count.
+
 ## 86. Loss balancing explains the same-context regression, but weakens off-diagonal robustness (2026-03-24)
 
 Canonical sources:
@@ -3588,3 +3644,92 @@ Decision:
   default branch yet.
 - if the project wants a tuned shared AO line later, start from the fixed
   weighting variant rather than EMA normalization.
+
+## 87. The first discrete encoder-decoder CQA branch is alive but loses to prefixlm (2026-03-25)
+
+Canonical sources:
+
+- train:
+  - `runs/cqa/patchnepa_cqa_v2_distnorm_unsigned_encdec_20260325_173546/cqa_v2_distnorm_unsigned_encdec_independent_d4_g2_s10000/ckpt_final.pt`
+- token suite:
+  - `results/cqa_multitype/patchnepa_cqa_v2_distnorm_unsigned_encdec_20260325_173546_suite/cqa_v2_distnorm_unsigned_encdec_suite.json`
+- distance completion:
+  - `results/cqa_completion/patchnepa_cqa_v2_distnorm_unsigned_encdec_20260325_173546_same_completion/cqa_v2_distnorm_unsigned_encdec_same_translation_g16_s64.json`
+  - `results/cqa_completion/patchnepa_cqa_v2_distnorm_unsigned_encdec_20260325_173546_offdiag_completion/cqa_v2_distnorm_unsigned_encdec_offdiag_translation_g16_s64.json`
+- utility classification:
+  - `runs/cqa_cls/patchnepa_cqa_v2_distnorm_unsigned_encdec_20260325_173546_obj_bg_cls/cqa_v2_distnorm_unsigned_encdec_obj_bg_seed0/ckpt_best.pt`
+  - `runs/cqa_cls/patchnepa_cqa_v2_distnorm_unsigned_encdec_20260325_173546_obj_only_cls/cqa_v2_distnorm_unsigned_encdec_obj_only_seed0/ckpt_best.pt`
+  - `runs/cqa_cls/patchnepa_cqa_v2_distnorm_unsigned_encdec_20260325_173546_pb_t50_rs_cls/cqa_v2_distnorm_unsigned_encdec_pb_t50_rs_seed0/ckpt_best.pt`
+- comparison baselines:
+  - prefixlm unsigned-normal token suite:
+    `results/cqa_multitype/patchnepa_cqa_distnorm_unsigned_shared_20260323_223425_suite/cqa_distnorm_unsigned_suite.json`
+  - canonical prefixlm `udf_distance` completion:
+    `results/cqa_completion/patchnepa_cqa_udfdist_translation_same_independent_20260322/cqa_udfdist_same_translation_g16_s64_independent_assets.json`
+    `results/cqa_completion/patchnepa_cqa_udfdist_translation_offdiag_independent_20260322/cqa_udfdist_offdiag_translation_g16_s64_independent_assets.json`
+  - utility reference:
+    `C014`
+
+Implementation note:
+
+- this is the first T5-like architecture branch, but it stays fully discrete:
+  - codec `cqa_v2`
+  - encoder input `[BOS, C...]`
+  - decoder input `query_embed(xyz) + type_embed(type)` only
+  - decoder self-attention mode `independent`
+  - no explicit `Q` block
+  - classifier is encoder-only with `mean` pool
+- old prefixlm checkpoints remain valid because model loading now dispatches on
+  `model_arch`, defaulting missing historical args to `prefixlm`.
+
+Key read:
+
+- token eval is positive but not competitive with prefixlm:
+  - same:
+    - `udf_distance acc=0.0981` vs majority `0.0159`
+    - `mesh_normal_unsigned acc=0.4922` vs majority `0.2971`
+  - offdiag:
+    - `udf_distance acc=0.0501` vs majority `0.0173`
+    - `mesh_normal_unsigned acc=0.3917` vs majority `0.2973`
+- relative to the discrete prefixlm unsigned-normal baseline:
+  - same:
+    - `udf_distance 0.0981` vs `0.3877`
+    - `mesh_normal_unsigned 0.4922` vs `0.5773`
+  - offdiag:
+    - `udf_distance 0.0501` vs `0.2005`
+    - `mesh_normal_unsigned 0.3917` vs `0.3832`
+- distance completion is also weaker than the canonical prefixlm `udf_distance`
+  line:
+  - same:
+    - enc-dec `MAE=0.0437`, `IoU@0.05=0.5012`, `mesh_fscore=0.0470`
+    - prefixlm `MAE=0.0207`, `IoU@0.05=0.7537`, `mesh_fscore=0.1702`
+  - offdiag:
+    - enc-dec `MAE=0.1061`, `IoU@0.05=0.3362`, `mesh_fscore=0.0252`
+    - prefixlm `MAE=0.1239`, `IoU@0.05=0.3861`, `mesh_fscore=0.1014`
+- utility remains paper-safe but below the current CQA encoder reference:
+  - enc-dec:
+    - `obj_bg=0.8038`
+    - `obj_only=0.8158`
+    - `pb_t50_rs=0.7595`
+  - `C014` reference:
+    - `obj_bg=0.8399`
+    - `obj_only=0.8468`
+    - `pb_t50_rs=0.7765`
+
+Interpretation:
+
+- the encoder-decoder branch is not degenerate:
+  - it beats majority on both tasks,
+  - keeps positive `no_context` / `wrong_shape_*` controls,
+  - and preserves paper-safe utility.
+- however, the first discrete enc-dec realization does not match the current
+  prefixlm mainline.
+- the best read is that the current gains come primarily from the typed
+  Q/A schema and target design, not automatically from switching to a
+  T5-style encoder-decoder separation.
+
+Decision:
+
+- keep discrete prefixlm `DISTANCE + NORMAL_UNSIGNED` as the safer mainline.
+- retain the enc-dec branch as a negative-but-informative architecture ablation.
+- if encoder-decoder is revisited later, the next lever should be training
+  scale or decoder/query design, not replacing the current prefixlm story now.

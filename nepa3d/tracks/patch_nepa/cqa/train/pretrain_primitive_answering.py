@@ -14,16 +14,14 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
-    ANSWER_VOCAB_SIZE,
     CQA_VOCAB_VERSION,
-    QUERY_TYPE_VOCAB_SIZE,
     answer_vocab_size,
     mask_logits_for_query_type,
     query_type_vocab_size,
 )
 from nepa3d.tracks.patch_nepa.cqa.data.dataset_cqa import QUERY_ORDER_MODES, cqa_collate_fn
 from nepa3d.tracks.patch_nepa.cqa.data.mixed_pretrain_cqa import build_mixed_pretrain_cqa
-from nepa3d.tracks.patch_nepa.cqa.models.primitive_answering import PrimitiveAnsweringModel
+from nepa3d.tracks.patch_nepa.cqa.models.factory import build_cqa_model_from_args
 
 
 def parse_args() -> argparse.Namespace:
@@ -80,6 +78,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--answer_vocab", type=int, default=0, help="If <=0, resolve from codec_version.")
     p.add_argument("--query_type_vocab", type=int, default=0, help="If <=0, resolve from codec_version.")
     p.add_argument("--generator_depth", type=int, default=2)
+    p.add_argument("--model_arch", type=str, default="prefixlm", choices=["prefixlm", "encdec"])
+    p.add_argument("--decoder_layers", type=int, default=4)
     p.add_argument(
         "--answer_factorization",
         type=str,
@@ -238,6 +238,11 @@ def main() -> None:
         args.answer_vocab = int(answer_vocab_size(str(args.codec_version)))
     if int(args.query_type_vocab) <= 0:
         args.query_type_vocab = int(query_type_vocab_size(str(args.codec_version)))
+    if str(args.model_arch).strip().lower() == "encdec":
+        if str(args.answer_factorization).strip().lower() != "independent":
+            raise ValueError("model_arch=encdec currently requires --answer_factorization independent")
+        args.answer_factorization = "independent"
+        args.query_interface_mode = "no_q"
 
     loader = DataLoader(
         dataset,
@@ -249,26 +254,7 @@ def main() -> None:
         drop_last=True,
     )
 
-    model = PrimitiveAnsweringModel(
-        d_model=int(args.d_model),
-        n_layers=int(args.n_layers),
-        n_heads=int(args.n_heads),
-        mlp_ratio=float(args.mlp_ratio),
-        dropout=float(args.dropout),
-        drop_path=float(args.drop_path),
-        backbone_impl=str(args.backbone_impl),
-        num_groups=int(args.num_groups),
-        group_size=int(args.group_size),
-        patch_center_mode=str(args.patch_center_mode),
-        patch_fps_random_start=bool(args.patch_fps_random_start),
-        local_encoder=str(args.local_encoder),
-        query_type_vocab=int(args.query_type_vocab),
-        answer_vocab=int(args.answer_vocab),
-        generator_depth=int(args.generator_depth),
-        codec_version=str(args.codec_version),
-        answer_factorization=str(args.answer_factorization),
-        query_interface_mode=str(args.query_interface_mode),
-    )
+    model = build_cqa_model_from_args(vars(args))
     opt = optim.AdamW(model.parameters(), lr=float(args.lr), weight_decay=float(args.weight_decay))
     model, opt, loader = accelerator.prepare(model, opt, loader)
     steps_per_epoch = int(len(loader))

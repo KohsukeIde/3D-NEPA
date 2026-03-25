@@ -22,6 +22,12 @@ def _causal_mask(t: int, device: torch.device) -> torch.Tensor:
     return torch.triu(torch.ones((t, t), device=device, dtype=torch.bool), diagonal=1)
 
 
+def _independent_mask(t: int, device: torch.device) -> torch.Tensor:
+    mask = torch.ones((t, t), device=device, dtype=torch.bool)
+    mask.fill_diagonal_(False)
+    return mask
+
+
 def _knn_topology_mask(
     xyz: torch.Tensor,
     k: int,
@@ -74,6 +80,7 @@ class EncoderDecoderTransformer(nn.Module):
         topo_k: int = 0,
         topo_include_bos: bool = True,
         src_causal: bool = False,
+        decoder_self_attn: str = "causal",
     ):
         super().__init__()
         self.d_model = int(d_model)
@@ -81,6 +88,12 @@ class EncoderDecoderTransformer(nn.Module):
         self.topo_k = int(topo_k)
         self.topo_include_bos = bool(topo_include_bos)
         self.src_causal = bool(src_causal)
+        self.decoder_self_attn = str(decoder_self_attn).strip().lower()
+        if self.decoder_self_attn not in {"causal", "independent"}:
+            raise ValueError(
+                "decoder_self_attn must be 'causal' or 'independent', "
+                f"got {decoder_self_attn!r}"
+            )
 
         self.encoder_layers = nn.ModuleList(
             [
@@ -141,26 +154,12 @@ class EncoderDecoderTransformer(nn.Module):
         residual = (x_next - x_prev) * mask / keep_prob
         return x_prev + residual
 
-    def forward(
+    def encode(
         self,
         enc_in: torch.Tensor,
-        dec_in: torch.Tensor,
         enc_xyz: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass.
-
-        Args:
-            enc_in: (B, L_enc, D)
-            dec_in: (B, L_dec, D)
-            enc_xyz: (B, L_enc, 3) optional positions for topology mask.
-
-        Returns:
-            enc_out: (B, L_enc, D)
-            dec_out: (B, L_dec, D)
-        """
+    ) -> torch.Tensor:
         b, l_enc, _ = enc_in.shape
-        b2, l_dec, _ = dec_in.shape
-        assert b == b2
 
         enc_mask = None
         mask_bll: Optional[torch.Tensor] = None
@@ -189,12 +188,26 @@ class EncoderDecoderTransformer(nn.Module):
                 )
             else:
                 enc_out = enc_next
-        enc_out = self.enc_ln(enc_out)
+        return self.enc_ln(enc_out)
 
-        dec_mask = _causal_mask(l_dec, device=dec_in.device) if l_dec > 0 else None
+    def decode(
+        self,
+        memory: torch.Tensor,
+        dec_in: torch.Tensor,
+    ) -> torch.Tensor:
+        _b, l_dec, _ = dec_in.shape
+        if l_dec <= 0:
+            return self.dec_ln(dec_in)
+
+        if self.decoder_self_attn == "causal":
+            dec_mask = _causal_mask(l_dec, device=dec_in.device)
+        elif self.decoder_self_attn == "independent":
+            dec_mask = _independent_mask(l_dec, device=dec_in.device)
+        else:
+            raise AssertionError("unreachable")
         dec_out = dec_in
         for li, dec_layer in enumerate(self.decoder_layers):
-            dec_next = dec_layer(dec_out, memory=enc_out, tgt_mask=dec_mask)
+            dec_next = dec_layer(dec_out, memory=memory, tgt_mask=dec_mask)
             if self.training:
                 dec_out = self._apply_drop_path(
                     dec_out,
@@ -203,5 +216,29 @@ class EncoderDecoderTransformer(nn.Module):
                 )
             else:
                 dec_out = dec_next
-        dec_out = self.dec_ln(dec_out)
+        return self.dec_ln(dec_out)
+
+    def forward(
+        self,
+        enc_in: torch.Tensor,
+        dec_in: torch.Tensor,
+        enc_xyz: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass.
+
+        Args:
+            enc_in: (B, L_enc, D)
+            dec_in: (B, L_dec, D)
+            enc_xyz: (B, L_enc, 3) optional positions for topology mask.
+
+        Returns:
+            enc_out: (B, L_enc, D)
+            dec_out: (B, L_dec, D)
+        """
+        b, _l_enc, _ = enc_in.shape
+        b2, _l_dec, _ = dec_in.shape
+        assert b == b2
+
+        enc_out = self.encode(enc_in, enc_xyz=enc_xyz)
+        dec_out = self.decode(enc_out, dec_in)
         return enc_out, dec_out
