@@ -1,6 +1,6 @@
 # Patch-NEPA Runlog (2026-02)
 
-Last updated: 2026-03-25
+Last updated: 2026-03-26
 
 Track note:
 
@@ -7895,3 +7895,250 @@ Decision:
 - freeze the architecture read:
   - prefixlm stays mainline,
   - enc-dec stays a negative-but-informative branch.
+
+## 182. Current raw-target 4-task shared line survives but shows tradeoff rather than synergy (2026-03-26)
+
+Lineage:
+
+- train `117455`
+- suite `117456`
+- same/offdiag completion `117457-117458`
+- utility classification `117459-117461`
+
+Summary:
+
+- token eval:
+  - same:
+    - `udf_distance acc=0.1232` vs majority `0.0159`
+    - `mesh_normal_unsigned acc=0.5091` vs majority `0.2971`
+    - `udf_thickness_valid_qbin acc=0.0765` vs majority `0.0241`
+    - `mesh_ao acc=0.5523` vs majority `0.5550`
+  - offdiag:
+    - `udf_distance acc=0.0601` vs majority `0.0173`
+    - `mesh_normal_unsigned acc=0.3841` vs majority `0.2973`
+    - `udf_thickness_valid_qbin acc=0.0465` vs majority `0.0236`
+    - `mesh_ao acc=0.5242` vs majority `0.5566`
+- the branch remains context-sensitive:
+  - `udf_distance` and `mesh_normal_unsigned` keep strong positive
+    `no_context` / `wrong_shape_*` deltas,
+  - rescued thickness also keeps positive controls,
+  - `mesh_ao` is still context-sensitive but does not beat its majority-heavy
+    baseline under the current raw target.
+- distance completion:
+  - same:
+    - `MAE=0.0290`, `IoU@0.05=0.6320`, `mesh_fscore=0.0759`
+  - offdiag:
+    - `MAE=0.1161`, `IoU@0.05=0.3583`, `mesh_fscore=0.0422`
+- utility classification is slightly stronger than `C034`:
+  - `obj_bg=0.8451`
+  - `obj_only=0.8520`
+  - `pb_t50_rs=0.7710`
+
+Operational interpretation:
+
+- the 4-task branch is not a collapse; all probes except raw AO clearly stay
+  alive.
+- but it is also not the hoped-for synergy result:
+  - the main `udf_distance` and same-context `mesh_normal_unsigned` reads are
+    worse than the strict `DISTANCE + NORMAL_UNSIGNED` anchor,
+  - completion quality also regresses overall,
+  - only utility classification improves slightly.
+- the safest read is that the present 4-answer set is complementary but still
+  limited by raw AO target quality.
+
+Decision:
+
+- do not promote the 4-task branch to mainline.
+- keep it as the current raw-target ceiling.
+- prioritize AO-HQ target improvement next; if the mesh-side second probe is
+  improved at the raw-target level, rerun the shared line then.
+
+## 183. Frozen curvature probe is positive but mostly same-context (2026-03-26)
+
+Lineage:
+
+- `117619`:
+  - `C034` strict `prefixlm + cqa_v2 DISTANCE + NORMAL_UNSIGNED`
+- `117622`:
+  - `C035` raw-target 4-task shared prefixlm
+
+Artifacts:
+
+- `results/cqa_probe/patchnepa_cqa_probe_curvature_c034_20260326_3/cqa_probe_curvature_c034_seed0.json`
+- `results/cqa_probe/patchnepa_cqa_probe_curvature_c035_20260326_3/cqa_probe_curvature_c035_seed0.json`
+
+Summary:
+
+- both frozen `answer_hidden` probes beat the scalar mean baseline on
+  same-context curvature:
+  - `C034`: `MAE/RMSE/r = 0.1482 / 0.1988 / 0.4821`
+    vs baseline `0.1870 / 0.2219`
+  - `C035`: `0.1517 / 0.1999 / 0.4514`
+    vs the same baseline
+- control sensitivity is clearly positive on same-context:
+  - `delta_mae(no_context) = +0.1414 / +0.1373`
+  - `delta_mae(wrong_shape_other) = +0.0898 / +0.0668`
+    for `C034 / C035`
+- off-diagonal is mixed:
+  - `C034` offdiag `MAE=0.2000` is worse than the mean baseline `0.1889`
+  - `C035` offdiag `MAE=0.1888` nearly matches the mean baseline `0.1889`
+    and improves Pearson `r` to `0.2210`
+
+Operational interpretation:
+
+- frozen query-conditioned CQA representations do expose unseen scalar
+  curvature.
+- the signal is strongest in same-context; off-diagonal curvature emergence is
+  still only partial.
+
+Decision:
+
+- keep curvature as a positive analysis-only geometric probe.
+- do not promote it as strong off-diagonal evidence yet.
+
+## 184. Signed-normal frozen probe remains negative on the winding-consistent subset (2026-03-26)
+
+Lineage:
+
+- shared subset manifest:
+  - `results/cqa_probe/patchnepa_cqa_probe_signed_subset_20260326/winding_consistent_subset.json`
+- `117620`:
+  - `C034` same probe on winding-consistent subset
+- `117621`:
+  - `C035` same probe on winding-consistent subset
+
+Artifacts:
+
+- `results/cqa_probe/patchnepa_cqa_probe_signed_c034_20260326_3/cqa_probe_signed_c034_seed0.json`
+- `results/cqa_probe/patchnepa_cqa_probe_signed_c035_20260326_3/cqa_probe_signed_c035_seed0.json`
+
+Summary:
+
+- same-context signed-normal probe is effectively zero:
+  - `C034`: `mean_cos=0.0094`, `angle_deg=89.30`
+  - `C035`: `mean_cos=0.0090`, `angle_deg=89.33`
+- off-diagonal is also near zero:
+  - `C034`: `0.0032`, `89.74 deg`
+  - `C035`: `0.0049`, `89.65 deg`
+- controls are not directionally clean:
+  - several off-diagonal wrong-shape / `no_context` conditions improve cosine
+    slightly instead of degrading it
+
+Operational interpretation:
+
+- even after filtering to `is_winding_consistent=1`, the frozen CQA branch does
+  not linearly expose signed orientation.
+- this is a negative analysis result, not evidence of emergent signed-normal
+  reasoning.
+
+Decision:
+
+- keep signed-normal probe negative.
+- do not extend it to few-shot until a stronger full-data probe exists.
+
+## 185. AO-HQ additive smoke succeeds; HKS smoke is partial and fragile (2026-03-26)
+
+Lineage:
+
+- AO-HQ sharded subset smoke:
+  - `117464, 117466, 117468, 117470, 117472, 117474, 117476, 117478`
+- HKS sharded subset smoke:
+  - `117465, 117467, 117469, 117471, 117473, 117475, 117477, 117479`
+- obsolete serial HKS smoke:
+  - `117465` (older single-job route) was later cancelled after the sharded
+    read was sufficient
+
+Artifacts:
+
+- `results/data_freeze/world_v3_aohq_smoke_eval64_sharded/mesh_aux_summary.json`
+- `results/data_freeze/world_v3_hks_smoke_eval64_sharded/mesh_aux_summary.json`
+
+Summary:
+
+- AO-HQ is clean on the whole 64-shape derived eval subset:
+  - `64/64` NPZs receive `mesh_surf_ao_hq`
+  - old `mesh_surf_ao` support is very coarse:
+    - `7` rounded values
+    - `std=0.219`
+  - new `mesh_surf_ao_hq` support is much denser:
+    - `129` rounded values
+    - `std=0.433`
+    - covers `[0, 1]` at `1/128` increments
+- HKS is only partially operational:
+  - `mesh_surf_hks_t0` exists on `48/64` subset shapes
+  - completed shard summaries contain `8` explicit ARPACK failures on `56`
+    processed rows, and one shard summary is still missing
+  - successful shapes have finite values, but the eigensolver path is not yet
+    stable
+
+Operational interpretation:
+
+- additive derived-cache augmentation is the correct mechanism for raw-target
+  experimentation.
+- AO-HQ is clearly the next target-quality wave for the mesh-side second probe.
+- HKS remains smoke-only until eigensolver robustness is improved.
+
+Decision:
+
+- prioritize AO-HQ for the next CQA rerun wave.
+- keep HKS as a future extension candidate, not a near-term mainline branch.
+
+## 186. Deeper decoder and decoder-side Q still do not rescue the enc-dec branch (2026-03-26)
+
+Lineage:
+
+- `C037` d12/no_q:
+  - train `117488`
+  - suite `117490`
+  - same/offdiag completion `117492`, `117494`
+  - utility `117496`, `117498`, `117500`
+- `C038` d12/full_q:
+  - train `117489`
+  - suite `117491`
+  - same/offdiag completion `117493`, `117495`
+  - utility `117497`, `117499`, `117501`
+
+Summary:
+
+- `C037` (`decoder_layers=12`, `no_q`):
+  - token eval:
+    - same/offdiag `udf_distance acc=0.0837 / 0.0497`
+    - same/offdiag `mesh_normal_unsigned acc=0.4853 / 0.3927`
+  - completion:
+    - same `MAE=0.0547`, `IoU@0.05=0.4575`, `mesh_fscore=0.0340`
+    - offdiag `MAE=0.1078`, `IoU@0.05=0.3239`, `mesh_fscore=0.0204`
+  - utility:
+    - `obj_bg=0.7762`
+    - `obj_only=0.8158`
+    - `pb_t50_rs=0.7595`
+- `C038` (`decoder_layers=12`, `full_q`):
+  - token eval:
+    - same/offdiag `udf_distance acc=0.0801 / 0.0503`
+    - same/offdiag `mesh_normal_unsigned acc=0.4843 / 0.4189`
+  - completion:
+    - same `MAE=0.0589`, `IoU@0.05=0.4481`, `mesh_fscore=0.0298`
+    - offdiag `MAE=0.1121`, `IoU@0.05=0.3033`, `mesh_fscore=0.0190`
+  - utility:
+    - `0.7762 / 0.8090 / 0.7491`
+- compare against earlier architecture rows:
+  - neither branch recovers the strict prefixlm `cqa_v2` anchor `C034`
+  - neither branch is a clear overall improvement over the first enc-dec row
+    `C033`
+  - the only clean positive move is that `C038` improves offdiag
+    `mesh_normal_unsigned` to `0.4189`
+
+Operational interpretation:
+
+- deeper decoder depth alone does not explain the enc-dec gap.
+- reintroducing an explicit decoder-side Q block also does not explain it.
+- the branch remains scientifically alive, but the main `udf_distance`
+  token/completion read is still the bottleneck, and prefixlm remains the clear
+  architecture winner under the current 10k recipe.
+
+Decision:
+
+- canonize `C037/C038` as negative architecture follow-ups.
+- keep prefixlm as the architecture mainline.
+- if enc-dec is revisited, change training scale or query-conditioned design
+  more substantially rather than only increasing decoder depth or restoring
+  decoder-side `full_q`.

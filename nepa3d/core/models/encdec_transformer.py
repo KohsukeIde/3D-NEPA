@@ -194,12 +194,15 @@ class EncoderDecoderTransformer(nn.Module):
         self,
         memory: torch.Tensor,
         dec_in: torch.Tensor,
+        dec_mask_override: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         _b, l_dec, _ = dec_in.shape
         if l_dec <= 0:
             return self.dec_ln(dec_in)
 
-        if self.decoder_self_attn == "causal":
+        if dec_mask_override is not None:
+            dec_mask = dec_mask_override
+        elif self.decoder_self_attn == "causal":
             dec_mask = _causal_mask(l_dec, device=dec_in.device)
         elif self.decoder_self_attn == "independent":
             dec_mask = _independent_mask(l_dec, device=dec_in.device)
@@ -223,6 +226,7 @@ class EncoderDecoderTransformer(nn.Module):
         enc_in: torch.Tensor,
         dec_in: torch.Tensor,
         enc_xyz: Optional[torch.Tensor] = None,
+        dec_mask_override: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Forward pass.
 
@@ -240,5 +244,5 @@ class EncoderDecoderTransformer(nn.Module):
         assert b == b2
 
         enc_out = self.encode(enc_in, enc_xyz=enc_xyz)
-        dec_out = self.decode(enc_out, dec_in)
+        dec_out = self.decode(enc_out, dec_in, dec_mask_override=dec_mask_override)
         return enc_out, dec_out

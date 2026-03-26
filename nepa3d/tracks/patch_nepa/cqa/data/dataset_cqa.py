@@ -191,6 +191,14 @@ TASK_REGISTRY: Dict[str, CQATaskSpec] = {
         field_keys={"ao": "mesh_surf_ao"},
         encode_mode="mesh_ao",
     ),
+    "mesh_ao_hq": CQATaskSpec(
+        name="mesh_ao_hq",
+        query_name="mesh_ao",
+        query_type=ASK_VISIBILITY,
+        query_xyz_key="surf_xyz",
+        field_keys={"ao": "mesh_surf_ao_hq"},
+        encode_mode="mesh_ao",
+    ),
     "udf_thickness": CQATaskSpec(
         name="udf_thickness",
         query_name="udf_thickness",

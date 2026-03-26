@@ -43,7 +43,13 @@ def normalize_cqa_model_args(args: Mapping[str, Any], *, ckpt_vocab_version: str
                 f"got {factorization!r}"
             )
         cfg["answer_factorization"] = "independent"
-        cfg["query_interface_mode"] = "no_q"
+        qim = str(cfg.get("query_interface_mode", "no_q") or "no_q").strip().lower()
+        if qim not in {"no_q", "full_q"}:
+            raise ValueError(
+                "encdec CQA currently supports query_interface_mode in "
+                f"{{'no_q','full_q'}}, got {qim!r}"
+            )
+        cfg["query_interface_mode"] = qim
         cfg["decoder_layers"] = int(cfg.get("decoder_layers", 4))
 
     return cfg

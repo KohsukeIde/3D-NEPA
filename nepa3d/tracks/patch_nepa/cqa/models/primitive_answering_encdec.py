@@ -71,7 +71,12 @@ class PrimitiveAnsweringEncDecModel(nn.Module):
             )
 
         self.requested_query_interface_mode = str(query_interface_mode).strip().lower()
-        self.query_interface_mode = "no_q"
+        if self.requested_query_interface_mode not in {"no_q", "full_q"}:
+            raise ValueError(
+                "PrimitiveAnsweringEncDecModel currently supports "
+                f"query_interface_mode in {{'no_q','full_q'}}, got {query_interface_mode!r}"
+            )
+        self.query_interface_mode = self.requested_query_interface_mode
 
         self.ctx_patch = PointPatchEmbed(
             num_groups=int(num_groups),
@@ -87,6 +92,9 @@ class PrimitiveAnsweringEncDecModel(nn.Module):
         self.query_type_embed = nn.Embedding(int(query_type_vocab), int(d_model))
 
         self.bos = nn.Parameter(torch.randn(1, 1, int(d_model)) * 0.02)
+        self.ans_bos = None
+        if self.query_interface_mode == "full_q":
+            self.ans_bos = nn.Parameter(torch.randn(1, 1, int(d_model)) * 0.02)
         self.backbone = EncoderDecoderTransformer(
             d_model=int(d_model),
             nhead=int(n_heads),
@@ -112,19 +120,49 @@ class PrimitiveAnsweringEncDecModel(nn.Module):
             qry_type = qry_type.unsqueeze(0).expand(qry_xyz.shape[0], -1)
         return q + self.query_type_embed(qry_type)
 
-    def forward(
+    def _build_answer_inputs(self, qry_xyz: torch.Tensor) -> torch.Tensor:
+        if self.ans_bos is None:
+            raise RuntimeError("_build_answer_inputs is only valid for query_interface_mode='full_q'")
+        b, n, _ = qry_xyz.shape
+        if n <= 0:
+            return qry_xyz.new_zeros((b, 0, self.d_model))
+        return self.ans_bos.expand(b, n, -1) + self.query_embed(qry_xyz)
+
+    @staticmethod
+    def _build_decoder_prompt_answer_mask(
+        *,
+        n_query: int,
+        n_answer: int,
+        device: torch.device,
+        query_interface_mode: str,
+    ) -> torch.Tensor:
+        if str(query_interface_mode) == "no_q":
+            mask = torch.ones((n_answer, n_answer), device=device, dtype=torch.bool)
+            if n_answer > 0:
+                mask.fill_diagonal_(False)
+            return mask
+        if str(query_interface_mode) != "full_q":
+            raise KeyError(f"unknown query_interface_mode={query_interface_mode}")
+        prompt_len = 1 + int(n_query)
+        total = int(prompt_len) + int(n_answer)
+        mask = torch.zeros((total, total), device=device, dtype=torch.bool)
+        if int(n_answer) > 0:
+            offdiag = torch.ones((n_answer, n_answer), device=device, dtype=torch.bool)
+            offdiag.fill_diagonal_(False)
+            mask[int(prompt_len):, int(prompt_len):] = offdiag
+            mask[:int(prompt_len), int(prompt_len):] = True
+        return mask
+
+    def _forward_no_q(
         self,
         ctx_xyz: torch.Tensor,
         qry_xyz: torch.Tensor,
         qry_type: torch.Tensor,
-        answer_code: torch.Tensor,
     ) -> PrimitiveAnsweringOutput:
-        del answer_code  # target-only in enc-dec v1; decoder input is query-only
         enc_out, ctx_tok, ctx_centers = self.encode_context(ctx_xyz)
         dec_in = self.encode_queries(qry_xyz, qry_type)
         dec_out = self.backbone.decode(enc_out, dec_in)
         logits = self.answer_head(dec_out)
-
         n_query = int(dec_in.shape[1])
         attn_mask = torch.ones((n_query, n_query), device=dec_in.device, dtype=torch.bool)
         if n_query > 0:
@@ -139,6 +177,57 @@ class PrimitiveAnsweringEncDecModel(nn.Module):
             sequence=dec_in,
             attn_mask=attn_mask,
         )
+
+    def _forward_full_q(
+        self,
+        ctx_xyz: torch.Tensor,
+        qry_xyz: torch.Tensor,
+        qry_type: torch.Tensor,
+    ) -> PrimitiveAnsweringOutput:
+        enc_out, ctx_tok, ctx_centers = self.encode_context(ctx_xyz)
+        q_tok = self.encode_queries(qry_xyz, qry_type)
+        ans_in = self._build_answer_inputs(qry_xyz)
+
+        if qry_type.dim() == 2:
+            type_scalar = qry_type[:, 0]
+        else:
+            type_scalar = qry_type
+        type_tok = self.query_type_embed(type_scalar).unsqueeze(1)
+        dec_seq = torch.cat([type_tok, q_tok, ans_in], dim=1)
+        prompt_len = 1 + q_tok.shape[1]
+        dec_mask = self._build_decoder_prompt_answer_mask(
+            n_query=int(q_tok.shape[1]),
+            n_answer=int(ans_in.shape[1]),
+            device=dec_seq.device,
+            query_interface_mode="full_q",
+        )
+        dec_out = self.backbone.decode(enc_out, dec_seq, dec_mask_override=dec_mask)
+        h_ans = dec_out[:, prompt_len:, :]
+        logits = self.answer_head(h_ans)
+        return PrimitiveAnsweringOutput(
+            logits=logits,
+            hidden=enc_out,
+            ctx_tokens=ctx_tok,
+            ctx_centers=ctx_centers,
+            query_tokens=q_tok,
+            answer_hidden=h_ans,
+            sequence=dec_seq,
+            attn_mask=dec_mask,
+        )
+
+    def forward(
+        self,
+        ctx_xyz: torch.Tensor,
+        qry_xyz: torch.Tensor,
+        qry_type: torch.Tensor,
+        answer_code: torch.Tensor,
+    ) -> PrimitiveAnsweringOutput:
+        del answer_code  # target-only in enc-dec v1; decoder input is query-only
+        if self.query_interface_mode == "no_q":
+            return self._forward_no_q(ctx_xyz, qry_xyz, qry_type)
+        if self.query_interface_mode == "full_q":
+            return self._forward_full_q(ctx_xyz, qry_xyz, qry_type)
+        raise AssertionError("unreachable")
 
     @torch.no_grad()
     def generate(self, ctx_xyz: torch.Tensor, qry_xyz: torch.Tensor, qry_type: torch.Tensor) -> torch.Tensor:

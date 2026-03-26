@@ -1,6 +1,6 @@
 # QueryNEPA -> PatchNEPA v2 Storyline
 
-Last updated: 2026-03-25
+Last updated: 2026-03-26
 
 ## 1. Purpose
 
@@ -450,6 +450,55 @@ Current safest CQA read:
   supportive rather than negative, but the discrete shared
   `DISTANCE + NORMAL_UNSIGNED` branch is still the safer canonical mainline.
 
+### 5.9 Frozen Geometric Probes and the Next Raw-Target Wave
+
+Frozen linear probes from `answer_hidden`:
+
+- curvature is the first clearly positive unseen-quantity probe:
+  - `C034` same-context curvature probe:
+    - `MAE/RMSE/r = 0.1482 / 0.1988 / 0.4821`
+    - versus scalar mean baseline `0.1870 / 0.2219`
+  - `C035` same-context curvature probe:
+    - `0.1517 / 0.1999 / 0.4514`
+    - also above the same baseline
+  - both show strong control sensitivity on same-context
+    (`delta_mae(no_context) ~= +0.14`)
+- off-diagonal curvature is only partial:
+  - `C034` offdiag MAE is still worse than the mean baseline
+  - `C035` nearly matches the baseline on MAE and improves Pearson `r`
+    (`0.2210`), so the 4-task branch may help correlation slightly
+  - interpretation:
+    - frozen CQA representations do expose unseen scalar geometry,
+    - but cross-carrier curvature emergence is still limited
+
+Signed-normal frozen probe on the winding-consistent subset:
+
+- remains effectively absent even after filtering to `is_winding_consistent=1`
+  shapes:
+  - `C034` same/offdiag `mean_cos = 0.0094 / 0.0032`
+  - `C035` same/offdiag `0.0090 / 0.0049`
+- several off-diagonal controls improve rather than degrade cosine slightly,
+  so the read is not directionally clean
+- interpretation:
+  - current CQA representations do **not** linearly expose signed orientation;
+    keep this as a negative analysis result
+
+AO-HQ and HKS raw-target smoke:
+
+- additive derived-cache augmentation is the correct mechanism for data-side
+  target upgrades:
+  - canonical `world_v3` stays untouched
+- AO-HQ is clearly promising:
+  - full `64/64` derived-subset success
+  - old AO has only `7` rounded support levels with `std=0.219`
+  - AO-HQ expands to `129` rounded levels with `std=0.433`
+- HKS is scientifically interesting but operationally fragile:
+  - `48/64` subset shapes receive `mesh_surf_hks_t0`
+  - ARPACK failures remain common on harder meshes
+- interpretation:
+  - the next raw-target wave should prioritize **AO-HQ**
+  - HKS stays smoke-only until the eigensolver path is stabilized
+
 ## 6. Practical Delta: PatchNEPA v2 vs PointGPT
 
 The practical comparison should currently be read as:
@@ -492,6 +541,27 @@ This means:
   architecture-controlled compare on the main `udf_distance` token/completion
   reads and on utility classification; the only approximately tied read is
   off-diagonal `mesh_normal_unsigned`.
+- deeper enc-dec follow-ups do not change that read:
+  - `decoder_layers=12` alone does not recover the missing `udf_distance`
+    token/completion signal,
+  - and adding a decoder-side `full_q` block only raises offdiag
+    `mesh_normal_unsigned` slightly without closing the main gap to prefixlm.
+- the current raw-target 4-task shared prefixlm line
+  (`DISTANCE + NORMAL_UNSIGNED + THICKNESS_VALID_QBIN + AO`) is also now
+  established as the present multi-probe ceiling: all probes except raw AO stay
+  scientifically alive, and utility classification improves slightly, but the
+  branch does **not** show monotonic synergy at `10k` because the main
+  `udf_distance` / `mesh_normal_unsigned` token reads and distance completion
+  regress relative to the stricter `DISTANCE + NORMAL_UNSIGNED` anchor.
+- frozen query-conditioned CQA representations already support a positive
+  same-context curvature linear probe from `answer_hidden`, so unseen scalar
+  geometry is at least partially present in the learned representation.
+- the same frozen representations do **not** linearly expose signed normals,
+  even on a winding-consistent subset, so emergent orientation-sensitive
+  geometry is not established.
+- additive derived-cache augmentation for AO-HQ is now validated on a 64-shape
+  subset without touching canonical `world_v3`, while HKS smoke remains only
+  partially successful because eigensolver failures are still common.
 - the same `surf`-trained `udf_distance` checkpoint now transfers zero-shot to
   `pc_bank -> udf_distance` at eval time only, still above majority and with
   positive `no_context` / `wrong_shape_other_synset` deltas.
@@ -531,8 +601,15 @@ This means:
   + rescued-thickness UDF branch, without destabilizing the distance anchor
   when thickness resolution is increased,
 - whether encoder-decoder can be made competitive with the current prefixlm
-  mainline once training scale or decoder/query design is tuned, or whether
-  architecture is genuinely secondary to the typed Q/A interface here,
+  mainline once training scale or a more substantial query-conditioned design
+  is changed, since simply using `decoder_layers=12` and decoder-side `full_q`
+  still leaves it clearly below the prefixlm anchor,
+- how much AO-HQ target improvement can turn the current 4-task raw-target
+  ceiling into a truly headline-safe mesh-two-answer line, especially since the
+  present raw `mesh_ao` branch is context-sensitive but still sits at/below its
+  majority-heavy baseline,
+- whether HKS can be stabilized enough to become a real mesh-native follow-up
+  probe rather than remaining a numerically fragile smoke result,
 - whether a redesigned task/target definition can increase context dependence
   without repeating the negative `near_surface` collapse or the negative
   `pc_bank` retry, especially for second mesh-family answers beyond
