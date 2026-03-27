@@ -539,6 +539,28 @@ AO-HQ full build and discrete reruns:
   - but it does **not** overturn the safer discrete mainline, which remains
     `prefixlm + cqa_v2 DISTANCE + NORMAL_UNSIGNED`
 
+Current discrete mainline-vs-utility snapshot:
+
+| branch | answers | token acc (`dist`, `normal`) same/offdiag | completion `MAE` same/offdiag | completion `IoU@0.05` same/offdiag | utility (`obj_bg / obj_only / pb_t50_rs`) | current role |
+|---|---|---|---|---|---|---|
+| `C034` | `dist + normal_unsigned` | `0.1745/0.0797`, `0.5495/0.3566` | `0.0192 / 0.1249` | `0.7030 / 0.3814` | `0.8399 / 0.8503 / 0.7679` | safest core mainline |
+| `C035` | `dist + normal_unsigned + thickness + AO(raw)` | `0.1232/0.0601`, `0.5091/0.3841` | `0.0290 / 0.1161` | `0.6320 / 0.3583` | `0.8451 / 0.8520 / 0.7710` | raw 4-task ceiling; utility-up, core-down |
+| `C042` | `dist + normal_unsigned + AO_HQ` | `0.1464/0.0688`, `0.5288/0.3808` | `0.0227 / 0.1214` | `0.6776 / 0.3657` | `0.8520 / 0.8485 / 0.7734` | strongest utility-supportive AO-HQ branch |
+| `C043` | `dist + normal_unsigned + thickness + AO_HQ` | `0.1144/0.0613`, `0.5021/0.4005` | `0.0324 / 0.1066` | `0.5974 / 0.3402` | `0.8434 / 0.8468 / 0.7797` | 4-task AO-HQ tradeoff ceiling |
+
+Reading of the table:
+
+- adding answer families can improve downstream utility slightly, but the gain
+  is **not monotonic** across variants
+- none of `C035 / C042 / C043` beats `C034` on the core
+  `distance + normal_unsigned` answering/completion anchor
+- AO-HQ helps more than raw AO on the mesh-side target, but it still does not
+  make the AO-family answer headline-safe off-diagonal
+- therefore:
+  - keep `C034` as the discrete method mainline
+  - treat `C042/C043` as supportive evidence that richer probe sets can
+    regularize the encoder and sometimes help utility
+
 ## 6. Practical Delta: PatchNEPA v2 vs PointGPT
 
 The practical comparison should currently be read as:
