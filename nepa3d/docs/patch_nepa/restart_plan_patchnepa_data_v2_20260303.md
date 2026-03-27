@@ -4043,6 +4043,72 @@ Key read:
     - offdiag `0.1121 / 0.1429 / 0.3033 / 0.0190`
   - utility:
     - `0.7762 / 0.8090 / 0.7491`
+
+## 94. Full AO-HQ build succeeds, but AO-HQ reruns remain supportive rather than decisive (2026-03-27)
+
+Canonical sources:
+
+- full AO-HQ build aggregate:
+  - `results/data_freeze/world_v3_aohq_fullmesh_r3_20260327_041356/mesh_aux_summary.json`
+- AO-HQ 3-task rerun (`C042`):
+  - `results/cqa_multitype/patchnepa_cqa_v2_distnormaohq_prefixlm_20260327_041356_r3_suite/cqa_v2_distnormaohq_prefixlm_suite.json`
+  - `results/cqa_completion/patchnepa_cqa_v2_distnormaohq_prefixlm_20260327_041356_r3_{same,offdiag}_completion/cqa_v2_distnormaohq_prefixlm_{same,offdiag}_translation_g16_s64.json`
+- AO-HQ 4-task rerun (`C043`):
+  - `results/cqa_multitype/patchnepa_cqa_v2_distnormthickaohq_prefixlm_20260327_041356_r3_suite/cqa_v2_distnormthickaohq_prefixlm_suite.json`
+  - `results/cqa_completion/patchnepa_cqa_v2_distnormthickaohq_prefixlm_20260327_041356_r3_{same,offdiag}_completion/cqa_v2_distnormthickaohq_prefixlm_{same,offdiag}_translation_g16_s64.json`
+
+Key read:
+
+- full AO-HQ additive build is now clean on the real corpus:
+  - `train_mesh 16004/16004`
+  - `eval 5241/5241`
+  - `overall 21245/21245`
+  - `0` errors
+  - canonical `world_v3` remains untouched
+- `C042` (`distance + normal_unsigned + AO_HQ`) is positive but not headline-safe:
+  - token acc:
+    - same/offdiag `udf_distance = 0.1464 / 0.0688`
+    - same/offdiag `mesh_normal_unsigned = 0.5288 / 0.3808`
+    - same/offdiag `mesh_ao_hq = 0.5650 / 0.5018`
+  - AO-HQ only barely clears majority on same-context and still fails it
+    off-diagonal:
+    - same `0.5650` vs majority `0.5624`
+    - offdiag `0.5018` vs majority `0.5535`
+  - completion:
+    - same `MAE/RMSE/IoU@0.05/F-score = 0.0227 / 0.0328 / 0.6776 / 0.0999`
+    - offdiag `0.1214 / 0.1889 / 0.3657 / 0.0562`
+  - utility:
+    - `obj_bg / obj_only / pb_t50_rs = 0.8520 / 0.8485 / 0.7734`
+- `C043` (`distance + normal_unsigned + thickness_valid_qbin + AO_HQ`) modestly
+  improves the raw-AO 4-task ceiling, but still does not become a new mainline:
+  - token acc:
+    - same/offdiag `udf_distance = 0.1144 / 0.0613`
+    - same/offdiag `mesh_normal_unsigned = 0.5021 / 0.4005`
+    - same/offdiag `udf_thickness_valid_qbin = 0.0778 / 0.0504`
+    - same/offdiag `mesh_ao_hq = 0.5624 / 0.5289`
+  - completion:
+    - same `0.0324 / 0.0453 / 0.5974 / 0.0604`
+    - offdiag `0.1066 / 0.1553 / 0.3402 / 0.0388`
+  - utility:
+    - `0.8434 / 0.8468 / 0.7797`
+
+Interpretation:
+
+- AO-HQ does improve the target itself and slightly lifts the mesh-side branch,
+  especially on same-context AO and some off-diagonal utility / MAE reads.
+- however, it still does **not** turn AO into a paper-safe second mesh answer:
+  off-diagonal AO-HQ remains below majority in both the 3-task and 4-task runs.
+- the safest discrete mainline remains the stricter `cqa_v2`
+  `DISTANCE + NORMAL_UNSIGNED` anchor (`C034`).
+- AO-HQ should now be treated as a supportive target-quality improvement rather
+  than the missing ingredient that fully resolves the mesh-two-answer line.
+
+Decision:
+
+- keep the full AO-HQ additive derived cache.
+- keep AO-HQ as the best current mesh-side second-answer target candidate.
+- do not yet promote AO-HQ 3-task or 4-task reruns over the existing `C034`
+  mainline.
 - comparison:
   - neither branch closes the gap to `C034`
   - `C037/C038` are also not clear improvements over `C033`

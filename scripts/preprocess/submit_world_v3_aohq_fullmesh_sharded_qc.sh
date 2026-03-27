@@ -12,16 +12,17 @@ fi
 
 RUN_TAG_BASE="${RUN_TAG_BASE:-world_v3_aohq_fullmesh_$(date +%Y%m%d_%H%M%S)}"
 SRC_CACHE_ROOT="${SRC_CACHE_ROOT:-data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1}"
-DST_CACHE_ROOT="${DST_CACHE_ROOT:-data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1_aohq_fullmesh_sharded}"
+DST_CACHE_ROOT="${DST_CACHE_ROOT:-data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1_aohq_fullmesh_sharded_r3}"
 GROUP_LIST="${GROUP_LIST:-qgah50055}"
 WALLTIME="${WALLTIME:-12:00:00}"
 AO_RAYS="${AO_RAYS:-128}"
 AO_EPS="${AO_EPS:-1e-4}"
 AO_MAX_T="${AO_MAX_T:-2.5}"
+AO_BATCH_SIZE="${AO_BATCH_SIZE:-64}"
 REFRESH="${REFRESH:-0}"
 OUT_DIR_BASE="${OUT_DIR_BASE:-${WORKDIR}/results/data_freeze/${RUN_TAG_BASE}}"
-TRAIN_NUM_SHARDS="${TRAIN_NUM_SHARDS:-16}"
-EVAL_NUM_SHARDS="${EVAL_NUM_SHARDS:-8}"
+TRAIN_NUM_SHARDS="${TRAIN_NUM_SHARDS:-32}"
+EVAL_NUM_SHARDS="${EVAL_NUM_SHARDS:-16}"
 
 mkdir -p "${OUT_DIR_BASE}"
 
@@ -57,6 +58,7 @@ submit_split() {
         AO_RAYS="${AO_RAYS}" \
         AO_EPS="${AO_EPS}" \
         AO_MAX_T="${AO_MAX_T}" \
+        AO_BATCH_SIZE="${AO_BATCH_SIZE}" \
         COMPUTE_HKS="0" \
         OUT_DIR="${out_dir}" \
         OUTPUT_JSON="${out_dir}/mesh_aux_summary.json" \

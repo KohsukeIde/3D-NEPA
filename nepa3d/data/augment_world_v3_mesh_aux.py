@@ -15,6 +15,11 @@ except Exception as e:
     raise RuntimeError("augment_world_v3_mesh_aux requires trimesh") from e
 
 try:
+    from trimesh.ray.ray_pyembree import RayMeshIntersector
+except Exception as e:
+    raise RuntimeError("augment_world_v3_mesh_aux requires trimesh.ray.ray_pyembree") from e
+
+try:
     import scipy.sparse as sp
     import scipy.sparse.linalg as spla
 except Exception as e:
@@ -95,20 +100,21 @@ def compute_mesh_ao_hq(
     n_rays: int = 128,
     eps: float = 1e-4,
     max_t: float = 2.5,
-    batch_size: int = 256,
+    batch_size: int = 64,
 ) -> np.ndarray:
     pts = np.asarray(surf_xyz, dtype=np.float32)
     nrms = np.asarray(surf_n, dtype=np.float32)
     nrms /= np.linalg.norm(nrms, axis=1, keepdims=True) + 1e-8
     hemi = _fibonacci_hemisphere(int(n_rays))
-    dirs = _orient_dirs_to_normals(hemi, nrms)
     ao = np.zeros((pts.shape[0], 1), dtype=np.float32)
-    intersector = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
+    intersector = RayMeshIntersector(mesh)
     for start in range(0, pts.shape[0], int(batch_size)):
         end = min(pts.shape[0], start + int(batch_size))
         p = pts[start:end]
         n = nrms[start:end]
-        d = dirs[start:end]
+        # Keep oriented ray directions batch-local. Building the full
+        # [num_points, n_rays, 3] tensor for large meshes causes avoidable OOM.
+        d = _orient_dirs_to_normals(hemi, n)
         batch, rays, _ = d.shape
         origins = p[:, None, :] + eps * n[:, None, :]
         origins = origins.reshape(batch, 1, 3) + eps * d
@@ -277,6 +283,7 @@ def _augment_npz(
     ao_rays: int,
     ao_eps: float,
     ao_max_t: float,
+    ao_batch_size: int,
     compute_hks: bool,
     hks_eigs: int,
     hks_times: Sequence[float],
@@ -301,6 +308,7 @@ def _augment_npz(
                         n_rays=int(ao_rays),
                         eps=float(ao_eps),
                         max_t=float(ao_max_t),
+                        batch_size=int(ao_batch_size),
                     )
                 except Exception as e:
                     errors.append(f"ao_hq:{type(e).__name__}: {e}")
@@ -353,6 +361,7 @@ def main() -> None:
     ap.add_argument("--ao_rays", type=int, default=128)
     ap.add_argument("--ao_eps", type=float, default=1e-4)
     ap.add_argument("--ao_max_t", type=float, default=2.5)
+    ap.add_argument("--ao_batch_size", type=int, default=64)
     ap.add_argument("--compute_hks", type=int, default=0)
     ap.add_argument("--hks_eigs", type=int, default=64)
     ap.add_argument("--hks_times", type=str, default="0.05,0.2,1.0")
@@ -382,6 +391,7 @@ def main() -> None:
             ao_rays=int(args.ao_rays),
             ao_eps=float(args.ao_eps),
             ao_max_t=float(args.ao_max_t),
+            ao_batch_size=int(args.ao_batch_size),
             compute_hks=bool(args.compute_hks),
             hks_eigs=int(args.hks_eigs),
             hks_times=hks_times,
@@ -403,6 +413,7 @@ def main() -> None:
         "refresh": bool(args.refresh),
         "compute_ao_hq": bool(args.compute_ao_hq),
         "ao_rays": int(args.ao_rays),
+        "ao_batch_size": int(args.ao_batch_size),
         "compute_hks": bool(args.compute_hks),
         "hks_eigs": int(args.hks_eigs),
         "hks_times": hks_times,

@@ -1,6 +1,6 @@
 # QueryNEPA -> PatchNEPA v2 Storyline
 
-Last updated: 2026-03-26
+Last updated: 2026-03-27
 
 ## 1. Purpose
 
@@ -499,6 +499,46 @@ AO-HQ and HKS raw-target smoke:
   - the next raw-target wave should prioritize **AO-HQ**
   - HKS stays smoke-only until the eigensolver path is stabilized
 
+AO-HQ full build and discrete reruns:
+
+- the full additive AO-HQ build now lands cleanly on the real corpus:
+  - `train_mesh 16004/16004`
+  - `eval 5241/5241`
+  - `overall 21245/21245`
+  - `0` errors
+  - canonical `world_v3` remains untouched
+- `DISTANCE + NORMAL_UNSIGNED + AO_HQ` (`C042`) is supportive but not yet a
+  headline-safe mesh-two-answer line:
+  - same/offdiag token acc:
+    - `udf_distance = 0.1464 / 0.0688`
+    - `mesh_normal_unsigned = 0.5288 / 0.3808`
+    - `mesh_ao_hq = 0.5650 / 0.5018`
+  - `mesh_ao_hq` only barely beats majority on same-context and still fails it
+    off-diagonal:
+    - same `0.5650` vs majority `0.5624`
+    - offdiag `0.5018` vs majority `0.5535`
+  - same/offdiag completion:
+    - `MAE = 0.0227 / 0.1214`
+    - `IoU@0.05 = 0.6776 / 0.3657`
+    - `mesh_fscore = 0.0999 / 0.0562`
+- the AO-HQ 4-task line (`C043`) is a mild improvement over the raw-AO
+  4-task ceiling, but still not a new mainline:
+  - same/offdiag token acc:
+    - `udf_distance = 0.1144 / 0.0613`
+    - `mesh_normal_unsigned = 0.5021 / 0.4005`
+    - `udf_thickness_valid_qbin = 0.0778 / 0.0504`
+    - `mesh_ao_hq = 0.5624 / 0.5289`
+  - same/offdiag completion:
+    - `MAE = 0.0324 / 0.1066`
+    - `IoU@0.05 = 0.5974 / 0.3402`
+    - `mesh_fscore = 0.0604 / 0.0388`
+  - `mesh_ao_hq` still stays at/below majority (`0.5624 / 0.5535`)
+- interpretation:
+  - AO-HQ genuinely improves the target and slightly improves the mesh-side
+    branch
+  - but it does **not** overturn the safer discrete mainline, which remains
+    `prefixlm + cqa_v2 DISTANCE + NORMAL_UNSIGNED`
+
 ## 6. Practical Delta: PatchNEPA v2 vs PointGPT
 
 The practical comparison should currently be read as:
@@ -560,8 +600,14 @@ This means:
   even on a winding-consistent subset, so emergent orientation-sensitive
   geometry is not established.
 - additive derived-cache augmentation for AO-HQ is now validated on a 64-shape
-  subset without touching canonical `world_v3`, while HKS smoke remains only
-  partially successful because eigensolver failures are still common.
+  subset without touching canonical `world_v3`, and the full AO-HQ additive
+  build now also lands cleanly on the real `train_mesh + eval` corpus.
+- AO-HQ reruns are supportive and slightly stronger than the old raw-AO branch,
+  but they still do not make the mesh-side second answer headline-safe because
+  off-diagonal `mesh_ao_hq` remains below majority in both the 3-task and
+  4-task reruns.
+- HKS smoke remains only partially successful because eigensolver failures are
+  still common.
 - the same `surf`-trained `udf_distance` checkpoint now transfers zero-shot to
   `pc_bank -> udf_distance` at eval time only, still above majority and with
   positive `no_context` / `wrong_shape_other_synset` deltas.
@@ -604,9 +650,9 @@ This means:
   mainline once training scale or a more substantial query-conditioned design
   is changed, since simply using `decoder_layers=12` and decoder-side `full_q`
   still leaves it clearly below the prefixlm anchor,
-- how much AO-HQ target improvement can turn the current 4-task raw-target
-  ceiling into a truly headline-safe mesh-two-answer line, especially since the
-  present raw `mesh_ao` branch is context-sensitive but still sits at/below its
+- whether AO target quality beyond the current AO-HQ upgrade can finally turn
+  the mesh-side second answer into a headline-safe line, since AO-HQ improves
+  same-context behavior but off-diagonal `mesh_ao_hq` still sits below its
   majority-heavy baseline,
 - whether HKS can be stabilized enough to become a real mesh-native follow-up
   probe rather than remaining a numerically fragile smoke result,

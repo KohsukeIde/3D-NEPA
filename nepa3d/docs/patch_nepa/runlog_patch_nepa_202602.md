@@ -8142,3 +8142,83 @@ Decision:
 - if enc-dec is revisited, change training scale or query-conditioned design
   more substantially rather than only increasing decoder depth or restoring
   decoder-side `full_q`.
+
+## 187. Full AO-HQ build lands cleanly; AO-HQ reruns improve the target but do not overturn the mainline (2026-03-27)
+
+Lineage:
+
+- AO-HQ fullmesh additive build `r3`:
+  - build shards `118105-118152`
+  - aggregate:
+    - `results/data_freeze/world_v3_aohq_fullmesh_r3_20260327_041356/mesh_aux_summary.json`
+- `C042` AO-HQ 3-task:
+  - train `118153`
+  - suite `118155`
+  - same/offdiag completion `118157`, `118159`
+  - utility `118161`, `118163`, `118165`
+- `C043` AO-HQ 4-task:
+  - train `118154`
+  - suite `118156`
+  - same/offdiag completion `118158`, `118160`
+  - utility `118162`, `118164`, `118166`
+
+Summary:
+
+- full AO-HQ additive build is fully successful on the derived root:
+  - `train_mesh 16004/16004`
+  - `eval 5241/5241`
+  - `overall 21245/21245`
+  - `0` errors
+  - `AO_RAYS=128`, `AO_BATCH_SIZE=64`
+  - canonical `world_v3` is untouched
+- `C042` (`distance + normal_unsigned + AO_HQ`):
+  - token eval:
+    - same/offdiag `udf_distance = 0.1464 / 0.0688`
+    - same/offdiag `mesh_normal_unsigned = 0.5288 / 0.3808`
+    - same/offdiag `mesh_ao_hq = 0.5650 / 0.5018`
+  - AO-HQ majority read:
+    - same `0.5650` vs `0.5624`
+    - offdiag `0.5018` vs `0.5535`
+  - completion:
+    - same `MAE=0.0227`, `IoU@0.05=0.6776`, `mesh_fscore=0.0999`
+    - offdiag `MAE=0.1214`, `IoU@0.05=0.3657`, `mesh_fscore=0.0562`
+  - utility:
+    - `obj_bg=0.8520`
+    - `obj_only=0.8485`
+    - `pb_t50_rs=0.7734`
+- `C043` (`distance + normal_unsigned + thickness_valid_qbin + AO_HQ`):
+  - token eval:
+    - same/offdiag `udf_distance = 0.1144 / 0.0613`
+    - same/offdiag `mesh_normal_unsigned = 0.5021 / 0.4005`
+    - same/offdiag `udf_thickness_valid_qbin = 0.0778 / 0.0504`
+    - same/offdiag `mesh_ao_hq = 0.5624 / 0.5289`
+  - AO-HQ majority read:
+    - same `0.5624` vs `0.5624`
+    - offdiag `0.5289` vs `0.5535`
+  - completion:
+    - same `MAE=0.0324`, `IoU@0.05=0.5974`, `mesh_fscore=0.0604`
+    - offdiag `MAE=0.1066`, `IoU@0.05=0.3402`, `mesh_fscore=0.0388`
+  - utility:
+    - `obj_bg=0.8434`
+    - `obj_only=0.8468`
+    - `pb_t50_rs=0.7797`
+
+Operational interpretation:
+
+- AO-HQ clearly fixes the target-quality bottleneck on the data side, and the
+  full additive build is now a reusable asset rather than a subset smoke.
+- however, AO-HQ still does not make the mesh-side second answer headline-safe:
+  it only barely beats majority on same-context in the 3-task run and stays
+  below majority off-diagonal in both 3-task and 4-task reruns.
+- the 3-task AO-HQ branch is supportive and utility-strong, but still slightly
+  weaker than `C034` on the main `distance + normal` anchor.
+- the 4-task AO-HQ branch is somewhat better than the raw-AO 4-task ceiling,
+  especially on off-diagonal `MAE` and `pb_t50_rs`, but still shows tradeoff
+  rather than clear synergy.
+
+Decision:
+
+- keep `prefixlm + cqa_v2 DISTANCE + NORMAL_UNSIGNED` (`C034`) as the safest
+  current discrete mainline.
+- keep AO-HQ as the strongest target-quality upgrade for the mesh-side second
+  answer, but not yet as a promoted headline branch.

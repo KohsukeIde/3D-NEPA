@@ -41,6 +41,7 @@ COMPUTE_AO_HQ="${COMPUTE_AO_HQ:-1}"
 AO_RAYS="${AO_RAYS:-128}"
 AO_EPS="${AO_EPS:-1e-4}"
 AO_MAX_T="${AO_MAX_T:-2.5}"
+AO_BATCH_SIZE="${AO_BATCH_SIZE:-64}"
 COMPUTE_HKS="${COMPUTE_HKS:-0}"
 HKS_EIGS="${HKS_EIGS:-64}"
 HKS_TIMES="${HKS_TIMES:-0.05,0.2,1.0}"
@@ -61,6 +62,7 @@ python -m nepa3d.data.augment_world_v3_mesh_aux \
   --ao_rays "${AO_RAYS}" \
   --ao_eps "${AO_EPS}" \
   --ao_max_t "${AO_MAX_T}" \
+  --ao_batch_size "${AO_BATCH_SIZE}" \
   --compute_hks "${COMPUTE_HKS}" \
   --hks_eigs "${HKS_EIGS}" \
   --hks_times "${HKS_TIMES}" \

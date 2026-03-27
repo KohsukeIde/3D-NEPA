@@ -30,7 +30,7 @@ datasets:
     context_source: pc_bank
 
   - name: mesh_ao_hq
-    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1_aohq_fullmesh_sharded
+    cache_root: data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1_aohq_fullmesh_sharded_r3
     split: eval
     backend: mesh
     weight: 1.0
