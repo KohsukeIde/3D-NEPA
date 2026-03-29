@@ -19,8 +19,8 @@ from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
     mask_logits_for_query_type,
     query_type_vocab_size,
 )
-from nepa3d.tracks.patch_nepa.cqa.data.dataset_cqa import QUERY_ORDER_MODES, cqa_collate_fn
-from nepa3d.tracks.patch_nepa.cqa.data.mixed_pretrain_cqa import build_mixed_pretrain_cqa
+from nepa3d.tracks.patch_nepa.cqa.data.dataset_cqa import QUERY_ORDER_MODES, cqa_collate_fn, cqa_packed_collate_fn
+from nepa3d.tracks.patch_nepa.cqa.data.mixed_pretrain_cqa import build_mixed_pretrain_cqa, build_packed_pretrain_cqa
 from nepa3d.tracks.patch_nepa.cqa.models.factory import build_cqa_model_from_args
 
 
@@ -78,8 +78,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--answer_vocab", type=int, default=0, help="If <=0, resolve from codec_version.")
     p.add_argument("--query_type_vocab", type=int, default=0, help="If <=0, resolve from codec_version.")
     p.add_argument("--generator_depth", type=int, default=2)
-    p.add_argument("--model_arch", type=str, default="prefixlm", choices=["prefixlm", "encdec"])
+    p.add_argument("--model_arch", type=str, default="prefixlm", choices=["prefixlm", "encdec", "external_pointmae"])
     p.add_argument("--decoder_layers", type=int, default=4)
+    p.add_argument("--external_backbone_ckpt", type=str, default="")
+    p.add_argument("--freeze_external_encoder", type=int, default=1, choices=[0, 1])
+    p.add_argument("--external_backbone_depth", type=int, default=12)
+    p.add_argument("--external_backbone_heads", type=int, default=6)
+    p.add_argument("--external_backbone_drop_path", type=float, default=0.1)
     p.add_argument(
         "--answer_factorization",
         type=str,
@@ -93,6 +98,13 @@ def parse_args() -> argparse.Namespace:
         default="full_q",
         choices=["full_q", "self_q", "no_q"],
         help="How answer slots can access the query block: full list, self-only, or no explicit query block.",
+    )
+    p.add_argument(
+        "--sampling_protocol",
+        type=str,
+        default="mixture",
+        choices=["mixture", "packed"],
+        help="Sampling protocol: one-task mixture per sample or packed multi-type samples sharing one context per shape.",
     )
     return p.parse_args()
 
@@ -224,15 +236,28 @@ def main() -> None:
     accelerator = Accelerator(kwargs_handlers=[ddp])
     set_seed(int(args.seed))
 
-    dataset, sampler, info = build_mixed_pretrain_cqa(
-        args.mix_config_path,
-        n_ctx=int(args.n_ctx),
-        n_qry=int(args.n_qry),
-        mode="train",
-        eval_seed=int(args.seed),
-        query_order=str(args.query_order),
-        codec_version=(str(args.codec_version).strip() or None),
-    )
+    if str(args.sampling_protocol).strip().lower() == "packed":
+        dataset, sampler, info = build_packed_pretrain_cqa(
+            args.mix_config_path,
+            n_ctx=int(args.n_ctx),
+            n_qry=int(args.n_qry),
+            mode="train",
+            eval_seed=int(args.seed),
+            query_order=str(args.query_order),
+            codec_version=(str(args.codec_version).strip() or None),
+        )
+        collate_fn = cqa_packed_collate_fn
+    else:
+        dataset, sampler, info = build_mixed_pretrain_cqa(
+            args.mix_config_path,
+            n_ctx=int(args.n_ctx),
+            n_qry=int(args.n_qry),
+            mode="train",
+            eval_seed=int(args.seed),
+            query_order=str(args.query_order),
+            codec_version=(str(args.codec_version).strip() or None),
+        )
+        collate_fn = cqa_collate_fn
     args.codec_version = str(str(args.codec_version).strip() or info.get("codec_version", CQA_VOCAB_VERSION))
     if int(args.answer_vocab) <= 0:
         args.answer_vocab = int(answer_vocab_size(str(args.codec_version)))
@@ -243,6 +268,9 @@ def main() -> None:
             raise ValueError("model_arch=encdec currently requires --answer_factorization independent")
         args.answer_factorization = "independent"
         args.query_interface_mode = "no_q"
+    if str(args.model_arch).strip().lower() == "external_pointmae":
+        if not str(args.external_backbone_ckpt).strip():
+            raise ValueError("model_arch=external_pointmae requires --external_backbone_ckpt")
 
     loader = DataLoader(
         dataset,
@@ -250,7 +278,7 @@ def main() -> None:
         sampler=sampler,
         num_workers=int(args.num_workers),
         pin_memory=True,
-        collate_fn=cqa_collate_fn,
+        collate_fn=collate_fn,
         drop_last=True,
     )
 
@@ -284,7 +312,10 @@ def main() -> None:
                 f,
                 indent=2,
             )
-        accelerator.print(f"[dataset] steps_per_epoch={steps_per_epoch} max_steps={max_steps} warmup_steps={warmup_steps}")
+        accelerator.print(
+            f"[dataset] protocol={args.sampling_protocol} steps_per_epoch={steps_per_epoch} "
+            f"max_steps={max_steps} warmup_steps={warmup_steps}"
+        )
         accelerator.print(f"[dataset] mix_info={json.dumps(info)}")
 
     wandb_run = _init_wandb(args, accelerator)

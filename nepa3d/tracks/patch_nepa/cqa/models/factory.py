@@ -15,6 +15,10 @@ from nepa3d.tracks.patch_nepa.cqa.models.primitive_answering import (
     PrimitiveAnsweringClassifier,
     PrimitiveAnsweringModel,
 )
+from nepa3d.tracks.patch_nepa.cqa.models.primitive_answering_external_pointmae import (
+    ExternalPointMAEPrimitiveAnsweringClassifier,
+    ExternalPointMAEPrimitiveAnsweringModel,
+)
 from nepa3d.tracks.patch_nepa.cqa.models.primitive_answering_encdec import (
     PrimitiveAnsweringEncDecClassifier,
     PrimitiveAnsweringEncDecModel,
@@ -31,7 +35,7 @@ def normalize_cqa_model_args(args: Mapping[str, Any], *, ckpt_vocab_version: str
     cfg["codec_version"] = codec_version
 
     model_arch = str(cfg.get("model_arch", "prefixlm") or "prefixlm").strip().lower()
-    if model_arch not in {"prefixlm", "encdec"}:
+    if model_arch not in {"prefixlm", "encdec", "external_pointmae"}:
         raise ValueError(f"unknown model_arch={model_arch!r}")
     cfg["model_arch"] = model_arch
 
@@ -51,6 +55,14 @@ def normalize_cqa_model_args(args: Mapping[str, Any], *, ckpt_vocab_version: str
             )
         cfg["query_interface_mode"] = qim
         cfg["decoder_layers"] = int(cfg.get("decoder_layers", 4))
+    elif model_arch == "external_pointmae":
+        cfg["external_backbone_ckpt"] = str(cfg.get("external_backbone_ckpt", "") or "").strip()
+        if not cfg["external_backbone_ckpt"]:
+            raise ValueError("model_arch='external_pointmae' requires external_backbone_ckpt")
+        cfg["freeze_external_encoder"] = bool(int(cfg.get("freeze_external_encoder", 1)))
+        cfg["external_backbone_depth"] = int(cfg.get("external_backbone_depth", 12))
+        cfg["external_backbone_heads"] = int(cfg.get("external_backbone_heads", 6))
+        cfg["external_backbone_drop_path"] = float(cfg.get("external_backbone_drop_path", 0.1))
 
     return cfg
 
@@ -82,6 +94,16 @@ def build_cqa_model_from_args(args: Mapping[str, Any], *, ckpt_vocab_version: st
             decoder_layers=int(cfg.get("decoder_layers", 4)),
             generator_depth=int(cfg.get("generator_depth", 0)),
         )
+    if str(cfg["model_arch"]) == "external_pointmae":
+        return ExternalPointMAEPrimitiveAnsweringModel(
+            **common,
+            external_backbone_ckpt=str(cfg.get("external_backbone_ckpt", "")),
+            freeze_external_encoder=bool(cfg.get("freeze_external_encoder", True)),
+            external_backbone_depth=int(cfg.get("external_backbone_depth", 12)),
+            external_backbone_heads=int(cfg.get("external_backbone_heads", 6)),
+            external_backbone_drop_path=float(cfg.get("external_backbone_drop_path", 0.1)),
+            generator_depth=int(cfg.get("generator_depth", 2)),
+        )
     return PrimitiveAnsweringModel(
         **common,
         generator_depth=int(cfg.get("generator_depth", 2)),
@@ -91,6 +113,8 @@ def build_cqa_model_from_args(args: Mapping[str, Any], *, ckpt_vocab_version: st
 def build_cqa_classifier(pretrained: nn.Module, *, n_cls: int, pool: str = "mean") -> nn.Module:
     if isinstance(pretrained, PrimitiveAnsweringEncDecModel):
         return PrimitiveAnsweringEncDecClassifier(pretrained, n_cls=int(n_cls), pool=str(pool))
+    if isinstance(pretrained, ExternalPointMAEPrimitiveAnsweringModel):
+        return ExternalPointMAEPrimitiveAnsweringClassifier(pretrained, n_cls=int(n_cls), pool=str(pool))
     if isinstance(pretrained, PrimitiveAnsweringModel):
         return PrimitiveAnsweringClassifier(pretrained, n_cls=int(n_cls), pool=str(pool))
     raise TypeError(f"unsupported pretrained CQA model type: {type(pretrained)!r}")

@@ -40,7 +40,7 @@ def fps(points: torch.Tensor, number: int) -> torch.Tensor:
     """Point-MAE-like FPS helper: returns sampled points, not indices."""
     if number >= points.size(1):
         return points
-    if pointnet2_utils is not None:
+    if pointnet2_utils is not None and points.is_cuda:
         fps_idx = pointnet2_utils.furthest_point_sample(points, int(number))
         fps_points = pointnet2_utils.gather_operation(
             points.transpose(1, 2).contiguous(), fps_idx
@@ -75,7 +75,7 @@ class Group(nn.Module):
     def forward(self, xyz: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, num_points, _ = xyz.shape
         center = fps(xyz, self.num_group)  # (B, G, 3)
-        if self.knn is not None:
+        if self.knn is not None and xyz.is_cuda and center.is_cuda:
             _, idx = self.knn(xyz, center)  # (B, G, K)
         else:
             dist = torch.cdist(center, xyz)
@@ -366,4 +366,3 @@ class PointMAEPatchClassifier(nn.Module):
         x = self.norm(x)
         concat_f = torch.cat([x[:, 0], x[:, 1:].max(1)[0]], dim=-1)
         return self.cls_head_finetune(concat_f)
-
