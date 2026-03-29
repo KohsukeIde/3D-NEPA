@@ -8238,3 +8238,79 @@ Takeaway:
 - but the gains are non-monotonic and do **not** automatically improve the
   core answering/completion objective
 - `C034` remains the line to defend as the current discrete mainline
+
+## 188. Degraded-input completion v1 is a completed negative robustness read (2026-03-27)
+
+Lineage:
+
+- `C044` degraded suite:
+  - `118607`
+
+Artifacts:
+
+- `results/cqa_degraded/patchnepa_cqa_v2_distnorm_unsigned_prefixlm_degraded_20260327_190535/cqa_v2_distnorm_unsigned_prefixlm_degraded_suite.json`
+- `results/cqa_degraded/patchnepa_cqa_v2_distnorm_unsigned_prefixlm_degraded_20260327_190535/cqa_v2_distnorm_unsigned_prefixlm_degraded_suite.csv`
+- `results/cqa_degraded/patchnepa_cqa_v2_distnorm_unsigned_prefixlm_degraded_20260327_190535/cqa_v2_distnorm_unsigned_prefixlm_degraded_suite.md`
+
+Protocol:
+
+- fixed ckpt: `C034` (`prefixlm + cqa_v2 DISTANCE + NORMAL_UNSIGNED`)
+- contexts:
+  - `same`
+  - `offdiag`
+- corruptions:
+  - `clean`
+  - `dropout@{0.50,0.25,0.10,0.05}`
+  - `gaussian@{0.01,0.02,0.05}`
+- methods:
+  - `cqa`
+  - `poisson`
+  - `bpa`
+- first-wave cap:
+  - `MAX_SHAPES=16`
+
+Summary:
+
+- CQA field metrics degrade smoothly under corruption:
+  - same `MAE`:
+    - `clean = 0.01899`
+    - `dropout@0.05 = 0.06582`
+    - `gaussian@0.05 = 0.06416`
+  - offdiag `MAE`:
+    - `clean = 0.12690`
+    - `dropout@0.05 = 0.14922`
+    - `gaussian@0.05 = 0.13246`
+  - same/offdiag `IoU@0.05`:
+    - `clean = 0.2828 / 0.1634`
+    - `dropout@0.05 = 0.1336 / 0.1226`
+    - `gaussian@0.05 = 0.1311 / 0.1145`
+- but the headline mesh comparison is clearly negative:
+  - same `clean` `mesh_fscore`:
+    - `cqa = 0.0176`
+    - `poisson = 0.1166`
+    - `bpa = 0.3193`
+  - offdiag `clean`:
+    - `0.0194 / 0.1298 / 0.2409`
+  - even at severe corruption, BPA stays ahead on mesh-facing metrics:
+    - same `dropout@0.05`: `0.0265 / 0.0506 / 0.1379`
+    - offdiag `gaussian@0.05`: `0.0081 / 0.0410 / 0.0501`
+
+Operational interpretation:
+
+- the first degraded-input suite does **not** yet produce the desired killer
+  robustness result for the CQA branch.
+- CQA completion degrades in a readable way on its own field metrics, but
+  the Open3D baselines remain clearly stronger on the chosen mesh metrics.
+- therefore the v1 degraded suite is best treated as:
+  - a completed robustness protocol prototype
+  - a negative control for the current headline claim
+  - not a promoted main result
+
+Decision:
+
+- canonize `C044` as a negative-but-useful robustness read.
+- do not promote degraded completion as the current killer axis.
+- if this direction is reopened later, change either:
+  - the comparison target,
+  - the mesh extraction path for CQA,
+  - or the degraded protocol itself, before using it as a paper headline.

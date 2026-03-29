@@ -4133,3 +4133,48 @@ Decision:
 - if enc-dec is revisited later, the next lever should be broader training
   scale or a more substantial query-conditioned design change, not just
   `decoder_layers=12` or decoder-side `full_q`.
+
+## 95. Degraded-input robustness v1 completes, but does not become a headline result (2026-03-27)
+
+Canonical sources:
+
+- `results/cqa_degraded/patchnepa_cqa_v2_distnorm_unsigned_prefixlm_degraded_20260327_190535/cqa_v2_distnorm_unsigned_prefixlm_degraded_suite.json`
+- `results/cqa_degraded/patchnepa_cqa_v2_distnorm_unsigned_prefixlm_degraded_20260327_190535/cqa_v2_distnorm_unsigned_prefixlm_degraded_suite.md`
+
+Key read:
+
+- v1 scope was intentionally small but complete:
+  - ckpt: `C034`
+  - contexts: `same + offdiag`
+  - corruptions: `clean + dropout{0.50,0.25,0.10,0.05} + gaussian{0.01,0.02,0.05}`
+  - methods: `cqa + poisson + bpa`
+  - `MAX_SHAPES=16`
+- CQA degrades smoothly on its own field metrics:
+  - same `MAE` rises from `0.01899` (`clean`) to `0.06582`
+    (`dropout@0.05`)
+  - offdiag `MAE` rises from `0.12690` to `0.14922`
+  - same/offdiag `IoU@0.05` fall from `0.2828 / 0.1634` to
+    `0.1336 / 0.1226` at `dropout@0.05`
+- but the mesh-baseline comparison is decisively negative:
+  - same `clean mesh_fscore`:
+    - `cqa = 0.0176`
+    - `poisson = 0.1166`
+    - `bpa = 0.3193`
+  - offdiag `clean`:
+    - `0.0194 / 0.1298 / 0.2409`
+  - the same ordering remains under stronger corruptions
+
+Interpretation:
+
+- this does **not** support the desired claim that CQA completion degrades
+  more gracefully than classical baselines under dropout/noise.
+- the current degraded suite is therefore a completed negative read:
+  useful as a protocol prototype and sanity check, but not a paper headline.
+
+Decision:
+
+- mark `C044` completed and canonized as negative.
+- do not use degraded-input completion as the main killer axis in its current
+  form.
+- if robustness is revisited later, redesign the comparison rather than only
+  rerunning the same v1 protocol.

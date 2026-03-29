@@ -628,6 +628,11 @@ This means:
   but they still do not make the mesh-side second answer headline-safe because
   off-diagonal `mesh_ao_hq` remains below majority in both the 3-task and
   4-task reruns.
+- the first degraded-input completion suite on the current safest mainline
+  (`C044`) is completed and negative as a headline robustness axis:
+  CQA field metrics degrade smoothly, but BPA and Poisson remain clearly
+  stronger on the chosen mesh metrics, so degraded completion is not yet the
+  killer result for the paper.
 - HKS smoke remains only partially successful because eigensolver failures are
   still common.
 - the same `surf`-trained `udf_distance` checkpoint now transfers zero-shot to
@@ -676,6 +681,9 @@ This means:
   the mesh-side second answer into a headline-safe line, since AO-HQ improves
   same-context behavior but off-diagonal `mesh_ao_hq` still sits below its
   majority-heavy baseline,
+- whether a redesigned robustness protocol can turn degraded-input completion
+  into a real headline axis, since the first `C044` wave is already a
+  completed negative result against Open3D baselines,
 - whether HKS can be stabilized enough to become a real mesh-native follow-up
   probe rather than remaining a numerically fragile smoke result,
 - whether a redesigned task/target definition can increase context dependence
