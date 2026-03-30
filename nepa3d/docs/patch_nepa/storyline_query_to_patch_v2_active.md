@@ -1,6 +1,6 @@
 # QueryNEPA -> PatchNEPA v2 Storyline
 
-Last updated: 2026-03-27
+Last updated: 2026-03-30
 
 ## 1. Purpose
 
@@ -633,6 +633,19 @@ This means:
   CQA field metrics degrade smoothly, but BPA and Poisson remain clearly
   stronger on the chosen mesh metrics, so degraded completion is not yet the
   killer result for the paper.
+- common-split protocol isolation is now completed on the
+  `DISTANCE + NORMAL_UNSIGNED` anchor:
+  - removing the train-split confound does **not** collapse the 2-type row,
+  - and `packed all-type-per-shape` is a small positive over common-split
+    `mixture` on the main field-facing reads,
+  - but the gain is modest enough that it does not by itself explain the full
+    2-type versus richer-answer tradeoff story.
+- a first frozen external Point-MAE control now lands as a real non-internal
+  reference on `pc_bank -> udf_distance`, staying clearly above majority on
+  both `surf` and `pc_bank` eval and yielding nontrivial completion, but the
+  current row is still a `cqa_v1` single-task distance harness and therefore
+  benchmark context rather than a strict apples-to-apples replacement for the
+  `cqa_v2 DISTANCE + NORMAL_UNSIGNED` mainline.
 - HKS smoke remains only partially successful because eigensolver failures are
   still common.
 - the same `surf`-trained `udf_distance` checkpoint now transfers zero-shot to
@@ -684,6 +697,12 @@ This means:
 - whether a redesigned robustness protocol can turn degraded-input completion
   into a real headline axis, since the first `C044` wave is already a
   completed negative result against Open3D baselines,
+- whether the small packed-over-mixture gain scales up beyond the current
+  common-split `2-type` protocol-isolation row, especially on the cleaner
+  `distance + normal + thickness_valid_qbin` bridge before AO-HQ is re-added,
+- whether the external Point-MAE control can be moved from the current
+  `cqa_v1` single-task distance harness into a stricter `cqa_v2` matched
+  compare, so the external baseline is more than benchmark context,
 - whether HKS can be stabilized enough to become a real mesh-native follow-up
   probe rather than remaining a numerically fragile smoke result,
 - whether a redesigned task/target definition can increase context dependence

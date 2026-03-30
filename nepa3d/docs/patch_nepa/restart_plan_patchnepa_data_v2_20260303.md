@@ -1,6 +1,6 @@
 # Patch-NEPA Restart Plan (Data-v2 + CPAC Alignment)
 
-Last updated: 2026-03-26
+Last updated: 2026-03-30
 
 ## 1. Purpose
 
@@ -4178,3 +4178,70 @@ Decision:
   form.
 - if robustness is revisited later, redesign the comparison rather than only
   rerunning the same v1 protocol.
+
+## 96. Common-split protocol isolation is positive but modest (2026-03-30)
+
+Canonical sources:
+
+- `results/cqa_multitype/patchnepa_cqa_v2_distnorm_unsigned_trainmesh_mixture10k_20260330_023600_suite/cqa_v2_distnorm_unsigned_trainmesh_mixture10k_suite.json`
+- `results/cqa_multitype/patchnepa_cqa_v2_distnorm_unsigned_trainmesh_packed10k_20260330_023600_suite/cqa_v2_distnorm_unsigned_trainmesh_packed10k_suite.json`
+- matching completion JSONs under
+  `results/cqa_completion/patchnepa_cqa_v2_distnorm_unsigned_trainmesh_{mixture10k,packed10k}_20260330_023600_*`
+
+Key read:
+
+- moving both tasks onto the same `train_mesh` support does **not** collapse
+  the 2-type anchor:
+  - common-split mixture remains positive on same/offdiag token metrics and
+    clean/offdiag completion
+- `packed all-type-per-shape` is a real but small positive over that control:
+  - better `udf_distance` token acc same/offdiag
+  - better offdiag `mesh_normal_unsigned`
+  - slightly better same/offdiag field completion
+  - but not uniformly better on every mesh-facing metric
+
+Interpretation:
+
+- the previous `C034` read is not mainly a train-split artifact
+- sampling protocol does matter, but only modestly in the current 2-type
+  `10k` regime
+- this is enough to justify using packed as the next protocol-isolation winner,
+  but not enough to claim that mixture sampling alone explains the full
+  2-type versus richer-answer tradeoff
+
+Decision:
+
+- treat `packed` as the leading next-step protocol for the cleaner
+  `distance + normal + thickness_valid_qbin` bridge
+- do not reopen the cancelled full-budget waves yet just from this result
+
+## 97. Frozen Point-MAE is now a real external CQA control (2026-03-30)
+
+Canonical sources:
+
+- `results/cqa_eval/patchnepa_cqa_external_pointmae_udfdist_pcbank_20260330_023600/cqa_external_pointmae_udfdist_{same,offdiag}_eval.json`
+- `results/cqa_completion/patchnepa_cqa_external_pointmae_udfdist_pcbank_20260330_023600/cqa_external_pointmae_udfdist_{same,offdiag}_translation_g16_s64.json`
+
+Key read:
+
+- frozen official Point-MAE plus a lightweight typed CQA readout is clearly
+  above majority on both eval surfaces:
+  - `surf`: `0.2646` vs `0.0379`
+  - `pc_bank`: `0.2817` vs `0.0397`
+- completion is also nontrivial:
+  - `surf MAE / IoU@0.05 = 0.0453 / 0.5620`
+  - `pc_bank = 0.0393 / 0.5823`
+
+Interpretation:
+
+- this closes the previous gap where CQA had no real non-internal same-harness
+  reference
+- however, the current adapter lands as a `cqa_v1` single-task distance row
+  trained on `pc_bank`, so it is still benchmark context rather than a strict
+  `cqa_v2` compare against `C034`
+
+Decision:
+
+- keep this row as the first external protocol sanity / benchmark context
+- if external baselines become central later, lift them into a stricter
+  matched `cqa_v2` compare rather than over-reading the current single-task row

@@ -1,6 +1,6 @@
 # Patch-NEPA Runlog (2026-02)
 
-Last updated: 2026-03-26
+Last updated: 2026-03-30
 
 Track note:
 
@@ -8314,3 +8314,126 @@ Decision:
   - the comparison target,
   - the mesh extraction path for CQA,
   - or the degraded protocol itself, before using it as a paper headline.
+
+## 189. Common-split protocol isolation: packed is a small positive over mixture (2026-03-30)
+
+Lineage:
+
+- `C050` common-split `mixture` control:
+  - train `119528`
+  - suite `119531`
+  - completion `119534/119537`
+- `C051` common-split `packed` compare:
+  - train `119527`
+  - suite `119530`
+  - completion `119533/119536`
+
+Artifacts:
+
+- mixture:
+  - `results/cqa_multitype/patchnepa_cqa_v2_distnorm_unsigned_trainmesh_mixture10k_20260330_023600_suite/cqa_v2_distnorm_unsigned_trainmesh_mixture10k_suite.{json,csv,md}`
+  - `results/cqa_completion/patchnepa_cqa_v2_distnorm_unsigned_trainmesh_mixture10k_20260330_023600_{same,offdiag}_completion/*.json`
+- packed:
+  - `results/cqa_multitype/patchnepa_cqa_v2_distnorm_unsigned_trainmesh_packed10k_20260330_023600_suite/cqa_v2_distnorm_unsigned_trainmesh_packed10k_suite.{json,csv,md}`
+  - `results/cqa_completion/patchnepa_cqa_v2_distnorm_unsigned_trainmesh_packed10k_20260330_023600_{same,offdiag}_completion/*.json`
+
+Protocol:
+
+- both rows use the same:
+  - `prefixlm`
+  - `cqa_v2`
+  - `DISTANCE + NORMAL_UNSIGNED`
+  - common `train_mesh` support
+  - `10k` budget
+- the only scientific change is batch construction:
+  - `C050`: `mixture`
+  - `C051`: `packed all-type-per-shape`
+
+Summary:
+
+- common-split mixture does **not** collapse relative to the historical anchor:
+  - token:
+    - same/offdiag `udf_distance = 0.1688 / 0.0790`
+    - same/offdiag `mesh_normal_unsigned = 0.5471 / 0.3505`
+  - completion:
+    - same `MAE / IoU@0.05 / F-score = 0.0192 / 0.6859 / 0.1168`
+    - offdiag `0.1227 / 0.3679 / 0.0704`
+- packed is a **small positive** over the common-split mixture control:
+  - token:
+    - `udf_distance` same/offdiag:
+      - `0.1726 / 0.0812` vs `0.1688 / 0.0790`
+    - `mesh_normal_unsigned`:
+      - same `0.5470` vs `0.5471` (neutral)
+      - offdiag `0.3642` vs `0.3505` (positive)
+  - completion:
+    - same `MAE / IoU@0.05 / F-score = 0.0186 / 0.6994 / 0.1253`
+    - offdiag `0.1219 / 0.3883 / 0.0653`
+    - mixture same/offdiag `0.0192 / 0.6859 / 0.1168` and
+      `0.1227 / 0.3679 / 0.0704`
+
+Operational interpretation:
+
+- the old `C034` read is **not** mainly a train-split artifact.
+- protocol matters some:
+  - simultaneous packed exposure helps the main distance row a little
+  - and helps offdiag `mesh_normal_unsigned`
+- but the effect is modest and not uniformly better on every mesh-facing
+  metric, so this is **not** evidence that mixture sampling alone explains the
+  whole richer-answer tradeoff.
+
+Decision:
+
+- canonize `C050` as the common-split control arm.
+- canonize `C051` as a small-positive protocol-isolation result.
+- if protocol change is extended next, carry the winner forward on the cleaner
+  `distance + normal + thickness_valid_qbin` bridge before reopening AO-HQ or
+  full-budget waves.
+
+## 190. Frozen external Point-MAE lands as a real non-internal control (2026-03-30)
+
+Lineage:
+
+- `C052`:
+  - train `119529`
+  - eval `119532/119535`
+  - completion `119538/119539`
+
+Artifacts:
+
+- eval:
+  - `results/cqa_eval/patchnepa_cqa_external_pointmae_udfdist_pcbank_20260330_023600/cqa_external_pointmae_udfdist_{same,offdiag}_eval.json`
+- completion:
+  - `results/cqa_completion/patchnepa_cqa_external_pointmae_udfdist_pcbank_20260330_023600/cqa_external_pointmae_udfdist_{same,offdiag}_translation_g16_s64.json`
+
+Protocol:
+
+- frozen official Point-MAE encoder (`pretrain.pth`)
+- shared typed CQA readout
+- current row lands on:
+  - `cqa_v1`
+  - single-task `udf_distance`
+  - train support `pc_bank`
+
+Summary:
+
+- token is clearly above majority on both eval surfaces:
+  - `surf`: `token_acc = 0.2646` vs majority `0.0379`
+  - `pc_bank`: `0.2817` vs `0.0397`
+- completion is nontrivial on both surfaces:
+  - `surf`: `MAE / IoU@0.05 / F-score = 0.0453 / 0.5620 / 0.0673`
+  - `pc_bank`: `0.0393 / 0.5823 / 0.0829`
+
+Operational interpretation:
+
+- this is a successful first external same-harness control:
+  the task is no longer only an internal encoder comparison.
+- however, the current row is still **not** a strict apples-to-apples compare
+  with `C034`, because it lands as a `cqa_v1` single-task distance harness
+  rather than the `cqa_v2 DISTANCE + NORMAL_UNSIGNED` mainline.
+
+Decision:
+
+- canonize `C052` as benchmark context / protocol sanity.
+- use it as a real non-internal reference.
+- do **not** over-read it as the verdict on external encoder superiority until
+  a stricter matched `cqa_v2` compare exists.
