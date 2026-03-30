@@ -1,6 +1,6 @@
 # Docs Inventory
 
-Last updated: 2026-03-14
+Last updated: 2026-03-30
 
 ## Purpose
 
@@ -36,6 +36,8 @@ It records, for every doc currently under `docs/`:
 - active replacement for scratch-vs-PatchNEPA headline comparison:
   - `patch_nepa/benchmark_scanobjectnn_variant.md`
   - `patch_nepa/storyline_query_to_patch_v2_active.md`
+- added code-organization inventory:
+  - `code_inventory_active.md`
 
 ## Root Docs
 
@@ -45,6 +47,7 @@ It records, for every doc currently under `docs/`:
 | `llm_retrieval_index.md` | default retrieval contract | `tier0` | `keep` | self | main LLM routing surface |
 | `results_index.md` | top-level result navigation | `tier0` | `keep` | self | human-facing index |
 | `current_state.json` | machine-readable current snapshot | `n/a` | `keep` | self | source of truth for top-level sync checks |
+| `code_inventory_active.md` | canonical code-organization boundary | `tier1` | `keep` | self | track/shared/compat/script boundary doc |
 | `insight_register_active.md` | experiment-family insight register | `tier1` | `keep` | self | should accumulate "what became newly known" |
 | `docs_cleanup_plan_active.md` | cleanup policy / governance | `tier1` | `keep` | self | keep until cleanup converges |
 | `docs_inventory_active.md` | full docs inventory | `n/a` | `keep` | self | inventory source for future merge/archive steps |

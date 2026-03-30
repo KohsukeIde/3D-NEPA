@@ -30,7 +30,7 @@ from nepa3d.tracks.patch_nepa.cqa.models.primitive_answering_distnorm_continuous
     load_distnorm_continuous_model,
 )
 
-DEFAULT_TASKS = "udf_distance,mesh_normal"
+DEFAULT_TASKS = "udf_distance,mesh_normal_unsigned"
 DEFAULT_CONTROLS = (
     "correct",
     "no_context",

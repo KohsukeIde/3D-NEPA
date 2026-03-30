@@ -1,6 +1,6 @@
 # NEPA Tracks Index
 
-Last updated: 2026-03-15
+Last updated: 2026-03-30
 
 ## 1. Purpose
 
@@ -12,9 +12,17 @@ This file separates documentation by model line to avoid mixing conclusions:
 It now also matches the code layout:
 
 - shared building blocks: `nepa3d/core/models/`
+- shared active infra: `nepa3d/data/`, `nepa3d/backends/`, `nepa3d/token/`,
+  `nepa3d/utils/`
 - legacy QueryNEPA code: `nepa3d/tracks/query_nepa/`
 - active PatchNEPA code: `nepa3d/tracks/patch_nepa/`
 - KPlane baseline code: `nepa3d/tracks/kplane/`
+- compatibility shims only: `nepa3d/models/`, `nepa3d/train/`,
+  `nepa3d/analysis/`
+
+Canonical code-boundary reference:
+
+- `nepa3d/docs/code_inventory_active.md`
 
 ## 2. Active Line (Patch-NEPA)
 

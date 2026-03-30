@@ -31,6 +31,8 @@ Point-MAE and PointGPT.
    - Raw execution ledger for Patch-NEPA jobs.
 9. `benchmark_scanobjectnn_variant.md`
    - Canonical headline ScanObjectNN benchmark table.
+10. `../code_inventory_active.md`
+   - Canonical code-organization boundary for current path ownership.
 
 ## Collaborator Quick Path
 
@@ -68,20 +70,43 @@ Current short answer:
   - `scripts/abci/submit_patchnepa_current_cpac.sh`
   - `scripts/abci/submit_patchnepa_current_cqa_pretrain.sh` (experimental)
 
+## Code Boundary
+
+Current code ownership is:
+
+- track-specific implementation: `nepa3d/tracks/patch_nepa/*`
+- shared active infra: `nepa3d/data/`, `nepa3d/backends/`, `nepa3d/token/`,
+  `nepa3d/utils/`, `nepa3d/core/models/`
+- compatibility entrypoints: `nepa3d/models/`, `nepa3d/train/`,
+  `nepa3d/analysis/`
+
+Important:
+
+- active guide docs should point to the canonical ownership paths above
+- historical ledgers may still mention the shim paths that were executed at the
+  time
+- the canonical boundary doc is `../code_inventory_active.md`
+
 ## Experimental CQA Branch
 
 An additive explicit-query CQA branch now exists alongside the current
 `recong2/composite` mainline.
 
-- core model: `nepa3d/models/primitive_answering.py`
-- dataset: `nepa3d/data/dataset_cqa.py`
+- canonical model home:
+  - `nepa3d/tracks/patch_nepa/cqa/models/primitive_answering.py`
+- canonical dataset home:
+  - `nepa3d/tracks/patch_nepa/cqa/data/dataset_cqa.py`
 - fixed vocab spec: `spec_cqa_vocab.md`
-- minimal config: `nepa3d/configs/shapenet_unpaired_mix_v2_cqa.yaml`
-- target audit: `nepa3d/analysis/audit_cqa_targets.py`
+- canonical config home:
+  - `nepa3d/tracks/patch_nepa/cqa/configs/shapenet_unpaired_mix_v2_cqa.yaml`
+- current launcher-compatible config path:
+  - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa.yaml`
+- canonical audit script:
+  - `nepa3d/tracks/patch_nepa/cqa/analysis/audit_cqa_targets.py`
 - classification utility wrapper: `scripts/eval/nepa3d_cqa_cls_qg.sh`
 - translation/completion wrapper: `scripts/analysis/nepa3d_cqa_udfdist_translation_qg.sh`
 - external baseline plan: `nepa3d/docs/patch_nepa/cqa_external_baseline_plan.md`
-- next smoke configs:
+- next launcher-compatible smoke configs:
   - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfsurf.yaml`
   - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfpcdiag.yaml`
 

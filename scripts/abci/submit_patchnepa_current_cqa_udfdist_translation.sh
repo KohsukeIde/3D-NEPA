@@ -6,13 +6,13 @@ ROOT_DIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 cd "${ROOT_DIR}" || exit 1
 
 SCRIPT="${ROOT_DIR}/scripts/analysis/nepa3d_cqa_udfdist_translation_qg.sh"
-DEFAULT_CKPT="runs/cqa/patchnepa_cqa_udfdist_worldv3_curve_20260316/cqa_udfdist_worldv3_g2_s10000/ckpt_final.pt"
+DEFAULT_CKPT="runs/cqa/patchnepa_cqa_v2_distnorm_unsigned_prefixlm_20260325_234124/cqa_v2_distnorm_unsigned_prefixlm_independent_g2_s10000/ckpt_final.pt"
 
 CKPT="${CKPT:-${DEFAULT_CKPT}}"
 MODE="${MODE:-same}"  # same|offdiag
 case "${MODE}" in
-  same) DEFAULT_MIX_CONFIG="nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfdist.yaml" ;;
-  offdiag) DEFAULT_MIX_CONFIG="nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfdist_pcbank.yaml" ;;
+  same) DEFAULT_MIX_CONFIG="nepa3d/configs/shapenet_unpaired_mix_v2_cqa_v2_dist_norm_unsigned.yaml" ;;
+  offdiag) DEFAULT_MIX_CONFIG="nepa3d/configs/shapenet_unpaired_mix_v2_cqa_v2_dist_norm_unsigned_pcbank_eval.yaml" ;;
   *)
     echo "[error] unsupported MODE=${MODE} (use same|offdiag)"
     exit 2
@@ -20,8 +20,8 @@ case "${MODE}" in
 esac
 
 MIX_CONFIG="${MIX_CONFIG:-${DEFAULT_MIX_CONFIG}}"
-RUN_SET="${RUN_SET:-patchnepa_cqa_udfdist_translation_${MODE}_$(date +%Y%m%d_%H%M%S)}"
-RUN_TAG="${RUN_TAG:-cqa_udfdist_${MODE}_translation_g${GRID_RES:-16}_s${MAX_SHAPES:-64}}"
+RUN_SET="${RUN_SET:-patchnepa_cqa_v2_distnorm_unsigned_udfdist_translation_${MODE}_$(date +%Y%m%d_%H%M%S)}"
+RUN_TAG="${RUN_TAG:-cqa_v2_distnorm_unsigned_udfdist_${MODE}_translation_g${GRID_RES:-16}_s${MAX_SHAPES:-64}}"
 LOG_ROOT="${LOG_ROOT:-${ROOT_DIR}/logs/cqa_completion/${RUN_SET}}"
 RESULTS_ROOT="${RESULTS_ROOT:-${ROOT_DIR}/results/cqa_completion/${RUN_SET}}"
 PBS_LOG_DIR="${PBS_LOG_DIR:-${LOG_ROOT}}"

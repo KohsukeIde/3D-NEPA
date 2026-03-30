@@ -42,9 +42,20 @@ Legacy means early/pre-review snapshots (including old ModelNet40-era runs). Cur
 - PatchNEPA token-stream branch: `nepa3d/tracks/patch_nepa/tokens/`
 - PatchNEPA additive CQA branch: `nepa3d/tracks/patch_nepa/cqa/`
 - KPlane baseline: `nepa3d/tracks/kplane/`
+- Shared runtime / preprocessing infra that is still actively used by multiple tracks:
+  - `nepa3d/data/`
+  - `nepa3d/backends/`
+  - `nepa3d/token/`
+  - `nepa3d/utils/`
+- Compatibility shims kept mainly for old import paths and old `python -m ...`
+  entrypoints:
+  - `nepa3d/models/`
+  - `nepa3d/train/`
+  - `nepa3d/analysis/`
 
-Legacy module paths under `nepa3d/models`, `nepa3d/data`, `nepa3d/train`,
-and `nepa3d/analysis` remain available as compatibility shims.
+In short: if code is specific to one research line, look in `nepa3d/tracks/`
+first. If it is generic sampling / cache / tokenizer / backend infrastructure,
+it intentionally lives outside `tracks/`.
 
 ## Classification Attention Mode (Important)
 

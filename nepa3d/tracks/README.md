@@ -11,5 +11,12 @@ legacy QueryNEPA, PatchNEPA variants, and the additive CQA branch.
 
 Shared model building blocks live under `nepa3d/core/models/`.
 
-Legacy import paths under `nepa3d.models`, `nepa3d.data`, `nepa3d.train`, and
-`nepa3d.analysis` are kept as compatibility shims.
+Outside this directory, the important split is:
+
+- shared active infra: `nepa3d/data/`, `nepa3d/backends/`, `nepa3d/token/`,
+  `nepa3d/utils/`, `nepa3d/core/models/`
+- mostly compatibility shims: `nepa3d/models/`, `nepa3d/train/`,
+  `nepa3d/analysis/`
+
+Use `tracks/*` as the canonical home for track-specific implementations and
+entrypoints.

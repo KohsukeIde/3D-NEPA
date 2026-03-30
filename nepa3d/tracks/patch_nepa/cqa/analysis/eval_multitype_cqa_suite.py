@@ -10,7 +10,7 @@ import torch
 
 from nepa3d.tracks.patch_nepa.cqa.analysis.eval_primitive_answering_tokens import run_token_eval
 
-DEFAULT_TASKS = "udf_distance,mesh_normal"
+DEFAULT_TASKS = "udf_distance,mesh_normal_unsigned"
 DEFAULT_CONTROLS = (
     "correct",
     "no_context",

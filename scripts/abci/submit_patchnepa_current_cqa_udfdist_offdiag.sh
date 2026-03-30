@@ -6,12 +6,12 @@ ROOT_DIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 cd "${ROOT_DIR}" || exit 1
 
 SCRIPT="${ROOT_DIR}/scripts/analysis/nepa3d_cqa_offdiag_udfdist_qg.sh"
-DEFAULT_CKPT="runs/cqa/patchnepa_cqa_udfdist_worldv3_curve_20260316/cqa_udfdist_worldv3_g2_s10000/ckpt_final.pt"
+DEFAULT_CKPT="runs/cqa/patchnepa_cqa_v2_distnorm_unsigned_prefixlm_20260325_234124/cqa_v2_distnorm_unsigned_prefixlm_independent_g2_s10000/ckpt_final.pt"
 
 CKPT="${CKPT:-${DEFAULT_CKPT}}"
-RUN_SET="${RUN_SET:-patchnepa_cqa_udfdist_offdiag_$(date +%Y%m%d_%H%M%S)}"
-RUN_TAG="${RUN_TAG:-cqa_udfdist_offdiag_eval}"
-MIX_CONFIG="${MIX_CONFIG:-nepa3d/configs/shapenet_unpaired_mix_v2_cqa_udfdist_pcbank.yaml}"
+RUN_SET="${RUN_SET:-patchnepa_cqa_v2_distnorm_unsigned_udfdist_offdiag_$(date +%Y%m%d_%H%M%S)}"
+RUN_TAG="${RUN_TAG:-cqa_v2_distnorm_unsigned_udfdist_offdiag_eval}"
+MIX_CONFIG="${MIX_CONFIG:-nepa3d/configs/shapenet_unpaired_mix_v2_cqa_v2_dist_norm_unsigned_pcbank_eval.yaml}"
 LOG_ROOT="${LOG_ROOT:-${ROOT_DIR}/logs/cqa_eval/${RUN_SET}}"
 RESULTS_ROOT="${RESULTS_ROOT:-${ROOT_DIR}/results/cqa_eval/${RUN_SET}}"
 PBS_LOG_DIR="${PBS_LOG_DIR:-${LOG_ROOT}}"

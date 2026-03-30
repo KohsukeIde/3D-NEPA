@@ -1,6 +1,6 @@
 # PatchNEPA Collaborator Reading Guide
 
-Last updated: 2026-03-14
+Last updated: 2026-03-30
 
 ## Purpose
 
@@ -95,24 +95,31 @@ After the 10-minute path, read:
   - Which jobs ran, when, and with which IDs?
 - `scripts/abci/README.md`
   - Which maintained wrapper should a collaborator actually run?
+- `nepa3d/docs/code_inventory_active.md`
+  - Which code path is canonical now versus historical shim-only?
 
 ## Code Entry Points
 
 If a collaborator wants to inspect the implementation rather than the docs,
 start here:
 
-1. `nepa3d/train/pretrain_patch_nepa_tokens.py`
+1. `nepa3d/tracks/patch_nepa/tokens/train/pretrain_patch_nepa_tokens.py`
    - Current PatchNEPA token pretrain implementation.
    - Contains `pretrain_objective`, `recon_loss_mode`,
      `recon_generator_depth`, and objective-aligned reconstruction diagnostics.
-2. `nepa3d/train/finetune_patch_cls.py`
+   - historical wrapper path `nepa3d/train/pretrain_patch_nepa_tokens.py`
+     still exists for older `python -m` launches.
+2. `nepa3d/tracks/patch_nepa/mainline/train/finetune_patch_cls.py`
    - Current ScanObjectNN / classification finetune implementation.
+   - historical wrapper path `nepa3d/train/finetune_patch_cls.py` still exists.
 3. `scripts/pretrain/nepa3d_pretrain_patch_nepa_tokens_qf.sh`
    - Main pretrain launcher.
 4. `scripts/pretrain/submit_pretrain_patch_nepa_tokens_qf.sh`
    - PBS submit wrapper for pretrain.
 5. `scripts/finetune/patchnepa_scanobjectnn_finetune.sh`
    - Main finetune entrypoint.
+6. `nepa3d/docs/code_inventory_active.md`
+   - Canonical map for `track` vs `shared` vs `compat` paths.
 
 ## Reproduction Entry Points
 
