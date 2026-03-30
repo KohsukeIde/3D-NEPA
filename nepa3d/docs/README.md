@@ -31,6 +31,8 @@ Last updated: 2026-03-14
   - `nepa3d/docs/docs_inventory_active.md`
 - Code organization inventory:
   - `nepa3d/docs/code_inventory_active.md`
+- Config inventory:
+  - `nepa3d/docs/config_inventory_active.md`
 - Operations boundary (local vs ABCI):
   - `nepa3d/docs/operations/README.md`
 - LLM retrieval index:
@@ -74,6 +76,8 @@ Last updated: 2026-03-14
 - For code-layout / ownership questions, also read:
   - `nepa3d/docs/code_inventory_active.md`
   - `nepa3d/docs/patch_nepa/nepa_tracks_index.md`
+- For config ownership / migration questions, also read:
+  - `nepa3d/docs/config_inventory_active.md`
 - Read `restart_plan_patchnepa_data_v2_20260303.md` only when current-branch
   detail is required.
 - Read raw runlogs only when provenance or exact launch history is required.

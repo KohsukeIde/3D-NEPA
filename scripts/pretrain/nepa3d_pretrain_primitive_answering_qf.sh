@@ -12,7 +12,7 @@ WORKDIR="${WORKDIR:-${DEFAULT_WORKDIR}}"
 VENV_ACTIVATE="${VENV_ACTIVATE:-${WORKDIR}/.venv/bin/activate}"
 CUDA_MODULE="${CUDA_MODULE:-cuda/12.9}"
 
-MIX_CONFIG="${MIX_CONFIG:-nepa3d/configs/shapenet_unpaired_mix_v2_cqa.yaml}"
+MIX_CONFIG="${MIX_CONFIG:-nepa3d/tracks/patch_nepa/cqa/configs/shapenet_unpaired_mix_v2_cqa.yaml}"
 RUN_TAG="${RUN_TAG:-cqa_$(date +%Y%m%d_%H%M%S)}"
 SAVE_DIR="${SAVE_DIR:-runs/cqa/${RUN_TAG}}"
 LOG_ROOT="${LOG_ROOT:-${WORKDIR}/logs/cqa_pretrain}"

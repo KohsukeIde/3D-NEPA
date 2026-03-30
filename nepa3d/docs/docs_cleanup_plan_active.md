@@ -78,6 +78,7 @@ These should remain easy to find and light to retrieve:
 - `nepa3d/docs/llm_retrieval_index.md`
 - `nepa3d/docs/results_index.md`
 - `nepa3d/docs/code_inventory_active.md`
+- `nepa3d/docs/config_inventory_active.md`
 - `nepa3d/docs/insight_register_active.md`
 - `nepa3d/docs/patch_nepa/collaborator_reading_guide_active.md`
 - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
@@ -172,6 +173,7 @@ Start with:
 
 - created `nepa3d/docs/docs_inventory_active.md`
 - created `nepa3d/docs/code_inventory_active.md`
+- created `nepa3d/docs/config_inventory_active.md`
 - archived:
   - `nepa3d/docs/archive/patch_nepa_scratch_to_patch_comparison_reference.md`
 - active references now point to:
@@ -181,3 +183,5 @@ Start with:
   - `nepa3d/docs/patch_nepa/scanobjectnn_ft_policy_audit_active.md`
 - added canonical code-boundary inventory so active guide docs can point to
   current ownership while runlogs keep historical paths
+- added canonical config-boundary inventory so `nepa3d/configs/` can be
+  migrated family-by-family without confusing ownership

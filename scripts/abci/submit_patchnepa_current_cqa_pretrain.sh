@@ -19,7 +19,7 @@ export RUN_SET
 export RUN_TAG
 export SAVE_DIR
 export LOG_ROOT
-export MIX_CONFIG="${MIX_CONFIG:-nepa3d/configs/shapenet_unpaired_mix_v2_cqa.yaml}"
+export MIX_CONFIG="${MIX_CONFIG:-nepa3d/tracks/patch_nepa/cqa/configs/shapenet_unpaired_mix_v2_cqa.yaml}"
 export USE_WANDB="${USE_WANDB:-1}"
 export WANDB_PROJECT="${WANDB_PROJECT:-patchnepa-cqa-pretrain}"
 export WANDB_GROUP="${WANDB_GROUP:-${RUN_SET}}"

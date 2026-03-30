@@ -7,7 +7,7 @@ cd "${ROOT_DIR}" || exit 1
 
 export RUN_SET="${RUN_SET:-patchnepa_cqa_smoke_$(date +%Y%m%d_%H%M%S)}"
 export RUN_TAG="${RUN_TAG:-cqa_v2_distnorm_unsigned_smoke_g2}"
-export MIX_CONFIG="${MIX_CONFIG:-nepa3d/configs/shapenet_unpaired_mix_v2_cqa.yaml}"
+export MIX_CONFIG="${MIX_CONFIG:-nepa3d/tracks/patch_nepa/cqa/configs/shapenet_unpaired_mix_v2_cqa.yaml}"
 export MAX_STEPS="${MAX_STEPS:-2000}"
 export EPOCHS="${EPOCHS:-1}"
 export SAVE_EVERY_STEPS="${SAVE_EVERY_STEPS:-1000}"

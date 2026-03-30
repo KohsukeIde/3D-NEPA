@@ -21,6 +21,8 @@ answer questions without loading raw ledgers unnecessarily.
   - `nepa3d/docs/docs_inventory_active.md`
 - code-organization inventory:
   - `nepa3d/docs/code_inventory_active.md`
+- config inventory:
+  - `nepa3d/docs/config_inventory_active.md`
 - current local execution source of truth:
   - `nepa3d/docs/patch_nepa/execution_backlog_active.md`
 - human-facing quickstart:
@@ -84,6 +86,7 @@ provenance backup, or abandoned ideas:
 | "What should I send a collaborator first?" | `patch_nepa/collaborator_reading_guide_active.md`, `patch_nepa/storyline_query_to_patch_v2_active.md`, `patch_nepa/benchmark_scanobjectnn_variant.md` |
 | "How is `docs/` organized or what can be archived?" | `docs_inventory_active.md`, `docs_cleanup_plan_active.md`, then folder `README.md` if needed |
 | "How is the code organized or which path is canonical now?" | `code_inventory_active.md`, `patch_nepa/nepa_tracks_index.md`, then `operations/README.md` if scripts matter |
+| "Which config family owns this YAML or can this top-level config be moved?" | `config_inventory_active.md`, then `code_inventory_active.md` if broader ownership matters |
 | "What old experiments existed?" | Tier 2, then archive only if still needed |
 
 ## Retrieval Rules

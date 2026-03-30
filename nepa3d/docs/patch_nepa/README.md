@@ -99,7 +99,9 @@ An additive explicit-query CQA branch now exists alongside the current
 - fixed vocab spec: `spec_cqa_vocab.md`
 - canonical config home:
   - `nepa3d/tracks/patch_nepa/cqa/configs/shapenet_unpaired_mix_v2_cqa.yaml`
-- current launcher-compatible config path:
+- maintained wrapper default:
+  - `nepa3d/tracks/patch_nepa/cqa/configs/shapenet_unpaired_mix_v2_cqa.yaml`
+- historical top-level compatibility copy:
   - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa.yaml`
 - canonical audit script:
   - `nepa3d/tracks/patch_nepa/cqa/analysis/audit_cqa_targets.py`

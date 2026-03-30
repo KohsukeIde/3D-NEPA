@@ -38,6 +38,8 @@ It records, for every doc currently under `docs/`:
   - `patch_nepa/storyline_query_to_patch_v2_active.md`
 - added code-organization inventory:
   - `code_inventory_active.md`
+- added config ownership inventory:
+  - `config_inventory_active.md`
 
 ## Root Docs
 
@@ -48,6 +50,7 @@ It records, for every doc currently under `docs/`:
 | `results_index.md` | top-level result navigation | `tier0` | `keep` | self | human-facing index |
 | `current_state.json` | machine-readable current snapshot | `n/a` | `keep` | self | source of truth for top-level sync checks |
 | `code_inventory_active.md` | canonical code-organization boundary | `tier1` | `keep` | self | track/shared/compat/script boundary doc |
+| `config_inventory_active.md` | canonical top-level config ownership inventory | `tier1` | `keep` | self | owner / compat / migration-risk boundary for `nepa3d/configs/` |
 | `insight_register_active.md` | experiment-family insight register | `tier1` | `keep` | self | should accumulate "what became newly known" |
 | `docs_cleanup_plan_active.md` | cleanup policy / governance | `tier1` | `keep` | self | keep until cleanup converges |
 | `docs_inventory_active.md` | full docs inventory | `n/a` | `keep` | self | inventory source for future merge/archive steps |

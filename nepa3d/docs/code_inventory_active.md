@@ -100,6 +100,7 @@ Config handling is intentionally conservative:
   still reference them
 - do not move an existing top-level YAML unless the corresponding wrappers and
   docs are updated in the same pass
+- detailed file-family ownership now lives in `nepa3d/docs/config_inventory_active.md`
 
 ## Historical-Path Policy
 
