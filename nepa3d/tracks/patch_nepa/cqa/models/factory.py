@@ -55,6 +55,7 @@ def normalize_cqa_model_args(args: Mapping[str, Any], *, ckpt_vocab_version: str
             )
         cfg["query_interface_mode"] = qim
         cfg["decoder_layers"] = int(cfg.get("decoder_layers", 4))
+        cfg["head_mode"] = "shared"
     elif model_arch == "external_pointmae":
         cfg["external_backbone_ckpt"] = str(cfg.get("external_backbone_ckpt", "") or "").strip()
         if not cfg["external_backbone_ckpt"]:
@@ -63,6 +64,12 @@ def normalize_cqa_model_args(args: Mapping[str, Any], *, ckpt_vocab_version: str
         cfg["external_backbone_depth"] = int(cfg.get("external_backbone_depth", 12))
         cfg["external_backbone_heads"] = int(cfg.get("external_backbone_heads", 6))
         cfg["external_backbone_drop_path"] = float(cfg.get("external_backbone_drop_path", 0.1))
+        cfg["head_mode"] = "shared"
+    else:
+        head_mode = str(cfg.get("head_mode", "shared") or "shared").strip().lower()
+        if head_mode not in {"shared", "multihead"}:
+            raise ValueError(f"unknown head_mode={head_mode!r}")
+        cfg["head_mode"] = head_mode
 
     return cfg
 
@@ -107,6 +114,7 @@ def build_cqa_model_from_args(args: Mapping[str, Any], *, ckpt_vocab_version: st
     return PrimitiveAnsweringModel(
         **common,
         generator_depth=int(cfg.get("generator_depth", 2)),
+        head_mode=str(cfg.get("head_mode", "shared")),
     )
 
 

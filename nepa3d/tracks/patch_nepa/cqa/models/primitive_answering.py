@@ -88,6 +88,7 @@ class PrimitiveAnsweringModel(nn.Module):
         codec_version: str = CQA_VOCAB_VERSION,
         answer_factorization: str = "ar",
         query_interface_mode: str = "full_q",
+        head_mode: str = "shared",
     ) -> None:
         super().__init__()
         self.model_arch = "prefixlm"
@@ -109,6 +110,9 @@ class PrimitiveAnsweringModel(nn.Module):
                 "query_interface_mode must be 'full_q', 'self_q', or 'no_q', "
                 f"got {query_interface_mode!r}"
             )
+        self.head_mode = str(head_mode).strip().lower()
+        if self.head_mode not in {"shared", "multihead"}:
+            raise ValueError(f"head_mode must be 'shared' or 'multihead', got {head_mode!r}")
 
         self.ctx_patch = PointPatchEmbed(
             num_groups=int(num_groups),
@@ -150,6 +154,20 @@ class PrimitiveAnsweringModel(nn.Module):
                 backbone_impl=str(backbone_impl),
             )
         self.answer_head = _MLP(int(d_model), int(answer_vocab), hidden_dim=int(d_model), n_layers=2, dropout=float(dropout))
+        self.task_answer_heads = None
+        if self.head_mode == "multihead":
+            self.task_answer_heads = nn.ModuleList(
+                [
+                    _MLP(
+                        int(d_model),
+                        int(answer_vocab),
+                        hidden_dim=int(d_model),
+                        n_layers=2,
+                        dropout=float(dropout),
+                    )
+                    for _ in range(int(query_type_vocab))
+                ]
+            )
 
     @staticmethod
     def _build_prompt_answer_mask(
@@ -221,6 +239,24 @@ class PrimitiveAnsweringModel(nn.Module):
             ans_tok = self.ans_bos.expand(b, n, -1)
         return ans_tok + pos
 
+    def _decode_answer_logits(self, h_ans: torch.Tensor, qry_type: torch.Tensor) -> torch.Tensor:
+        if self.head_mode == "shared" or self.task_answer_heads is None:
+            return self.answer_head(h_ans)
+
+        if qry_type.dim() == 1:
+            qry_type = qry_type.unsqueeze(0).expand(h_ans.shape[0], -1)
+        qry_type = qry_type.to(device=h_ans.device, dtype=torch.long)
+        logits = h_ans.new_zeros((h_ans.shape[0], h_ans.shape[1], self.answer_vocab))
+        flat_hidden = h_ans.reshape(-1, h_ans.shape[-1])
+        flat_qtype = qry_type.reshape(-1)
+        flat_logits = logits.reshape(-1, self.answer_vocab)
+        for qid in flat_qtype.unique(sorted=True).tolist():
+            idx = flat_qtype == int(qid)
+            if not torch.any(idx):
+                continue
+            flat_logits[idx] = self.task_answer_heads[int(qid)](flat_hidden[idx])
+        return logits
+
     def forward(
         self,
         ctx_xyz: torch.Tensor,
@@ -278,7 +314,7 @@ class PrimitiveAnsweringModel(nn.Module):
                 gen_mask = torch.ones((h_ans.shape[1], h_ans.shape[1]), device=h_ans.device, dtype=torch.bool)
                 gen_mask.fill_diagonal_(False)
             h_ans = self.generator(h_ans, is_causal=False, attn_mask_override=gen_mask)
-        logits = self.answer_head(h_ans)
+        logits = self._decode_answer_logits(h_ans, qry_type)
         return PrimitiveAnsweringOutput(
             logits=logits,
             hidden=h,

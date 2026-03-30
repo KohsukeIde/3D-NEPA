@@ -100,6 +100,13 @@ def parse_args() -> argparse.Namespace:
         help="How answer slots can access the query block: full list, self-only, or no explicit query block.",
     )
     p.add_argument(
+        "--head_mode",
+        type=str,
+        default="shared",
+        choices=["shared", "multihead"],
+        help="Shared typed answer head or task-specific readout heads on top of the same backbone.",
+    )
+    p.add_argument(
         "--sampling_protocol",
         type=str,
         default="mixture",

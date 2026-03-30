@@ -17,6 +17,7 @@ MODEL_ARCH="${MODEL_ARCH:-prefixlm}"
 DECODER_LAYERS="${DECODER_LAYERS:-4}"
 ANSWER_FACTORIZATION="${ANSWER_FACTORIZATION:-independent}"
 QUERY_INTERFACE_MODE="${QUERY_INTERFACE_MODE:-full_q}"
+HEAD_MODE="${HEAD_MODE:-shared}"
 QUERY_ORDER="${QUERY_ORDER:-shuffled}"
 EVAL_QUERY_ORDER="${EVAL_QUERY_ORDER:-sampled}"
 
@@ -38,6 +39,10 @@ NUM_WORKERS="${NUM_WORKERS:-8}"
 SEED="${SEED:-0}"
 WALLTIME="${WALLTIME:-48:00:00}"
 RT_QG="${RT_QG:-1}"
+SUITE_WALLTIME="${SUITE_WALLTIME:-${WALLTIME}}"
+COMP_WALLTIME="${COMP_WALLTIME:-${WALLTIME}}"
+CLS_WALLTIME="${CLS_WALLTIME:-${WALLTIME}}"
+PROBE_WALLTIME="${PROBE_WALLTIME:-${WALLTIME}}"
 
 EVAL_TASK_FILTER="${EVAL_TASK_FILTER:-${TASKS}}"
 EVAL_MAX_SAMPLES_PER_TASK="${EVAL_MAX_SAMPLES_PER_TASK:-128}"
@@ -48,6 +53,7 @@ COMP_CHUNK_N_QUERY="${COMP_CHUNK_N_QUERY:-64}"
 COMP_EXPORT_ASSETS="${COMP_EXPORT_ASSETS:-1}"
 COMP_MESH_EVAL="${COMP_MESH_EVAL:-1}"
 CLS_POOL="${CLS_POOL:-mean}"
+CLS_EPOCHS="${CLS_EPOCHS:-300}"
 ENABLE_GEO_PROBES="${ENABLE_GEO_PROBES:-1}"
 GEO_PROBE_TARGETS="${GEO_PROBE_TARGETS:-curvature,signed_normal}"
 SIGNED_MANIFEST_JSON_DEFAULT="${ROOT_DIR}/results/cqa_probe/patchnepa_cqa_probe_signed_subset_20260326/winding_consistent_subset.json"
@@ -65,6 +71,7 @@ train_out="$(
     DECODER_LAYERS="${DECODER_LAYERS}" \
     ANSWER_FACTORIZATION="${ANSWER_FACTORIZATION}" \
     QUERY_INTERFACE_MODE="${QUERY_INTERFACE_MODE}" \
+    HEAD_MODE="${HEAD_MODE}" \
     QUERY_ORDER="${QUERY_ORDER}" \
     EVAL_QUERY_ORDER="${EVAL_QUERY_ORDER}" \
     EVAL_TASK_FILTER="${EVAL_TASK_FILTER}" \
@@ -110,6 +117,7 @@ suite_out="$(
   OUT_JSON="${SUITE_RESULTS_ROOT}/${SUITE_RUN_TAG}.json" \
   OUT_CSV="${SUITE_RESULTS_ROOT}/${SUITE_RUN_TAG}.csv" \
   OUT_MD="${SUITE_RESULTS_ROOT}/${SUITE_RUN_TAG}.md" \
+  WALLTIME="${SUITE_WALLTIME}" \
   "${ROOT_DIR}/scripts/abci/submit_patchnepa_current_cqa_multitype_suite.sh"
 )"
 printf '%s\n' "${suite_out}"
@@ -137,6 +145,7 @@ for mode in same offdiag; do
     CHUNK_N_QUERY="${COMP_CHUNK_N_QUERY}" \
     MESH_EVAL="${COMP_MESH_EVAL}" \
     EXPORT_ASSETS="${COMP_EXPORT_ASSETS}" \
+    WALLTIME="${COMP_WALLTIME}" \
     "${ROOT_DIR}/scripts/abci/submit_patchnepa_current_cqa_udfdist_translation.sh"
   )"
   printf '%s\n' "${comp_out}"
@@ -154,6 +163,8 @@ for variant in obj_bg obj_only pb_t50_rs; do
     SAVE_DIR="${ROOT_DIR}/runs/cqa_cls/${cls_run_set}" \
     LOG_ROOT="${ROOT_DIR}/logs/cqa_cls/${cls_run_set}" \
     POOL="${CLS_POOL}" \
+    EPOCHS="${CLS_EPOCHS}" \
+    WALLTIME="${CLS_WALLTIME}" \
     "${ROOT_DIR}/scripts/abci/submit_patchnepa_current_cqa_cls.sh"
   )"
   printf '%s\n' "${cls_out}"
@@ -178,6 +189,7 @@ if [[ "${ENABLE_GEO_PROBES}" == "1" ]]; then
       SAVE_DIR="${ROOT_DIR}/runs/cqa_probe/${probe_run_set}" \
       RESULTS_ROOT="${ROOT_DIR}/results/cqa_probe/${probe_run_set}" \
       LOG_ROOT="${ROOT_DIR}/logs/cqa_probe/${probe_run_set}" \
+      WALLTIME="${PROBE_WALLTIME}" \
       "${ROOT_DIR}/scripts/abci/submit_patchnepa_current_cqa_geo_probe.sh"
     )"
     printf '%s\n' "${probe_out}"
