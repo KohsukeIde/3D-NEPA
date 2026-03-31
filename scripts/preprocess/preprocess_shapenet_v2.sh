@@ -20,6 +20,12 @@ if [[ -n "${ENV_FILE:-}" && -f "${ENV_FILE}" ]]; then
   set +a
 fi
 
+# Avoid process x BLAS/OpenMP thread oversubscription by default.
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
+export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
+
 PYTHON_BIN="${PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"
 SHAPENET_ROOT="${SHAPENET_ROOT:-data/ShapeNetCore.v2}"
 OUT_ROOT="${OUT_ROOT:-data/shapenet_cache_v2}"
@@ -29,6 +35,10 @@ SEED="${SEED:-0}"
 WORKERS="${WORKERS:-32}"
 NUM_SHARDS="${NUM_SHARDS:-1}"
 SHARD_ID="${SHARD_ID:-0}"
+TASK_TIMEOUT_SEC="${TASK_TIMEOUT_SEC:-0}"
+TASK_TIMEOUT_GRACE_SEC="${TASK_TIMEOUT_GRACE_SEC:-2}"
+TASK_LIST_JSON="${TASK_LIST_JSON:-}"
+SKIP_TASK_LIST_JSON="${SKIP_TASK_LIST_JSON:-}"
 SKIP_EXISTING="${SKIP_EXISTING:-1}"
 MISSING_ONLY="${MISSING_ONLY:-0}"
 
@@ -91,6 +101,16 @@ if [[ "${MISSING_ONLY}" == "1" ]]; then
 fi
 if [[ "${AUGMENT_EXISTING}" == "1" ]]; then
   EXTRA_ARGS+=( --augment_existing )
+fi
+if [[ -n "${TASK_LIST_JSON}" ]]; then
+  EXTRA_ARGS+=( --task_list_json "${TASK_LIST_JSON}" )
+fi
+if [[ -n "${SKIP_TASK_LIST_JSON}" ]]; then
+  EXTRA_ARGS+=( --skip_task_list_json "${SKIP_TASK_LIST_JSON}" )
+fi
+if [[ "${TASK_TIMEOUT_SEC}" != "0" ]]; then
+  EXTRA_ARGS+=( --task_timeout_sec "${TASK_TIMEOUT_SEC}" )
+  EXTRA_ARGS+=( --task_timeout_grace_sec "${TASK_TIMEOUT_GRACE_SEC}" )
 fi
 
 set -x

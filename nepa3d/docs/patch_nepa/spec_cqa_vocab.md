@@ -5,10 +5,14 @@ Last updated: 2026-03-13
 This file fixes the explicit-query CQA answer vocabulary used by the additive
 primitive-answering branch.
 
+For the paper-facing geometric-teacher layer added in April 2026, read
+`spec_geo_teacher_vocab_v1.md` first. This file remains the runtime-facing CQA
+vocabulary note for the historical additive branch.
+
 ## Version
 
 - `vocab_version = "cqa_v1"`
-- source of truth: `nepa3d/data/cqa_codec.py`
+- source of truth: `nepa3d/tracks/patch_nepa/cqa/data/cqa_codec.py`
 
 ## Query Types
 

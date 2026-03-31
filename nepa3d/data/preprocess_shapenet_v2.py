@@ -30,9 +30,11 @@ import json
 import math
 import os
 import random
+import time
+from collections import deque
 from dataclasses import asdict, dataclass
 from functools import partial
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -42,6 +44,11 @@ except Exception as e:
     raise RuntimeError(
         "preprocess_shapenet_v2 requires trimesh. Install trimesh or run in the project env."
     ) from e
+
+try:
+    import open3d as o3d  # type: ignore
+except Exception:
+    o3d = None
 
 from tqdm import tqdm
 
@@ -75,6 +82,8 @@ def _unit_vectors(rng: np.random.RandomState, n: int) -> np.ndarray:
 
 
 def _sample_surface(mesh: "trimesh.Trimesh", n: int, rng: np.random.RandomState) -> Tuple[np.ndarray, np.ndarray]:
+    if int(n) <= 0:
+        return np.zeros((0, 3), dtype=np.float32), np.zeros((0,), dtype=np.int64)
     # trimesh.sample.sample_surface uses global np.random by default; we want deterministic per-shape.
     # We implement by temporarily seeding.
     state = np.random.get_state()
@@ -151,6 +160,25 @@ def _sample_udf_grid_grad(udf_grid: np.ndarray, xyz: np.ndarray) -> np.ndarray:
     return grad.astype(np.float32)
 
 
+def _build_open3d_raycast_scene(mesh: "trimesh.Trimesh") -> Any | None:
+    if o3d is None:
+        return None
+    try:
+        vertices = o3d.core.Tensor(
+            np.asarray(mesh.vertices, dtype=np.float32),
+            dtype=o3d.core.Dtype.Float32,
+        )
+        faces = o3d.core.Tensor(
+            np.asarray(mesh.faces, dtype=np.uint32),
+            dtype=o3d.core.Dtype.UInt32,
+        )
+        scene = o3d.t.geometry.RaycastingScene()
+        scene.add_triangles(vertices, faces)
+        return scene
+    except Exception:
+        return None
+
+
 def _visibility_signature(
     mesh: "trimesh.Trimesh",
     xyz: np.ndarray,
@@ -159,6 +187,7 @@ def _visibility_signature(
     n_dirs: int,
     eps: float,
     max_t: float,
+    o3d_scene: Any | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Visibility signature from fixed external directions.
 
@@ -166,11 +195,32 @@ def _visibility_signature(
     Fallback path (no rtree / spatial index): front-facing signature based on surface normals.
     """
     n = int(np.asarray(xyz).shape[0])
+    if int(n_dirs) <= 0:
+        return (
+            np.zeros((n, 0), dtype=np.float32),
+            np.zeros((n, 1), dtype=np.float32),
+            np.zeros((n, 1), dtype=np.float32),
+        )
     dirs = _fibonacci_dirs(int(n_dirs))
     pts = np.asarray(xyz, dtype=np.float32)
     nrms = np.asarray(normals, dtype=np.float32)
     nrms = nrms / (np.linalg.norm(nrms, axis=1, keepdims=True) + 1e-8)
     vis = np.zeros((n, dirs.shape[0]), dtype=np.float32)
+    if o3d_scene is not None:
+        epsf = float(max(eps, 1e-6))
+        max_tf = float(max_t)
+        for j, v in enumerate(dirs):
+            sign = np.where((nrms @ v.reshape(3, 1)).reshape(-1, 1) >= 0.0, 1.0, -1.0).astype(np.float32)
+            o = pts + sign * epsf * v.reshape(1, 3)
+            d = np.repeat(v.reshape(1, 3), n, axis=0).astype(np.float32)
+            rays = o3d.core.Tensor(np.concatenate([o, d], axis=1), dtype=o3d.core.Dtype.Float32)
+            t_hit = o3d_scene.cast_rays(rays)["t_hit"].numpy().astype(np.float32)
+            occ = np.isfinite(t_hit) & (t_hit < max_tf)
+            vis[:, j] = 1.0
+            vis[occ, j] = 0.0
+        vis_count = vis.sum(axis=1, keepdims=True).astype(np.float32)
+        ao = (1.0 - vis.mean(axis=1, keepdims=True)).astype(np.float32)
+        return vis.astype(np.float32), vis_count, ao
     try:
         intersector = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
         epsf = float(max(eps, 1e-6))
@@ -194,7 +244,9 @@ def _visibility_signature(
     return vis.astype(np.float32), vis_count, ao
 
 
-def _visibility_exact_available(mesh: "trimesh.Trimesh") -> bool:
+def _visibility_exact_available(mesh: "trimesh.Trimesh", *, o3d_scene: Any | None = None) -> bool:
+    if o3d_scene is not None:
+        return True
     try:
         intersector = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
         ray_o = np.asarray([[2.0, 0.0, 0.0]], dtype=np.float32)
@@ -277,7 +329,13 @@ def _make_pc_ctx_bank(
     )
 
 
-def _closest_point_and_face(mesh: "trimesh.Trimesh", xyz: np.ndarray, *, chunk: int = 200000) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _closest_point_and_face(
+    mesh: "trimesh.Trimesh",
+    xyz: np.ndarray,
+    *,
+    chunk: int = 200000,
+    o3d_scene: Any | None = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return closest points, distances, and face indices (chunked).
 
     Falls back to trimesh.proximity.closest_point_naive when optional spatial
@@ -287,6 +345,17 @@ def _closest_point_and_face(mesh: "trimesh.Trimesh", xyz: np.ndarray, *, chunk: 
     cps = np.zeros_like(xyz)
     dist = np.zeros((xyz.shape[0],), dtype=np.float32)
     face = np.zeros((xyz.shape[0],), dtype=np.int64)
+    if o3d_scene is not None:
+        for i in range(0, xyz.shape[0], chunk):
+            sl = slice(i, min(i + chunk, xyz.shape[0]))
+            out = o3d_scene.compute_closest_points(
+                o3d.core.Tensor(xyz[sl], dtype=o3d.core.Dtype.Float32)
+            )
+            cp = out["points"].numpy().astype(np.float32)
+            cps[sl] = cp
+            dist[sl] = np.linalg.norm(xyz[sl] - cp, axis=1).astype(np.float32)
+            face[sl] = out["primitive_ids"].numpy().astype(np.int64)
+        return cps, dist, face
     for i in range(0, xyz.shape[0], chunk):
         sl = slice(i, min(i + chunk, xyz.shape[0]))
         try:
@@ -624,6 +693,7 @@ def _ray_intersect(
     ray_o: np.ndarray,
     ray_d: np.ndarray,
     *,
+    o3d_scene: Any | None = None,
     udf_grid: Optional[np.ndarray] = None,
     max_t: float = 2.5,
     n_steps: int = 128,
@@ -644,6 +714,24 @@ def _ray_intersect(
             np.zeros((0, 1), dtype=np.int64),
         )
     n = int(ray_o.shape[0])
+    if o3d_scene is not None:
+        rays = o3d.core.Tensor(
+            np.concatenate([np.asarray(ray_o, dtype=np.float32), np.asarray(ray_d, dtype=np.float32)], axis=1),
+            dtype=o3d.core.Dtype.Float32,
+        )
+        out = o3d_scene.cast_rays(rays)
+        t_hit = out["t_hit"].numpy().astype(np.float32)
+        hit_mask = np.isfinite(t_hit)
+        t = np.where(hit_mask, t_hit, float(max_t)).reshape(-1, 1).astype(np.float32)
+        hit = hit_mask.astype(np.float32).reshape(-1, 1)
+        nrm = out["primitive_normals"].numpy().astype(np.float32)
+        nrm[~hit_mask] = 0.0
+        nrm /= np.linalg.norm(nrm, axis=1, keepdims=True) + 1e-8
+        hit_xyz = (np.asarray(ray_o, dtype=np.float32) + np.asarray(ray_d, dtype=np.float32) * t).astype(np.float32)
+        hit_xyz *= hit
+        face_idx = np.full((n, 1), -1, dtype=np.int64)
+        face_idx[hit_mask, 0] = out["primitive_ids"].numpy().astype(np.int64)[hit_mask]
+        return t, hit, nrm.astype(np.float32), hit_xyz, face_idx
     try:
         intersector = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
         loc, idx_ray, idx_tri = intersector.intersects_location(ray_o, ray_d, multiple_hits=False)
@@ -750,6 +838,7 @@ def _has_required_surface_keys(npz: "np.lib.npyio.NpzFile") -> bool:
 def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int) -> Optional[str]:
     synset, model_id = _infer_synset_model(mesh_path)
     rng = np.random.RandomState(seed)
+    tmp_out_path = ""
     if os.path.isfile(out_path) and bool(cfg.skip_existing):
         if not bool(cfg.augment_existing):
             return None
@@ -773,6 +862,7 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
         mesh = normalize_mesh(mesh)
         if mesh.faces.shape[0] == 0 or mesh.vertices.shape[0] == 0:
             return f"empty mesh: {mesh_path}"
+        o3d_scene = _build_open3d_raycast_scene(mesh)
 
         bbox_min = mesh.bounds[0].astype(np.float32)
         bbox_max = mesh.bounds[1].astype(np.float32)
@@ -796,7 +886,7 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
             surf_bary = _surface_barycentric(mesh, surf_xyz, surf_face_idx)
 
         visibility_fallback_used = np.asarray(
-            [0 if _visibility_exact_available(mesh) else 1], dtype=np.int32
+            [0 if _visibility_exact_available(mesh, o3d_scene=o3d_scene) else 1], dtype=np.int32
         )
 
         # --- mesh query set ---
@@ -806,6 +896,12 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
             mesh_qry_bary = np.asarray(existing["mesh_qry_bary"], dtype=np.float32)
             mesh_qry_n = np.asarray(existing["mesh_qry_n"], dtype=np.float32)
             mesh_qry_curv = np.asarray(existing["mesh_qry_curv"], dtype=np.float32)
+        elif int(cfg.n_mesh_qry) <= 0:
+            mesh_qry_xyz = np.zeros((0, 3), dtype=np.float32)
+            mesh_qry_face_idx = np.zeros((0,), dtype=np.int64)
+            mesh_qry_bary = np.zeros((0, 3), dtype=np.float32)
+            mesh_qry_n = np.zeros((0, 3), dtype=np.float32)
+            mesh_qry_curv = np.zeros((0, 1), dtype=np.float32)
         else:
             mesh_qry_xyz, mesh_qry_face_idx = _sample_surface(mesh, int(cfg.n_mesh_qry), rng)
             mesh_qry_bary = _surface_barycentric(mesh, mesh_qry_xyz, mesh_qry_face_idx)
@@ -816,6 +912,10 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
             mesh_qry_vis_sig = np.asarray(existing["mesh_qry_vis_sig"], dtype=np.float32)
             mesh_qry_viscount = np.asarray(existing["mesh_qry_viscount"], dtype=np.float32)
             mesh_qry_ao = np.asarray(existing["mesh_qry_ao"], dtype=np.float32)
+        elif int(mesh_qry_xyz.shape[0]) <= 0:
+            mesh_qry_vis_sig = np.zeros((0, int(cfg.mesh_vis_n_dirs)), dtype=np.float32)
+            mesh_qry_viscount = np.zeros((0, 1), dtype=np.float32)
+            mesh_qry_ao = np.zeros((0, 1), dtype=np.float32)
         else:
             mesh_qry_vis_sig, mesh_qry_viscount, mesh_qry_ao = _visibility_signature(
                 mesh,
@@ -824,6 +924,7 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
                 n_dirs=int(cfg.mesh_vis_n_dirs),
                 eps=float(cfg.mesh_vis_eps),
                 max_t=float(cfg.mesh_vis_max_t),
+                o3d_scene=o3d_scene,
             )
 
         # --- UDF volume queries ---
@@ -842,7 +943,7 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
                 near_ratio=float(cfg.udf_near_ratio),
                 near_std=float(cfg.udf_near_std),
             )
-            cp, dist1d, face_idx = _closest_point_and_face(mesh, udf_qry_xyz)
+            cp, dist1d, face_idx = _closest_point_and_face(mesh, udf_qry_xyz, o3d_scene=o3d_scene)
             udf_qry_cp_xyz = cp.astype(np.float32)
             udf_qry_cp_n = mesh.face_normals[face_idx].astype(np.float32)
             udf_qry_cp_n /= np.linalg.norm(udf_qry_cp_n, axis=1, keepdims=True) + 1e-8
@@ -899,6 +1000,7 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
                 n_dirs=int(cfg.mesh_vis_n_dirs),
                 eps=float(cfg.mesh_vis_eps),
                 max_t=float(cfg.mesh_vis_max_t),
+                o3d_scene=o3d_scene,
             )
 
         if bool(cfg.strict_udf_surface):
@@ -981,6 +1083,7 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
                 mesh,
                 ray_o,
                 ray_d,
+                o3d_scene=o3d_scene,
                 udf_grid=udf_grid_local,
                 max_t=float(cfg.mesh_vis_max_t),
                 n_steps=max(64, int(cfg.surf_udf_steps)),
@@ -1072,10 +1175,17 @@ def preprocess_one(mesh_path: str, out_path: str, *, cfg: V2GenConfig, seed: int
         )
 
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        np.savez(out_path, **payload)
+        tmp_out_path = f"{out_path}.tmp.{os.getpid()}.npz"
+        np.savez(tmp_out_path, **payload)
+        os.replace(tmp_out_path, out_path)
         return None
 
     except Exception as e:
+        if tmp_out_path and os.path.exists(tmp_out_path):
+            try:
+                os.remove(tmp_out_path)
+            except OSError:
+                pass
         return f"{mesh_path}: {type(e).__name__}: {e}"
 
 
@@ -1108,6 +1218,142 @@ def _filter_shard(items: List[Tuple[str, str, int]], num_shards: int, shard_id: 
     return [x for i, x in enumerate(items) if (i % ns) == sid]
 
 
+def _task_record(task: Tuple[str, str, int], **extra: Any) -> Dict[str, Any]:
+    mesh_path, out_path, base_seed = task
+    rec: Dict[str, Any] = {
+        "mesh_path": mesh_path,
+        "out_path": out_path,
+        "base_seed": int(base_seed),
+    }
+    rec.update(extra)
+    return rec
+
+
+def _task_from_record(rec: Dict[str, Any]) -> Tuple[str, str, int]:
+    return str(rec["mesh_path"]), str(rec["out_path"]), int(rec["base_seed"])
+
+
+def _load_task_records(json_path: str) -> List[Tuple[str, str, int]]:
+    with open(json_path, "r") as f:
+        payload = json.load(f)
+    if not isinstance(payload, list):
+        raise ValueError(f"task list must be a JSON list: {json_path}")
+    return [_task_from_record(dict(rec)) for rec in payload]
+
+
+def _manifest_sidecar_path(out_root: str, stem: str, *, num_shards: int, shard_id: int) -> str:
+    if int(num_shards) > 1:
+        name = f"{stem}.shard{int(shard_id):03d}of{int(num_shards):03d}.json"
+    else:
+        name = f"{stem}.json"
+    return os.path.join(out_root, name)
+
+
+def _worker_entry(
+    send_conn: Any,
+    task: Tuple[str, str, int],
+    *,
+    cfg: V2GenConfig,
+) -> None:
+    err: Optional[str] = None
+    try:
+        err = _worker(task, cfg=cfg)
+    except BaseException as e:
+        mesh_path = task[0]
+        err = f"{mesh_path}: {type(e).__name__}: {e}"
+    try:
+        send_conn.send(err)
+    finally:
+        send_conn.close()
+
+
+def _run_with_task_timeouts(
+    tasks: List[Tuple[str, str, int]],
+    *,
+    cfg: V2GenConfig,
+    num_workers: int,
+    task_timeout_sec: float,
+    timeout_grace_sec: float,
+) -> Tuple[List[str], List[Dict[str, Any]]]:
+    import multiprocessing as mp
+
+    pending: Deque[Tuple[str, str, int]] = deque(tasks)
+    active: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    deferred: List[Dict[str, Any]] = []
+    pbar = tqdm(total=len(tasks))
+    poll_sleep_sec = 0.2
+
+    while pending or active:
+        while pending and len(active) < int(num_workers):
+            task = pending.popleft()
+            recv_conn, send_conn = mp.Pipe(duplex=False)
+            proc = mp.Process(target=_worker_entry, args=(send_conn, task), kwargs={"cfg": cfg})
+            proc.start()
+            send_conn.close()
+            active.append(
+                {
+                    "task": task,
+                    "proc": proc,
+                    "recv": recv_conn,
+                    "start": time.monotonic(),
+                }
+            )
+
+        next_active: List[Dict[str, Any]] = []
+        for state in active:
+            task = state["task"]
+            proc = state["proc"]
+            recv_conn = state["recv"]
+            elapsed_sec = float(time.monotonic() - float(state["start"]))
+
+            if recv_conn.poll():
+                err = recv_conn.recv()
+                proc.join(timeout=0.1)
+                recv_conn.close()
+                if err is not None:
+                    errors.append(str(err))
+                pbar.update(1)
+                continue
+
+            if not proc.is_alive():
+                err = None
+                if recv_conn.poll():
+                    err = recv_conn.recv()
+                elif int(proc.exitcode or 0) != 0:
+                    mesh_path = task[0]
+                    err = f"{mesh_path}: RuntimeError: worker exited with code {proc.exitcode}"
+                recv_conn.close()
+                proc.join(timeout=0.1)
+                if err is not None:
+                    errors.append(str(err))
+                pbar.update(1)
+                continue
+
+            if float(task_timeout_sec) > 0.0 and elapsed_sec > float(task_timeout_sec):
+                proc.terminate()
+                proc.join(timeout=float(timeout_grace_sec))
+                if proc.is_alive() and hasattr(proc, "kill"):
+                    proc.kill()
+                    proc.join(timeout=float(timeout_grace_sec))
+                recv_conn.close()
+                mesh_path = task[0]
+                reason = f"TimeoutError: exceeded {float(task_timeout_sec):.1f}s"
+                deferred.append(_task_record(task, reason=reason, elapsed_sec=elapsed_sec))
+                errors.append(f"{mesh_path}: {reason}; deferred")
+                pbar.update(1)
+                continue
+
+            next_active.append(state)
+
+        active = next_active
+        if active:
+            time.sleep(poll_sleep_sec)
+
+    pbar.close()
+    return errors, deferred
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--shapenet_root", type=str, required=True)
@@ -1118,6 +1364,30 @@ def main() -> None:
     ap.add_argument("--num_workers", type=int, default=8)
     ap.add_argument("--num_shards", type=int, default=1, help="split target task list into N shards.")
     ap.add_argument("--shard_id", type=int, default=0, help="0-based shard id when num_shards>1.")
+    ap.add_argument(
+        "--task_timeout_sec",
+        type=float,
+        default=0.0,
+        help="Per-shape hard timeout in seconds. Timed-out meshes are deferred and written to a sidecar JSON.",
+    )
+    ap.add_argument(
+        "--task_timeout_grace_sec",
+        type=float,
+        default=2.0,
+        help="Grace period after terminate() before kill() when task_timeout_sec > 0.",
+    )
+    ap.add_argument(
+        "--task_list_json",
+        type=str,
+        default="",
+        help="Optional explicit JSON task list produced by a previous deferred run.",
+    )
+    ap.add_argument(
+        "--skip_task_list_json",
+        type=str,
+        default="",
+        help="Optional JSON task list whose mesh paths should be skipped.",
+    )
 
     # sizes
     ap.add_argument("--n_surf", type=int, default=8192)
@@ -1224,6 +1494,14 @@ def main() -> None:
     for m in test_meshes:
         tasks_all.append((m, _out_path(m, "test"), int(args.seed) + 12345))
 
+    if str(args.task_list_json).strip():
+        tasks_all = _load_task_records(str(args.task_list_json).strip())
+
+    if str(args.skip_task_list_json).strip():
+        skip_tasks = _load_task_records(str(args.skip_task_list_json).strip())
+        skip_mesh_paths = {task[0] for task in skip_tasks}
+        tasks_all = [task for task in tasks_all if task[0] not in skip_mesh_paths]
+
     num_tasks_all = len(tasks_all)
     num_missing_tasks_total = 0
     if bool(args.missing_only):
@@ -1243,10 +1521,17 @@ def main() -> None:
         print(f"[missing_only] total_missing_now={num_missing_tasks_total} total_all={num_tasks_all}")
 
     os.makedirs(args.out_root, exist_ok=True)
+    deferred_path = _manifest_sidecar_path(
+        args.out_root,
+        "v2_deferred",
+        num_shards=int(args.num_shards),
+        shard_id=int(args.shard_id),
+    )
 
     # multiprocessing
     if int(args.num_workers) <= 1:
         errors = []
+        deferred = []
         for mesh_path, out_path, base_seed in tqdm(tasks):
             syn, mid = _infer_synset_model(mesh_path)
             import zlib
@@ -1255,12 +1540,26 @@ def main() -> None:
             if err is not None:
                 errors.append(err)
     else:
-        import multiprocessing as mp
+        if float(args.task_timeout_sec) > 0.0:
+            errors, deferred = _run_with_task_timeouts(
+                tasks,
+                cfg=cfg,
+                num_workers=int(args.num_workers),
+                task_timeout_sec=float(args.task_timeout_sec),
+                timeout_grace_sec=float(args.task_timeout_grace_sec),
+            )
+        else:
+            import multiprocessing as mp
 
-        with mp.Pool(processes=int(args.num_workers)) as pool:
-            fn = partial(_worker, cfg=cfg)
-            errors = list(tqdm(pool.imap(fn, tasks), total=len(tasks)))
-        errors = [e for e in errors if e is not None]
+            with mp.Pool(processes=int(args.num_workers)) as pool:
+                fn = partial(_worker, cfg=cfg)
+                errors = list(tqdm(pool.imap(fn, tasks), total=len(tasks)))
+            errors = [e for e in errors if e is not None]
+            deferred = []
+
+    if len(deferred) > 0:
+        with open(deferred_path, "w") as f:
+            json.dump(deferred, f, indent=2)
 
     manifest = {
         "shapenet_root": args.shapenet_root,
@@ -1272,10 +1571,16 @@ def main() -> None:
         "num_meshes": len(meshes),
         "num_train": len(train_meshes),
         "num_test": len(test_meshes),
+        "task_timeout_sec": float(args.task_timeout_sec),
+        "task_timeout_grace_sec": float(args.task_timeout_grace_sec),
+        "task_list_json": str(args.task_list_json),
+        "skip_task_list_json": str(args.skip_task_list_json),
         "missing_only": bool(args.missing_only),
         "num_tasks_all": num_tasks_all,
         "num_missing_tasks_total": num_missing_tasks_total,
         "num_tasks_in_shard": len(tasks),
+        "num_deferred": len(deferred),
+        "deferred_path": deferred_path if len(deferred) > 0 else "",
         "config": asdict(cfg),
         "errors": errors[:100],
     }
@@ -1288,6 +1593,8 @@ def main() -> None:
 
     if len(errors) > 0:
         print(f"[WARN] {len(errors)} meshes failed. See v2_manifest.json for examples.")
+    if len(deferred) > 0:
+        print(f"[WARN] {len(deferred)} meshes deferred. See {deferred_path}.")
 
 
 def _worker(task: Tuple[str, str, int], *, cfg: V2GenConfig) -> Optional[str]:
