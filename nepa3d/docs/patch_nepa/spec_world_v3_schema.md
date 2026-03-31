@@ -7,6 +7,9 @@ The goal is not to freeze the paper theme. The goal is to freeze the **raw
 cache contract** so downstream experiments can be compared on one stable data
 definition.
 
+For the paper-facing dataset and protocol semantics layered above this raw
+contract, read `dataset_geo_teacher_v1_spec.md`.
+
 ## Carriers
 
 - `surf_xyz`

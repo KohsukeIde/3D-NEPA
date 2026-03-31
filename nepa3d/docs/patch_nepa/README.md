@@ -11,27 +11,37 @@ Point-MAE and PointGPT.
 1. `collaborator_reading_guide_active.md`
    - One-page collaborator-facing entrypoint.
    - Start here when sharing the current line with a coauthor.
-2. `storyline_query_to_patch_v2_active.md`
+2. `paper_direction_geo_teacher_202604.md`
+   - Paper-facing direction layer added above the historical mainline docs.
+3. `dataset_geo_teacher_v1_spec.md`
+   - Paper-facing dataset / split / protocol source of truth.
+4. `storyline_query_to_patch_v2_active.md`
    - Cross-line storyline and interpretation boundary.
    - Start here when asking "what happened?" or "which result is valid?"
-3. `hypothesis_matrix_active.md`
+5. `hypothesis_matrix_geo_teacher_v1.md`
+   - Paper-facing geo-teacher hypothesis sheet.
+6. `hypothesis_matrix_active.md`
    - Hypotheses, supporting evidence, current status, and next minimal tests.
-4. `scanobjectnn_ft_policy_audit_active.md`
+7. `scanobjectnn_ft_policy_audit_active.md`
    - Exact list of old ScanObjectNN FT result families that are now
      historical/internal because they came from the earlier `file`-split
      policy.
-5. `execution_backlog_active.md`
+8. `migration_cross_primitive_to_geo_teacher_202604.md`
+   - Old-claim to new-claim migration note.
+9. `spec_geo_teacher_vocab_v1.md`
+   - Paper-facing canonical task vocabulary.
+10. `execution_backlog_active.md`
    - Canonical local-only execution backlog and gating rules.
    - Start here when asking "what should run next locally?"
-6. `restart_plan_patchnepa_data_v2_20260303.md`
+11. `restart_plan_patchnepa_data_v2_20260303.md`
    - Active investigation memo for the current v2 token-path branch.
-7. `patch_nepa_stage2_active.md`
+12. `patch_nepa_stage2_active.md`
    - Active mainline policy and stage-2 execution rules.
-8. `runlog_patch_nepa_202602.md`
+13. `runlog_patch_nepa_202602.md`
    - Raw execution ledger for Patch-NEPA jobs.
-9. `benchmark_scanobjectnn_variant.md`
+14. `benchmark_scanobjectnn_variant.md`
    - Canonical headline ScanObjectNN benchmark table.
-10. `../code_inventory_active.md`
+15. `../code_inventory_active.md`
    - Canonical code-organization boundary for current path ownership.
 
 ## Collaborator Quick Path
@@ -62,6 +72,7 @@ start from:
 Current short answer:
 
 - current main reconstruction line: PatchNEPA v2 `recong2` full300
+- current paper-facing direction: geometric-teacher pretraining on the CQA path
 - current ScanObjectNN benchmark headline: pending revalidation
 - historical file-split FT headline: `0.8485 / 0.8589 / 0.8140`
 - current thin ABCI entrypoints:
@@ -116,6 +127,8 @@ Current merge rules:
 
 - existing `recong2/composite` remains the mainline baseline
 - CQA is evaluated as an additive branch
+- the paper-facing geo-teacher layer is added above the historical mainline
+  docs rather than replacing them
 - surface-aligned tasks use `surf_xyz` as the query carrier
 - only `ASK_DISTANCE` uses `udf_qry_xyz`
 - the first `mesh_visibility + udf_thickness` smoke is a wiring check only, not
