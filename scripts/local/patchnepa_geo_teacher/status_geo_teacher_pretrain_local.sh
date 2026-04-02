@@ -15,7 +15,7 @@ running=0
 pid=""
 tmux_running=0
 if [[ "${LAUNCH_MODE}" == "tmux" ]] && command -v tmux >/dev/null 2>&1; then
-  if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
+  if tmux has-session -t "=${TMUX_SESSION}" 2>/dev/null; then
     tmux_running=1
   fi
 fi

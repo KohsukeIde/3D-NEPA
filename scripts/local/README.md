@@ -28,9 +28,10 @@ for this machine, while ABCI-facing entrypoints are kept separately under
   - use this when the run assumes `/mnt/.../3D-NEPA-data`, local timeout
     policy, or local resume behavior
 - `patchnepa_geo_teacher/`
-  - local-only multi-GPU geo-teacher pretrain launchers for this workstation
-  - use this when the run is a direct local DDP CQA/teacher-target pretrain,
-    not an ABCI submit
+  - local-only multi-GPU geo-teacher pretrain and post-train launchers for
+    this workstation
+  - use this when the run is a direct local DDP CQA/teacher-target pretrain or
+    its downstream chain, not an ABCI submit
 - `patchnepa_local_queue.tsv`
   - machine-readable queue manifest
 - `patchnepa_local_queue_runner.sh`

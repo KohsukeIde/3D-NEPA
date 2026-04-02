@@ -52,6 +52,8 @@ Workstation-specific operational notes for `itachi` live under:
 
 - `itachi/README.md`
 - `itachi/local_data_ops_202604.md`
+- `itachi/local_geo_teacher_pretrain_ops_202604.md`
+- `itachi/local_geo_teacher_posttrain_ops_202604.md`
 
 These are local execution notes only. Do not treat them as paper-facing or
 ABCI-facing source-of-truth docs.
