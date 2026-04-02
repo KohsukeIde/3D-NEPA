@@ -1,0 +1,16 @@
+dataset_version: v2_cqa
+codec_version: cqa_v2
+replacement: false
+mix_seed: 0
+packed_budget_unit: shape
+# Current local worldvis cache provides 45,047 train shapes. With replacement=false,
+# one pretrain epoch traverses the full train split once at the shape level.
+mix_num_shapes: 45047
+datasets:
+  - name: udf_distance
+    cache_root: data/shapenet_cache_v2_20260401_worldvis
+    split: train
+    weight: 1.0
+    task_name: udf_distance
+    context_source: surf
+    codec_version: cqa_v2

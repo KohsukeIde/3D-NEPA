@@ -61,8 +61,12 @@ Reference:
   - default ckpt: current best mixed-source `g2` checkpoint
 - `submit_patchnepa_current_cqa_pretrain.sh`
   - submit the experimental explicit-query CQA branch on ABCI
-  - current default tasks: `mesh_visibility + udf_thickness`
+  - historical default tasks: `udf_distance + mesh_normal_unsigned`
   - current default cache: `data/shapenet_unpaired_cache_v2_20260311_worldvis_drop1`
+- `submit_patchnepa_geo_teacher_compare_pretrain.sh`
+  - submit the matched `100`-epoch geo-teacher compare on ABCI
+  - default config: `shapenet_geo_teacher_packed_distnorm_unsigned_v1.yaml`
+  - default protocol: `packed + multihead + per_task + no_q`
 
 ## Recommended Reading
 
@@ -72,6 +76,7 @@ Reference:
 4. `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
 5. `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
 6. `nepa3d/docs/patch_nepa/spec_cqa_vocab.md`
+7. `nepa3d/docs/patch_nepa/experiment_route_ab_matrix_202604.md`
 
 ## Examples
 
@@ -87,6 +92,9 @@ bash scripts/abci/submit_patchnepa_current_cpac.sh
 
 # experimental explicit-query CQA pretrain
 bash scripts/abci/submit_patchnepa_current_cqa_pretrain.sh
+
+# matched 100-epoch geo-teacher compare
+bash scripts/abci/submit_patchnepa_geo_teacher_compare_pretrain.sh
 ```
 
 ```bash

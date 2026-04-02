@@ -21,7 +21,7 @@ from nepa3d.tracks.patch_nepa.cqa.data.cqa_codec import (
 )
 from nepa3d.tracks.patch_nepa.cqa.data.dataset_cqa import QUERY_ORDER_MODES, cqa_collate_fn, cqa_packed_collate_fn
 from nepa3d.tracks.patch_nepa.cqa.data.mixed_pretrain_cqa import build_mixed_pretrain_cqa, build_packed_pretrain_cqa
-from nepa3d.tracks.patch_nepa.cqa.models.factory import build_cqa_model_from_args
+from nepa3d.tracks.patch_nepa.cqa.models.factory import build_cqa_model_from_args, normalize_cqa_model_args
 
 
 def parse_args() -> argparse.Namespace:
@@ -113,6 +113,17 @@ def parse_args() -> argparse.Namespace:
         choices=["mixture", "packed"],
         help="Sampling protocol: one-task mixture per sample or packed multi-type samples sharing one context per shape.",
     )
+    p.add_argument(
+        "--loss_balance",
+        type=str,
+        default="flat",
+        choices=["flat", "per_task", "per_shape_task"],
+        help=(
+            "How to reduce masked CE across a batch. 'flat' matches historical behavior; "
+            "'per_task' equalizes answer-family weight; 'per_shape_task' equalizes each "
+            "shape-task row in packed/common-shape runs."
+        ),
+    )
     return p.parse_args()
 
 
@@ -144,6 +155,35 @@ def _scheduler_scale(step: int, args: argparse.Namespace, max_steps: int, warmup
     return min_scale + (1.0 - min_scale) * cosv
 
 
+def _reduce_row_values(
+    row_values: torch.Tensor,
+    *,
+    task_id: torch.Tensor | None,
+    shape_id: torch.Tensor | None,
+    mode: str,
+) -> torch.Tensor:
+    if row_values.numel() <= 0:
+        return row_values.sum()
+    if str(mode) == "flat":
+        return row_values.mean()
+    if str(mode) == "per_shape_task":
+        return row_values.mean()
+    if str(mode) != "per_task":
+        raise KeyError(f"unknown loss_balance={mode}")
+    if task_id is None:
+        return row_values.mean()
+    task_id = task_id.reshape(-1).to(device=row_values.device, dtype=torch.long)
+    uniq = task_id.unique(sorted=True)
+    task_means = []
+    for tid in uniq.tolist():
+        mask = task_id == int(tid)
+        if torch.any(mask):
+            task_means.append(row_values[mask].mean())
+    if len(task_means) <= 0:
+        return row_values.mean()
+    return torch.stack(task_means).mean()
+
+
 def _masked_ce_metrics(
     logits: torch.Tensor,
     target: torch.Tensor,
@@ -151,6 +191,9 @@ def _masked_ce_metrics(
     *,
     codec_version: str,
     answer_vocab: int,
+    task_id: torch.Tensor | None = None,
+    shape_id: torch.Tensor | None = None,
+    loss_balance: str = "flat",
 ) -> dict[str, torch.Tensor]:
     masked_logits = mask_logits_for_query_type(
         logits,
@@ -160,7 +203,15 @@ def _masked_ce_metrics(
     )
     flat_logits = masked_logits.reshape(-1, int(masked_logits.shape[-1]))
     flat_target = target.reshape(-1)
-    loss = F.cross_entropy(flat_logits, flat_target)
+    token_loss = F.cross_entropy(flat_logits, flat_target, reduction="none").reshape_as(target)
+    row_loss = token_loss.mean(dim=1)
+    loss = _reduce_row_values(
+        row_loss,
+        task_id=task_id,
+        shape_id=shape_id,
+        mode=str(loss_balance),
+    )
+    flat_loss = token_loss.mean()
 
     pred = masked_logits.argmax(dim=-1)
     token_acc = (pred == target).float().mean()
@@ -169,6 +220,7 @@ def _masked_ce_metrics(
     entropy = -(probs * probs.clamp_min(1e-12).log()).sum(dim=-1).mean()
     return {
         "loss": loss,
+        "flat_loss": flat_loss,
         "token_acc": token_acc,
         "entropy": entropy,
         "masked_logits": masked_logits,
@@ -239,7 +291,15 @@ def _init_wandb(args: argparse.Namespace, accelerator: Accelerator):
 
 def main() -> None:
     args = parse_args()
-    ddp = DistributedDataParallelKwargs(find_unused_parameters=False)
+    raw_model_arch = str(args.model_arch).strip().lower()
+    raw_query_if = str(args.query_interface_mode).strip().lower()
+    raw_head_mode = str(args.head_mode).strip().lower()
+    ddp_find_unused = (
+        raw_model_arch != "prefixlm"
+        or raw_query_if != "full_q"
+        or raw_head_mode != "shared"
+    )
+    ddp = DistributedDataParallelKwargs(find_unused_parameters=ddp_find_unused)
     accelerator = Accelerator(kwargs_handlers=[ddp])
     set_seed(int(args.seed))
 
@@ -270,14 +330,7 @@ def main() -> None:
         args.answer_vocab = int(answer_vocab_size(str(args.codec_version)))
     if int(args.query_type_vocab) <= 0:
         args.query_type_vocab = int(query_type_vocab_size(str(args.codec_version)))
-    if str(args.model_arch).strip().lower() == "encdec":
-        if str(args.answer_factorization).strip().lower() != "independent":
-            raise ValueError("model_arch=encdec currently requires --answer_factorization independent")
-        args.answer_factorization = "independent"
-        args.query_interface_mode = "no_q"
-    if str(args.model_arch).strip().lower() == "external_pointmae":
-        if not str(args.external_backbone_ckpt).strip():
-            raise ValueError("model_arch=external_pointmae requires --external_backbone_ckpt")
+    args = argparse.Namespace(**normalize_cqa_model_args(vars(args)))
 
     loader = DataLoader(
         dataset,
@@ -324,6 +377,17 @@ def main() -> None:
             f"max_steps={max_steps} warmup_steps={warmup_steps}"
         )
         accelerator.print(f"[dataset] mix_info={json.dumps(info)}")
+        accelerator.print(f"[train] ddp_find_unused_parameters={int(ddp_find_unused)}")
+        accelerator.print(
+            f"[train] head_mode={args.head_mode} loss_balance={args.loss_balance} "
+            f"query_interface={args.query_interface_mode}"
+        )
+        if str(args.sampling_protocol) == "packed" and str(args.head_mode) != "multihead":
+            accelerator.print("[warn] packed multi-task comparisons are easiest to interpret with --head_mode multihead")
+        if str(args.sampling_protocol) == "packed" and str(args.loss_balance) == "flat":
+            accelerator.print(
+                "[warn] packed runs with loss_balance=flat preserve historical behavior but do not equalize task weight"
+            )
 
     wandb_run = _init_wandb(args, accelerator)
 
@@ -350,6 +414,9 @@ def main() -> None:
                 batch["qry_type"],
                 codec_version=str(args.codec_version),
                 answer_vocab=int(args.answer_vocab),
+                task_id=batch.get("task_id"),
+                shape_id=batch.get("shape_id"),
+                loss_balance=str(args.loss_balance),
             )
             loss = metrics["loss"]
             accelerator.backward(loss)
@@ -363,6 +430,7 @@ def main() -> None:
             batch_count += 1
             global_step += 1
             loss_val = float(loss.detach().cpu())
+            flat_loss_val = float(metrics["flat_loss"].detach().cpu())
             tok_val = float(metrics["token_acc"].detach().cpu())
             ent_val = float(metrics["entropy"].detach().cpu())
             lr_val = float(opt.param_groups[0]["lr"])
@@ -370,11 +438,19 @@ def main() -> None:
             tok_sum += tok_val
             ent_sum += ent_val
             if accelerator.is_main_process:
-                pbar.set_postfix(loss=loss_val, acc=tok_val, ent=ent_val, lr=lr_val, step=global_step)
+                pbar.set_postfix(
+                    loss=loss_val,
+                    flat=flat_loss_val,
+                    acc=tok_val,
+                    ent=ent_val,
+                    lr=lr_val,
+                    step=global_step,
+                )
             if wandb_run is not None and accelerator.is_main_process and (global_step % max(1, int(args.wandb_log_every)) == 0):
                 wandb_run.log(
                     {
                         "train/loss": loss_val,
+                        "train/flat_loss": flat_loss_val,
                         "train/token_acc": tok_val,
                         "train/answer_entropy": ent_val,
                         "train/lr": lr_val,

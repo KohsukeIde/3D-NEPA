@@ -252,6 +252,7 @@ class V2PrimitiveCQADataset(Dataset):
         query_dist_max: float | None = None,
         query_order: str | None = None,
         codec_version: str = CQA_VOCAB_VERSION,
+        task_id: int = 0,
     ) -> None:
         super().__init__()
         self.paths = list(paths)
@@ -275,6 +276,7 @@ class V2PrimitiveCQADataset(Dataset):
         self.query_dist_min = None if query_dist_min is None else float(query_dist_min)
         self.query_dist_max = None if query_dist_max is None else float(query_dist_max)
         self.query_order = _resolve_query_order(query_order, mode=self.mode)
+        self.task_id = int(task_id)
 
     def __len__(self) -> int:
         return len(self.paths)
@@ -306,6 +308,8 @@ class V2PrimitiveCQADataset(Dataset):
                 query_dist_max=self.query_dist_max,
                 query_order=self.query_order,
                 codec_version=self.codec_version,
+                task_id=int(self.task_id),
+                shape_id=int(idx),
             )
 
 
@@ -350,6 +354,8 @@ def _build_single_task_sample(
     query_dist_max: float | None,
     query_order: str,
     codec_version: str,
+    task_id: int = 0,
+    shape_id: int = -1,
 ) -> Dict[str, Any]:
     qry_all = np.asarray(npz[task.query_xyz_key], dtype=np.float32)
     q_pool = np.arange(int(qry_all.shape[0]), dtype=np.int64)
@@ -445,6 +451,8 @@ def _build_single_task_sample(
         "query_dist_min": query_dist_min,
         "query_dist_max": query_dist_max,
         "query_order": query_order,
+        "task_id": int(task_id),
+        "shape_id": int(shape_id),
         "answer_vocab_size": int(answer_vocab_size(str(codec_version))),
         "vocab_version": str(codec_version),
     }
@@ -530,8 +538,10 @@ class PackedPrimitiveCQADataset(Dataset):
                     query_dist_max=packed.query_dist_max,
                     query_order=self.query_order,
                     codec_version=self.codec_version,
+                    task_id=int(task_idx),
+                    shape_id=int(idx),
                 )
-                for packed, task, query_type in self._resolved_specs
+                for task_idx, (packed, task, query_type) in enumerate(self._resolved_specs)
             ]
         out: Dict[str, Any] = {}
         out["ctx_xyz"] = torch.stack([r["ctx_xyz"] for r in rows], dim=0)
@@ -539,6 +549,8 @@ class PackedPrimitiveCQADataset(Dataset):
         out["qry_type"] = torch.stack([r["qry_type"] for r in rows], dim=0)
         out["answer_code"] = torch.stack([r["answer_code"] for r in rows], dim=0)
         out["qry_src_code"] = torch.stack([r["qry_src_code"] for r in rows], dim=0)
+        out["task_id"] = torch.tensor([int(r["task_id"]) for r in rows], dtype=torch.long)
+        out["shape_id"] = torch.tensor([int(r["shape_id"]) for r in rows], dtype=torch.long)
         out["task_name"] = [r["task_name"] for r in rows]
         out["context_source"] = [r["context_source"] for r in rows]
         out["cache_split"] = [r["cache_split"] for r in rows]
@@ -562,6 +574,8 @@ def cqa_collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     out["qry_type"] = torch.stack([b["qry_type"] for b in batch], dim=0)
     out["answer_code"] = torch.stack([b["answer_code"] for b in batch], dim=0)
     out["qry_src_code"] = torch.stack([b["qry_src_code"] for b in batch], dim=0)
+    out["task_id"] = torch.tensor([int(b.get("task_id", 0)) for b in batch], dtype=torch.long)
+    out["shape_id"] = torch.tensor([int(b.get("shape_id", -1)) for b in batch], dtype=torch.long)
     out["task_name"] = [b["task_name"] for b in batch]
     out["context_source"] = [b["context_source"] for b in batch]
     out["cache_split"] = [b["cache_split"] for b in batch]
@@ -584,6 +598,8 @@ def cqa_packed_collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     out["qry_type"] = torch.cat([b["qry_type"] for b in batch], dim=0)
     out["answer_code"] = torch.cat([b["answer_code"] for b in batch], dim=0)
     out["qry_src_code"] = torch.cat([b["qry_src_code"] for b in batch], dim=0)
+    out["task_id"] = torch.cat([b["task_id"] for b in batch], dim=0)
+    out["shape_id"] = torch.cat([b["shape_id"] for b in batch], dim=0)
     out["task_name"] = [name for b in batch for name in b["task_name"]]
     out["context_source"] = [name for b in batch for name in b["context_source"]]
     out["cache_split"] = [name for b in batch for name in b["cache_split"]]

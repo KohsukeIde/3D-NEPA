@@ -1,6 +1,6 @@
 # Geo-Teacher Hypothesis Matrix v1
 
-Last updated: 2026-04-01
+Last updated: 2026-04-02
 
 ## 1. Purpose
 
@@ -25,13 +25,15 @@ Status labels:
 | G5 | `surf -> pc_bank` should remain in the paper, but as degraded-context evaluation rather than cross-primitive headline evidence | supported | current runtime already switches `context_source` between `surf` and `pc_bank`; the new story centers supervision design rather than modality symmetry | keep off-diagonal controls but rename them in the new paper-facing docs |
 | G6 | a dedicated runtime `geo_teacher_v1` codec / dataset version is required before the story can change | rejected | the current implementation can already express the first migration using `v2_cqa` + `cqa_v2` with new manifests/configs | do not block the doc and protocol migration on a new runtime alias |
 | G7 | AO-HQ should be in the first headline-safe canonical task set | open | task registry supports `mesh_ao_hq`, but the strongest shared evidence still favors distance/normal and the current schema docs do not center AO-HQ | keep AO-HQ supplemental until a cleaner shared-result package exists |
+| G8 | the first fair paper decision should be a matched `100`-epoch compare rather than another CQA feature expansion | supported | reviewer-facing fairness against Point-MAE-style baselines depends more on matched pretraining budget than on adding more teacher types first | run `recon / distance / distance+normal` under one fixed `100`-epoch protocol |
+| G9 | the first teacher-target compare should use shape-level packed budgets rather than historical effective task-sample budgets | supported | packed training is now intended as same-shape supervision; `packed_budget_unit=shape` keeps epoch semantics explicit | use `replacement=false` and full-train shape count per epoch in the first matched configs |
 
 ## 3. Current Priority Order
 
-1. add paper-facing docs without deleting historical provenance docs
-2. build same-shape `train / val / eval` manifests
-3. create packed + multihead Tier-1 configs
-4. evaluate `same_context` and `degraded_context` under the new language
+1. keep the paper-facing docs fixed around the Route A / Route B decision rule
+2. run the matched `100`-epoch matrix: `recon / distance / distance+normal`
+3. read the result through `ScanObjectNN + ShapeNetPart` and `same/degraded/control/completion`
+4. only then add thickness as the next teacher target
 
 ## 4. Source Docs
 
