@@ -1,6 +1,6 @@
 # PatchNEPA Paper Direction: Geometric Teacher Pretraining
 
-Last updated: 2026-04-01
+Last updated: 2026-04-02
 
 ## 1. Purpose
 
@@ -143,5 +143,28 @@ layer it is a clean-to-degraded observation shift test.
   `nepa3d/docs/patch_nepa/dataset_geo_teacher_v1_spec.md`
 - paper-facing vocab semantics:
   `nepa3d/docs/patch_nepa/spec_geo_teacher_vocab_v1.md`
+- first matched Route A/B compare:
+  `nepa3d/docs/patch_nepa/experiment_route_ab_matrix_202604.md`
 - migration memo:
   `nepa3d/docs/patch_nepa/migration_cross_primitive_to_geo_teacher_202604.md`
+
+## 9. Immediate Paper Decision Rule
+
+The next move is a matched `100`-epoch comparison, not further expansion of
+the typed-answer task inventory.
+
+The decision rule is:
+
+- Route A if geometric-teacher pretraining is favorable on matched downstream
+  transfer (`ScanObjectNN`, `ShapeNetPart`)
+- Route B if the strongest signal remains in direct geometry readouts
+  (`same_context`, `degraded_context`, `controls`, `completion`)
+
+The first matched matrix is:
+
+1. internal xyz-reconstruction baseline
+2. `udf_distance`
+3. `udf_distance + mesh_normal_unsigned`
+
+`udf_thickness_valid_qbin` remains the next add-on after this compare.
+`mesh_ao_hq` remains supplemental.

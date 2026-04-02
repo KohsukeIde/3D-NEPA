@@ -62,6 +62,7 @@ ANSWER_FACTORIZATION="${ANSWER_FACTORIZATION:-independent}"
 QUERY_INTERFACE_MODE="${QUERY_INTERFACE_MODE:-full_q}"
 HEAD_MODE="${HEAD_MODE:-shared}"
 SAMPLING_PROTOCOL="${SAMPLING_PROTOCOL:-mixture}"
+LOSS_BALANCE="${LOSS_BALANCE:-flat}"
 USE_WANDB="${USE_WANDB:-1}"
 WANDB_PROJECT="${WANDB_PROJECT:-patchnepa-cqa-pretrain}"
 WANDB_ENTITY="${WANDB_ENTITY:-}"
@@ -115,7 +116,7 @@ echo "save_dir=${SAVE_DIR}" | tee -a "${LOG_PATH}"
 echo "epochs=${EPOCHS} batch=${BATCH} n_ctx=${N_CTX} n_qry=${N_QRY}" | tee -a "${LOG_PATH}"
 echo "query_order(train)=${QUERY_ORDER} query_order(eval)=${EVAL_QUERY_ORDER}" | tee -a "${LOG_PATH}"
 echo "max_steps=${MAX_STEPS} scheduler=${LR_SCHEDULER} warmup_steps=${WARMUP_STEPS} warmup_ratio=${WARMUP_RATIO} min_lr=${MIN_LR} clip=${MAX_GRAD_NORM}" | tee -a "${LOG_PATH}"
-echo "model_arch=${MODEL_ARCH} model=d${D_MODEL}/L${N_LAYERS}/H${N_HEADS} groups=${NUM_GROUPS} group_size=${GROUP_SIZE} gdepth=${GENERATOR_DEPTH} decoder_layers=${DECODER_LAYERS} factorization=${ANSWER_FACTORIZATION} query_if=${QUERY_INTERFACE_MODE} head_mode=${HEAD_MODE} sampling_protocol=${SAMPLING_PROTOCOL}" | tee -a "${LOG_PATH}"
+echo "model_arch=${MODEL_ARCH} model=d${D_MODEL}/L${N_LAYERS}/H${N_HEADS} groups=${NUM_GROUPS} group_size=${GROUP_SIZE} gdepth=${GENERATOR_DEPTH} decoder_layers=${DECODER_LAYERS} factorization=${ANSWER_FACTORIZATION} query_if=${QUERY_INTERFACE_MODE} head_mode=${HEAD_MODE} sampling_protocol=${SAMPLING_PROTOCOL} loss_balance=${LOSS_BALANCE}" | tee -a "${LOG_PATH}"
 echo "external_backbone_ckpt=${EXTERNAL_BACKBONE_CKPT} freeze_external=${FREEZE_EXTERNAL_ENCODER} external_depth=${EXTERNAL_BACKBONE_DEPTH} external_heads=${EXTERNAL_BACKBONE_HEADS} external_drop_path=${EXTERNAL_BACKBONE_DROP_PATH}" | tee -a "${LOG_PATH}"
 echo "wandb: use=${USE_WANDB} project=${WANDB_PROJECT} run=${WANDB_RUN_NAME} group=${WANDB_GROUP} mode=${WANDB_MODE} dir=${WANDB_DIR}" | tee -a "${LOG_PATH}"
 echo "eval: final=${RUN_EVAL_CONTROLS} curve=${RUN_EVAL_CURVE} sample_mode=${EVAL_SAMPLE_MODE} max_samples=${EVAL_MAX_SAMPLES_PER_TASK} task_filter=${EVAL_TASK_FILTER}" | tee -a "${LOG_PATH}"
@@ -169,6 +170,7 @@ python -m nepa3d.train.pretrain_primitive_answering \
   --query_interface_mode "${QUERY_INTERFACE_MODE}" \
   --head_mode "${HEAD_MODE}" \
   --sampling_protocol "${SAMPLING_PROTOCOL}" \
+  --loss_balance "${LOSS_BALANCE}" \
   --use_wandb "${USE_WANDB}" \
   --wandb_project "${WANDB_PROJECT}" \
   --wandb_entity "${WANDB_ENTITY}" \

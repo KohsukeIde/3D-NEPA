@@ -1,6 +1,6 @@
 # Geo-Teacher Dataset Spec v1
 
-Last updated: 2026-04-01
+Last updated: 2026-04-02
 
 ## 1. Purpose
 
@@ -165,6 +165,36 @@ rewrite.
    training identity.
 5. Add paper-facing docs without deleting historical `recong2` / unpaired
    provenance docs.
+
+## 10.1 Current Runnable Local Package
+
+As of `2026-04-02`, the prepared local cache that is actually ready to run is:
+
+- `data/shapenet_cache_v2_20260401_worldvis`
+
+Current available splits are:
+
+- `train` (`45,047` shapes)
+- `test` (`4,995` shapes)
+
+Current limitations:
+
+- `val` is not materialized yet in the local cache
+- `mesh_surf_ao_hq` is not present in the current base cache
+
+Therefore, the first runnable matched compare should use:
+
+- `split=train` for pretraining
+- `packed_budget_unit=shape`
+- `replacement=false`
+- one full train-shape pass per epoch
+
+The first runnable configs are intentionally smaller than the full Tier-1 set:
+
+- `udf_distance`
+- `udf_distance + mesh_normal_unsigned`
+
+Thickness remains next, after the first matched compare is in place.
 
 ## 11. When Raw Rebuild Becomes Necessary
 

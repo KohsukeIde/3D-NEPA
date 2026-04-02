@@ -34,7 +34,7 @@ def build_mixed_pretrain_cqa(
     names: List[str] = []
     weights: List[float] = []
     codec_versions: List[str] = []
-    for s in specs:
+    for task_id, s in enumerate(specs):
         paths = list_npz(s.cache_root, s.split)
         if len(paths) == 0:
             raise FileNotFoundError(f"no npz found: cache_root={s.cache_root} split={s.split}")
@@ -54,6 +54,7 @@ def build_mixed_pretrain_cqa(
             query_dist_max=s.extra.get("query_dist_max", None),
             query_order=query_order,
             codec_version=ds_codec,
+            task_id=int(task_id),
         )
         datasets.append(ds)
         names.append(s.name)
@@ -148,26 +149,36 @@ def build_packed_pretrain_cqa(
         query_order=query_order,
         codec_version=default_codec,
     )
-    mix_num_samples = int(cfg.get("mix_num_samples", len(canonical_paths) * max(1, len(packed_task_specs))))
-    num_shapes = int(math.ceil(float(mix_num_samples) / float(max(1, len(packed_task_specs)))))
     replacement = bool(cfg.get("replacement", True))
+    packed_budget_unit = str(cfg.get("packed_budget_unit", "task")).strip().lower()
+    if packed_budget_unit not in {"task", "shape"}:
+        raise ValueError(f"unknown packed_budget_unit={packed_budget_unit!r}; expected 'task' or 'shape'")
+
+    if packed_budget_unit == "shape":
+        num_shapes_requested = int(cfg.get("mix_num_shapes", cfg.get("mix_num_samples", len(canonical_paths))))
+    else:
+        mix_num_samples = int(cfg.get("mix_num_samples", len(canonical_paths) * max(1, len(packed_task_specs))))
+        num_shapes_requested = int(math.ceil(float(mix_num_samples) / float(max(1, len(packed_task_specs)))))
+
+    num_shape_samples = int(num_shapes_requested if replacement else min(num_shapes_requested, len(dataset)))
     sampler = RandomSampler(
         dataset,
         replacement=replacement,
-        num_samples=num_shapes if replacement else min(num_shapes, len(dataset)),
+        num_samples=num_shape_samples,
     )
     info = {
         "names": [str(s.name) for s in specs],
         "task_names": [str(spec.task_name) for spec in packed_task_specs],
         "shape_count": int(len(dataset)),
         "num_tasks_per_shape": int(len(packed_task_specs)),
-        "num_shape_samples": int(num_shapes if replacement else min(num_shapes, len(dataset))),
-        "effective_task_samples": int((num_shapes if replacement else min(num_shapes, len(dataset))) * max(1, len(packed_task_specs))),
+        "num_shape_samples": int(num_shape_samples),
+        "effective_task_samples": int(num_shape_samples * max(1, len(packed_task_specs))),
         "replacement": replacement,
         "seed": int(cfg.get("mix_seed", 0)),
         "codec_version": default_codec,
         "common_shape_support": int(len(common_keys)),
         "sampling_protocol": "packed",
+        "packed_budget_unit": packed_budget_unit,
         "paths_source": "common_intersection",
     }
     return dataset, sampler, info

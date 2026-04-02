@@ -1,0 +1,23 @@
+dataset_version: v2_cqa
+codec_version: cqa_v2
+replacement: false
+mix_seed: 0
+packed_budget_unit: shape
+# Match the train-shape budget to the current local worldvis cache so that
+# 100 epochs means 100 full passes over the same shape support.
+mix_num_shapes: 45047
+datasets:
+  - name: udf_distance
+    cache_root: data/shapenet_cache_v2_20260401_worldvis
+    split: train
+    weight: 1.0
+    task_name: udf_distance
+    context_source: surf
+    codec_version: cqa_v2
+  - name: mesh_normal_unsigned
+    cache_root: data/shapenet_cache_v2_20260401_worldvis
+    split: train
+    weight: 1.0
+    task_name: mesh_normal_unsigned
+    context_source: surf
+    codec_version: cqa_v2

@@ -15,33 +15,35 @@ Point-MAE and PointGPT.
    - Paper-facing direction layer added above the historical mainline docs.
 3. `dataset_geo_teacher_v1_spec.md`
    - Paper-facing dataset / split / protocol source of truth.
-4. `storyline_query_to_patch_v2_active.md`
+4. `experiment_route_ab_matrix_202604.md`
+   - First matched `100`-epoch decision matrix for Route A vs Route B.
+5. `storyline_query_to_patch_v2_active.md`
    - Cross-line storyline and interpretation boundary.
    - Start here when asking "what happened?" or "which result is valid?"
-5. `hypothesis_matrix_geo_teacher_v1.md`
+6. `hypothesis_matrix_geo_teacher_v1.md`
    - Paper-facing geo-teacher hypothesis sheet.
-6. `hypothesis_matrix_active.md`
+7. `hypothesis_matrix_active.md`
    - Hypotheses, supporting evidence, current status, and next minimal tests.
-7. `scanobjectnn_ft_policy_audit_active.md`
+8. `scanobjectnn_ft_policy_audit_active.md`
    - Exact list of old ScanObjectNN FT result families that are now
      historical/internal because they came from the earlier `file`-split
      policy.
-8. `migration_cross_primitive_to_geo_teacher_202604.md`
+9. `migration_cross_primitive_to_geo_teacher_202604.md`
    - Old-claim to new-claim migration note.
-9. `spec_geo_teacher_vocab_v1.md`
+10. `spec_geo_teacher_vocab_v1.md`
    - Paper-facing canonical task vocabulary.
-10. `execution_backlog_active.md`
+11. `execution_backlog_active.md`
    - Canonical local-only execution backlog and gating rules.
    - Start here when asking "what should run next locally?"
-11. `restart_plan_patchnepa_data_v2_20260303.md`
+12. `restart_plan_patchnepa_data_v2_20260303.md`
    - Active investigation memo for the current v2 token-path branch.
-12. `patch_nepa_stage2_active.md`
+13. `patch_nepa_stage2_active.md`
    - Active mainline policy and stage-2 execution rules.
-13. `runlog_patch_nepa_202602.md`
+14. `runlog_patch_nepa_202602.md`
    - Raw execution ledger for Patch-NEPA jobs.
-14. `benchmark_scanobjectnn_variant.md`
+15. `benchmark_scanobjectnn_variant.md`
    - Canonical headline ScanObjectNN benchmark table.
-15. `../code_inventory_active.md`
+16. `../code_inventory_active.md`
    - Canonical code-organization boundary for current path ownership.
 
 ## Machine-Specific Notes
@@ -90,6 +92,7 @@ Current short answer:
   - `scripts/abci/submit_patchnepa_current_ft.sh`
   - `scripts/abci/submit_patchnepa_current_cpac.sh`
   - `scripts/abci/submit_patchnepa_current_cqa_pretrain.sh` (experimental)
+  - `scripts/abci/submit_patchnepa_geo_teacher_compare_pretrain.sh`
 
 ## Code Boundary
 
@@ -120,8 +123,13 @@ An additive explicit-query CQA branch now exists alongside the current
 - fixed vocab spec: `spec_cqa_vocab.md`
 - canonical config home:
   - `nepa3d/tracks/patch_nepa/cqa/configs/shapenet_unpaired_mix_v2_cqa.yaml`
+- current matched-compare configs:
+  - `nepa3d/tracks/patch_nepa/cqa/configs/shapenet_geo_teacher_packed_distance_only_v1.yaml`
+  - `nepa3d/tracks/patch_nepa/cqa/configs/shapenet_geo_teacher_packed_distnorm_unsigned_v1.yaml`
 - maintained wrapper default:
   - `nepa3d/tracks/patch_nepa/cqa/configs/shapenet_unpaired_mix_v2_cqa.yaml`
+- matched-compare wrapper:
+  - `scripts/abci/submit_patchnepa_geo_teacher_compare_pretrain.sh`
 - historical top-level compatibility copy:
   - `nepa3d/configs/shapenet_unpaired_mix_v2_cqa.yaml`
 - canonical audit script:
