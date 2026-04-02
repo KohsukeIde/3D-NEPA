@@ -23,6 +23,10 @@ for this machine, while ABCI-facing entrypoints are kept separately under
 
 ## Files
 
+- `patchnepa_data/`
+  - local-only data/cache preparation launchers for this workstation
+  - use this when the run assumes `/mnt/.../3D-NEPA-data`, local timeout
+    policy, or local resume behavior
 - `patchnepa_local_queue.tsv`
   - machine-readable queue manifest
 - `patchnepa_local_queue_runner.sh`

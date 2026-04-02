@@ -44,6 +44,16 @@ Point-MAE and PointGPT.
 15. `../code_inventory_active.md`
    - Canonical code-organization boundary for current path ownership.
 
+## Machine-Specific Notes
+
+Workstation-specific operational notes for `itachi` live under:
+
+- `itachi/README.md`
+- `itachi/local_data_ops_202604.md`
+
+These are local execution notes only. Do not treat them as paper-facing or
+ABCI-facing source-of-truth docs.
+
 ## Collaborator Quick Path
 
 If a collaborator asks:

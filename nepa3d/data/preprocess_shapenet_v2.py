@@ -1267,6 +1267,22 @@ def _worker_entry(
         send_conn.close()
 
 
+def _recv_worker_result(
+    recv_conn: Any,
+    *,
+    task: Tuple[str, str, int],
+    proc: Any,
+) -> Optional[str]:
+    mesh_path = task[0]
+    try:
+        return recv_conn.recv()
+    except EOFError:
+        exit_code = proc.exitcode
+        if int(exit_code or 0) != 0:
+            return f"{mesh_path}: RuntimeError: worker closed result pipe early (exit code {exit_code})"
+        return None
+
+
 def _run_with_task_timeouts(
     tasks: List[Tuple[str, str, int]],
     *,
@@ -1308,9 +1324,9 @@ def _run_with_task_timeouts(
             elapsed_sec = float(time.monotonic() - float(state["start"]))
 
             if recv_conn.poll():
-                err = recv_conn.recv()
-                proc.join(timeout=0.1)
+                err = _recv_worker_result(recv_conn, task=task, proc=proc)
                 recv_conn.close()
+                proc.join()
                 if err is not None:
                     errors.append(str(err))
                 pbar.update(1)
@@ -1319,12 +1335,12 @@ def _run_with_task_timeouts(
             if not proc.is_alive():
                 err = None
                 if recv_conn.poll():
-                    err = recv_conn.recv()
+                    err = _recv_worker_result(recv_conn, task=task, proc=proc)
                 elif int(proc.exitcode or 0) != 0:
                     mesh_path = task[0]
                     err = f"{mesh_path}: RuntimeError: worker exited with code {proc.exitcode}"
                 recv_conn.close()
-                proc.join(timeout=0.1)
+                proc.join()
                 if err is not None:
                     errors.append(str(err))
                 pbar.update(1)
@@ -1336,6 +1352,8 @@ def _run_with_task_timeouts(
                 if proc.is_alive() and hasattr(proc, "kill"):
                     proc.kill()
                     proc.join(timeout=float(timeout_grace_sec))
+                if not proc.is_alive():
+                    proc.join()
                 recv_conn.close()
                 mesh_path = task[0]
                 reason = f"TimeoutError: exceeded {float(task_timeout_sec):.1f}s"

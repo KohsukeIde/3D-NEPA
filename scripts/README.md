@@ -54,6 +54,8 @@ If it is maintained and ABCI-facing, it belongs in `scripts/abci/`.
 - `scripts/local/`
   - maintained local-only queue manifests, runners, and workstation pipelines
   - this is the primary local execution surface
+  - local data-preparation entrypoints should also live here, e.g.
+    `scripts/local/patchnepa_data/`
   - see `scripts/local/README.md`
 - `scripts/abci/`
   - curated collaborator-facing ABCI submit wrappers for the current PatchNEPA

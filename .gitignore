@@ -46,3 +46,4 @@ logs/pretrain/m1/runner_gpu0.log
 *.e[0-9]*
 PointGPT/
 PointGPT/
+data
