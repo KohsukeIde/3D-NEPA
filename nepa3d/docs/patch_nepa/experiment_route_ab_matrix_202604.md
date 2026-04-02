@@ -127,3 +127,15 @@ Do not claim any of the following until the compare is actually run:
 - AO-HQ belongs in the first headline-safe package
 
 This file only fixes the first fair compare.
+
+## 9. Current Itachi Automation Boundary
+
+The current local `itachi` automation covers the subset that is already
+runnable and maintained on this machine:
+
+- `ScanObjectNN` direct FT on the three paper-facing variants
+- multitype `same_context / degraded_context / controls`
+- `udf_distance` completion under same and degraded context
+
+`ShapeNetPart` remains part of the Route-A decision rule, but it is not yet in
+the maintained `itachi` post-pretrain chain.

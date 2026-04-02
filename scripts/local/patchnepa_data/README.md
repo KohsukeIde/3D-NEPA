@@ -25,6 +25,15 @@ Do not duplicate the core worker logic here. The maintained workers remain in
   - uses shared-server defaults: `WORKERS=16`, `TASK_TIMEOUT_SEC=900`, `nice=10`, `ionice best-effort/7`
 - `status_shapenet_worldvis_local.sh`
   - prints tmux/pid state, cache count, and recent log lines
+- `run_scanobjectnn_variants_local.sh`
+  - local wrapper for canonical `obj_bg / obj_only / pb_t50_rs` `v3_nonorm`
+    ScanObjectNN variant-cache preparation
+  - starts detached by default in a dedicated `tmux` session
+  - uses shared-server defaults: `WORKERS=8`, `PT_FPS_WORKERS=8`,
+    `NORMALIZE_PC=0`, `QUERY_BBOX_MODE=auto`
+- `status_scanobjectnn_variants_local.sh`
+  - prints tmux/pid state, per-variant train/test cache counts, and recent log
+    lines
 
 ## Runtime notes
 

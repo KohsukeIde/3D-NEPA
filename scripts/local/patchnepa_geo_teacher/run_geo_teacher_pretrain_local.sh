@@ -109,7 +109,7 @@ case "${LAUNCH_MODE}" in
       echo "[error] tmux not found"
       exit 1
     fi
-    if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
+    if tmux has-session -t "=${TMUX_SESSION}" 2>/dev/null; then
       echo "[info] geo-teacher pretrain already running in tmux session=${TMUX_SESSION}"
       echo "[info] log=${LOG_FILE}"
       exit 0
@@ -134,7 +134,7 @@ case "${LAUNCH_MODE}" in
     tmux new-session -d -s "${TMUX_SESSION}" \
       "cd '${ROOT_DIR}' && bash '${ROOT_DIR}/scripts/local/patchnepa_geo_teacher/_run_geo_teacher_pretrain_inner.sh'"
     sleep 1
-    if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
+    if tmux has-session -t "=${TMUX_SESSION}" 2>/dev/null; then
       echo "[info] started detached geo-teacher pretrain in tmux"
       echo "[info] session=${TMUX_SESSION}"
       echo "[info] log=${LOG_FILE}"

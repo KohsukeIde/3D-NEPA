@@ -20,6 +20,13 @@ Do not put collaborator-facing ABCI submit wrappers here. Those remain under
   - lightweight status and log-tail view
 - `_run_geo_teacher_pretrain_inner.sh`
   - worker-side local DDP entrypoint used by the detached launcher
+- `run_geo_teacher_posttrain_local.sh`
+  - detached local launcher for downstream jobs after the current geo-teacher
+    pretrain checkpoint is ready
+- `status_geo_teacher_posttrain_local.sh`
+  - lightweight status and artifact-count view for the downstream chain
+- `_run_geo_teacher_posttrain_inner.sh`
+  - local orchestration entrypoint for ScanObjectNN FT and Route-B evals
 
 ## Default run
 
@@ -56,6 +63,30 @@ Foreground smoke:
 ```bash
 FOREGROUND=1 MAX_STEPS=2 bash scripts/local/patchnepa_geo_teacher/run_geo_teacher_pretrain_local.sh
 ```
+
+Launch downstream chain after pretrain:
+
+```bash
+bash scripts/local/patchnepa_geo_teacher/run_geo_teacher_posttrain_local.sh
+```
+
+Check downstream chain status:
+
+```bash
+bash scripts/local/patchnepa_geo_teacher/status_geo_teacher_posttrain_local.sh
+```
+
+The current local downstream chain covers the runnable subset of the Route A/B
+matrix:
+
+- Route A:
+  - `ScanObjectNN` direct FT for `obj_bg`, `obj_only`, `pb_t50_rs`
+- Route B:
+  - multitype same/offdiag/control suite
+  - `udf_distance` completion under same and degraded context
+
+`ShapeNetPart` is still part of the scientific decision rule, but it is not
+yet wired into the maintained local chain on `itachi`.
 
 ## W&B
 

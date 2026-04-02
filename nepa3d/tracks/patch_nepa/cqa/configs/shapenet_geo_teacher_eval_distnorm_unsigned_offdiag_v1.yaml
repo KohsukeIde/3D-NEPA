@@ -1,0 +1,22 @@
+dataset_version: v2_cqa
+codec_version: cqa_v2
+replacement: false
+mix_seed: 0
+mix_num_samples: 4995
+
+datasets:
+  - name: udf_distance
+    cache_root: data/shapenet_cache_v2_20260401_worldvis
+    split: test
+    weight: 1.0
+    task_name: udf_distance
+    context_source: pc_bank
+    codec_version: cqa_v2
+
+  - name: mesh_normal_unsigned
+    cache_root: data/shapenet_cache_v2_20260401_worldvis
+    split: test
+    weight: 1.0
+    task_name: mesh_normal_unsigned
+    context_source: pc_bank
+    codec_version: cqa_v2
