@@ -46,6 +46,7 @@ Use this index to avoid mixing canonical active benchmark docs with legacy ledge
 
 - ScanObjectNN core3 tables: `classification/results_scanobjectnn_core3_active.md`
 - ScanObjectNN review tables: `classification/results_scanobjectnn_review_active.md`
+- ScanObjectNN PointGPT / pointNEPA sidecar ledger: `classification/results_scanobjectnn_pointgpt_pointnepa_active.md`
 - ModelNet40 PointGPT-style protocol: `classification/results_modelnet40_pointgpt_active.md`
 - UCPR/CPAC active results: `completion/results_ucpr_cpac_active.md`
 - UCPR/CPAC table planning: `completion/eccv_ucpr_cpac_tables.md`
