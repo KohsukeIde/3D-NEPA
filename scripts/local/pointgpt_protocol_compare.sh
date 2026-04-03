@@ -362,4 +362,11 @@ SUMMARY_PATH="${LOG_ROOT}/${RUN_TAG}_summary.md"
   run_protocol_variant "hardest" "${HARDEST_CONFIG_PATH}" "${FT_MAX_EPOCH_HARDEST}" "strict" "1" "29636"
 } | tee "${SUMMARY_PATH}"
 
+DONE_PATH="${SUMMARY_PATH}.done"
+cat > "${DONE_PATH}" <<EOF
+run_tag=${RUN_TAG}
+date=$(date -Is)
+summary=${SUMMARY_PATH}
+EOF
+
 echo "[done] summary=${SUMMARY_PATH}"
