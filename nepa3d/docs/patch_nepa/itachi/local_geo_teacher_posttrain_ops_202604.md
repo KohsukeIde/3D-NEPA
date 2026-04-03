@@ -41,6 +41,17 @@ Route A subset:
   - `pb_t50_rs`
 - budget:
   - `300` epochs each
+- execution:
+  - run one variant at a time
+  - `4 GPU` local DDP per FT run
+  - direct `scan_h5` input from raw `ScanObjectNN` H5 roots
+  - H5 direct eval uses on-the-fly deterministic FPS when `pt_sample_mode_eval=fps`
+    so the eval crop policy is aligned with Point-MAE / PCP-MAE style FPS eval
+- `ShapeNetPart` direct part-seg FT:
+  - budget `300` epochs
+  - `4 GPU` local DDP
+  - raw txt root `data/shapenetcore_partanno_segmentation_benchmark_v0_normal`
+  - fetched locally via `scripts/local/patchnepa_data/prepare_shapenetpart_local.sh`
 
 Route B subset:
 
@@ -51,10 +62,10 @@ Route B subset:
 - `udf_distance` completion:
   - same context
   - degraded context
-
-Not yet wired into the maintained local chain:
-
-- `ShapeNetPart`
+- analysis-only extension:
+  - frozen `curvature` probe from `answer_hidden`
+- launch order:
+  - after all Route-A jobs finish
 
 ## Current local entrypoints
 
@@ -62,10 +73,22 @@ Not yet wired into the maintained local chain:
   - `scripts/local/patchnepa_geo_teacher/run_geo_teacher_posttrain_local.sh`
 - post-train status:
   - `scripts/local/patchnepa_geo_teacher/status_geo_teacher_posttrain_local.sh`
+- full `300 epoch` chain launcher:
+  - `scripts/local/patchnepa_geo_teacher/run_geo_teacher_full300_chain_local.sh`
+- full `300 epoch` chain status:
+  - `scripts/local/patchnepa_geo_teacher/status_geo_teacher_full300_chain_local.sh`
+- standalone curvature probe launcher:
+  - `scripts/local/patchnepa_geo_teacher/run_geo_teacher_curvature_probe_local.sh`
+- standalone curvature probe status:
+  - `scripts/local/patchnepa_geo_teacher/status_geo_teacher_curvature_probe_local.sh`
 - ScanObjectNN variant-cache launcher:
   - `scripts/local/patchnepa_data/run_scanobjectnn_variants_local.sh`
 - ScanObjectNN variant-cache status:
   - `scripts/local/patchnepa_data/status_scanobjectnn_variants_local.sh`
+- ShapeNetPart data prep launcher:
+  - `scripts/local/patchnepa_data/prepare_shapenetpart_local.sh`
+- local result ledger:
+  - `nepa3d/docs/patch_nepa/itachi/results_geo_teacher_itachi_active.md`
 
 ## Launch policy
 
@@ -81,10 +104,22 @@ Check status:
 bash scripts/local/patchnepa_geo_teacher/status_geo_teacher_posttrain_local.sh
 ```
 
+Run only the curvature probe against the current checkpoint:
+
+```bash
+bash scripts/local/patchnepa_geo_teacher/run_geo_teacher_curvature_probe_local.sh
+```
+
 Foreground debug:
 
 ```bash
 FOREGROUND=1 bash scripts/local/patchnepa_geo_teacher/run_geo_teacher_posttrain_local.sh
+```
+
+Queue the full `300 epoch` local chain:
+
+```bash
+bash scripts/local/patchnepa_geo_teacher/run_geo_teacher_full300_chain_local.sh
 ```
 
 ## Local resource policy
@@ -92,25 +127,32 @@ FOREGROUND=1 bash scripts/local/patchnepa_geo_teacher/run_geo_teacher_posttrain_
 The current downstream chain assumes:
 
 - `4 x A100 80GB`
-- three independent `ScanObjectNN` FT jobs on `GPU 0,1,2`
-- Route-B evals on `GPU 3`
-
-The current local chain uses one GPU per FT job instead of local multi-GPU FT.
-This keeps the three ScanObjectNN variants moving at once while preserving one
-GPU for the geometry readouts.
+- one `ScanObjectNN` FT at a time with `4 GPU` local DDP
+- one `ShapeNetPart` FT with `4 GPU` local DDP
+- `scan_h5` direct input for FT; no variant-cache prep required
+- ShapeNetPart raw txt input under `data/shapenetcore_partanno_segmentation_benchmark_v0_normal`
+- Route-B evals after FT completes
 
 ## W&B note
 
-Local FT jobs can use W&B, but the maintained post-train chain defaults to
-offline mode unless explicitly overridden at launch time.
+Local FT jobs on `itachi` should use W&B online logging by default.
 
-Reason:
+Maintained default:
 
-- local W&B auth on this machine is not guaranteed to be active at every login
-- downstream automation should not fail just because online logging is missing
+- `FT_WANDB_MODE=online`
+- `FT_WANDB_PROJECT=patchnepa-geo-teacher-scanobjectnn`
+- `PARTSEG_WANDB_MODE=online`
+- `PARTSEG_WANDB_PROJECT=patchnepa-geo-teacher-shapenetpart`
 
-Override when desired:
+Maintained ShapeNetPart fetch path:
+
+- primary:
+  `https://huggingface.co/datasets/cminst/ShapeNet/resolve/main/shapenetcore_partanno_segmentation_benchmark_v0_normal.zip`
+- fallback:
+  `https://shapenet.cs.stanford.edu/media/shapenetcore_partanno_segmentation_benchmark_v0_normal.zip`
+
+Override only when needed:
 
 ```bash
-FT_WANDB_MODE=online bash scripts/local/patchnepa_geo_teacher/run_geo_teacher_posttrain_local.sh
+FT_WANDB_MODE=offline bash scripts/local/patchnepa_geo_teacher/run_geo_teacher_posttrain_local.sh
 ```
