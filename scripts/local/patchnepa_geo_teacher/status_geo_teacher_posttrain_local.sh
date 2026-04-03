@@ -15,6 +15,7 @@ PRETRAIN_SAVE_DIR="${PRETRAIN_SAVE_DIR:-${PRETRAIN_SAVE_ROOT}/${PRETRAIN_RUN_TAG
 CKPT_NAME="${CKPT_NAME:-ckpt_final.pt}"
 CKPT_PATH="${CKPT_PATH:-${PRETRAIN_SAVE_DIR}/${CKPT_NAME}}"
 FT_SAVE_ROOT="${FT_SAVE_ROOT:-${ROOT_DIR}/runs/patchcls_itachi}"
+PARTSEG_SAVE_ROOT="${PARTSEG_SAVE_ROOT:-${ROOT_DIR}/runs/patchpart_itachi}"
 SUITE_RESULT_ROOT="${SUITE_RESULT_ROOT:-${ROOT_DIR}/results/cqa_multitype_itachi}"
 COMPLETION_RESULT_ROOT="${COMPLETION_RESULT_ROOT:-${ROOT_DIR}/results/cqa_completion_itachi}"
 
@@ -51,6 +52,7 @@ else
 fi
 echo "log=${LOG_FILE}"
 echo "ft_run_dirs=$(find "${FT_SAVE_ROOT}" -maxdepth 1 -mindepth 1 -type d -name "${PRETRAIN_RUN_TAG}__ft_*" 2>/dev/null | wc -l || true)"
+echo "partseg_run_dirs=$(find "${PARTSEG_SAVE_ROOT}" -maxdepth 1 -mindepth 1 -type d -name "${PRETRAIN_RUN_TAG}__ft_shapenetpart_*" 2>/dev/null | wc -l || true)"
 echo "suite_json=$(find "${SUITE_RESULT_ROOT}" -maxdepth 1 -type f -name "${PRETRAIN_RUN_TAG}*.json" 2>/dev/null | wc -l || true)"
 echo "completion_json=$(find "${COMPLETION_RESULT_ROOT}" -maxdepth 1 -type f -name "${PRETRAIN_RUN_TAG}*.json" 2>/dev/null | wc -l || true)"
 

@@ -29,6 +29,7 @@ from torch.utils.data import Dataset
 from torch.utils.data import get_worker_info
 
 from nepa3d.data.dataset import _apply_point_aug
+from nepa3d.utils.fps import fps_order
 
 
 @dataclass
@@ -365,7 +366,9 @@ class PatchClsArrayDataset(Dataset):
         self.mc_eval_k = int(mc_eval_k)
         self.aug_eval = bool(aug_eval)
         self.deterministic_eval_sampling = bool(deterministic_eval_sampling)
-        self._warned_fps_fallback = False
+        # Cache full deterministic FPS orders lazily per-sample.
+        # ScanObjectNN h5 uses fixed-size point sets, so this stays modest.
+        self._fps_cache: Dict[int, np.ndarray] = {}
 
     def __len__(self) -> int:
         return int(self.points.shape[0])
@@ -378,21 +381,39 @@ class PatchClsArrayDataset(Dataset):
             self._rng = np.random.RandomState(seed)
         return self._rng
 
-    def _sample_indices(self, n_total: int, *, sample_uid: int = 0) -> np.ndarray:
-        n = min(self.n_point, int(n_total))
+    def _sample_rng(self, *, sample_uid: int = 0) -> np.random.RandomState:
         if (not self.aug) and self.deterministic_eval_sampling:
             seed = (int(self.rng_seed) * 1315423911 + int(sample_uid) * 2654435761) & 0xFFFFFFFF
-            rng = np.random.RandomState(seed)
-        else:
-            rng = self._get_rng()
-        # For direct h5 route we don't have precomputed fps order.
-        # Keep behavior explicit and deterministic-per-worker.
-        if self.sample_mode in {"fps", "fps_then_sample"} and (not self._warned_fps_fallback):
-            print(
-                f"[warn] PatchClsArrayDataset: sample_mode={self.sample_mode} but no precomputed fps order in h5 route; "
-                "using random subset."
-            )
-            self._warned_fps_fallback = True
+            return np.random.RandomState(seed)
+        return self._get_rng()
+
+    def _full_fps_order(self, pc_xyz: np.ndarray, *, cache_key: Optional[int] = None) -> np.ndarray:
+        if cache_key is not None:
+            cached = self._fps_cache.get(int(cache_key))
+            if cached is not None and int(cached.shape[0]) == int(pc_xyz.shape[0]):
+                return cached
+        order = fps_order(pc_xyz, int(pc_xyz.shape[0])).astype(np.int64, copy=False)
+        if cache_key is not None:
+            self._fps_cache[int(cache_key)] = order
+        return order
+
+    def _sample_indices(self, pc_xyz: np.ndarray, *, sample_uid: int = 0, cache_key: Optional[int] = None) -> np.ndarray:
+        n_total = int(pc_xyz.shape[0])
+        n = min(self.n_point, n_total)
+        rng = self._sample_rng(sample_uid=sample_uid)
+
+        if self.sample_mode in {"fps", "fps_then_sample"}:
+            full_order = self._full_fps_order(pc_xyz, cache_key=cache_key)
+            if self.sample_mode == "fps":
+                return full_order[:n].astype(np.int64, copy=False)
+
+            point_all = min(n_total, _pointmae_point_all(n))
+            prefix = full_order[:point_all]
+            if int(prefix.shape[0]) <= n:
+                return prefix[rng.permutation(int(prefix.shape[0]))].astype(np.int64, copy=False)
+            sel = rng.choice(int(prefix.shape[0]), size=n, replace=False)
+            return prefix[sel].astype(np.int64, copy=False)
+
         idx = rng.choice(n_total, size=n, replace=False)
         return idx.astype(np.int64, copy=False)
 
@@ -438,14 +459,14 @@ class PatchClsArrayDataset(Dataset):
         if self.mc_eval_k > 1:
             xyz_list = []
             for k in range(self.mc_eval_k):
-                idx = self._sample_indices(pc_xyz.shape[0], sample_uid=(index * 10007 + k))
+                idx = self._sample_indices(pc_xyz, sample_uid=(index * 10007 + k), cache_key=index)
                 xyz = pc_xyz[idx]
                 if self.aug_eval:
                     xyz = self._maybe_augment(xyz)
                 xyz_list.append(xyz)
             xyz = np.stack(xyz_list, axis=0)  # (K,N,3)
         else:
-            idx = self._sample_indices(pc_xyz.shape[0], sample_uid=index)
+            idx = self._sample_indices(pc_xyz, sample_uid=index, cache_key=index)
             xyz = pc_xyz[idx]
             xyz = self._maybe_augment(xyz)
 

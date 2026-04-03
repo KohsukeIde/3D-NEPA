@@ -100,7 +100,8 @@ fi
 if [[ "${FOREGROUND:-0}" == "1" ]]; then
   echo "[info] starting in foreground"
   echo "[info] log=${LOG_FILE}"
-  exec bash "${ROOT_DIR}/scripts/local/patchnepa_geo_teacher/_run_geo_teacher_pretrain_inner.sh" 2>&1 | tee -a "${LOG_FILE}"
+  bash "${ROOT_DIR}/scripts/local/patchnepa_geo_teacher/_run_geo_teacher_pretrain_inner.sh" 2>&1 | tee -a "${LOG_FILE}"
+  exit "${PIPESTATUS[0]}"
 fi
 
 case "${LAUNCH_MODE}" in
