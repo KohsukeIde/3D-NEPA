@@ -50,4 +50,6 @@ PointGPT/
 # Nested repos (do not track)
 PCP-MAE/
 Point-MAE/
-data
+
+# Local dataset symlink at repo root
+/data
