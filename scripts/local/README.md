@@ -1,25 +1,9 @@
 # Local Ops
 
-This directory is the maintained local-only operations area for PatchNEPA and
-external baseline work on this workstation.
+This directory is the maintained local-only operations area for PatchNEPA.
 
-It exists because local GPU execution is the current default execution surface
-for this machine, while ABCI-facing entrypoints are kept separately under
-`scripts/abci/`.
-
-## Boundary
-
-- this folder is the source of truth for workstation execution
-- on this PC, any script you directly launch should come from this folder
-- local assumptions are allowed here:
-  - fixed small-GPU layouts such as 1-2 GPU DDP
-  - local log roots under `logs/local/`
-  - local W&B naming / resumption conventions
-  - machine-specific queue manifests
-- if a launcher is meant for ABCI users, it does not belong here
-- `scripts/sanity/pointgpt_*_local_*.sh` are compatibility shims only
-- science and benchmark interpretation do not belong here; keep those in
-  `nepa3d/docs/...`
+It exists because local GPU execution is now the primary launch surface until
+NeurIPS, while PBS/QF runners are no longer the default operational path.
 
 ## Files
 
@@ -42,18 +26,9 @@ for this machine, while ABCI-facing entrypoints are kept separately under
   - PointGPT local 2-GPU DDP pretrain wrapper
 - `pointgpt_finetune_local_ddp.sh`
   - PointGPT local 2-GPU DDP ScanObjectNN fine-tune wrapper
-  - supports both legacy `test-as-val` and strict `train->val` policy
-- `pointgpt_test_local.sh`
-  - PointGPT local test wrapper for final test-set evaluation from a chosen ckpt
 - `pointgpt_nepa_vs_cdl12_pipeline.sh`
   - local sequential pipeline:
     `nepa_cosine pretrain -> cdl12 pretrain -> obj_bg fine-tune compare`
-- `pointgpt_ft_recipe_matrix_2x2.sh`
-  - local sequential matrix:
-    `pretrain objective {nepa_cosine, cdl12} x FT recipe {cls-only, PointGPT FT}`
-- `pointgpt_protocol_compare.sh`
-  - local sequential PointGPT baseline protocol audit:
-    `test-as-val vs strict(train->val)` under the original PointGPT FT recipe
 
 ## Source of Truth
 
@@ -64,8 +39,6 @@ for this machine, while ABCI-facing entrypoints are kept separately under
   - `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`
 - execution order, gating, and local budget live in:
   - `nepa3d/docs/patch_nepa/execution_backlog_active.md`
-- local-vs-ABCI operational boundary lives in:
-  - `nepa3d/docs/operations/README.md`
 
 ## Usage
 
@@ -81,7 +54,7 @@ Check status:
 bash scripts/local/patchnepa_local_status.sh
 ```
 
-Run the current world-package visibility-first exploratory branch directly:
+Run the current visibility-first exploratory branch directly:
 
 ```bash
 bash scripts/local/patchnepa_visocc_branch.sh
@@ -95,8 +68,6 @@ bash scripts/local/patchnepa_visocc_branch.sh
 - keep launch commands relative to the repo root
 - prefer existing maintained wrappers under `scripts/pretrain/`,
   `scripts/analysis/`, and `scripts/finetune/`
-- but on this workstation, invoke them through a maintained `scripts/local/`
-  entrypoint whenever one exists
 - use direct `python -m ...` only when the maintained wrapper does not expose
   the needed knobs
 - if a branch script already manages both GPUs internally (for example

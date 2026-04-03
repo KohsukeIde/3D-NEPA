@@ -165,6 +165,11 @@ wait_for_exp_completion() {
   local label="$1"
   local exp_name="$2"
   local exp_path="$3"
+  if [[ "${exp_path}" == ./* ]]; then
+    exp_path="${POINTGPT_DIR}/${exp_path#./}"
+  elif [[ "${exp_path}" != /* ]]; then
+    exp_path="${POINTGPT_DIR}/${exp_path}"
+  fi
   local expected_epoch="$4"
   local ckpt_path="${exp_path}/ckpt-last.pth"
   local log_path=""
@@ -371,7 +376,7 @@ ensure_cdl12_pretrain() {
   fi
 
   if pgrep -af -- "--exp_name ${CDL12_EXP_NAME}" >/dev/null; then
-    wait_for_exp_completion "cdl12_pretrain_existing" "${CDL12_EXP_NAME}" "${exp_path}" "${CDL12_MAX_EPOCH}"
+    wait_for_exp_completion "cdl12_pretrain_existing" "${CDL12_EXP_NAME}" "${exp_path}" "${CDL12_MAX_EPOCH}" >&2
     printf '%s\n' "${ckpt_path}"
     return 0
   fi
@@ -390,7 +395,7 @@ ensure_cdl12_pretrain() {
     "pointgpt,pretrain,cdl12,ddp2,full,online" \
     "29557" \
     "${extra_args}"
-  wait_for_exp_completion "cdl12_pretrain" "${CDL12_EXP_NAME}" "${exp_path}" "${CDL12_MAX_EPOCH}"
+  wait_for_exp_completion "cdl12_pretrain" "${CDL12_EXP_NAME}" "${exp_path}" "${CDL12_MAX_EPOCH}" >&2
   printf '%s\n' "${ckpt_path}"
 }
 
@@ -559,6 +564,13 @@ cat > "${MATRIX_SUMMARY_PATH}" <<EOF
   - summary: \`${LOG_ROOT}/cdl12_clsonly_${RUN_TAG}_summary.md\`
 - cdl12 x pointgpt_ft:
   - summary: \`${LOG_ROOT}/cdl12_pointgptft_${RUN_TAG}_summary.md\`
+EOF
+
+DONE_PATH="${MATRIX_SUMMARY_PATH}.done"
+cat > "${DONE_PATH}" <<EOF
+run_tag=${RUN_TAG}
+date=$(date -Is)
+summary=${MATRIX_SUMMARY_PATH}
 EOF
 
 echo "[done] matrix summary written to ${MATRIX_SUMMARY_PATH}"
