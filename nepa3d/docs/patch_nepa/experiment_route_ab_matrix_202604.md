@@ -1,6 +1,6 @@
 # Route A/B Matched Compare Matrix (2026-04)
 
-Last updated: 2026-04-02
+Last updated: 2026-04-04
 
 ## 1. Purpose
 
@@ -34,7 +34,21 @@ direct geometry readouts and typed answering:
 Do not pick the paper route after ad hoc interpretation. Pick it from this
 decision rule.
 
-## 3. First Matched Matrix
+## 3. Current Interim Budget Choice
+
+After the first local `300`-epoch `distance + normal_unsigned` run, the current
+read is:
+
+- Route-A utility (`ScanObjectNN`, `ShapeNetPart`) does not materially improve
+  over the `100`-epoch pilot,
+- Route-B same-context geometry readouts do improve at `300` epochs.
+
+Therefore, for the immediate compare-and-decide loop, the interim matched
+budget is frozen back to **100 pretrain epochs**.
+
+This is an execution decision, not a final paper claim.
+
+## 4. First Matched Matrix
 
 The first compare is deliberately small:
 
@@ -53,7 +67,7 @@ All three runs should use:
 
 `mesh_ao_hq` is supplemental and should stay out of the first decision matrix.
 
-## 4. Runtime Mapping
+## 5. Runtime Mapping
 
 For the teacher-target side, the current runnable implementation is:
 
@@ -68,7 +82,7 @@ For the reconstruction side, the baseline is **not** the CQA trainer. Use the
 existing PatchNEPA reconstruction line as the internal xyz-reconstruction
 baseline.
 
-## 5. Current Local Data Boundary
+## 6. Current Local Data Boundary
 
 The first local package is tied to the current prepared cache:
 
@@ -84,7 +98,7 @@ Important:
 - `udf_surf_thickness` is present, but thickness is not in the first matched
   matrix
 
-## 6. Current Canonical Configs
+## 7. Current Canonical Configs
 
 The first teacher-target configs are:
 
@@ -102,7 +116,7 @@ These configs intentionally:
 This means one CQA pretrain epoch corresponds to one full pass over the current
 train-shape support.
 
-## 7. Launcher Boundary
+## 8. Launcher Boundary
 
 The matched teacher-target launcher should default to:
 
@@ -117,7 +131,7 @@ Current thin entrypoint:
 
 - `scripts/abci/submit_patchnepa_geo_teacher_compare_pretrain.sh`
 
-## 8. What Not To Claim Yet
+## 9. What Not To Claim Yet
 
 Do not claim any of the following until the compare is actually run:
 
@@ -128,7 +142,7 @@ Do not claim any of the following until the compare is actually run:
 
 This file only fixes the first fair compare.
 
-## 9. Current Itachi Automation Boundary
+## 10. Current Itachi Automation Boundary
 
 The current local `itachi` automation covers the subset that is already
 runnable and maintained on this machine:

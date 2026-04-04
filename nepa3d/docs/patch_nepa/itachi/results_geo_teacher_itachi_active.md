@@ -11,6 +11,30 @@ It is intentionally separate from the paper-facing benchmark pages:
 - each entry must state whether it is provisional or canonical,
 - only canonically aligned runs should later be copied into headline tables.
 
+Current compare note:
+
+- `300 epoch` improves Route-B same-context geometry readouts,
+- but does not materially improve Route-A utility over the `100 epoch` pilot,
+- so the current interim compare budget is frozen at `100 pretrain epochs`
+  while the next arm comparisons are assembled.
+
+Current active compare arm:
+
+- `geo_teacher_distance_only_100ep_itachi_main`
+  - status:
+    - pretrain running
+    - `100` epochs
+    - `4 GPU` DDP
+    - `udf_distance` only
+  - downstream chain:
+    - queued and waiting for pretrain completion
+    - planned readouts:
+      - `ScanObjectNN`
+      - `ShapeNetPart`
+      - single-task Route-B (`udf_distance`)
+      - `completion`
+      - `curvature`
+
 ## Current checkpoint
 
 - pretrain checkpoint:
@@ -23,7 +47,50 @@ It is intentionally separate from the paper-facing benchmark pages:
   - pilot
   - not the final `300`-epoch external-comparison recipe
 
+## Current full-budget checkpoint
+
+- pretrain checkpoint:
+  - `runs/cqa_itachi/geo_teacher_distnorm_unsigned_300ep_itachi_main/ckpt_final.pt`
+- pretrain regime:
+  - `300` epochs
+  - `udf_distance + mesh_normal_unsigned`
+  - `packed + multihead + per_task`
+  - `4 GPU` DDP
+  - `global_step = 105300`
+- status:
+  - completed
+  - this is the current full-budget local result for the `distance + normal_unsigned` arm
+
 ## Route A: ScanObjectNN utility
+
+### Current full-budget (`300 epoch` pretrain) read
+
+- `obj_bg`
+  - completed
+  - canonical read:
+    - `test_acc = 0.8451`
+  - delta vs `100 epoch` pilot:
+    - `+0.0000`
+  - current interpretation:
+    - effectively unchanged from the `100 epoch` pilot
+- `obj_only`
+  - completed
+  - canonical read:
+    - `test_acc = 0.8485`
+  - delta vs `100 epoch` pilot:
+    - `+0.0017`
+  - current interpretation:
+    - slight gain over the `100 epoch` pilot
+    - still below `C035 obj_only = 0.8520`
+- `pb_t50_rs`
+  - completed
+  - canonical read:
+    - `test_acc = 0.8046`
+  - delta vs `100 epoch` pilot:
+    - `+0.0014`
+  - current interpretation:
+    - slight gain over the `100 epoch` pilot
+    - still below corrected `Point-MAE pb_t50_rs = 0.8459`
 
 ### Current canonical rerun status
 
@@ -67,6 +134,19 @@ It is intentionally separate from the paper-facing benchmark pages:
     - still below corrected `Point-MAE pb_t50_rs = 0.8459`
 
 ## Route A: ShapeNetPart utility
+
+- `ShapeNetPart` (`300 epoch` pretrain)
+  - completed
+  - canonical read:
+    - `TEST acc = 0.9419`
+    - `TEST class_avg_iou = 0.8261`
+    - `TEST instance_avg_iou = 0.8499`
+  - delta vs `100 epoch` pilot:
+    - `class_avg_iou: -0.0052`
+    - `instance_avg_iou: -0.0017`
+  - current interpretation:
+    - slightly worse than the `100 epoch` pilot
+    - still below `Point-MAE 86.1` and `PCP-MAE 84.9 Cls.mIoU`
 
 - `ShapeNetPart`
   - completed
@@ -117,6 +197,41 @@ It is intentionally separate from the paper-facing benchmark pages:
   - `pb_t50_rs = 0.7710`
 
 ## Route B: Analysis / capability
+
+### Current full-budget (`300 epoch` pretrain) read
+
+- multitype same/offdiag:
+  - same-context correct:
+    - `udf_distance token_acc = 0.5650`
+    - `mesh_normal_unsigned token_acc = 0.7500`
+  - offdiag correct:
+    - `udf_distance token_acc = 0.1460`
+    - `mesh_normal_unsigned token_acc = 0.4350`
+  - delta vs `100 epoch` pilot:
+    - strong same-context gain
+    - modest offdiag gain
+
+- completion:
+  - same-context:
+    - `MAE = 0.00635`
+    - `IoU@0.05 = 0.9651`
+  - offdiag:
+    - `MAE = 0.1178`
+    - `IoU@0.05 = 0.4785`
+  - delta vs `100 epoch` pilot:
+    - same-context improved clearly
+    - offdiag improved slightly
+
+- curvature probe:
+  - same-context:
+    - `MAE = 0.1202`
+    - `pearson_r = 0.6795`
+  - offdiag:
+    - `MAE = 0.2041`
+    - `pearson_r = 0.1506`
+  - delta vs `100 epoch` pilot:
+    - same-context improved
+    - offdiag worsened
 
 ### Current automatic chain status
 
@@ -243,19 +358,19 @@ Current read:
   - queued in tmux session
     `geo_teacher_distnorm_unsigned_300ep_itachi_main_chain`
   - current state:
-    - `300 epoch` pretrain is running
-    - `4 GPU` DDP
-    - `batch_size = 32 / GPU`
-    - `global batch = 128`
-    - current observed progress:
-      - around `step 622 / 105300`
-      - around `ep 001` late phase
+    - `300 epoch` pretrain completed
+    - corrected downstream rerun completed
+    - the first downstream attempt was invalid:
+      - it accidentally reused the `100 epoch` checkpoint
+      - symptom:
+        - `obj_bg` and `obj_only` `test_metrics.json` were exactly identical to the `100 epoch` run
+      - cause:
+        - stale `CKPT_PATH` leaked into the downstream launcher
+    - invalid `300ep` downstream artifacts were archived on `2026-04-04`
+    - corrected downstream used:
+      - `ckpt=/home/minesawa/ssl/3D-NEPA/runs/cqa_itachi/geo_teacher_distnorm_unsigned_300ep_itachi_main/ckpt_final.pt`
   - planned flow:
-    - `300 epoch` ShapeNet pretrain
-    - `ScanObjectNN obj_bg -> obj_only -> pb_t50_rs`
-    - `ShapeNetPart`
-    - Route B same/offdiag/completion
-    - curvature probe
+    - completed
 
 ## Update rule
 
