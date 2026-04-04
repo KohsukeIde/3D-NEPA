@@ -44,12 +44,25 @@ logs/pretrain/m1/runner_gpu0.log
 *.out
 *.o[0-9]*
 *.e[0-9]*
-PointGPT/
-PointGPT/
 
-# Nested repos (do not track)
-PCP-MAE/
-Point-MAE/
+# PointGPT fork (track source; ignore data / runs / weights)
+# Nested `.git` was moved aside for vendoring; keep backup untracked
+PointGPT.git.backup/
 
-# Local dataset symlink at repo root
-/data
+PointGPT/data/
+PointGPT/checkpoints/
+PointGPT/experiments/
+PointGPT/wandb/
+PointGPT/**/__pycache__/
+PointGPT/**/*.py[cod]
+PointGPT/**/*.log
+PointGPT/**/*.pth
+PointGPT/**/*.pt
+PointGPT/**/*.ckpt
+PointGPT/**/*.safetensors
+PointGPT/**/*.npz
+PointGPT/**/*.h5
+PointGPT/knn_cuda/**/*.so
+PointGPT/knn_cuda/**/build/
+PointGPT/.venv/
+PointGPT/.pytest_cache/
