@@ -394,7 +394,7 @@ ensure_cdl12_pretrain() {
     "${CDL12_EXP_NAME}" \
     "pointgpt,pretrain,cdl12,ddp2,full,online" \
     "29557" \
-    "${extra_args}"
+    "${extra_args}" >&2
   wait_for_exp_completion "cdl12_pretrain" "${CDL12_EXP_NAME}" "${exp_path}" "${CDL12_MAX_EPOCH}" >&2
   printf '%s\n' "${ckpt_path}"
 }

@@ -290,7 +290,7 @@ ensure_pretrain() {
     "${POINTNEPA_EXP_NAME}" \
     "pointgpt,s,pointnepa,pretrain,vitshift,maskoff,ddp2" \
     "29681" \
-    "${meta_path}"
+    "${meta_path}" >&2
   load_meta_for_exp "${POINTNEPA_EXP_NAME}"
   exp_path="${EXPERIMENT_PATH}"
   if [[ "${exp_path}" == ./* ]]; then
