@@ -13,6 +13,7 @@ PID_FILE="${PID_FILE:-${LOG_ROOT}/${RUN_TAG}.pid}"
 DEFAULT_SESSION="${RUN_TAG//[^[:alnum:]_]/_}"
 TMUX_SESSION="${TMUX_SESSION:-${DEFAULT_SESSION}}"
 LAUNCH_MODE="${LAUNCH_MODE:-tmux}"
+ENV_FILE="${ENV_FILE:-${LOG_ROOT}/.${TMUX_SESSION}.env}"
 
 mkdir -p "${LOG_ROOT}" "${SAVE_ROOT}"
 
@@ -115,6 +116,8 @@ case "${LAUNCH_MODE}" in
       echo "[info] log=${LOG_FILE}"
       exit 0
     fi
+    : > "${ENV_FILE}"
+    chmod 600 "${ENV_FILE}"
     for name in \
       ROOT_DIR RUN_TAG SAVE_DIR LOG_ROOT LOG_FILE PID_FILE PYTHON_BIN MIX_CONFIG \
       CUDA_VISIBLE_DEVICES NPROC_PER_NODE MASTER_PORT EPOCHS SAVE_EVERY SAVE_EVERY_STEPS \
@@ -130,10 +133,10 @@ case "${LAUNCH_MODE}" in
       WANDB_LOG_EVERY WANDB_DIR RUN_EVAL_CONTROLS RUN_EVAL_CURVE OMP_NUM_THREADS \
       MKL_NUM_THREADS OPENBLAS_NUM_THREADS NUMEXPR_NUM_THREADS
     do
-      tmux set-environment -g "${name}" "${!name:-}"
+      printf 'export %s=%q\n' "${name}" "${!name:-}" >> "${ENV_FILE}"
     done
     tmux new-session -d -s "${TMUX_SESSION}" \
-      "cd '${ROOT_DIR}' && bash '${ROOT_DIR}/scripts/local/patchnepa_geo_teacher/_run_geo_teacher_pretrain_inner.sh'"
+      "cd '${ROOT_DIR}' && source '${ENV_FILE}' && bash '${ROOT_DIR}/scripts/local/patchnepa_geo_teacher/_run_geo_teacher_pretrain_inner.sh'"
     sleep 1
     if tmux has-session -t "=${TMUX_SESSION}" 2>/dev/null; then
       echo "[info] started detached geo-teacher pretrain in tmux"
