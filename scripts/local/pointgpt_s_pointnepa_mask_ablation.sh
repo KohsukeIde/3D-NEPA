@@ -292,7 +292,7 @@ ensure_pointnepa_pretrain() {
     "pointgpt,s,pointnepa,pretrain,maskoff,ddp2" \
     "29671" \
     "${extra_args}" \
-    "${meta_path}"
+    "${meta_path}" >&2
   load_meta_for_exp "${POINTNEPA_EXP_NAME}"
   exp_path="${EXPERIMENT_PATH}"
   if [[ "${exp_path}" == ./* ]]; then

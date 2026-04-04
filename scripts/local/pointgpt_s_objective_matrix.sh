@@ -280,7 +280,7 @@ ensure_nepa_pretrain() {
   CONFIG_PATH="${NEPA_CONFIG_PATH}" \
   EXP_NAME="${NEPA_EXP_NAME}" \
   EXTRA_ARGS="${extra_args}" \
-  "${PRETRAIN_WRAPPER}"
+  "${PRETRAIN_WRAPPER}" >&2
 
   load_meta_for_exp "${NEPA_EXP_NAME}"
   exp_path="${EXPERIMENT_PATH}"
