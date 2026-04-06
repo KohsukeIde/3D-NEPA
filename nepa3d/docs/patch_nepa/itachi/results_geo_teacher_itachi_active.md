@@ -1,9 +1,16 @@
 # Itachi Geo-Teacher Active Results
 
-Last updated: 2026-04-03 (JST)
+Last updated: 2026-04-05 (JST)
 
 This page records `itachi`-local geo-teacher runs as soon as they produce a
 usable artifact.
+
+Route-A implementation note:
+
+- current `Geo-PCP` / Route-A engine is being moved to `PCP-MAE`
+- `3D-NEPA` remains the Route-B geometry-evaluation harness
+- for Route-A utility tables, PCP-MAE `hardest` should be read as the local
+  `pb_t50_rs` equivalent
 
 It is intentionally separate from the paper-facing benchmark pages:
 
@@ -18,22 +25,82 @@ Current compare note:
 - so the current interim compare budget is frozen at `100 pretrain epochs`
   while the next arm comparisons are assembled.
 
+## Route A (PCP-MAE engine) implementation status
+
+- engine split:
+  - Route-A / Hybrid pretrain engine: `PCP-MAE`
+  - Route-B geometry evaluation harness: `3D-NEPA`
+- local source of truth:
+  - `PCP-MAE/` for Route-A implementation
+  - `nepa3d/` for Route-B harness and ledgering
+- current local compare arms:
+  - `pcp_worldvis_base_100ep`
+  - `geopcp_worldvis_base_normal_100ep`
+  - `geopcp_worldvis_base_normal_thickness_100ep`
+- current local runtime note:
+  - Route-A compare is being moved to a compiled-first `PCP-MAE` runtime on
+    `itachi`
+  - `pointnet2_ops` and `chamfer_dist` fallbacks are now debug-only
+  - the maintained launch path is `scripts/local/patchnepa_geopcp/`
+
+### Route A v1 smoke status
+
+- compiled runtime smoke:
+  - `geopcp-pcpmae-cu118` built on `itachi`
+  - `pointnet2_ops` backend:
+    - `compiled`
+  - `chamfer_dist` backend:
+    - `native`
+- dataset smoke:
+  - `ShapeNetWorldTeacher` confirms `45,047` `train` NPZ files
+  - `test` contamination in the file list: `0`
+- pretrain smoke:
+  - `pcp_worldvis_base_100ep`: passed forward/backward
+  - `geopcp_worldvis_base_normal_100ep`: passed forward/backward
+  - `geopcp_worldvis_base_normal_thickness_100ep`: passed forward/backward
+- checkpoint compatibility smoke:
+  - PCP-MAE `PointTransformer.load_model_from_ckpt`: passed
+  - PCP-MAE ShapeNetPart loader: passed
+  - `3D-NEPA` `external_pointmae` Route-B extractor: passed with PCP-MAE
+    positional-embedding auto-detection
+- downstream smoke:
+  - ScanObjectNN `obj_bg`: passed
+  - ShapeNetPart: passed
+  - Route-B same/offdiag/completion/curvature chain: passed on a reduced smoke budget
+
 Current active compare arm:
 
 - `geo_teacher_distance_only_100ep_itachi_main`
   - status:
-    - pretrain running
+    - pretrain completed
     - `100` epochs
     - `4 GPU` DDP
     - `udf_distance` only
   - downstream chain:
-    - queued and waiting for pretrain completion
-    - planned readouts:
+    - completed
+    - produced readouts:
       - `ScanObjectNN`
       - `ShapeNetPart`
       - single-task Route-B (`udf_distance`)
       - `completion`
       - `curvature`
+
+## Current compare-arm checkpoint
+
+- pretrain checkpoint:
+  - `runs/cqa_itachi/geo_teacher_distance_only_100ep_itachi_main/ckpt_final.pt`
+- pretrain regime:
+  - `100` epochs
+  - `udf_distance`
+  - `packed + multihead + per_task`
+  - `4 GPU` DDP
+  - `global_step = 17500`
+- final pretrain read:
+  - `epoch/loss = 2.5899`
+  - `epoch/token_acc = 0.2961`
+- status:
+  - completed
+  - this is the current `distance-only` compare arm under the interim `100`-epoch budget
 
 ## Current checkpoint
 
@@ -62,6 +129,69 @@ Current active compare arm:
   - this is the current full-budget local result for the `distance + normal_unsigned` arm
 
 ## Route A: ScanObjectNN utility
+
+### Geo-PCP compare table (`PCP-MAE` engine)
+
+Primary compare arms under the current interim `100`-epoch budget:
+
+- `pcp_worldvis_base_100ep`
+  - status:
+    - active
+    - compiled-first launch path running on `itachi`
+    - `4 GPU` DDP pretrain completed
+    - downstream progress:
+      - `obj_bg`: completed
+      - `obj_only`: completed
+      - `hardest` (`pb_t50_rs equivalent`): resumed and running
+      - `ShapeNetPart`: pending
+      - `Route B`: pending
+  - current run:
+    - save_dir:
+      - `PCP-MAE/experiments/pcp_worldvis_base_100ep/geopcp/pcp_worldvis_base_100ep`
+    - log:
+      - `/mnt/urashima/users/minesawa/3D-NEPA-data/logs/patchnepa_geopcp/full_chain/pcp_worldvis_base_100ep.pretrain.log`
+      - `/mnt/urashima/users/minesawa/3D-NEPA-data/logs/patchnepa_geopcp/full_chain/pcp_worldvis_base_100ep.chain.log`
+    - current read:
+      - pretrain ckpt:
+        - `/mnt/urashima/users/minesawa/3D-NEPA-data/repo_artifacts/pcpmae_experiments/pcp_worldvis_base_100ep/geopcp/pcp_worldvis_base_100ep/ckpt-epoch-100.pth`
+      - `obj_bg` best ckpt:
+        - `/mnt/urashima/users/minesawa/3D-NEPA-data/repo_artifacts/pcpmae_experiments/finetune_scan_objbg_itachi/itachi/geopcp_scan_obj_bg/ckpt-best.pth`
+      - `obj_only` best ckpt:
+        - `/mnt/urashima/users/minesawa/3D-NEPA-data/repo_artifacts/pcpmae_experiments/finetune_scan_objonly_itachi/itachi/geopcp_scan_obj_only/ckpt-best.pth`
+- `geopcp_worldvis_base_normal_100ep`
+  - status:
+    - implementation ready
+    - compiled-first launch path added
+    - queued next by manual arm order
+- `geopcp_worldvis_base_normal_thickness_100ep`
+  - status:
+    - implementation ready
+    - compiled-first launch path added
+    - queued after `base+normal`
+
+### Current active compare arm (`100 epoch` pretrain, `udf_distance` only)
+
+- `obj_bg`
+  - completed
+  - canonical read:
+    - `test_acc = 0.8330`
+  - current interpretation:
+    - below the current `distance + normal_unsigned` `100`-epoch pilot
+    - below `C034` and `C035`
+- `obj_only`
+  - completed
+  - canonical read:
+    - `test_acc = 0.8571`
+  - current interpretation:
+    - above the current `distance + normal_unsigned` `100`-epoch pilot
+    - above `C034` and `C035`
+- `pb_t50_rs`
+  - completed
+  - canonical read:
+    - `test_acc = 0.8067`
+  - current interpretation:
+    - slightly above the current `distance + normal_unsigned` `100`-epoch pilot
+    - above `C034` and `C035`
 
 ### Current full-budget (`300 epoch` pretrain) read
 
@@ -135,6 +265,16 @@ Current active compare arm:
 
 ## Route A: ShapeNetPart utility
 
+- `ShapeNetPart` (`100 epoch` pretrain, `udf_distance` only)
+  - completed
+  - canonical read:
+    - `TEST acc = 0.9426`
+    - `TEST class_avg_iou = 0.8280`
+    - `TEST instance_avg_iou = 0.8515`
+  - current interpretation:
+    - very close to the current `distance + normal_unsigned` `100`-epoch pilot on `instance_avg_iou`
+    - slightly below it on aligned `class_avg_iou`
+
 - `ShapeNetPart` (`300 epoch` pretrain)
   - completed
   - canonical read:
@@ -198,6 +338,36 @@ Current active compare arm:
 
 ## Route B: Analysis / capability
 
+### Current active compare arm (`100 epoch` pretrain, `udf_distance` only)
+
+- multitype same/offdiag:
+  - same-context correct:
+    - `udf_distance token_acc = 0.2986`
+  - offdiag correct:
+    - `udf_distance token_acc = 0.1163`
+  - current interpretation:
+    - weaker than the current `distance + normal_unsigned` `100`-epoch pilot
+
+- completion:
+  - same-context:
+    - `MAE = 0.01074`
+    - `IoU@0.05 = 0.8633`
+  - offdiag:
+    - `MAE = 0.1219`
+    - `IoU@0.05 = 0.4245`
+  - current interpretation:
+    - weaker than the current `distance + normal_unsigned` `100`-epoch pilot on both same/offdiag reads
+
+- curvature probe:
+  - same-context:
+    - `MAE = 0.1411`
+    - `pearson_r = 0.5173`
+  - offdiag:
+    - `MAE = 0.2157`
+    - `pearson_r = 0.0975`
+  - current interpretation:
+    - weaker than the current `distance + normal_unsigned` `100`-epoch pilot on both same/offdiag reads
+
 ### Current full-budget (`300 epoch` pretrain) read
 
 - multitype same/offdiag:
@@ -238,11 +408,9 @@ Current active compare arm:
 - the repaired automatic Route-B stage now completes through:
   - multitype same/offdiag suite
   - `udf_distance` completion same/offdiag
-- current remaining tail:
-  - a fresh `curvature` probe rerun is still in progress
 - current state:
-  - multitype/completion artifacts are present and usable
-  - the post-train chain itself is still marked `running` because the final curvature rerun has not exited yet
+  - multitype/completion/curvature artifacts are present and usable
+  - the repaired post-train chains for the current `100`-epoch pilots are completed
 
 ### Multitype same/offdiag
 

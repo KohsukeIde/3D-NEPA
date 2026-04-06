@@ -1,6 +1,6 @@
 # Route A/B Matched Compare Matrix (2026-04)
 
-Last updated: 2026-04-04
+Last updated: 2026-04-05
 
 ## 1. Purpose
 
@@ -52,9 +52,9 @@ This is an execution decision, not a final paper claim.
 
 The first compare is deliberately small:
 
-1. internal xyz-reconstruction baseline
-2. `udf_distance` only
-3. `udf_distance + mesh_normal_unsigned`
+1. `PCP-MAE` baseline
+2. `Geo-PCP` (`recon + center + normal`)
+3. `Geo-PCP` (`recon + center + normal + thickness`)
 
 All three runs should use:
 
@@ -63,24 +63,27 @@ All three runs should use:
 - the same downstream fine-tuning recipe
 - the same evaluation policy
 
-`udf_thickness_valid_qbin` is phase 2.
+Global arbitrary-query `distance` stays in the Route-B CQA harness for now.
 
-`mesh_ao_hq` is supplemental and should stay out of the first decision matrix.
+`AO_HQ` stays supplemental and should stay out of the first decision matrix.
 
 ## 5. Runtime Mapping
 
-For the teacher-target side, the current runnable implementation is:
+For the Route-A side, the current runnable implementation is:
 
-- runtime dataset layer: `v2_cqa`
-- runtime codec layer: `cqa_v2`
-- training protocol: `packed + multihead`
-- loss reduction: `per_task`
-- answer factorization: `independent`
-- query interface: `no_q` or `self_q`
+- pretrain engine: `PCP-MAE`
+- dataset source: `world_v3` surface carrier cache
+- loss family: continuous (`recon + center + optional geometric teachers`)
+- compare budget: `100` pretrain epochs
+- downstream flow: existing `PCP-MAE` ScanObjectNN / ShapeNetPart fine-tune
 
-For the reconstruction side, the baseline is **not** the CQA trainer. Use the
-existing PatchNEPA reconstruction line as the internal xyz-reconstruction
-baseline.
+For the Route-B side, keep the existing `3D-NEPA` CQA harness:
+
+- `same_context`
+- `degraded_context`
+- `controls`
+- `completion`
+- `curvature`
 
 ## 6. Current Local Data Boundary
 
@@ -100,36 +103,54 @@ Important:
 
 ## 7. Current Canonical Configs
 
-The first teacher-target configs are:
+The first Route-A configs are:
 
-- `nepa3d/tracks/patch_nepa/cqa/configs/shapenet_geo_teacher_packed_distance_only_v1.yaml`
-- `nepa3d/tracks/patch_nepa/cqa/configs/shapenet_geo_teacher_packed_distnorm_unsigned_v1.yaml`
+- `PCP-MAE/cfgs/geopcp/pcp_worldvis_base_100ep.yaml`
+- `PCP-MAE/cfgs/geopcp/geopcp_worldvis_base_normal_100ep.yaml`
+- `PCP-MAE/cfgs/geopcp/geopcp_worldvis_base_normal_thickness_100ep.yaml`
 
 These configs intentionally:
 
 - use the current `worldvis` cache directly
 - use `split=train`
-- set `packed_budget_unit=shape`
-- set `replacement=false`
-- set `mix_num_shapes=45047`
+- set `npoints=1024`
+- keep the current PCP-MAE masking / grouping recipe
 
-This means one CQA pretrain epoch corresponds to one full pass over the current
-train-shape support.
+Implementation status on `itachi`:
+
+- PCP-MAE-native Route-A v1 branch is now present under `PCP-MAE/`
+- the local `world_v3` adapter is restricted to `train` and confirms `45,047`
+  train NPZs with no `test` contamination
+- the three compare arms have passed local forward/backward smoke
+- PCP-MAE ScanObjectNN / ShapeNetPart checkpoint loading smoke has also passed
+- 3D-NEPA `external_pointmae` now auto-detects PCP-MAE-style positional
+  embeddings and can read the smoke checkpoint for Route-B harness use
+
+This means one pretrain epoch corresponds to one full pass over the current
+local train support.
 
 ## 8. Launcher Boundary
 
-The matched teacher-target launcher should default to:
+The matched Route-A launcher should default to:
 
-- `sampling_protocol=packed`
-- `head_mode=multihead`
-- `loss_balance=per_task`
-- `answer_factorization=independent`
-- `query_interface_mode=no_q`
+- `4xA100`
+- `total_bs=128`
 - `epochs=100`
+- `PCP-MAE` pretrain entrypoint
+- existing `PCP-MAE` downstream fine-tune entrypoints
 
-Current thin entrypoint:
+Current local thin entrypoints:
 
-- `scripts/abci/submit_patchnepa_geo_teacher_compare_pretrain.sh`
+- `scripts/local/patchnepa_geopcp/build_pcpmae_geopcp_env.sh`
+- `scripts/local/patchnepa_geopcp/run_pcpmae_geopcp_pretrain_local.sh`
+- `scripts/local/patchnepa_geopcp/run_pcpmae_geopcp_ablation_triple_local.sh`
+- `scripts/local/patchnepa_geopcp/run_pcpmae_geopcp_full_chain_local.sh`
+
+Runtime requirement:
+
+- the Route-A path is now compiled-first on `itachi`
+- `pointnet2_ops` and `chamfer_dist` must resolve to compiled/native backends
+- slow fallback is debug-only and is not the normal compare path
 
 ## 9. What Not To Claim Yet
 
@@ -144,12 +165,12 @@ This file only fixes the first fair compare.
 
 ## 10. Current Itachi Automation Boundary
 
-The current local `itachi` automation covers the subset that is already
-runnable and maintained on this machine:
+The current local `itachi` Route-B automation remains the maintained geometry
+evaluation path inside `3D-NEPA`.
 
-- `ScanObjectNN` direct FT on the three paper-facing variants
-- multitype `same_context / degraded_context / controls`
-- `udf_distance` completion under same and degraded context
+For Route-A, the maintained pretrain engine is now `PCP-MAE`, not the CQA
+trainer.
 
-`ShapeNetPart` remains part of the Route-A decision rule, but it is not yet in
-the maintained `itachi` post-pretrain chain.
+The local Route-A execution note lives in:
+
+- `nepa3d/docs/patch_nepa/itachi/local_geopcp_pcpmae_ops_202604.md`

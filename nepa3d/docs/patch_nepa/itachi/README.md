@@ -24,3 +24,5 @@ docs here. Those remain in the parent `patch_nepa/` directory.
   - local-only multi-GPU geo-teacher pretrain boundary and launch policy
 - `local_geo_teacher_posttrain_ops_202604.md`
   - local-only downstream chain after the current geo-teacher pretrain
+- `local_geopcp_pcpmae_ops_202604.md`
+  - local-only Route-A Geo-PCP execution boundary with `PCP-MAE` as the pretrain engine and compiled-first runtime
