@@ -1,6 +1,6 @@
 # Itachi Route-A Geo-PCP Ops (PCP-MAE Engine)
 
-Last updated: 2026-04-05
+Last updated: 2026-04-07
 
 This note records the local-only execution boundary for the PCP-MAE-native
 Geo-PCP Route-A branch on `itachi`.
@@ -73,6 +73,14 @@ Expected build variables:
 - `obj_only` -> PCP-MAE `ScanObjectNN_objectonly`
 - `hardest` -> local ledger `pb_t50_rs` equivalent
 - `ShapeNetPart` -> PCP-MAE segmentation flow
+
+## Route-B note for Route-A runs
+
+- default Route-A compare chains do **not** run Route-B
+- Route-B can still be enabled with `RUN_ROUTEB=1`, but for PCP-MAE /
+  Geo-PCP checkpoints it should be read as an external probe only
+- do not treat Route-B numbers from Route-A checkpoints as headline parity
+  with CQA-trained checkpoints
 
 ## Local wrappers
 

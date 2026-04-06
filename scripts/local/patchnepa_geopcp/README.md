@@ -21,6 +21,17 @@ Current downstream policy:
 - `ScanObjectNN hardest` (`pb_t50_rs` equivalent in the local ledger)
 - `ShapeNetPart`
 
+Current Route-B policy for Route-A runs:
+
+- `Route B` is not part of the default Route-A compare chain
+- default full-chain / queue launchers now run:
+  - `ScanObjectNN`
+  - `ShapeNetPart`
+- `Route B` is optional and must be explicitly enabled with:
+  - `RUN_ROUTEB=1`
+- when enabled for `PCP-MAE` / `Geo-PCP` checkpoints, treat it as an
+  external probe only, not as headline parity with CQA-trained models
+
 All wrappers assume this repo root:
 
 - `/home/minesawa/ssl/3D-NEPA`
@@ -46,7 +57,7 @@ Local setup / launch order:
 2. `scripts/local/patchnepa_geopcp/run_pcpmae_geopcp_pretrain_local.sh`
 3. `scripts/local/patchnepa_geopcp/run_pcpmae_geopcp_scanobjectnn_ft_local.sh`
 4. `scripts/local/patchnepa_geopcp/run_pcpmae_geopcp_shapenetpart_ft_local.sh`
-5. `scripts/local/patchnepa_geopcp/run_pcpmae_geopcp_routeb_local.sh`
+5. `scripts/local/patchnepa_geopcp/run_pcpmae_geopcp_routeb_local.sh` (optional)
 
 Arm-complete orchestration:
 

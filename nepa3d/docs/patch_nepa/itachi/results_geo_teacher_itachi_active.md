@@ -1,6 +1,6 @@
 # Itachi Geo-Teacher Active Results
 
-Last updated: 2026-04-05 (JST)
+Last updated: 2026-04-07 (JST)
 
 This page records `itachi`-local geo-teacher runs as soon as they produce a
 usable artifact.
@@ -11,6 +11,9 @@ Route-A implementation note:
 - `3D-NEPA` remains the Route-B geometry-evaluation harness
 - for Route-A utility tables, PCP-MAE `hardest` should be read as the local
   `pb_t50_rs` equivalent
+- for Route-A (`PCP-MAE` / `Geo-PCP`) runs, any Route-B readout should be
+  treated as an external probe only, not as headline parity with
+  CQA-trained checkpoints
 
 It is intentionally separate from the paper-facing benchmark pages:
 
@@ -136,16 +139,16 @@ Primary compare arms under the current interim `100`-epoch budget:
 
 - `pcp_worldvis_base_100ep`
   - status:
-    - active
-    - compiled-first launch path running on `itachi`
+    - completed end-to-end
+    - compiled-first launch path validated on `itachi`
     - `4 GPU` DDP pretrain completed
-    - downstream progress:
-      - `obj_bg`: completed
-      - `obj_only`: completed
-      - `hardest` (`pb_t50_rs equivalent`): resumed and running
-      - `ShapeNetPart`: pending
-      - `Route B`: pending
-  - current run:
+    - downstream completed:
+      - `obj_bg`
+      - `obj_only`
+      - `hardest` (`pb_t50_rs equivalent`)
+      - `ShapeNetPart`
+      - `Route B`
+    - current run:
     - save_dir:
       - `PCP-MAE/experiments/pcp_worldvis_base_100ep/geopcp/pcp_worldvis_base_100ep`
     - log:
@@ -158,16 +161,68 @@ Primary compare arms under the current interim `100`-epoch budget:
         - `/mnt/urashima/users/minesawa/3D-NEPA-data/repo_artifacts/pcpmae_experiments/finetune_scan_objbg_itachi/itachi/geopcp_scan_obj_bg/ckpt-best.pth`
       - `obj_only` best ckpt:
         - `/mnt/urashima/users/minesawa/3D-NEPA-data/repo_artifacts/pcpmae_experiments/finetune_scan_objonly_itachi/itachi/geopcp_scan_obj_only/ckpt-best.pth`
+  - Route-A utility read:
+    - `obj_bg best_acc = 0.9264`
+    - `obj_only best_acc = 0.9195`
+    - `hardest best_acc = 0.8721`
+    - `ShapeNetPart best class_avg_iou = 0.8348`
+    - `ShapeNetPart best instance_avg_iou = 0.8551`
 - `geopcp_worldvis_base_normal_100ep`
   - status:
-    - implementation ready
-    - compiled-first launch path added
-    - queued next by manual arm order
+    - completed end-to-end
+    - compiled-first launch path validated on `itachi`
+    - `4 GPU` DDP pretrain completed
+    - downstream completed:
+      - `obj_bg`
+      - `obj_only`
+      - `hardest` (`pb_t50_rs equivalent`)
+      - `ShapeNetPart`
+      - `Route B`
+  - Route-A utility read:
+    - `obj_bg best_acc = 0.8596`
+    - `obj_only best_acc = 0.8596`
+    - `hardest best_acc = 0.8400`
+    - `ShapeNetPart best class_avg_iou = 0.8297`
+    - `ShapeNetPart best instance_avg_iou = 0.8533`
 - `geopcp_worldvis_base_normal_thickness_100ep`
   - status:
-    - implementation ready
-    - compiled-first launch path added
-    - queued after `base+normal`
+    - running
+    - pretrain started on `2026-04-07 JST`
+    - downstream not started yet
+
+### Geo-PCP `base + normal` (`100 epoch` pretrain)
+
+- ScanObjectNN utility
+  - `obj_bg`
+    - best_acc = `0.8596`
+    - epoch-300 val acc = `0.8339`
+  - `obj_only`
+    - best_acc = `0.8596`
+    - epoch-300 val acc = `0.8442`
+  - `hardest` (`pb_t50_rs equivalent`)
+    - best_acc = `0.8398`
+    - epoch-300 val acc = `0.8336`
+- ShapeNetPart utility
+  - best accuracy = `0.9433`
+  - best class_avg_iou = `0.8297`
+  - best instance_avg_iou = `0.8533`
+- Route-B (`external_pointmae`, single-task `udf_distance`)
+  - same-context correct:
+    - `token_acc = 0.1644`
+  - offdiag correct:
+    - `token_acc = 0.0685`
+  - completion same:
+    - `MAE = 0.05219`
+    - `IoU@0.05 = 0.2530`
+  - completion offdiag:
+    - `MAE = 0.13764`
+    - `IoU@0.05 = 0.15864`
+  - curvature same:
+    - `MAE = 0.1496`
+    - `pearson_r = 0.4045`
+  - curvature offdiag:
+    - `MAE = 0.2180`
+    - `pearson_r = 0.1211`
 
 ### Current active compare arm (`100 epoch` pretrain, `udf_distance` only)
 

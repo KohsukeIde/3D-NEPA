@@ -18,7 +18,7 @@ export ROOT_DIR PCP_ROOT PYTHON_BIN CONDA_PREFIX CUDA_HOME CC CXX TORCH_CUDA_ARC
 export QUEUE_NAME LOG_ROOT LOG_FILE PID_FILE
 export RUN_SCANOBJECTNN="${RUN_SCANOBJECTNN:-1}"
 export RUN_SHAPENETPART="${RUN_SHAPENETPART:-1}"
-export RUN_ROUTEB="${RUN_ROUTEB:-1}"
+export RUN_ROUTEB="${RUN_ROUTEB:-0}"
 export FT_VARIANTS="${FT_VARIANTS:-obj_bg,obj_only,hardest}"
 export FT_NUM_WORKERS="${FT_NUM_WORKERS:-8}"
 export ARM_LIST="${ARM_LIST:-pcp_worldvis_base_100ep,geopcp_worldvis_base_normal_100ep,geopcp_worldvis_base_normal_thickness_100ep}"
