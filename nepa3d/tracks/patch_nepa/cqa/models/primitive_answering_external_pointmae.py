@@ -19,6 +19,21 @@ from nepa3d.tracks.patch_nepa.mainline.models.pointmae_patch_classifier import (
 )
 
 
+def _pcp_get_pos_embed(embed_dim: int, ipt_pos: torch.Tensor) -> torch.Tensor:
+    bsz, groups, dims = ipt_pos.size()
+    if int(embed_dim) % 6 != 0:
+        raise ValueError(f"embed_dim must be divisible by 6, got {embed_dim}")
+    omega = torch.arange(int(embed_dim) // 6, device=ipt_pos.device, dtype=ipt_pos.dtype)
+    omega = 1.0 / (10000 ** (omega / (int(embed_dim) / 6.0)))
+    rpe = []
+    for i in range(dims):
+        pos_i = ipt_pos[:, :, i]
+        out = torch.einsum("bg,d->bgd", pos_i, omega)
+        rpe.append(torch.sin(out))
+        rpe.append(torch.cos(out))
+    return torch.cat(rpe, dim=-1)
+
+
 def _extract_pointmae_encoder_state(payload: Mapping[str, Any]) -> dict[str, torch.Tensor]:
     raw_state: Mapping[str, Any]
     if isinstance(payload.get("base_model", None), Mapping):
@@ -46,6 +61,13 @@ def _extract_pointmae_encoder_state(payload: Mapping[str, Any]) -> dict[str, tor
     return mapped
 
 
+def _infer_external_backbone_variant(state: Mapping[str, torch.Tensor]) -> str:
+    w = state.get("pos_embed.0.weight", None)
+    if isinstance(w, torch.Tensor) and w.ndim == 2 and int(w.shape[1]) != 3:
+        return "pcpmae"
+    return "pointmae"
+
+
 class FrozenPointMAEContextEncoder(nn.Module):
     """Point-MAE encoder surface used as a frozen point-only external baseline."""
 
@@ -70,14 +92,35 @@ class FrozenPointMAEContextEncoder(nn.Module):
         self.num_group = int(num_groups)
         self.encoder_dims = int(encoder_dims)
         self.ckpt_path = str(ckpt_path).strip()
+        self.external_variant = "pointmae"
+
+        state: Optional[dict[str, torch.Tensor]] = None
+        if self.ckpt_path:
+            path = Path(str(self.ckpt_path))
+            if not path.is_file():
+                raise FileNotFoundError(f"external Point-MAE checkpoint not found: {path}")
+            payload = torch.load(str(path), map_location="cpu")
+            if not isinstance(payload, Mapping):
+                raise TypeError(f"unsupported Point-MAE checkpoint payload type: {type(payload)!r}")
+            state = _extract_pointmae_encoder_state(payload)
+            if not state:
+                raise RuntimeError(f"no encoder weights found in Point-MAE checkpoint: {path}")
+            self.external_variant = _infer_external_backbone_variant(state)
 
         self.group_divider = PointMAEGroup(num_group=self.num_group, group_size=self.group_size)
         self.encoder = PointMAEEncoder(encoder_channel=self.encoder_dims)
-        self.pos_embed = nn.Sequential(
-            nn.Linear(3, 128),
-            nn.GELU(),
-            nn.Linear(128, self.trans_dim),
-        )
+        if self.external_variant == "pcpmae":
+            self.pos_embed = nn.Sequential(
+                nn.Linear(self.trans_dim, self.trans_dim),
+                nn.GELU(),
+                nn.Linear(self.trans_dim, self.trans_dim),
+            )
+        else:
+            self.pos_embed = nn.Sequential(
+                nn.Linear(3, 128),
+                nn.GELU(),
+                nn.Linear(128, self.trans_dim),
+            )
         dpr = [x.item() for x in torch.linspace(0, self.drop_path_rate, self.depth)]
         self.blocks = PointMAETransformerEncoder(
             embed_dim=self.trans_dim,
@@ -90,8 +133,8 @@ class FrozenPointMAEContextEncoder(nn.Module):
         )
         self.norm = nn.LayerNorm(self.trans_dim)
 
-        if self.ckpt_path:
-            self.load_pretrained(self.ckpt_path)
+        if state is not None:
+            self.load_state_dict(state, strict=False)
 
     def load_pretrained(self, ckpt_path: str) -> None:
         path = Path(str(ckpt_path))
@@ -108,7 +151,10 @@ class FrozenPointMAEContextEncoder(nn.Module):
     def forward(self, xyz: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         neighborhood, center = self.group_divider(xyz)
         tokens = self.encoder(neighborhood)
-        pos = self.pos_embed(center)
+        if self.external_variant == "pcpmae":
+            pos = self.pos_embed(_pcp_get_pos_embed(self.trans_dim, center))
+        else:
+            pos = self.pos_embed(center)
         h = self.blocks(tokens, pos)
         h = self.norm(h)
         return h, center
@@ -192,4 +238,3 @@ class ExternalPointMAEPrimitiveAnsweringClassifier(nn.Module):
         h = self.backbone(seq, is_causal=False)
         pooled = h[:, 0, :] if self.pool == "bos" else h[:, 1:, :].mean(dim=1)
         return self.head(pooled)
-
