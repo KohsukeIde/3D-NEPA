@@ -161,6 +161,23 @@ print(float(best.get("acc", float("nan"))))
 PY
 }
 
+prepare_resume_ckpt() {
+  local exp_path="$1"
+  local last_ckpt="${exp_path}/ckpt-last.pth"
+  local best_ckpt="${exp_path}/ckpt-best.pth"
+  if [[ -f "${last_ckpt}" ]]; then
+    printf '%s\n' "${last_ckpt}"
+    return 0
+  fi
+  if [[ -f "${best_ckpt}" ]]; then
+    cp -f "${best_ckpt}" "${last_ckpt}"
+    echo "[resume] promoted ckpt-best -> ckpt-last at ${exp_path}" >&2
+    printf '%s\n' "${last_ckpt}"
+    return 0
+  fi
+  return 1
+}
+
 wait_for_exp_completion() {
   local label="$1"
   local exp_name="$2"
@@ -324,8 +341,11 @@ ensure_finetune_stage() {
   meta_path="$(meta_path_for_exp "${exp_name}")"
   exp_path="$(resolve_existing_exp_path "${exp_name}" "${exp_path}")"
   local ckpt_path="${exp_path}/ckpt-last.pth"
-  local epoch
-  epoch="$(ckpt_epoch_if_exists "${ckpt_path}")"
+  local epoch=-1
+  if prepare_resume_ckpt "${exp_path}" >/dev/null 2>&1; then
+    ckpt_path="${exp_path}/ckpt-last.pth"
+    epoch="$(ckpt_epoch "${ckpt_path}")"
+  fi
 
   if (( epoch >= expected_epoch )); then
     echo "[done] ${label} already complete: epoch=${epoch}" >&2

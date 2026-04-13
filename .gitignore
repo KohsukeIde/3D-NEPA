@@ -43,9 +43,7 @@ logs/pretrain/m1/runner_gpu0.log
 *.err
 *.out
 *.o[0-9]*
-*.e[0-9]*
-
-# PointGPT fork (track source; ignore data / runs / weights)
+*.e[0-9]*# PointGPT fork (track source; ignore data / runs / weights)
 # Nested `.git` was moved aside for vendoring; keep backup untracked
 PointGPT.git.backup/
 

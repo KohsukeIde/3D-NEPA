@@ -435,7 +435,7 @@ class GPT_Transformer(nn.Module):
             overall_mask = torch.from_numpy(
                 overall_mask).to(torch.bool).to('cuda')
 
-            eye_mask = torch.eye(self.num_groups).to(torch.bool).to('cuda')
+            eye_mask = torch.eye(seq_len, device=group_input_tokens.device, dtype=torch.bool)
 
             attn_mask = attn_mask | overall_mask.unsqueeze(0) & ~eye_mask
 

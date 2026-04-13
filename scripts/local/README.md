@@ -29,6 +29,10 @@ NeurIPS, while PBS/QF runners are no longer the default operational path.
 - `pointgpt_nepa_vs_cdl12_pipeline.sh`
   - local sequential pipeline:
     `nepa_cosine pretrain -> cdl12 pretrain -> obj_bg fine-tune compare`
+- `pointgpt_s_vitshift_then_resume_cdl12_watchdog.sh`
+  - watchdog wrapper for the current PointGPT-S local chain:
+    `pointNEPA-S mask-off done -> vit-shift -> remaining cdl12 -> PointGPT FT`
+  - reruns the chain automatically until the final `.done` file appears
 
 ## Source of Truth
 
