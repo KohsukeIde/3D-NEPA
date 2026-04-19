@@ -1,8 +1,6 @@
 __pycache__/
 *.py[cod]
-.pytest_cache/
-
-# Local data and experiment outputs (also listed in parent repo .gitignore)
+.pytest_cache/# Local data and experiment outputs (also listed in parent repo .gitignore)
 /data/
 /checkpoints/
 /experiments/

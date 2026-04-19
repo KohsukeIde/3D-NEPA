@@ -1,0 +1,11 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+[remote "origin"]
+	url = https://github.com/CGuangyan-BIT/PointGPT.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "V1.2"]
+	remote = origin
+	merge = refs/heads/V1.2
