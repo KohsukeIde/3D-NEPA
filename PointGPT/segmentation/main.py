@@ -9,6 +9,7 @@ import datetime
 import logging
 import sys
 import importlib
+import inspect
 import shutil
 import provider
 import numpy as np
@@ -181,15 +182,20 @@ def main(args):
     optimizer = optim.AdamW(
         param_groups, lr=args.learning_rate, weight_decay=0.05)
 
-    scheduler = CosineLRScheduler(optimizer,
-                                  t_initial=args.epoch,
-                                #   t_mul=1,
-                                  lr_min=1e-6,
-                                  cycle_decay=0.1,
-                                  warmup_lr_init=1e-6,
-                                  warmup_t=args.warmup_epoch,
-                                  cycle_limit=1,
-                                  t_in_epochs=True)
+    coslr_kwargs = dict(
+        t_initial=args.epoch,
+        lr_min=1e-6,
+        warmup_lr_init=1e-6,
+        warmup_t=args.warmup_epoch,
+        cycle_limit=1,
+        t_in_epochs=True,
+    )
+    sig = inspect.signature(CosineLRScheduler.__init__)
+    if 'cycle_decay' in sig.parameters:
+        coslr_kwargs['cycle_decay'] = 0.1
+    elif 'decay_rate' in sig.parameters:
+        coslr_kwargs['decay_rate'] = 0.1
+    scheduler = CosineLRScheduler(optimizer, **coslr_kwargs)
 
     best_acc = 0
     global_epoch = 0
@@ -317,7 +323,7 @@ def main(args):
             mean_shape_ious = np.mean(list(shape_ious.values()))
             test_metrics['accuracy'] = total_correct / float(total_seen)
             test_metrics['class_avg_accuracy'] = np.mean(
-                np.array(total_correct_class) / np.array(total_seen_class, dtype=np.float))
+                np.array(total_correct_class) / np.array(total_seen_class, dtype=float))
             for cat in sorted(shape_ious.keys()):
                 log_string('eval mIoU of %s %f' %
                            (cat + ' ' * (14 - len(cat)), shape_ious[cat]))

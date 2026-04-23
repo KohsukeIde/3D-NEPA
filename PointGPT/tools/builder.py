@@ -1,5 +1,6 @@
 import os
 import sys
+import inspect
 # online package
 import torch
 # optimizer
@@ -73,15 +74,20 @@ def build_opti_sche(base_model, config):
     if sche_config.type == 'LambdaLR':
         scheduler = build_lambda_sche(optimizer, sche_config.kwargs)  # misc.py
     elif sche_config.type == 'CosLR':
-        scheduler = CosineLRScheduler(optimizer,
-                                      t_initial=sche_config.kwargs.epochs,
-                                      # t_mul=1,
-                                      lr_min=1e-6,
-                                      cycle_decay=0.1,  # decay_rate
-                                      warmup_lr_init=1e-6,
-                                      warmup_t=sche_config.kwargs.initial_epochs,
-                                      cycle_limit=1,
-                                      t_in_epochs=True)
+        coslr_kwargs = dict(
+            t_initial=sche_config.kwargs.epochs,
+            lr_min=1e-6,
+            warmup_lr_init=1e-6,
+            warmup_t=sche_config.kwargs.initial_epochs,
+            cycle_limit=1,
+            t_in_epochs=True,
+        )
+        sig = inspect.signature(CosineLRScheduler.__init__)
+        if 'cycle_decay' in sig.parameters:
+            coslr_kwargs['cycle_decay'] = 0.1
+        elif 'decay_rate' in sig.parameters:
+            coslr_kwargs['decay_rate'] = 0.1
+        scheduler = CosineLRScheduler(optimizer, **coslr_kwargs)
     elif sche_config.type == 'StepLR':
         scheduler = torch.optim.lr_scheduler.StepLR(
             optimizer, **sche_config.kwargs)
