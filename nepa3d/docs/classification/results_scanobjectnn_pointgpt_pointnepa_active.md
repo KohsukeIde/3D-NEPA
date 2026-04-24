@@ -1,6 +1,6 @@
 # ScanObjectNN PointGPT / pointNEPA Sidecar Results (Active)
 
-Snapshot time: `2026-04-24 JST` (includes the 2026-04-22 local rebuild chain)
+Snapshot time: `2026-04-25 JST` (includes the 2026-04-22 local rebuild chain and the 2026-04-24 order-randomized downstream partial)
 
 ## 2026-04-22 local rebuild status
 
@@ -438,23 +438,51 @@ Interpretation:
 
 - order randomization is not a null run; the pretext objective still optimizes
   strongly under the modified AR mechanism.
-- the missing piece is now downstream, not pretrain completion.
+- downstream is partially available through the `obj_bg` fine-tune below, but
+  the readout/stress follow-up audits for that checkpoint are still missing.
+
+### Order-randomized no-mask `obj_bg` downstream fine-tune
+
+The `obj_bg` fine-tune from the no-mask + order-randomized pretrain produced a
+valid best checkpoint, but did not complete the planned `300` epochs.
+
+- job:
+  - former `134867.qjcm`
+- experiment:
+  - `PointGPT/experiments/finetune_scan_objbg/PointGPT-S/pgpt_s_nomask_ordrand_objbg_e300`
+- log:
+  - `PointGPT/experiments/finetune_scan_objbg/PointGPT-S/pgpt_s_nomask_ordrand_objbg_e300/20260424_005342.log`
+- checkpoint:
+  - `ckpt-best.pth`
+- termination:
+  - walltime limit at epoch `215`
+  - PBS message: `job killed: walltime 18035 exceeded limit 18000`
+- best validation accuracy observed before termination:
+  - epoch `170`: `88.8699`
+
+Object-side interpretation:
+
+- the order-randomized no-mask downstream row is not a failed/null downstream
+  run; it has a usable best checkpoint.
+- it is slightly below the completed local no-mask rebuild `obj_bg` best
+  (`89.2123`) and below the official PointGPT-S protocol-compare row
+  (`~89.85-90.02`, depending on split convention), so the current evidence
+  does not show an order-randomization downstream gain.
+- because the run ended early, report it as a walltime-limited partial row
+  unless a continuation is launched.
 
 ## Current pending object-side runs
 
 Current live queue:
 
-- `134867.qjcm`
-  - running `obj_bg` fine-tune for the order-randomized no-mask pretrain
-  - output root:
-    - `PointGPT/experiments/finetune_scan_objbg/PointGPT-S/pgpt_s_nomask_ordrand_objbg_e300`
-  - current best observed val accuracy in the live log:
-    - `86.8151` at epoch `39`
-- `134875.qjcm`
-  - dependency-held readout audit for the order-randomized `obj_bg` fine-tune
-- `134876.qjcm`
-  - dependency-held support-stress battery for the order-randomized `obj_bg`
-    fine-tune
+- none observed on `2026-04-25 JST`.
+
+Still missing:
+
+- readout decomposition for the order-randomized `obj_bg` checkpoint
+- support-stress battery for the order-randomized `obj_bg` checkpoint
+- optional continuation of the order-randomized `obj_bg` fine-tune to the full
+  `300` epochs, if a complete matched row is required
 
 Recently completed:
 
@@ -464,3 +492,7 @@ Recently completed:
   - ShapeNetPart full fine-tune from the official PointGPT-S pretrain
 - `134874.qjcm`
   - ShapeNetPart full fine-tune from the local no-mask PointGPT-S pretrain
+- `134867.qjcm`
+  - PointGPT-S `no-mask + order-randomized` `obj_bg` fine-tune reached a valid
+    best checkpoint at epoch `170` with validation accuracy `88.8699`, then
+    stopped by walltime at epoch `215`.
