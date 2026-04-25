@@ -1,6 +1,6 @@
 # ScanObjectNN PointGPT / pointNEPA Sidecar Results (Active)
 
-Snapshot time: `2026-04-25 JST` (includes the 2026-04-22 local rebuild chain and the 2026-04-24 order-randomized downstream partial)
+Snapshot time: `2026-04-25 JST` (includes the 2026-04-22 local rebuild chain, the 2026-04-24 order-randomized downstream partial, and the 2026-04-25 order-randomized readout/support audits)
 
 ## 2026-04-22 local rebuild status
 
@@ -469,7 +469,62 @@ Object-side interpretation:
   (`~89.85-90.02`, depending on split convention), so the current evidence
   does not show an order-randomization downstream gain.
 - because the run ended early, report it as a walltime-limited partial row
-  unless a continuation is launched.
+  unless a continuation is launched. The best checkpoint was saved at epoch
+  `170` and remained the best observed checkpoint through epoch `215`, so the
+  follow-up audits below use it as the early-stop checkpoint.
+
+### Order-randomized no-mask `obj_bg` readout audit
+
+Readout decomposition is now complete for the early-stop best checkpoint.
+
+- result files:
+  - `results/ptgpt_nomask_ordrand_objbg_readout_full.md`
+  - `results/ptgpt_nomask_ordrand_objbg_readout_full.json`
+- global:
+  - top-1 accuracy `0.8726`
+  - top-2 hit `0.9587`
+  - top-5 hit `0.9931`
+- hardest pair:
+  - `pillow -> bag`
+  - normalized confusion `0.2857`
+  - direct pair top-1 accuracy `0.7368`
+  - binary probe balanced accuracy `0.8221`
+
+Interpretation:
+
+- the order-randomized no-mask row retains high top-k coverage even though its
+  top-1 accuracy is below the official PointGPT-S and completed no-mask rows.
+- this supports the current conservative claim: causal order randomization is
+  not a collapse-inducing perturbation for ScanObjectNN `obj_bg`, but it is
+  more damaging than mask removal alone.
+
+### Order-randomized no-mask `obj_bg` support stress
+
+Support-stress audit is also complete for the same early-stop best checkpoint.
+
+- result files:
+  - `results/ptgpt_nomask_ordrand_objbg_stress_full.md`
+  - `results/ptgpt_nomask_ordrand_objbg_stress_full.json`
+
+| condition | accuracy |
+|---|---:|
+| clean | `0.8933` |
+| random keep50 | `0.8692` |
+| random keep20 | `0.4509` |
+| random keep10 | `0.1945` |
+| structured keep50 | `0.7177` |
+| structured keep20 | `0.2427` |
+| structured keep10 | `0.1325` |
+| xyz zero | `0.0723` |
+
+Interpretation:
+
+- the order-randomized row follows the same object-side stress pattern as the
+  official/no-mask rows: mild random drop is a weak stress, structured removal
+  is much harsher, and xyz-zero collapses.
+- this completes the minimal readout + support-stress audit for the
+  order-randomized checkpoint. A full 300-epoch continuation remains optional,
+  not required for the current early-stop interpretation.
 
 ## Current pending object-side runs
 
@@ -479,8 +534,6 @@ Current live queue:
 
 Still missing:
 
-- readout decomposition for the order-randomized `obj_bg` checkpoint
-- support-stress battery for the order-randomized `obj_bg` checkpoint
 - optional continuation of the order-randomized `obj_bg` fine-tune to the full
   `300` epochs, if a complete matched row is required
 
