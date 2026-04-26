@@ -12,6 +12,7 @@ import importlib
 import inspect
 import shutil
 import provider
+import random
 import numpy as np
 import torch.optim as optim
 from timm.scheduler import CosineLRScheduler
@@ -68,6 +69,7 @@ def parse_args():
                         default=2048, help='point Number')
     parser.add_argument('--normal', action='store_true',
                         default=False, help='use normals')
+    parser.add_argument('--seed', default=0, type=int, help='random seed')
 
     # parser.add_argument('--step_size', type=int, default=20, help='decay step for lr decay')
     # parser.add_argument('--lr_decay', type=float, default=0.5, help='decay rate for lr decay')
@@ -131,6 +133,10 @@ def main(args):
     logger.addHandler(file_handler)
     log_string('PARAMETER ...')
     log_string(args)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
 
     root = args.root
 

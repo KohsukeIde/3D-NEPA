@@ -13,6 +13,7 @@ WARMUP_EPOCH="${WARMUP_EPOCH:-30}"
 BATCH_SIZE="${BATCH_SIZE:-16}"
 LEARNING_RATE="${LEARNING_RATE:-0.0002}"
 MODEL_NAME="${MODEL_NAME:-PointGPT_S}"
+SEED="${SEED:-0}"
 
 if [[ -z "${CKPT_PATH}" ]]; then
   echo "[error] CKPT_PATH is required"
@@ -40,4 +41,5 @@ exec python main.py \
   --warmup_epoch "${WARMUP_EPOCH}" \
   --batch_size "${BATCH_SIZE}" \
   --learning_rate "${LEARNING_RATE}" \
-  --log_dir "${RUN_NAME}"
+  --log_dir "${RUN_NAME}" \
+  --seed "${SEED}"
