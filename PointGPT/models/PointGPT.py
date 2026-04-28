@@ -93,13 +93,98 @@ class Encoder_small(nn.Module):  # Embedding module
 
 
 class Group(nn.Module):
-    def __init__(self, num_group, group_size, order_mode="simplified_morton"):
+    def __init__(
+            self,
+            num_group,
+            group_size,
+            order_mode="simplified_morton",
+            group_mode="fps_knn",
+            group_radius=0.22,
+            group_voxel_grid=6):
         super().__init__()
         self.num_group = num_group
         self.group_size = group_size
         self.order_mode = str(order_mode)
+        self.group_mode = str(group_mode)
+        self.group_radius = float(group_radius)
+        self.group_voxel_grid = int(group_voxel_grid)
         self.knn = KNN(k=self.group_size, transpose_mode=True)
         self.knn_2 = KNN(k=1, transpose_mode=True)
+
+    def _random_centers(self, xyz):
+        batch_size, num_points, _ = xyz.shape
+        center_rows = []
+        for _ in range(batch_size):
+            if num_points >= self.num_group:
+                idx = torch.randperm(num_points, device=xyz.device)[:self.num_group]
+            else:
+                idx = torch.randint(0, num_points, (self.num_group,), device=xyz.device)
+            center_rows.append(xyz[_, idx])
+        return torch.stack(center_rows, dim=0)
+
+    def _voxel_centers(self, xyz):
+        batch_size, _, _ = xyz.shape
+        centers = []
+        grid = self.group_voxel_grid
+        for b in range(batch_size):
+            pts = xyz[b]
+            lo = pts.min(dim=0, keepdim=True).values
+            hi = pts.max(dim=0, keepdim=True).values
+            norm = (pts - lo) / (hi - lo + 1e-6)
+            cell = torch.clamp((norm * grid).long(), 0, grid - 1)
+            key = cell[:, 0] * grid * grid + cell[:, 1] * grid + cell[:, 2]
+            chosen = []
+            for key_value in torch.unique(key, sorted=True):
+                idx = torch.nonzero(key == key_value, as_tuple=False).view(-1)
+                centroid = pts[idx].mean(dim=0, keepdim=True)
+                nearest = idx[torch.argmin(torch.sum((pts[idx] - centroid) ** 2, dim=1))]
+                chosen.append(nearest)
+            if len(chosen) == 0:
+                chosen_idx = torch.zeros(1, dtype=torch.long, device=xyz.device)
+            else:
+                chosen_idx = torch.stack(chosen).long()
+            if chosen_idx.numel() >= self.num_group:
+                selected = misc.fps(pts[chosen_idx].unsqueeze(0), self.num_group).squeeze(0)
+            else:
+                fill = misc.fps(pts.unsqueeze(0), self.num_group - chosen_idx.numel()).squeeze(0)
+                selected = torch.cat([pts[chosen_idx], fill], dim=0)
+            centers.append(selected)
+        return torch.stack(centers, dim=0)
+
+    def _radius_indices(self, xyz, center):
+        dist = torch.cdist(center, xyz)
+        nearest = torch.argsort(dist, dim=-1)
+        idx = nearest[:, :, :self.group_size].clone()
+        within = dist <= self.group_radius
+        for b in range(xyz.shape[0]):
+            for g in range(center.shape[1]):
+                candidates = torch.nonzero(within[b, g], as_tuple=False).view(-1)
+                if candidates.numel() == 0:
+                    continue
+                cand_dist = dist[b, g, candidates]
+                candidates = candidates[torch.argsort(cand_dist)]
+                if candidates.numel() >= self.group_size:
+                    idx[b, g] = candidates[:self.group_size]
+                else:
+                    idx[b, g, :candidates.numel()] = candidates
+                    idx[b, g, candidates.numel():] = candidates[-1]
+        return idx
+
+    def _random_group_indices(self, xyz):
+        batch_size, num_points, _ = xyz.shape
+        rows = []
+        for _ in range(batch_size):
+            rows.append(torch.randint(
+                0, num_points, (self.num_group, self.group_size), device=xyz.device))
+        return torch.stack(rows, dim=0)
+
+    def _gather_neighborhood(self, xyz, idx):
+        batch_size, num_points, _ = xyz.shape
+        idx_base = torch.arange(
+            0, batch_size, device=xyz.device).view(-1, 1, 1) * num_points
+        idx = (idx + idx_base).view(-1)
+        return xyz.view(batch_size * num_points, -1)[idx, :].view(
+            batch_size, self.num_group, self.group_size, 3).contiguous()
 
     def simplied_morton_sorting(self, xyz, center):
         '''
@@ -188,19 +273,26 @@ class Group(nn.Module):
             center : B G 3
         '''
         batch_size, num_points, _ = xyz.shape
-        # fps the centers out
-        center = misc.fps(xyz, self.num_group)  # B G 3
-        # knn to get the neighborhood
-        _, idx = self.knn(xyz, center)  # B G M
+        if self.group_mode == "fps_knn":
+            center = misc.fps(xyz, self.num_group)
+            _, idx = self.knn(xyz, center)
+        elif self.group_mode == "random_center_knn":
+            center = self._random_centers(xyz)
+            _, idx = self.knn(xyz, center)
+        elif self.group_mode == "voxel_center_knn":
+            center = self._voxel_centers(xyz)
+            _, idx = self.knn(xyz, center)
+        elif self.group_mode == "radius_fps":
+            center = misc.fps(xyz, self.num_group)
+            idx = self._radius_indices(xyz, center)
+        elif self.group_mode == "random_group":
+            center = self._random_centers(xyz)
+            idx = self._random_group_indices(xyz)
+        else:
+            raise ValueError(f"Unsupported PointGPT group_mode: {self.group_mode}")
         assert idx.size(1) == self.num_group
         assert idx.size(2) == self.group_size
-        idx_base = torch.arange(
-            0, batch_size, device=xyz.device).view(-1, 1, 1) * num_points
-        idx = idx + idx_base
-        idx = idx.view(-1)
-        neighborhood = xyz.view(batch_size * num_points, -1)[idx, :]
-        neighborhood = neighborhood.view(
-            batch_size, self.num_group, self.group_size, 3).contiguous()
+        neighborhood = self._gather_neighborhood(xyz, idx)
         # normalize
         neighborhood = neighborhood - center.unsqueeze(2)
 
@@ -497,16 +589,25 @@ class PointGPT(nn.Module):
         self.drop_path_rate = config.transformer_config.drop_path_rate
         self.weight_center = config.weight_center
         self.order_mode = getattr(config, 'order_mode', 'simplified_morton')
+        self.group_mode = getattr(config, 'group_mode', 'fps_knn')
+        self.group_radius = getattr(config, 'group_radius', 0.22)
+        self.group_voxel_grid = getattr(config, 'group_voxel_grid', 6)
 
         print_log(
             f'[PointGPT] divide point cloud into G{self.num_group} x S{self.group_size} points ...', logger='PointGPT')
         print_log(
             f'[PointGPT] patch order mode = {self.order_mode}',
             logger='PointGPT')
+        print_log(
+            f'[PointGPT] patch group mode = {self.group_mode}',
+            logger='PointGPT')
         self.group_divider = Group(
             num_group=self.num_group,
             group_size=self.group_size,
-            order_mode=self.order_mode)
+            order_mode=self.order_mode,
+            group_mode=self.group_mode,
+            group_radius=self.group_radius,
+            group_voxel_grid=self.group_voxel_grid)
 
         self.loss = config.loss
 
@@ -680,13 +781,22 @@ class PointTransformer(nn.Module):
         self.num_group = config.num_group
         self.encoder_dims = config.encoder_dims
         self.order_mode = getattr(config, 'order_mode', 'simplified_morton')
+        self.group_mode = getattr(config, 'group_mode', 'fps_knn')
+        self.group_radius = getattr(config, 'group_radius', 0.22)
+        self.group_voxel_grid = getattr(config, 'group_voxel_grid', 6)
 
         self.group_divider = Group(
             num_group=self.num_group,
             group_size=self.group_size,
-            order_mode=self.order_mode)
+            order_mode=self.order_mode,
+            group_mode=self.group_mode,
+            group_radius=self.group_radius,
+            group_voxel_grid=self.group_voxel_grid)
         print_log(
             f'[PointTransformer] patch order mode = {self.order_mode}',
+            logger='Transformer')
+        print_log(
+            f'[PointTransformer] patch group mode = {self.group_mode}',
             logger='Transformer')
 
         assert self.encoder_dims in [384, 768, 1024]

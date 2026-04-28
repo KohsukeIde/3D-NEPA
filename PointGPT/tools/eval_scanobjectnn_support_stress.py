@@ -176,9 +176,11 @@ def main():
 
     conditions = [
         ("clean", "clean", 1.0),
+        ("random_keep80", "random_drop", 0.8),
         ("random_keep50", "random_drop", 0.5),
         ("random_keep20", "random_drop", 0.2),
         ("random_keep10", "random_drop", 0.1),
+        ("structured_keep80", "structured_drop", 0.8),
         ("structured_keep50", "structured_drop", 0.5),
         ("structured_keep20", "structured_drop", 0.2),
         ("structured_keep10", "structured_drop", 0.1),

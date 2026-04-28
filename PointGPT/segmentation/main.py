@@ -70,6 +70,13 @@ def parse_args():
     parser.add_argument('--normal', action='store_true',
                         default=False, help='use normals')
     parser.add_argument('--seed', default=0, type=int, help='random seed')
+    parser.add_argument('--group_mode', default='fps_knn', type=str,
+                        choices=['fps_knn', 'random_center_knn', 'voxel_center_knn', 'radius_fps', 'random_group'],
+                        help='PointGPT patch grouping mode')
+    parser.add_argument('--group_radius', default=0.22, type=float,
+                        help='radius used by radius_fps grouping')
+    parser.add_argument('--group_voxel_grid', default=6, type=int,
+                        help='grid resolution used by voxel_center_knn grouping')
 
     # parser.add_argument('--step_size', type=int, default=20, help='decay step for lr decay')
     # parser.add_argument('--lr_decay', type=float, default=0.5, help='decay rate for lr decay')
@@ -81,17 +88,17 @@ def parse_args():
 
 def get_model_loss(MODEL, args, num_part):
     if args.model_name == 'PointGPT_S':
-        classifier = MODEL.get_model(num_part, trans_dim=384, depth=12, drop_path_rate=0.1, num_heads=6, decoder_depth=4, group_size=32, num_group=128, prop_dim=1024, label_dim1=512, label_dim2=256, encoder_dims=384)
+        classifier = MODEL.get_model(num_part, trans_dim=384, depth=12, drop_path_rate=0.1, num_heads=6, decoder_depth=4, group_size=32, num_group=128, prop_dim=1024, label_dim1=512, label_dim2=256, encoder_dims=384, group_mode=args.group_mode, group_radius=args.group_radius, group_voxel_grid=args.group_voxel_grid)
         classifier = classifier.cuda()
         criterion = MODEL.get_loss().cuda()
         classifier.apply(inplace_relu)  
     elif args.model_name == 'PointGPT_B':
-        classifier = MODEL.get_model(num_part, trans_dim=768, depth=12, drop_path_rate=0.1, num_heads=12, decoder_depth=4, group_size=32, num_group=128, prop_dim=2048, label_dim1=1024, label_dim2=512, encoder_dims=768)
+        classifier = MODEL.get_model(num_part, trans_dim=768, depth=12, drop_path_rate=0.1, num_heads=12, decoder_depth=4, group_size=32, num_group=128, prop_dim=2048, label_dim1=1024, label_dim2=512, encoder_dims=768, group_mode=args.group_mode, group_radius=args.group_radius, group_voxel_grid=args.group_voxel_grid)
         classifier = classifier.cuda()
         criterion = MODEL.get_loss().cuda()
         classifier.apply(inplace_relu)  
     elif args.model_name == 'PointGPT_L':
-        classifier = MODEL.get_model(num_part, trans_dim=1024, depth=24, drop_path_rate=0.1, num_heads=16, decoder_depth=4, group_size=32, num_group=128, prop_dim=2048, label_dim1=1024, label_dim2=512, encoder_dims=1024)
+        classifier = MODEL.get_model(num_part, trans_dim=1024, depth=24, drop_path_rate=0.1, num_heads=16, decoder_depth=4, group_size=32, num_group=128, prop_dim=2048, label_dim1=1024, label_dim2=512, encoder_dims=1024, group_mode=args.group_mode, group_radius=args.group_radius, group_voxel_grid=args.group_voxel_grid)
         classifier = classifier.cuda()
         criterion = MODEL.get_loss().cuda()
         classifier.apply(inplace_relu)  

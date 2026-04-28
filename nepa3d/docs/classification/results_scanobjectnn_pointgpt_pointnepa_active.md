@@ -1,6 +1,77 @@
 # ScanObjectNN PointGPT / pointNEPA Sidecar Results (Active)
 
-Snapshot time: `2026-04-25 JST` (includes the 2026-04-22 local rebuild chain, the 2026-04-24 order-randomized downstream partial, and the 2026-04-25 order-randomized readout/support audits)
+Snapshot time: `2026-04-29 JST` (includes the 2026-04-22 local rebuild chain, the 2026-04-24 no-mask order-randomized downstream partial, the 2026-04-25 no-mask order-randomized readout/support audits, the 2026-04-27 severity-curve / mask-on order-randomized audits, and the 2026-04-29 train-time / eval-time grouping ablations)
+
+## 2026-04-29 grouping / patchization ablation
+
+Purpose:
+
+- Test whether the support-stress conclusion is only a perturbation artifact, or whether PointGPT-style patchization/grouping itself changes what random and structured point removal measure.
+- This is the object-side architecture-strengthening experiment for the claim that random point-drop robustness is not the right robustness notion.
+
+Primary result files:
+
+- ScanObjectNN obj_bg readout:
+  - `3D-NEPA/results/ptgpt_group_random_center_knn_objbg_readout.md`
+  - `3D-NEPA/results/ptgpt_group_random_group_objbg_readout.md`
+- ScanObjectNN obj_bg support stress:
+  - `3D-NEPA/results/ptgpt_group_random_center_knn_objbg_stress.md`
+  - `3D-NEPA/results/ptgpt_group_random_group_objbg_stress.md`
+- ScanObjectNN obj_bg eval-time grouping:
+  - `3D-NEPA/results/ptgpt_group_random_center_knn_objbg_grouping.md`
+  - `3D-NEPA/results/ptgpt_group_random_group_objbg_grouping.md`
+- ShapeNetPart support stress:
+  - `3D-NEPA/results/ptgpt_shapenetpart_group_random_center_knn_stress.md`
+  - `3D-NEPA/results/ptgpt_shapenetpart_group_random_group_stress.md`
+- ShapeNetPart eval-time grouping:
+  - `3D-NEPA/results/ptgpt_shapenetpart_group_random_center_knn_grouping.md`
+  - `3D-NEPA/results/ptgpt_shapenetpart_group_random_group_grouping.md`
+
+### Train-time grouping summary
+
+| Task | Train grouping | Clean / top1 score | Random keep20 | Structured keep20 | Strong stress |
+|---|---|---:|---:|---:|---:|
+| ScanObjectNN `obj_bg` | `random_center_knn` | `0.8726` readout top1 | `0.4733` | `0.2341` | `xyz_zero = 0.0723` |
+| ScanObjectNN `obj_bg` | `random_group` | `0.7177` readout top1 | `0.7298` | `0.2100` | `xyz_zero = 0.0723` |
+| ShapeNetPart | `random_center_knn` | `0.8199` class avg IoU | `0.7137` | `0.6553` | `part_drop_largest = 0.5231`, `xyz_zero = 0.2711` |
+| ShapeNetPart | `random_group` | `0.8064` class avg IoU | `0.8088` | `0.6782` | `part_drop_largest = 0.5158`, `xyz_zero = 0.2916` |
+
+Interpretation:
+
+- On ScanObjectNN, train-time `random_group` substantially reduces clean object classification performance (`0.8726 -> 0.7177`), so local grouping is important for global object recognition.
+- On ShapeNetPart, train-time `random_group` remains close on clean dense transfer (`0.8199 -> 0.8064` class avg IoU), but it makes random/part-keep support stress almost non-informative. This shows that the stress metric itself depends on grouping/patchization.
+- `part_drop_largest` and `xyz_zero` remain strong stresses under both grouping regimes, so structured semantic support removal is more diagnostic than random point retention.
+
+### Eval-time grouping summary
+
+ScanObjectNN `obj_bg`:
+
+| Trained grouping | Eval grouping | Clean acc | Random keep20 | Structured keep20 |
+|---|---|---:|---:|---:|
+| `random_center_knn` | `fps_knn` | `0.8881` | `0.4802` | `0.2306` |
+| `random_center_knn` | `random_center_knn` | `0.8812` | `0.4750` | `0.2151` |
+| `random_center_knn` | `random_group` | `0.1256` | `0.1102` | `0.1102` |
+| `random_group` | `fps_knn` | `0.1015` | `0.1222` | `0.1119` |
+| `random_group` | `random_center_knn` | `0.0998` | `0.1325` | `0.0981` |
+| `random_group` | `random_group` | `0.7229` | `0.7177` | `0.1704` |
+
+ShapeNetPart:
+
+| Trained grouping | Eval grouping | Clean class avg IoU | Random keep20 | Structured keep20 | Part-drop-largest |
+|---|---|---:|---:|---:|---:|
+| `random_center_knn` | `fps_knn` | `0.8267` | `0.7319` | `0.6773` | `0.5341` |
+| `random_center_knn` | `random_center_knn` | `0.8251` | `0.7207` | `0.6581` | `0.5199` |
+| `random_center_knn` | `random_group` | `0.4182` | `0.4168` | `0.6124` | `0.3681` |
+| `random_group` | `fps_knn` | `0.4773` | `0.4592` | `0.5721` | `0.4091` |
+| `random_group` | `random_center_knn` | `0.4744` | `0.4537` | `0.5831` | `0.4231` |
+| `random_group` | `random_group` | `0.8060` | `0.8044` | `0.6728` | `0.5130` |
+
+Interpretation:
+
+- The learned representation/head is tightly coupled to the grouping construction used during training. Local-neighborhood trained models collapse under destructive `random_group` inference, and `random_group` trained models collapse under local-neighborhood inference.
+- This is stronger than a pure support-stress result: the architecture/patchization operator changes both clean transfer and the meaning of random/structured stress.
+- The safe main-text claim is now: random point removal is not a sufficient robustness test for point-cloud SSL; grouping/patchization determines whether random support stress preserves or destroys the evidence the model uses.
+- A stronger architecture claim is supported on the object side for PointGPT-style grouping, but a universal claim about all scene-level point architectures would still require scene segmentation grouping/patchization ablations.
 
 ## 2026-04-22 local rebuild status
 
@@ -323,16 +394,16 @@ Object-side readout interpretation:
 Full-object support stress completed:
 
 - official summary:
-  - `3D-NEPA/results/ptgpt_stress_official_objbg_full.md`
+  - `3D-NEPA/results/ptgpt_stress_official_objbg_severity.md`
 - no-mask summary:
-  - `3D-NEPA/results/ptgpt_stress_nomask_objbg_full.md`
+  - `3D-NEPA/results/ptgpt_stress_nomask_objbg_severity.md`
 
 Overall accuracy:
 
-| row | clean | random keep50 | random keep20 | random keep10 | structured keep50 | structured keep20 | structured keep10 | xyz-zero |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| official `obj_bg` | `0.9122` | `0.8950` | `0.4269` | `0.2702` | `0.7401` | `0.2272` | `0.1308` | `0.0929` |
-| no-mask `obj_bg` | `0.8744` | `0.8778` | `0.5215` | `0.2341` | `0.6730` | `0.2186` | `0.1153` | `0.0929` |
+| row | clean | random keep80 | random keep50 | random keep20 | random keep10 | structured keep80 | structured keep50 | structured keep20 | structured keep10 | xyz-zero |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| official `obj_bg` | `0.9105` | `0.9139` | `0.8812` | `0.4337` | `0.2616` | `0.8881` | `0.7453` | `0.2100` | `0.1239` | `0.0929` |
+| no-mask `obj_bg` | `0.8916` | `0.8726` | `0.8726` | `0.5112` | `0.2392` | `0.8606` | `0.6936` | `0.2306` | `0.1205` | `0.0929` |
 
 Stress interpretation:
 
@@ -410,6 +481,31 @@ ShapeNetPart interpretation:
 - The no-mask row is slightly below the official PointGPT-S row, but only
   marginally, so the weak-binding reading is not confined to global object
   classification alone.
+
+### ShapeNetPart support-stress severity curves
+
+Support-stress severity curves are complete for the same two ShapeNetPart
+checkpoints.
+
+- official summary:
+  - `3D-NEPA/results/ptgpt_shapenetpart_official_support_stress.md`
+- no-mask summary:
+  - `3D-NEPA/results/ptgpt_shapenetpart_nomask_support_stress.md`
+
+Class-avg IoU:
+
+| row | clean | random keep80 | random keep50 | random keep20 | random keep10 | structured keep80 | structured keep50 | structured keep20 | structured keep10 | part-drop-largest | part keep20/part | xyz-zero |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| official | `0.8335` | `0.8226` | `0.8184` | `0.6929` | `0.5443` | `0.8200` | `0.7674` | `0.6454` | `0.6093` | `0.4844` | `0.6927` | `0.2588` |
+| no-mask | `0.8287` | `0.8204` | `0.8131` | `0.7016` | `0.5518` | `0.8126` | `0.7673` | `0.6546` | `0.6471` | `0.4711` | `0.6992` | `0.2327` |
+
+Interpretation:
+
+- dense part transfer is not just a classification-only artifact: the no-mask
+  row stays close to the official row on clean ShapeNetPart.
+- random and per-part thinning degrade smoothly, while removing the largest
+  semantic part is substantially harsher.
+- `xyz_zero` remains the strongest null-style stress for both rows.
 
 ## PointGPT-S no-mask + order-randomized pretrain
 
@@ -526,16 +622,121 @@ Interpretation:
   order-randomized checkpoint. A full 300-epoch continuation remains optional,
   not required for the current early-stop interpretation.
 
+## PointGPT-S mask-on + order-randomized pretrain
+
+The `mask_ratio=0.7` + random token order PointGPT-S row is now available as
+the missing mask-on/order-randomized cell for the 2x2 AR scaffold audit.
+
+- pretrain experiment:
+  - `PointGPT/experiments/pretrain_orderrandom/PointGPT-S/pgpt_s_masked_ordrand_e300`
+- checkpoints:
+  - `ckpt-last.pth`
+  - `ckpt-epoch-300.pth`
+- downstream checkpoint:
+  - `PointGPT/experiments/finetune_scan_objbg/PointGPT-S/pgpt_s_masked_ordrand_objbg_e300/ckpt-best.pth`
+- readout audit:
+  - `3D-NEPA/results/ptgpt_masked_ordrand_objbg_readout_full.md`
+- support-stress audit:
+  - `3D-NEPA/results/ptgpt_masked_ordrand_objbg_stress_full.md`
+
+Readout:
+
+| row | top1 acc | top2 hit | top5 hit | hardest pair | pair direct acc | pair probe bal acc |
+|---|---:|---:|---:|---|---:|---:|
+| mask-on + order-random `obj_bg` | `0.8795` | `0.9552` | `0.9983` | `bed -> sofa` | `0.9219` | `0.8972` |
+
+Support stress:
+
+| row | clean | random keep80 | random keep50 | random keep20 | random keep10 | structured keep80 | structured keep50 | structured keep20 | structured keep10 | xyz-zero |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| mask-on + order-random `obj_bg` | `0.8916` | `0.8692` | `0.8744` | `0.6007` | `0.2960` | `0.8520` | `0.6781` | `0.2754` | `0.1566` | `0.0723` |
+
+Interpretation:
+
+- mask-on order randomization is not collapse-inducing for ScanObjectNN
+  `obj_bg`: top-1 remains high and top-k coverage remains very high.
+- compared with mask removal alone, order randomization is still a meaningful
+  perturbation, so the conservative paper claim should be that masking is
+  weakly binding while causal order is more binding but not catastrophic.
+  This row now separates mask removal from order randomization more cleanly
+  than the previous no-mask-only order-randomized audit.
+
+## PointGPT-S train-time grouping ablation
+
+This is the stronger architecture-claim audit requested after the evaluation-only
+grouping ablations. The goal is to test whether PointGPT-style local
+patchization itself is part of the support-stress behavior, rather than only
+testing inference-time perturbations on a fixed model.
+
+Implemented grouping modes:
+
+| mode | purpose |
+|---|---|
+| `fps_knn` | original PointGPT-style local grouping baseline |
+| `random_center_knn` | preserve local neighborhoods, but choose centers randomly instead of FPS |
+| `random_group` | destroy local neighborhoods by grouping random points |
+| `voxel_center_knn` | available for eval/config, not queued for full retrain yet |
+| `radius_fps` | available for eval/config, not queued for full retrain yet |
+
+Code paths:
+
+- classification/pretrain grouping: `PointGPT/models/PointGPT.py`
+- ShapeNetPart grouping: `PointGPT/segmentation/models/pt.py`
+- QF stage script: `scripts/sanity/pointgpt_grouping_retrain_stage_qf.sh`
+
+Smoke checks completed before queueing:
+
+- CPU grouping shape check passed for all five modes in classification.
+- CPU grouping shape check passed for all five modes in ShapeNetPart
+  segmentation.
+- YAML/config load checks passed for the two queued variants.
+- QF preflight import initially failed because the local fallback
+  `pointnet2_ops` path was not on `PYTHONPATH`; the submit script now exports
+  `PointGPT` and `PointGPT/segmentation/models` before preflight.
+
+Queued train-time variants:
+
+| variant | pretrain job | obj_bg FT | ShapeNetPart FT | obj_bg audit | ShapeNetPart audit |
+|---|---:|---:|---:|---:|---:|
+| `random_center_knn` | `135779.qjcm` | `135781.qjcm` | `135782.qjcm` | `135785.qjcm` | `135786.qjcm` |
+| `random_group` | `135780.qjcm` | `135783.qjcm` | `135784.qjcm` | `135787.qjcm` | `135788.qjcm` |
+
+Queue status at `2026-04-28 09:26 JST`:
+
+- `135779.qjcm` and `135780.qjcm` are running on QF.
+- downstream fine-tune and audit jobs are dependency-held with `afterok`.
+- both pretrain jobs reached epoch logs and checkpoint save successfully:
+  - `random_center_knn`: epoch `2/300` saved; loss is decreasing from the
+    first epoch.
+  - `random_group`: epoch `2/300` saved; loss is much larger than the local
+    grouping variant but decreasing, consistent with deliberately broken local
+    patch structure.
+
+Interpretation target:
+
+- If `random_center_knn` remains close to `fps_knn`, FPS center selection is not
+  the critical factor; local neighborhoods are.
+- If `random_group` collapses or becomes much less robust under ScanObjectNN /
+  ShapeNetPart support stress, this supports the stronger claim that the local
+  grouping/patchization architecture is part of the observed robustness profile.
+- If both variants remain close, the safe claim should stay at the evaluation
+  level: random point-drop is a weak stress, but the architecture-level causal
+  claim is not supported by this ablation.
+
 ## Current pending object-side runs
 
 Current live queue:
 
-- none observed on `2026-04-25 JST`.
+- `135779.qjcm`: `PointGPT-S` `random_center_knn` grouping pretrain
+- `135780.qjcm`: `PointGPT-S` `random_group` grouping pretrain
+- `135781.qjcm`--`135788.qjcm`: dependent `obj_bg`, ShapeNetPart, and audit
+  jobs for the two grouping variants
 
 Still missing:
 
 - optional continuation of the order-randomized `obj_bg` fine-tune to the full
   `300` epochs, if a complete matched row is required
+- completion of the two train-time grouping ablation chains above
 
 Recently completed:
 

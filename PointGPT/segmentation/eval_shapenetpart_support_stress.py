@@ -31,6 +31,10 @@ def parse_args():
     p.add_argument("--num_workers", type=int, default=8)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--normal", action="store_true", default=False)
+    p.add_argument("--group_mode", default="fps_knn",
+                   choices=["fps_knn", "random_center_knn", "voxel_center_knn", "radius_fps", "random_group"])
+    p.add_argument("--group_radius", type=float, default=0.22)
+    p.add_argument("--group_voxel_grid", type=int, default=6)
     p.add_argument("--output_json", default="")
     p.add_argument("--output_md", default="")
     return p.parse_args()
@@ -46,6 +50,17 @@ def _resample(points, target, keep_idx, npoint, rng):
     return kept_points[idx], kept_target[idx]
 
 
+def _ratio_suffix(condition, prefix, suffix=""):
+    if not condition.startswith(prefix):
+        return None
+    tail = condition[len(prefix):]
+    if suffix:
+        if not tail.endswith(suffix):
+            return None
+        tail = tail[: -len(suffix)]
+    return int(tail) / 100.0
+
+
 def stress_one(points, target, condition, rng):
     npoint = points.shape[0]
     if condition == "clean":
@@ -55,30 +70,37 @@ def stress_one(points, target, condition, rng):
         out[:, :3] = 0.0
         return out, target
 
-    keep20 = max(1, int(round(0.2 * npoint)))
-    if condition == "random_keep20":
-        keep_idx = rng.choice(npoint, keep20, replace=False)
+    random_ratio = _ratio_suffix(condition, "random_keep")
+    if random_ratio is not None:
+        keep_n = max(1, int(round(random_ratio * npoint)))
+        keep_idx = rng.choice(npoint, keep_n, replace=False)
         return _resample(points, target, keep_idx, npoint, rng)
-    if condition == "structured_keep20":
+
+    structured_ratio = _ratio_suffix(condition, "structured_keep")
+    if structured_ratio is not None:
+        keep_n = max(1, int(round(structured_ratio * npoint)))
         anchor = int(rng.randint(0, npoint))
         dist = np.sum((points[:, :3] - points[anchor : anchor + 1, :3]) ** 2, axis=1)
-        keep_idx = np.argsort(dist)[-keep20:]
+        keep_idx = np.argsort(dist)[-keep_n:]
         return _resample(points, target, keep_idx, npoint, rng)
+
     if condition == "part_drop_largest":
         labels, counts = np.unique(target, return_counts=True)
         if len(labels) <= 1:
-            keep_idx = rng.choice(npoint, keep20, replace=False)
+            keep_idx = rng.choice(npoint, max(1, int(round(0.2 * npoint))), replace=False)
         else:
             drop_label = labels[np.argmax(counts)]
             keep_idx = np.flatnonzero(target != drop_label)
             if keep_idx.size == 0:
-                keep_idx = rng.choice(npoint, keep20, replace=False)
+                keep_idx = rng.choice(npoint, max(1, int(round(0.2 * npoint))), replace=False)
         return _resample(points, target, keep_idx, npoint, rng)
-    if condition == "part_keep20_per_part":
+
+    part_keep_ratio = _ratio_suffix(condition, "part_keep", "_per_part")
+    if part_keep_ratio is not None:
         keep_parts = []
         for label in np.unique(target):
             idx = np.flatnonzero(target == label)
-            k = max(1, int(round(0.2 * idx.size)))
+            k = max(1, int(round(part_keep_ratio * idx.size)))
             keep_parts.append(rng.choice(idx, k, replace=False))
         keep_idx = np.concatenate(keep_parts, axis=0)
         return _resample(points, target, keep_idx, npoint, rng)
@@ -100,11 +122,20 @@ def build_model(args):
 def evaluate_condition(model, loader, condition, args):
     condition_offsets = {
         "clean": 0,
-        "random_keep20": 1,
-        "structured_keep20": 2,
-        "part_drop_largest": 3,
-        "part_keep20_per_part": 4,
-        "xyz_zero": 5,
+        "random_keep80": 1,
+        "random_keep50": 2,
+        "random_keep20": 3,
+        "random_keep10": 4,
+        "structured_keep80": 5,
+        "structured_keep50": 6,
+        "structured_keep20": 7,
+        "structured_keep10": 8,
+        "part_drop_largest": 9,
+        "part_keep80_per_part": 10,
+        "part_keep50_per_part": 11,
+        "part_keep20_per_part": 12,
+        "part_keep10_per_part": 13,
+        "xyz_zero": 14,
     }
     rng = np.random.RandomState(args.seed + condition_offsets[condition])
     total_correct = 0
@@ -188,7 +219,7 @@ def to_md(summary):
     lines.append("## Notes")
     lines.append("")
     lines.append("- `part_drop_largest` removes the largest ground-truth part within each object before resampling.")
-    lines.append("- `part_keep20_per_part` keeps 20% of each part before resampling. These are support-stress probes, not official ShapeNetPart scores.")
+    lines.append("- `part_keepXX_per_part` keeps XX% of each ground-truth part before resampling. These are support-stress probes, not official ShapeNetPart scores.")
     return "\n".join(lines) + "\n"
 
 
@@ -202,7 +233,23 @@ def main():
     dataset = PartNormalDataset(root=args.root, npoints=args.npoint, split="test", normal_channel=args.normal)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
     model = build_model(args)
-    conditions = ["clean", "random_keep20", "structured_keep20", "part_drop_largest", "part_keep20_per_part", "xyz_zero"]
+    conditions = [
+        "clean",
+        "random_keep80",
+        "random_keep50",
+        "random_keep20",
+        "random_keep10",
+        "structured_keep80",
+        "structured_keep50",
+        "structured_keep20",
+        "structured_keep10",
+        "part_drop_largest",
+        "part_keep80_per_part",
+        "part_keep50_per_part",
+        "part_keep20_per_part",
+        "part_keep10_per_part",
+        "xyz_zero",
+    ]
     rows = [evaluate_condition(model, loader, cond, args) for cond in conditions]
     summary = {
         "ckpt": args.ckpt,

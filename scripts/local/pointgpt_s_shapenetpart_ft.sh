@@ -14,6 +14,9 @@ BATCH_SIZE="${BATCH_SIZE:-16}"
 LEARNING_RATE="${LEARNING_RATE:-0.0002}"
 MODEL_NAME="${MODEL_NAME:-PointGPT_S}"
 SEED="${SEED:-0}"
+GROUP_MODE="${GROUP_MODE:-fps_knn}"
+GROUP_RADIUS="${GROUP_RADIUS:-0.22}"
+GROUP_VOXEL_GRID="${GROUP_VOXEL_GRID:-6}"
 
 if [[ -z "${CKPT_PATH}" ]]; then
   echo "[error] CKPT_PATH is required"
@@ -42,4 +45,7 @@ exec python main.py \
   --batch_size "${BATCH_SIZE}" \
   --learning_rate "${LEARNING_RATE}" \
   --log_dir "${RUN_NAME}" \
-  --seed "${SEED}"
+  --seed "${SEED}" \
+  --group_mode "${GROUP_MODE}" \
+  --group_radius "${GROUP_RADIUS}" \
+  --group_voxel_grid "${GROUP_VOXEL_GRID}"
