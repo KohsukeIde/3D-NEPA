@@ -35,6 +35,8 @@ def parse_args():
                    choices=["fps_knn", "random_center_knn", "voxel_center_knn", "radius_fps", "random_group"])
     p.add_argument("--group_radius", type=float, default=0.22)
     p.add_argument("--group_voxel_grid", type=int, default=6)
+    p.add_argument("--local_noise_sigma", type=float, default=0.08,
+                   help="Gaussian noise sigma as a fraction of object bbox diagonal for local_jitter.")
     p.add_argument("--output_json", default="")
     p.add_argument("--output_md", default="")
     return p.parse_args()
@@ -61,7 +63,7 @@ def _ratio_suffix(condition, prefix, suffix=""):
     return int(tail) / 100.0
 
 
-def stress_one(points, target, condition, rng):
+def stress_one(points, target, condition, rng, local_noise_sigma=0.08):
     npoint = points.shape[0]
     if condition == "clean":
         return points, target
@@ -83,6 +85,30 @@ def stress_one(points, target, condition, rng):
         dist = np.sum((points[:, :3] - points[anchor : anchor + 1, :3]) ** 2, axis=1)
         keep_idx = np.argsort(dist)[-keep_n:]
         return _resample(points, target, keep_idx, npoint, rng)
+
+    local_jitter_ratio = _ratio_suffix(condition, "local_jitter")
+    if local_jitter_ratio is not None:
+        out = points.copy()
+        patch_n = max(1, int(round(local_jitter_ratio * npoint)))
+        anchor = int(rng.randint(0, npoint))
+        dist = np.sum((out[:, :3] - out[anchor : anchor + 1, :3]) ** 2, axis=1)
+        patch_idx = np.argsort(dist)[:patch_n]
+        diag = float(np.linalg.norm(out[:, :3].max(axis=0) - out[:, :3].min(axis=0)))
+        sigma = max(1e-6, float(local_noise_sigma) * diag)
+        out[patch_idx, :3] = out[patch_idx, :3] + rng.normal(0.0, sigma, size=(patch_idx.size, 3)).astype(out.dtype)
+        return out, target
+
+    local_replace_ratio = _ratio_suffix(condition, "local_replace")
+    if local_replace_ratio is not None:
+        out = points.copy()
+        patch_n = max(1, int(round(local_replace_ratio * npoint)))
+        anchor = int(rng.randint(0, npoint))
+        dist = np.sum((out[:, :3] - out[anchor : anchor + 1, :3]) ** 2, axis=1)
+        patch_idx = np.argsort(dist)[:patch_n]
+        mins = out[:, :3].min(axis=0)
+        maxs = out[:, :3].max(axis=0)
+        out[patch_idx, :3] = mins + rng.rand(patch_idx.size, 3).astype(out.dtype) * (maxs - mins)
+        return out, target
 
     if condition == "part_drop_largest":
         labels, counts = np.unique(target, return_counts=True)
@@ -130,12 +156,20 @@ def evaluate_condition(model, loader, condition, args):
         "structured_keep50": 6,
         "structured_keep20": 7,
         "structured_keep10": 8,
-        "part_drop_largest": 9,
-        "part_keep80_per_part": 10,
-        "part_keep50_per_part": 11,
-        "part_keep20_per_part": 12,
-        "part_keep10_per_part": 13,
-        "xyz_zero": 14,
+        "local_jitter80": 9,
+        "local_jitter50": 10,
+        "local_jitter20": 11,
+        "local_jitter10": 12,
+        "local_replace80": 13,
+        "local_replace50": 14,
+        "local_replace20": 15,
+        "local_replace10": 16,
+        "part_drop_largest": 17,
+        "part_keep80_per_part": 18,
+        "part_keep50_per_part": 19,
+        "part_keep20_per_part": 20,
+        "part_keep10_per_part": 21,
+        "xyz_zero": 22,
     }
     rng = np.random.RandomState(args.seed + condition_offsets[condition])
     total_correct = 0
@@ -151,7 +185,7 @@ def evaluate_condition(model, loader, condition, args):
             stressed_pts = []
             stressed_tgt = []
             for i in range(pts_np.shape[0]):
-                pts_i, tgt_i = stress_one(pts_np[i], tgt_np[i], condition, rng)
+                pts_i, tgt_i = stress_one(pts_np[i], tgt_np[i], condition, rng, args.local_noise_sigma)
                 stressed_pts.append(pts_i)
                 stressed_tgt.append(tgt_i)
             points_t = torch.tensor(np.stack(stressed_pts), dtype=torch.float32).cuda().transpose(2, 1)
@@ -243,6 +277,14 @@ def main():
         "structured_keep50",
         "structured_keep20",
         "structured_keep10",
+        "local_jitter80",
+        "local_jitter50",
+        "local_jitter20",
+        "local_jitter10",
+        "local_replace80",
+        "local_replace50",
+        "local_replace20",
+        "local_replace10",
         "part_drop_largest",
         "part_keep80_per_part",
         "part_keep50_per_part",

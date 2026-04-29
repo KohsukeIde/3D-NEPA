@@ -46,6 +46,8 @@ def parse_args():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--output_json", type=str, default="")
     p.add_argument("--output_md", type=str, default="")
+    p.add_argument("--local_noise_sigma", type=float, default=0.08,
+                   help="Gaussian noise sigma as a fraction of the object bbox diagonal for local_jitter.")
     return p.parse_args()
 
 
@@ -81,7 +83,20 @@ def _resample_to_npoints(points, keep_idx, npoints, g):
     return torch.cat([kept, kept[extra_idx]], dim=0)
 
 
-def apply_condition(points, condition, keep_ratio, generator):
+def _local_patch_indices(pts, ratio, generator):
+    npoints = pts.shape[0]
+    patch_n = max(1, int(round(npoints * ratio)))
+    anchor = int(torch.randint(0, npoints, (1,), generator=generator).item())
+    dist = torch.sum((pts - pts[anchor : anchor + 1]) ** 2, dim=-1)
+    return torch.topk(dist, k=patch_n, largest=False).indices
+
+
+def _bbox_diag(pts):
+    extent = pts.max(dim=0).values - pts.min(dim=0).values
+    return torch.linalg.norm(extent).clamp_min(1e-6)
+
+
+def apply_condition(points, condition, keep_ratio, generator, noise_sigma=0.08):
     bsz, npoints, _ = points.shape
     if condition == "clean":
         return points
@@ -104,7 +119,27 @@ def apply_condition(points, condition, keep_ratio, generator):
     return torch.stack(out, dim=0)
 
 
-def eval_condition(model, loader, npoints, condition, keep_ratio, max_batches, seed):
+def apply_local_noise(points, condition, ratio, generator, noise_sigma=0.08):
+    bsz, _, _ = points.shape
+    out = points.clone()
+    for b in range(bsz):
+        pts = out[b]
+        patch_idx = _local_patch_indices(pts, ratio, generator)
+        if condition == "local_jitter":
+            sigma = float(noise_sigma) * float(_bbox_diag(pts).item())
+            noise = torch.randn((patch_idx.numel(), pts.shape[1]), generator=generator, dtype=pts.dtype) * sigma
+            pts[patch_idx] = pts[patch_idx] + noise
+        elif condition == "local_replace":
+            mins = pts.min(dim=0).values
+            maxs = pts.max(dim=0).values
+            rand = torch.rand((patch_idx.numel(), pts.shape[1]), generator=generator, dtype=pts.dtype)
+            pts[patch_idx] = mins + rand * (maxs - mins)
+        else:
+            raise ValueError(f"Unsupported local noise condition: {condition}")
+    return out
+
+
+def eval_condition(model, loader, npoints, condition, keep_ratio, max_batches, seed, noise_sigma):
     g = torch.Generator(device="cpu")
     g.manual_seed(seed)
     total = 0
@@ -119,7 +154,10 @@ def eval_condition(model, loader, npoints, condition, keep_ratio, max_batches, s
             points = data[0]
             labels = data[1].view(-1)
             points = misc.fps(points.cuda(), npoints).cpu()
-            stressed = apply_condition(points, condition, keep_ratio, g).cuda()
+            if condition in {"local_jitter", "local_replace"}:
+                stressed = apply_local_noise(points, condition, keep_ratio, g, noise_sigma=noise_sigma).cuda()
+            else:
+                stressed = apply_condition(points, condition, keep_ratio, g, noise_sigma=noise_sigma).cuda()
             logits, _ = model(stressed, compute_recon=False)
             pred = logits.argmax(dim=-1).cpu()
 
@@ -184,6 +222,14 @@ def main():
         ("structured_keep50", "structured_drop", 0.5),
         ("structured_keep20", "structured_drop", 0.2),
         ("structured_keep10", "structured_drop", 0.1),
+        ("local_jitter80", "local_jitter", 0.8),
+        ("local_jitter50", "local_jitter", 0.5),
+        ("local_jitter20", "local_jitter", 0.2),
+        ("local_jitter10", "local_jitter", 0.1),
+        ("local_replace80", "local_replace", 0.8),
+        ("local_replace50", "local_replace", 0.5),
+        ("local_replace20", "local_replace", 0.2),
+        ("local_replace10", "local_replace", 0.1),
         ("xyz_zero", "xyz_zero", 0.0),
     ]
     rows = []
@@ -196,6 +242,7 @@ def main():
             keep_ratio,
             max_batches=args.max_batches,
             seed=args.seed + idx,
+            noise_sigma=args.local_noise_sigma,
         )
         result["name"] = name
         rows.append(result)
