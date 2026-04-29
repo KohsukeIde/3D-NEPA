@@ -632,6 +632,14 @@ the missing mask-on/order-randomized cell for the 2x2 AR scaffold audit.
 - checkpoints:
   - `ckpt-last.pth`
   - `ckpt-epoch-300.pth`
+- pretext-side movement:
+  - epoch `0`: `356.9574`
+  - epoch `50`: `45.3103`
+  - epoch `100`: `42.7796`
+  - epoch `200`: `40.9040`
+  - epoch `300`: `40.2699`
+  - `M_pre = 0.8872`
+  - epoch-300 logged diagnostics: `loss_main=0.04003`, `recon_cd_l1=0.03472`, `recon_cd_l2=0.00532`
 - downstream checkpoint:
   - `PointGPT/experiments/finetune_scan_objbg/PointGPT-S/pgpt_s_masked_ordrand_objbg_e300/ckpt-best.pth`
 - readout audit:
