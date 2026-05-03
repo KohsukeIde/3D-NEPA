@@ -1,0 +1,134 @@
+[
+  {
+    "checkpoint_path": "/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/results/object_ssl_pointmae_pcpmae/heldout_experiments/pcpmae/heldout_obj_bg/pcpmae/pcpmae_obj_bg_heldout_seed2026/ckpt-best.pth",
+    "git_commit": "3dcf4b6a299e59744adcc064c5fa5d4b2b703187",
+    "hardest_pair": {
+      "count": 3,
+      "pred": "display",
+      "true": "cabinet"
+    },
+    "model": "pcpmae",
+    "n_samples": 581,
+    "notes": "structured_keep drops a local anchor neighborhood by retaining farthest points, matching existing PointGPT support-stress protocol; input-level FPS is skipped when the H5 point count already equals npoints.",
+    "oracle2_score": 97.9345977306366,
+    "oracle5_score": 99.48365092277527,
+    "script": "/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/scripts/object_ssl/eval_scanobjectnn_mae.py",
+    "seed": 2026,
+    "selection_protocol": "heldout_selection",
+    "split": "obj_bg",
+    "task": "scanobjectnn",
+    "top1": 92.77108311653137,
+    "top2_hit": 97.9345977306366,
+    "top5_hit": 99.48365092277527
+  },
+  {
+    "checkpoint_path": "/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/results/object_ssl_pointmae_pcpmae/heldout_experiments/pcpmae/heldout_obj_only/pcpmae/pcpmae_obj_only_heldout_seed2026/ckpt-best.pth",
+    "git_commit": "3dcf4b6a299e59744adcc064c5fa5d4b2b703187",
+    "hardest_pair": {
+      "count": 4,
+      "pred": "shelf",
+      "true": "cabinet"
+    },
+    "model": "pcpmae",
+    "n_samples": 581,
+    "notes": "structured_keep drops a local anchor neighborhood by retaining farthest points, matching existing PointGPT support-stress protocol; input-level FPS is skipped when the H5 point count already equals npoints.",
+    "oracle2_score": 97.24612832069397,
+    "oracle5_score": 99.13941621780396,
+    "script": "/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/scripts/object_ssl/eval_scanobjectnn_mae.py",
+    "seed": 2026,
+    "selection_protocol": "heldout_selection",
+    "split": "obj_only",
+    "task": "scanobjectnn",
+    "top1": 92.25473403930664,
+    "top2_hit": 97.24612832069397,
+    "top5_hit": 99.13941621780396
+  },
+  {
+    "checkpoint_path": "/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/results/object_ssl_pointmae_pcpmae/heldout_experiments/pcpmae/heldout_pb_t50_rs/pcpmae/pcpmae_pb_t50_rs_heldout_seed2026/ckpt-best.pth",
+    "git_commit": "3dcf4b6a299e59744adcc064c5fa5d4b2b703187",
+    "hardest_pair": {
+      "count": 24,
+      "pred": "desk",
+      "true": "table"
+    },
+    "model": "pcpmae",
+    "n_samples": 2882,
+    "notes": "structured_keep drops a local anchor neighborhood by retaining farthest points, matching existing PointGPT support-stress protocol; input-level FPS is skipped when the H5 point count already equals npoints.",
+    "oracle2_score": 95.7321286201477,
+    "oracle5_score": 98.85495901107788,
+    "script": "/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/scripts/object_ssl/eval_scanobjectnn_mae.py",
+    "seed": 2026,
+    "selection_protocol": "heldout_selection",
+    "split": "pb_t50_rs",
+    "task": "scanobjectnn",
+    "top1": 88.86190056800842,
+    "top2_hit": 95.7321286201477,
+    "top5_hit": 98.85495901107788
+  },
+  {
+    "checkpoint_path": "/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/results/object_ssl_pointmae_pcpmae/work/pointmae_heldout/experiments/heldout_obj_bg/pointmae/pointmae_obj_bg_heldout_seed2026/ckpt-best.pth",
+    "git_commit": "3dcf4b6a299e59744adcc064c5fa5d4b2b703187",
+    "hardest_pair": {
+      "count": 5,
+      "pred": "cabinet",
+      "true": "door"
+    },
+    "model": "pointmae",
+    "n_samples": 581,
+    "notes": "structured_keep drops a local anchor neighborhood by retaining farthest points, matching existing PointGPT support-stress protocol; input-level FPS is skipped when the H5 point count already equals npoints.",
+    "oracle2_score": 94.49225664138794,
+    "oracle5_score": 98.96729588508606,
+    "script": "/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/scripts/object_ssl/eval_scanobjectnn_mae.py",
+    "seed": 2026,
+    "selection_protocol": "heldout_selection",
+    "split": "obj_bg",
+    "task": "scanobjectnn",
+    "top1": 85.88640093803406,
+    "top2_hit": 94.49225664138794,
+    "top5_hit": 98.96729588508606
+  },
+  {
+    "checkpoint_path": "/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/results/object_ssl_pointmae_pcpmae/work/pointmae_heldout/experiments/heldout_obj_only/pointmae/pointmae_obj_only_heldout_seed2026/ckpt-best.pth",
+    "git_commit": "3dcf4b6a299e59744adcc064c5fa5d4b2b703187",
+    "hardest_pair": {
+      "count": 7,
+      "pred": "shelf",
+      "true": "cabinet"
+    },
+    "model": "pointmae",
+    "n_samples": 581,
+    "notes": "structured_keep drops a local anchor neighborhood by retaining farthest points, matching existing PointGPT support-stress protocol; input-level FPS is skipped when the H5 point count already equals npoints.",
+    "oracle2_score": 94.32013630867004,
+    "oracle5_score": 98.27883243560791,
+    "script": "/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/scripts/object_ssl/eval_scanobjectnn_mae.py",
+    "seed": 2026,
+    "selection_protocol": "heldout_selection",
+    "split": "obj_only",
+    "task": "scanobjectnn",
+    "top1": 86.40275597572327,
+    "top2_hit": 94.32013630867004,
+    "top5_hit": 98.27883243560791
+  },
+  {
+    "checkpoint_path": "/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/results/object_ssl_pointmae_pcpmae/work/pointmae_heldout/experiments/heldout_pb_t50_rs/pointmae/pointmae_pb_t50_rs_heldout_seed2026/ckpt-best.pth",
+    "git_commit": "3dcf4b6a299e59744adcc064c5fa5d4b2b703187",
+    "hardest_pair": {
+      "count": 23,
+      "pred": "desk",
+      "true": "table"
+    },
+    "model": "pointmae",
+    "n_samples": 2882,
+    "notes": "structured_keep drops a local anchor neighborhood by retaining farthest points, matching existing PointGPT support-stress protocol; input-level FPS is skipped when the H5 point count already equals npoints.",
+    "oracle2_score": 92.05412864685059,
+    "oracle5_score": 97.57112860679626,
+    "script": "/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/scripts/object_ssl/eval_scanobjectnn_mae.py",
+    "seed": 2026,
+    "selection_protocol": "heldout_selection",
+    "split": "pb_t50_rs",
+    "task": "scanobjectnn",
+    "top1": 83.10201168060303,
+    "top2_hit": 92.05412864685059,
+    "top5_hit": 97.57112860679626
+  }
+]

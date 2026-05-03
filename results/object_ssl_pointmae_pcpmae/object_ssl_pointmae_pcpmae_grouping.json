@@ -1,0 +1,14 @@
+[
+  {
+    "git_commit": "3dcf4b6a299e59744adcc064c5fa5d4b2b703187",
+    "model": "pointmae",
+    "status": "BLOCKED: grouping swap incompatible with pointmae without architecture hooks or retraining",
+    "task": "grouping"
+  },
+  {
+    "git_commit": "3dcf4b6a299e59744adcc064c5fa5d4b2b703187",
+    "model": "pcpmae",
+    "status": "BLOCKED: grouping swap incompatible with pcpmae without architecture hooks or retraining",
+    "task": "grouping"
+  }
+]
