@@ -29,6 +29,8 @@ Relevant result files:
 Interpretation note:
 
 - These Point-MAE / PCP-MAE rows strengthen the object-side Q3/Q4 evidence beyond PointGPT-only coverage.
+- ShapeNetPart support rows now score unique retained original point indices. When the retained support is resampled for the fixed-size forward pass, repeated forward logits are averaged back to the original retained point before mIoU/top-k scoring.
+- `clean_subset_score` is the clean full-input prediction evaluated on the same retained point set, so ShapeNetPart `damage_pp` is a matched retained-subset delta.
 - The grouping rows should not be read as train-time grouping ablations; they are inference-time patchization perturbations. Train-time grouping evidence in this ledger remains PointGPT-specific.
 
 ## 2026-04-29 grouping / patchization ablation

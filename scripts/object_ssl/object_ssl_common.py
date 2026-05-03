@@ -393,11 +393,18 @@ def stress_points_and_labels(
     return torch.stack(out_points, dim=0), torch.stack(out_labels, dim=0)
 
 
-def shape_iou_metrics(pred: np.ndarray, target: np.ndarray) -> dict[str, float]:
+def _iter_shape_arrays(pred: Any, target: Any):
+    if isinstance(target, np.ndarray) and target.dtype != object and target.ndim >= 2:
+        for i in range(target.shape[0]):
+            yield np.asarray(pred[i]), np.asarray(target[i])
+    else:
+        for pr, gt in zip(pred, target):
+            yield np.asarray(pr), np.asarray(gt)
+
+
+def shape_iou_metrics(pred: Any, target: Any) -> dict[str, float]:
     shape_ious = {cat: [] for cat in SEG_CLASSES}
-    for i in range(target.shape[0]):
-        gt = target[i]
-        pr = pred[i]
+    for pr, gt in _iter_shape_arrays(pred, target):
         cat = SEG_LABEL_TO_CAT[int(gt[0])]
         part_ious = []
         for part in SEG_CLASSES[cat]:

@@ -21,9 +21,9 @@ from object_ssl_common import (
     git_commit,
     jsonable,
     patch_eval_grouping,
+    resample_indices,
     repo_root_from_script,
     shape_iou_metrics,
-    stress_points_and_labels,
     write_json,
 )
 
@@ -113,6 +113,318 @@ def oracle_predictions(top1: np.ndarray, hit: np.ndarray, target: np.ndarray) ->
     return out
 
 
+def label_entropy(counts: np.ndarray) -> float:
+    total = float(counts.sum())
+    if total <= 0:
+        return 0.0
+    probs = counts[counts > 0].astype(np.float64) / total
+    return float(-(probs * np.log2(probs)).sum())
+
+
+def part_hist(labels: torch.Tensor) -> np.ndarray:
+    return np.bincount(labels.detach().cpu().numpy().reshape(-1), minlength=50).astype(np.int64)
+
+
+def support_indices_for_batch(
+    points: torch.Tensor,
+    target: torch.Tensor,
+    condition: str,
+    ratio: float,
+    generator: torch.Generator,
+) -> tuple[list[torch.Tensor], list[torch.Tensor], list[int]]:
+    bsz, npoints, _ = points.shape
+    keep_n = max(1, int(round(npoints * ratio)))
+    keep_indices = []
+    forward_indices = []
+    removed_parts = []
+    for b in range(bsz):
+        pts = points[b]
+        tgt = target[b]
+        removed_part = -1
+        if condition in {"clean", "xyz_zero"}:
+            keep_idx = torch.arange(npoints)
+        elif condition == "random_drop":
+            keep_idx = torch.randperm(npoints, generator=generator)[:keep_n]
+        elif condition == "structured_drop":
+            anchor = int(torch.randint(0, npoints, (1,), generator=generator).item())
+            dist = torch.sum((pts[:, :3] - pts[anchor : anchor + 1, :3]) ** 2, dim=-1)
+            keep_idx = torch.topk(dist, k=keep_n, largest=True).indices
+        elif condition == "largest_part_removed":
+            uniq, counts = torch.unique(tgt, return_counts=True)
+            largest = uniq[counts.argmax()]
+            removed_part = int(largest.item())
+            keep_idx = torch.nonzero(tgt != largest, as_tuple=False).view(-1)
+            if keep_idx.numel() == 0:
+                keep_idx = torch.arange(npoints)
+                removed_part = -1
+        elif condition == "part_keep":
+            keep_chunks = []
+            for part in torch.unique(tgt):
+                part_idx = torch.nonzero(tgt == part, as_tuple=False).view(-1)
+                part_keep = max(1, int(round(part_idx.numel() * ratio)))
+                perm = torch.randperm(part_idx.numel(), generator=generator)[:part_keep]
+                keep_chunks.append(part_idx[perm])
+            keep_idx = torch.cat(keep_chunks, dim=0)
+        else:
+            raise ValueError(f"Unsupported segmentation condition: {condition}")
+        keep_idx = torch.unique(keep_idx.long(), sorted=True)
+        if keep_idx.numel() == npoints:
+            forward_idx = keep_idx.clone().long()
+        else:
+            forward_idx = resample_indices(keep_idx, npoints, generator).long()
+        keep_indices.append(keep_idx)
+        forward_indices.append(forward_idx)
+        removed_parts.append(removed_part)
+    return keep_indices, forward_indices, removed_parts
+
+
+def build_forward_points(points: torch.Tensor, forward_indices: list[torch.Tensor], condition: str) -> torch.Tensor:
+    rows = []
+    for b, idx in enumerate(forward_indices):
+        row = points[b, idx].clone()
+        if condition == "xyz_zero":
+            row[:, :3] = 0
+        rows.append(row)
+    return torch.stack(rows, dim=0)
+
+
+def average_logits_by_original_index(
+    logits_forward: torch.Tensor,
+    forward_idx: torch.Tensor,
+    keep_idx: torch.Tensor,
+) -> torch.Tensor:
+    inverse = torch.full(
+        (int(max(int(forward_idx.max().item()), int(keep_idx.max().item()))) + 1,),
+        -1,
+        dtype=torch.long,
+        device=logits_forward.device,
+    )
+    keep_idx_dev = keep_idx.to(logits_forward.device)
+    forward_idx_dev = forward_idx.to(logits_forward.device)
+    inverse[keep_idx_dev] = torch.arange(keep_idx.numel(), device=logits_forward.device)
+    local_idx = inverse[forward_idx_dev]
+    if torch.any(local_idx < 0):
+        raise RuntimeError("forward_idx contains a point outside keep_idx")
+    logits_unique = torch.zeros(
+        keep_idx.numel(),
+        logits_forward.shape[-1],
+        dtype=logits_forward.dtype,
+        device=logits_forward.device,
+    )
+    counts = torch.zeros(keep_idx.numel(), 1, dtype=logits_forward.dtype, device=logits_forward.device)
+    logits_unique.index_add_(0, local_idx, logits_forward)
+    counts.index_add_(0, local_idx, torch.ones(logits_forward.shape[0], 1, dtype=logits_forward.dtype, device=logits_forward.device))
+    return logits_unique / counts.clamp_min(1.0)
+
+
+def category_restricted_prediction_1d(logits: torch.Tensor, target: torch.Tensor) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    logits_np = logits.detach().cpu().numpy()
+    target_np = target.detach().cpu().numpy()
+    cat = SEG_LABEL_TO_CAT[int(target_np[0])]
+    parts = SEG_CLASSES[cat]
+    allowed_logits = logits_np[:, parts]
+    order = np.argsort(-allowed_logits, axis=1)
+    sorted_parts = np.asarray(parts, dtype=np.int64)[order]
+    pred = sorted_parts[:, 0]
+    top2 = sorted_parts[:, : min(2, sorted_parts.shape[1])]
+    top5 = sorted_parts[:, : min(5, sorted_parts.shape[1])]
+    hit2 = np.any(top2 == target_np[:, None], axis=1)
+    hit5 = np.any(top5 == target_np[:, None], axis=1)
+    return pred, hit2, hit5
+
+
+def summarize_prediction_lists(
+    *,
+    pred_batches: list[np.ndarray],
+    target_batches: list[np.ndarray],
+    top2_hits: list[np.ndarray],
+    top5_hits: list[np.ndarray],
+) -> dict:
+    hit2_all = np.concatenate(top2_hits, axis=0)
+    hit5_all = np.concatenate(top5_hits, axis=0)
+    target_all = np.concatenate(target_batches, axis=0)
+    pred_all = np.concatenate(pred_batches, axis=0)
+    oracle2_batches = [oracle_predictions(pred, hit, target) for pred, hit, target in zip(pred_batches, top2_hits, target_batches)]
+    oracle5_batches = [oracle_predictions(pred, hit, target) for pred, hit, target in zip(pred_batches, top5_hits, target_batches)]
+    base_iou = shape_iou_metrics(pred_batches, target_batches)
+    oracle2_iou = shape_iou_metrics(oracle2_batches, target_batches)
+    oracle5_iou = shape_iou_metrics(oracle5_batches, target_batches)
+    return {
+        "point_top1": float((pred_all == target_all).mean() * 100.0),
+        "point_top2_hit": float(hit2_all.mean() * 100.0),
+        "point_top5_hit": float(hit5_all.mean() * 100.0),
+        "class_avg_miou": base_iou["class_avg_miou"],
+        "instance_avg_miou": base_iou["instance_avg_miou"],
+        "oracle2_class_avg_miou": oracle2_iou["class_avg_miou"],
+        "oracle2_instance_avg_miou": oracle2_iou["instance_avg_miou"],
+        "oracle5_class_avg_miou": oracle5_iou["class_avg_miou"],
+        "oracle5_instance_avg_miou": oracle5_iou["instance_avg_miou"],
+        "n_shapes": len(target_batches),
+        "n_points": int(target_all.size),
+    }
+
+
+def new_condition_accumulator() -> dict:
+    return {
+        "pred_batches": [],
+        "target_batches": [],
+        "top2_hits": [],
+        "top5_hits": [],
+        "clean_pred_batches": [],
+        "clean_top2_hits": [],
+        "clean_top5_hits": [],
+        "before_hist": np.zeros(50, dtype=np.int64),
+        "retained_hist": np.zeros(50, dtype=np.int64),
+        "removed_hist": np.zeros(50, dtype=np.int64),
+        "retained_counts": [],
+        "forward_counts": [],
+        "repeated_forward_counts": [],
+    }
+
+
+def update_condition_accumulator(
+    acc: dict,
+    *,
+    target_full: torch.Tensor,
+    keep_idx: torch.Tensor,
+    forward_idx: torch.Tensor,
+    removed_part: int,
+    logits_forward: torch.Tensor,
+    clean_logits_full: torch.Tensor,
+) -> None:
+    target_unique = target_full[keep_idx].long()
+    logits_unique = average_logits_by_original_index(logits_forward, forward_idx, keep_idx)
+    pred, hit2, hit5 = category_restricted_prediction_1d(logits_unique, target_unique)
+    clean_pred, clean_hit2, clean_hit5 = category_restricted_prediction_1d(clean_logits_full[keep_idx], target_unique)
+
+    target_np = target_unique.numpy()
+    acc["pred_batches"].append(pred)
+    acc["target_batches"].append(target_np)
+    acc["top2_hits"].append(hit2)
+    acc["top5_hits"].append(hit5)
+    acc["clean_pred_batches"].append(clean_pred)
+    acc["clean_top2_hits"].append(clean_hit2)
+    acc["clean_top5_hits"].append(clean_hit5)
+
+    acc["before_hist"] += part_hist(target_full)
+    acc["retained_hist"] += part_hist(target_unique)
+    if removed_part >= 0:
+        acc["removed_hist"][removed_part] += 1
+    acc["retained_counts"].append(int(keep_idx.numel()))
+    acc["forward_counts"].append(int(forward_idx.numel()))
+    acc["repeated_forward_counts"].append(int(forward_idx.numel() - keep_idx.numel()))
+
+
+def finalize_condition(condition_name: str, acc: dict) -> dict:
+    perturbed = summarize_prediction_lists(
+        pred_batches=acc["pred_batches"],
+        target_batches=acc["target_batches"],
+        top2_hits=acc["top2_hits"],
+        top5_hits=acc["top5_hits"],
+    )
+    clean_subset = summarize_prediction_lists(
+        pred_batches=acc["clean_pred_batches"],
+        target_batches=acc["target_batches"],
+        top2_hits=acc["clean_top2_hits"],
+        top5_hits=acc["clean_top5_hits"],
+    )
+    retained_counts_np = np.asarray(acc["retained_counts"], dtype=np.float64)
+    forward_counts_np = np.asarray(acc["forward_counts"], dtype=np.float64)
+    repeated_counts_np = np.asarray(acc["repeated_forward_counts"], dtype=np.float64)
+    return {
+        "condition": condition_name,
+        **perturbed,
+        "clean_subset_point_top1": clean_subset["point_top1"],
+        "clean_subset_point_top2_hit": clean_subset["point_top2_hit"],
+        "clean_subset_point_top5_hit": clean_subset["point_top5_hit"],
+        "clean_subset_class_avg_miou": clean_subset["class_avg_miou"],
+        "clean_subset_instance_avg_miou": clean_subset["instance_avg_miou"],
+        "damage_pp": float(clean_subset["instance_avg_miou"] - perturbed["instance_avg_miou"]),
+        "metric_scope": "unique_retained_original_points",
+        "logit_aggregation": "mean_by_original_index",
+        "n_forward_points": int(forward_counts_np.sum()),
+        "support_provenance": {
+            "mean_retained_unique_points": float(retained_counts_np.mean()),
+            "min_retained_unique_points": int(retained_counts_np.min()),
+            "max_retained_unique_points": int(retained_counts_np.max()),
+            "mean_forward_points": float(forward_counts_np.mean()),
+            "mean_repeated_forward_points": float(repeated_counts_np.mean()),
+            "mean_forward_duplication_factor": float(np.mean(forward_counts_np / retained_counts_np)),
+            "part_histogram_before": acc["before_hist"].tolist(),
+            "part_histogram_retained": acc["retained_hist"].tolist(),
+            "largest_removed_part_histogram": acc["removed_hist"].tolist(),
+            "part_entropy_before": label_entropy(acc["before_hist"]),
+            "part_entropy_retained": label_entropy(acc["retained_hist"]),
+        },
+    }
+
+
+def repeat_labels_for_conditions(labels: torch.Tensor, n_conditions: int) -> torch.Tensor:
+    reps = [n_conditions] + [1] * (labels.dim() - 1)
+    return labels.repeat(*reps)
+
+
+def eval_conditions(
+    *,
+    classifier: torch.nn.Module,
+    loader: torch.utils.data.DataLoader,
+    conditions: list[tuple[str, str, float, int]],
+    max_batches: int,
+) -> list[dict]:
+    accumulators = {name: new_condition_accumulator() for name, _, _, _ in conditions}
+    generators = {
+        name: torch.Generator(device="cpu").manual_seed(seed)
+        for name, _, _, seed in conditions
+    }
+    clean_index = next((i for i, (_, kind, _, _) in enumerate(conditions) if kind == "clean"), None)
+
+    classifier.eval()
+    with torch.no_grad():
+        for batch_idx, (points, label, target) in enumerate(loader):
+            if max_batches > 0 and batch_idx >= max_batches:
+                break
+            points = points.float()
+            target = target.long()
+            condition_inputs = []
+            condition_support = {}
+            for name, kind, ratio, _ in conditions:
+                keep_indices, forward_indices, removed_parts = support_indices_for_batch(
+                    points,
+                    target,
+                    kind,
+                    ratio,
+                    generators[name],
+                )
+                condition_inputs.append(build_forward_points(points, forward_indices, kind))
+                condition_support[name] = (keep_indices, forward_indices, removed_parts)
+
+            device = torch.device("cuda")
+            batch_size = points.shape[0]
+            stacked_points = torch.cat(condition_inputs, dim=0).to(device)
+            stacked_labels = repeat_labels_for_conditions(label.long(), len(conditions)).to(device)
+            logits_all = classifier(stacked_points.transpose(2, 1), to_categorical(stacked_labels, 16, device)).detach().cpu()
+            logits_by_condition = list(torch.split(logits_all, batch_size, dim=0))
+            if clean_index is None:
+                clean_logits = classifier(points.to(device).transpose(2, 1), to_categorical(label.long().to(device), 16, device)).detach().cpu()
+            else:
+                clean_logits = logits_by_condition[clean_index]
+
+            for cond_idx, (name, _, _, _) in enumerate(conditions):
+                keep_indices, forward_indices, removed_parts = condition_support[name]
+                logits_condition = logits_by_condition[cond_idx]
+                for b, keep_idx in enumerate(keep_indices):
+                    update_condition_accumulator(
+                        accumulators[name],
+                        target_full=target[b],
+                        keep_idx=keep_idx,
+                        forward_idx=forward_indices[b],
+                        removed_part=removed_parts[b],
+                        logits_forward=logits_condition[b],
+                        clean_logits_full=clean_logits[b],
+                    )
+    return [finalize_condition(name, accumulators[name]) for name, _, _, _ in conditions]
+
+
 def eval_condition(
     *,
     classifier: torch.nn.Module,
@@ -127,10 +439,17 @@ def eval_condition(
     generator.manual_seed(seed)
     pred_batches = []
     target_batches = []
-    oracle2_batches = []
-    oracle5_batches = []
     top2_hits = []
     top5_hits = []
+    clean_pred_batches = []
+    clean_top2_hits = []
+    clean_top5_hits = []
+    before_hist = np.zeros(50, dtype=np.int64)
+    retained_hist = np.zeros(50, dtype=np.int64)
+    removed_hist = np.zeros(50, dtype=np.int64)
+    retained_counts = []
+    forward_counts = []
+    repeated_forward_counts = []
 
     classifier.eval()
     with torch.no_grad():
@@ -139,7 +458,7 @@ def eval_condition(
                 break
             points = points.float()
             target = target.long()
-            stressed_points, stressed_target = stress_points_and_labels(
+            keep_indices, forward_indices, removed_parts = support_indices_for_batch(
                 points,
                 target,
                 condition_kind,
@@ -147,42 +466,78 @@ def eval_condition(
                 generator,
             )
             device = torch.device("cuda")
-            stressed_points = stressed_points.to(device)
+            stressed_points = build_forward_points(points, forward_indices, condition_kind).to(device)
             labels = label.long().to(device)
-            logits = classifier(stressed_points.transpose(2, 1), to_categorical(labels, 16, device))
-            pred, hit2, hit5 = category_restricted_predictions(logits, stressed_target)
-            target_np = stressed_target.numpy()
-            pred_batches.append(pred)
-            target_batches.append(target_np)
-            top2_hits.append(hit2)
-            top5_hits.append(hit5)
-            oracle2_batches.append(oracle_predictions(pred, hit2, target_np))
-            oracle5_batches.append(oracle_predictions(pred, hit5, target_np))
+            clean_points = points.to(device)
+            clean_logits = classifier(clean_points.transpose(2, 1), to_categorical(labels, 16, device)).detach().cpu()
+            if condition_kind == "clean":
+                logits = clean_logits
+            else:
+                logits = classifier(stressed_points.transpose(2, 1), to_categorical(labels, 16, device)).detach().cpu()
+            for b, keep_idx in enumerate(keep_indices):
+                forward_idx = forward_indices[b]
+                target_unique = target[b, keep_idx].long()
+                logits_unique = average_logits_by_original_index(logits[b], forward_idx, keep_idx)
+                pred, hit2, hit5 = category_restricted_prediction_1d(logits_unique, target_unique)
+                clean_pred, clean_hit2, clean_hit5 = category_restricted_prediction_1d(clean_logits[b, keep_idx], target_unique)
 
-    pred_all = np.concatenate(pred_batches, axis=0)
-    target_all = np.concatenate(target_batches, axis=0)
-    hit2_all = np.concatenate(top2_hits, axis=0)
-    hit5_all = np.concatenate(top5_hits, axis=0)
-    oracle2_all = np.concatenate(oracle2_batches, axis=0)
-    oracle5_all = np.concatenate(oracle5_batches, axis=0)
+                target_np = target_unique.numpy()
+                pred_batches.append(pred)
+                target_batches.append(target_np)
+                top2_hits.append(hit2)
+                top5_hits.append(hit5)
+                clean_pred_batches.append(clean_pred)
+                clean_top2_hits.append(clean_hit2)
+                clean_top5_hits.append(clean_hit5)
 
-    base_iou = shape_iou_metrics(pred_all, target_all)
-    oracle2_iou = shape_iou_metrics(oracle2_all, target_all)
-    oracle5_iou = shape_iou_metrics(oracle5_all, target_all)
-    point_top1 = float((pred_all == target_all).mean() * 100.0)
+                before_hist += part_hist(target[b])
+                retained_hist += part_hist(target_unique)
+                if removed_parts[b] >= 0:
+                    removed_hist[removed_parts[b]] += 1
+                retained_counts.append(int(keep_idx.numel()))
+                forward_counts.append(int(forward_idx.numel()))
+                repeated_forward_counts.append(int(forward_idx.numel() - keep_idx.numel()))
+
+    perturbed = summarize_prediction_lists(
+        pred_batches=pred_batches,
+        target_batches=target_batches,
+        top2_hits=top2_hits,
+        top5_hits=top5_hits,
+    )
+    clean_subset = summarize_prediction_lists(
+        pred_batches=clean_pred_batches,
+        target_batches=target_batches,
+        top2_hits=clean_top2_hits,
+        top5_hits=clean_top5_hits,
+    )
+    retained_counts_np = np.asarray(retained_counts, dtype=np.float64)
+    forward_counts_np = np.asarray(forward_counts, dtype=np.float64)
+    repeated_counts_np = np.asarray(repeated_forward_counts, dtype=np.float64)
     return {
         "condition": condition_name,
-        "point_top1": point_top1,
-        "point_top2_hit": float(hit2_all.mean() * 100.0),
-        "point_top5_hit": float(hit5_all.mean() * 100.0),
-        "class_avg_miou": base_iou["class_avg_miou"],
-        "instance_avg_miou": base_iou["instance_avg_miou"],
-        "oracle2_class_avg_miou": oracle2_iou["class_avg_miou"],
-        "oracle2_instance_avg_miou": oracle2_iou["instance_avg_miou"],
-        "oracle5_class_avg_miou": oracle5_iou["class_avg_miou"],
-        "oracle5_instance_avg_miou": oracle5_iou["instance_avg_miou"],
-        "n_shapes": int(target_all.shape[0]),
-        "n_points": int(target_all.size),
+        **perturbed,
+        "clean_subset_point_top1": clean_subset["point_top1"],
+        "clean_subset_point_top2_hit": clean_subset["point_top2_hit"],
+        "clean_subset_point_top5_hit": clean_subset["point_top5_hit"],
+        "clean_subset_class_avg_miou": clean_subset["class_avg_miou"],
+        "clean_subset_instance_avg_miou": clean_subset["instance_avg_miou"],
+        "damage_pp": float(clean_subset["instance_avg_miou"] - perturbed["instance_avg_miou"]),
+        "metric_scope": "unique_retained_original_points",
+        "logit_aggregation": "mean_by_original_index",
+        "n_forward_points": int(forward_counts_np.sum()),
+        "support_provenance": {
+            "mean_retained_unique_points": float(retained_counts_np.mean()),
+            "min_retained_unique_points": int(retained_counts_np.min()),
+            "max_retained_unique_points": int(retained_counts_np.max()),
+            "mean_forward_points": float(forward_counts_np.mean()),
+            "mean_repeated_forward_points": float(repeated_counts_np.mean()),
+            "mean_forward_duplication_factor": float(np.mean(forward_counts_np / retained_counts_np)),
+            "part_histogram_before": before_hist.tolist(),
+            "part_histogram_retained": retained_hist.tolist(),
+            "largest_removed_part_histogram": removed_hist.tolist(),
+            "part_entropy_before": label_entropy(before_hist),
+            "part_entropy_retained": label_entropy(retained_hist),
+        },
     }
 
 
@@ -203,25 +558,17 @@ def main() -> None:
     patched_groups = patch_eval_grouping(classifier, args.grouping_mode, args.seed)
 
     wanted = set(args.conditions)
-    rows = []
+    condition_specs = []
     for idx, (name, kind, ratio) in enumerate(PART_CONDITIONS):
         if name not in wanted:
             continue
-        rows.append(
-            eval_condition(
-                classifier=classifier,
-                loader=loader,
-                condition_name=name,
-                condition_kind=kind,
-                ratio=ratio,
-                seed=args.seed + idx,
-                max_batches=args.max_batches,
-            )
-        )
-
-    clean_miou = next((r["instance_avg_miou"] for r in rows if r["condition"] == "clean"), None)
-    for row in rows:
-        row["damage_pp"] = float(clean_miou - row["instance_avg_miou"]) if clean_miou is not None else None
+        condition_specs.append((name, kind, ratio, args.seed + idx))
+    rows = eval_conditions(
+        classifier=classifier,
+        loader=loader,
+        conditions=condition_specs,
+        max_batches=args.max_batches,
+    )
 
     payload = {
         "metadata": {
@@ -243,7 +590,10 @@ def main() -> None:
             "notes": (
                 "ShapeNetPart top-k is computed under the standard known-category part-label restriction "
                 "used by the original evaluation. grouping_mode is an eval-time patchization perturbation "
-                f"with checkpoint/readout fixed; fps_knn is the unmodified path; {checkpoint_note}."
+                "with checkpoint/readout fixed; fps_knn is the unmodified path. Support perturbation "
+                "metrics are computed on unique retained original point indices. When retained support "
+                "is resampled for the fixed-size forward pass, logits are averaged back to each original "
+                f"retained point before mIoU/top-k computation; {checkpoint_note}."
             ),
         },
         "conditions": rows,

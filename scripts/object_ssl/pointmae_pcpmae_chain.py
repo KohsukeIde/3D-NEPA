@@ -650,6 +650,7 @@ class Chain:
                 for metric in ["class_avg_miou", "instance_avg_miou", "point_top1", "point_top2_hit", "point_top5_hit"]:
                     clean_rows.append(self.metric_row(meta, metric, clean.get(metric)))
                 for row in conditions:
+                    provenance = row.get("support_provenance", {})
                     support_rows.append(
                         {
                             **self.base_row(meta),
@@ -657,6 +658,13 @@ class Chain:
                             "metric_name": "Instance mIoU (%)",
                             "score": row.get("instance_avg_miou"),
                             "damage_pp": row.get("damage_pp"),
+                            "clean_subset_score": row.get("clean_subset_instance_avg_miou"),
+                            "mean_retained_unique_points": provenance.get("mean_retained_unique_points"),
+                            "mean_repeated_forward_points": provenance.get("mean_repeated_forward_points"),
+                            "part_entropy_before": provenance.get("part_entropy_before"),
+                            "part_entropy_retained": provenance.get("part_entropy_retained"),
+                            "metric_scope": row.get("metric_scope"),
+                            "logit_aggregation": row.get("logit_aggregation"),
                         }
                     )
                 topk_rows.append(
@@ -694,7 +702,25 @@ class Chain:
         write_csv(
             self.result_dir / "object_ssl_pointmae_pcpmae_support_stress.csv",
             support_rows,
-            clean_fields[:5] + ["condition", "metric_name", "score", "damage_pp", "n_samples", "seed", "script", "git_commit", "notes"],
+            clean_fields[:5]
+            + [
+                "condition",
+                "metric_name",
+                "score",
+                "clean_subset_score",
+                "damage_pp",
+                "mean_retained_unique_points",
+                "mean_repeated_forward_points",
+                "part_entropy_before",
+                "part_entropy_retained",
+                "metric_scope",
+                "logit_aggregation",
+                "n_samples",
+                "seed",
+                "script",
+                "git_commit",
+                "notes",
+            ],
         )
         topk_fields = [
             "model",
@@ -716,7 +742,22 @@ class Chain:
         write_text(self.result_dir / "object_ssl_pointmae_pcpmae_clean.md", markdown_table(clean_rows, clean_fields))
         write_text(
             self.result_dir / "object_ssl_pointmae_pcpmae_support_stress.md",
-            markdown_table(support_rows, ["model", "task", "split", "condition", "metric_name", "score", "damage_pp", "selection_protocol"]),
+            markdown_table(
+                support_rows,
+                [
+                    "model",
+                    "task",
+                    "split",
+                    "condition",
+                    "metric_name",
+                    "score",
+                    "clean_subset_score",
+                    "damage_pp",
+                    "mean_retained_unique_points",
+                    "mean_repeated_forward_points",
+                    "selection_protocol",
+                ],
+            ),
         )
         write_text(self.result_dir / "object_ssl_pointmae_pcpmae_topk.md", markdown_table(topk_rows, topk_fields))
         write_text(self.result_dir / "object_ssl_pointmae_pcpmae_selection.md", markdown_table(selection_rows, topk_fields))
@@ -759,6 +800,10 @@ class Chain:
             "These diagnostics test whether the object-side support and readout ambiguities persist beyond the PointGPT scaffold.",
             "They do not by themselves prove a universal object-level 3D SSL failure.",
             "",
+            "ShapeNetPart support rows report metrics on unique retained original point indices.",
+            "When retained support is resampled to satisfy the fixed-size forward pass, logits are averaged back to each original retained point before mIoU/top-k computation.",
+            "`clean_subset_score` is the clean full-input prediction evaluated on the same retained point set, so `damage_pp` is a matched retained-subset delta for ShapeNetPart rows.",
+            "",
             f"- git commit: `{self.git_commit}`",
             f"- result dir: `{self.result_dir}`",
             f"- log dir: `{self.log_dir}`",
@@ -774,7 +819,21 @@ class Chain:
             markdown_table(clean_rows, ["model", "task", "split", "selection_protocol", "metric_name", "score"]),
             "## Q3 Support Perturbations",
             "",
-            markdown_table(support_rows, ["model", "task", "split", "condition", "metric_name", "score", "damage_pp"]),
+            markdown_table(
+                support_rows,
+                [
+                    "model",
+                    "task",
+                    "split",
+                    "condition",
+                    "metric_name",
+                    "score",
+                    "clean_subset_score",
+                    "damage_pp",
+                    "mean_retained_unique_points",
+                    "mean_repeated_forward_points",
+                ],
+            ),
             "## Q4 Candidate Sets",
             "",
             markdown_table(topk_rows, ["model", "task", "split", "selection_protocol", "top1", "top2_hit", "top5_hit", "oracle2_score", "oracle5_score"]),
@@ -784,6 +843,13 @@ class Chain:
             "## Grouping Diagnostics",
             "",
             self.grouping_summary_text(),
+            "",
+            "## Scene-Side Support Audit",
+            "",
+            "- Static audit target: `/home/minesawa/ssl/concerto-shortcut-mvp/tools/concerto_projection_shortcut/eval_masking_battery.py`.",
+            "- The scene-side masking battery filters point-level tensors with explicit masks and records separate `retained` and `full_nn` score spaces.",
+            "- Existing scene result files such as `/home/minesawa/ssl/concerto-shortcut-mvp/tools/concerto_projection_shortcut/results_support_severity_concerto_decoder.csv` and `/home/minesawa/ssl/concerto-shortcut-mvp/tools/concerto_projection_shortcut/results_utonia_scannet_support_stress_featurezero_audit/utonia_scannet_support_stress.md` should therefore be cited with their score-space label. `retained` is retained-support scoring; `full_nn` is full-scene nearest-retained propagation.",
+            "- This audit is separate from the object-side Point-MAE/PCP-MAE rerun and does not add new scene numbers.",
             "",
             "## Data Paths",
             "",
@@ -849,6 +915,12 @@ class Chain:
             "",
             "- Reused protocol: `PointGPT/tools/eval_scanobjectnn_support_stress.py` structured/random/xyz-zero semantics.",
             "- New adapters: `scripts/object_ssl/eval_scanobjectnn_mae.py`, `scripts/object_ssl/eval_shapenetpart_mae.py`.",
+            "- ShapeNetPart adapter computes support metrics on unique retained original point indices and aggregates repeated forward logits by original index.",
+            "",
+            "## Scene-side audit note",
+            "",
+            "- Static audit target: `/home/minesawa/ssl/concerto-shortcut-mvp/tools/concerto_projection_shortcut/eval_masking_battery.py`.",
+            "- Scene-side masking results distinguish `retained` from `full_nn` score spaces; cite this label explicitly when using scene Q3 rows.",
             "",
         ]
         write_text(self.docs_dir / "object_ssl_pointmae_pcpmae_audit.md", "\n".join(lines))

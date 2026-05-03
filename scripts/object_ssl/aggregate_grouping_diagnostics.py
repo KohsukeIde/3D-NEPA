@@ -35,6 +35,7 @@ def rows_from_payload(path: Path) -> list[dict]:
             "git_commit": meta["git_commit"],
             "notes": meta.get("notes", ""),
         }
+        provenance = condition.get("support_provenance", {})
         if meta["task"] == "scanobjectnn":
             row.update(
                 {
@@ -51,9 +52,16 @@ def rows_from_payload(path: Path) -> list[dict]:
                 {
                     "metric_name": "Instance mIoU (%)",
                     "score": condition.get("instance_avg_miou"),
+                    "clean_subset_score": condition.get("clean_subset_instance_avg_miou"),
                     "top2_hit": condition.get("point_top2_hit"),
                     "top5_hit": condition.get("point_top5_hit"),
                     "damage_pp": condition.get("damage_pp"),
+                    "mean_retained_unique_points": provenance.get("mean_retained_unique_points"),
+                    "mean_repeated_forward_points": provenance.get("mean_repeated_forward_points"),
+                    "part_entropy_before": provenance.get("part_entropy_before"),
+                    "part_entropy_retained": provenance.get("part_entropy_retained"),
+                    "metric_scope": condition.get("metric_scope"),
+                    "logit_aggregation": condition.get("logit_aggregation"),
                     "strong_stress_score": (
                         condition.get("instance_avg_miou")
                         if condition["condition"] in {"largest_part_removed", "xyz_zero"}
@@ -85,7 +93,14 @@ def main() -> None:
         "condition",
         "metric_name",
         "score",
+        "clean_subset_score",
         "damage_pp",
+        "mean_retained_unique_points",
+        "mean_repeated_forward_points",
+        "part_entropy_before",
+        "part_entropy_retained",
+        "metric_scope",
+        "logit_aggregation",
         "top2_hit",
         "top5_hit",
         "n_samples",
@@ -103,7 +118,10 @@ def main() -> None:
         "condition",
         "metric_name",
         "score",
+        "clean_subset_score",
         "damage_pp",
+        "mean_retained_unique_points",
+        "mean_repeated_forward_points",
     ]
     write_json(result_dir / "object_ssl_pointmae_pcpmae_grouping.json", rows)
     write_csv(result_dir / "object_ssl_pointmae_pcpmae_grouping.csv", rows, fields)

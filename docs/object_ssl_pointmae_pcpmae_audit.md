@@ -1,7 +1,7 @@
 # Point-MAE / PCP-MAE Object SSL Audit
 
 - phase: `final`
-- git commit: `7b7b788b372fc32c8a1a3be6a88682b25bf1095f`
+- git commit: `fd9da67bb59f04e034c8f98fa1e9f42244801318`
 - root: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA`
 - Point-MAE root: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/Point-MAE`
 - PCP-MAE root: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/PCP-MAE`
@@ -65,3 +65,9 @@ pointmae:
 
 - Reused protocol: `PointGPT/tools/eval_scanobjectnn_support_stress.py` structured/random/xyz-zero semantics.
 - New adapters: `scripts/object_ssl/eval_scanobjectnn_mae.py`, `scripts/object_ssl/eval_shapenetpart_mae.py`.
+- ShapeNetPart adapter computes support metrics on unique retained original point indices and aggregates repeated forward logits by original index.
+
+## Scene-side audit note
+
+- Static audit target: `/home/minesawa/ssl/concerto-shortcut-mvp/tools/concerto_projection_shortcut/eval_masking_battery.py`.
+- Scene-side masking results distinguish `retained` from `full_nn` score spaces; cite this label explicitly when using scene Q3 rows.
