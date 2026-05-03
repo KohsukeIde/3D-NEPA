@@ -14,6 +14,7 @@ import numpy as np
 import torch
 
 from object_ssl_common import (
+    GROUPING_MODES,
     SCANOBJECTNN_CLASS_NAMES,
     SCAN_CONDITIONS,
     confusion_matrix,
@@ -21,6 +22,7 @@ from object_ssl_common import (
     git_commit,
     hardest_pair,
     jsonable,
+    patch_eval_grouping,
     repo_root_from_script,
     stress_points,
     topk_metrics,
@@ -50,6 +52,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=2026)
     p.add_argument("--max-batches", type=int, default=0)
     p.add_argument("--conditions", nargs="*", default=[x[0] for x in SCAN_CONDITIONS])
+    p.add_argument("--grouping-mode", default="fps_knn", choices=GROUPING_MODES)
     p.add_argument("--selection-protocol", default="official_checkpoint")
     p.add_argument("--output-json", required=True)
     return p.parse_args()
@@ -159,6 +162,7 @@ def main() -> None:
     builder, misc, cfg_from_yaml_file = import_repo(repo_root)
     points, labels, h5_path = load_h5(args, root)
     model, cfg = build_model(args, builder, cfg_from_yaml_file)
+    patched_groups = patch_eval_grouping(model, args.grouping_mode, args.seed)
 
     wanted = set(args.conditions)
     rows = []
@@ -191,6 +195,8 @@ def main() -> None:
             "task": "scanobjectnn",
             "split": args.variant,
             "selection_protocol": args.selection_protocol,
+            "grouping_mode": args.grouping_mode,
+            "patched_group_modules": patched_groups,
             "repo_root": str(repo_root),
             "config": str(Path(args.config).resolve()),
             "checkpoint_path": str(Path(args.checkpoint).resolve()),
@@ -204,7 +210,8 @@ def main() -> None:
             "notes": (
                 "structured_keep drops a local anchor neighborhood by retaining farthest points, "
                 "matching existing PointGPT support-stress protocol; input-level FPS is skipped "
-                "when the H5 point count already equals npoints."
+                "when the H5 point count already equals npoints. grouping_mode is an eval-time "
+                "patchization perturbation with checkpoint/readout fixed; fps_knn is the unmodified path."
             ),
         },
         "conditions": rows,

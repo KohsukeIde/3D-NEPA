@@ -10,6 +10,7 @@ import math
 import os
 import subprocess
 from pathlib import Path
+from types import MethodType
 from typing import Any, Iterable
 
 import numpy as np
@@ -84,6 +85,8 @@ PART_CONDITIONS = [
     ("xyz_zero", "xyz_zero", 0.0),
 ]
 
+GROUPING_MODES = ["fps_knn", "random_center_knn", "random_group"]
+
 
 def repo_root_from_script() -> Path:
     return Path(__file__).resolve().parents[2]
@@ -156,7 +159,7 @@ def write_csv(path: str | Path, rows: list[dict[str, Any]], fieldnames: list[str
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore", lineterminator="\n")
         writer.writeheader()
         for row in rows:
             writer.writerow({k: row.get(k, "") for k in fieldnames})
@@ -212,6 +215,97 @@ def hardest_pair(confusion: np.ndarray, names: list[str]) -> dict[str, Any]:
         "pred": names[pred_idx] if pred_idx < len(names) else str(pred_idx),
         "count": int(off[true_idx, pred_idx]),
     }
+
+
+def _batched_gather_points(xyz: torch.Tensor, idx: torch.Tensor) -> torch.Tensor:
+    batch_size, num_points, channels = xyz.shape
+    idx_base = torch.arange(batch_size, device=xyz.device).view(batch_size, 1, 1) * num_points
+    flat_idx = (idx + idx_base).reshape(-1)
+    gathered = xyz.reshape(batch_size * num_points, channels)[flat_idx]
+    return gathered.reshape(batch_size, idx.shape[1], idx.shape[2], channels)
+
+
+def _select_random_centers(
+    xyz: torch.Tensor,
+    num_group: int,
+    generator: torch.Generator,
+) -> torch.Tensor:
+    batch_size, num_points, channels = xyz.shape
+    rows = []
+    for _ in range(batch_size):
+        if num_points >= num_group:
+            idx = torch.randperm(num_points, device=xyz.device, generator=generator)[:num_group]
+        else:
+            idx = torch.randint(0, num_points, (num_group,), device=xyz.device, generator=generator)
+        rows.append(idx)
+    center_idx = torch.stack(rows, dim=0)
+    return xyz.gather(1, center_idx.unsqueeze(-1).expand(-1, -1, channels))
+
+
+def _knn_indices(xyz: torch.Tensor, center: torch.Tensor, group_size: int) -> torch.Tensor:
+    dist = torch.cdist(center.float(), xyz.float())
+    return torch.topk(dist, k=group_size, dim=-1, largest=False, sorted=False).indices
+
+
+def _random_group_indices(
+    xyz: torch.Tensor,
+    num_group: int,
+    group_size: int,
+    generator: torch.Generator,
+) -> torch.Tensor:
+    batch_size, num_points, _ = xyz.shape
+    rows = [
+        torch.randint(0, num_points, (num_group, group_size), device=xyz.device, generator=generator)
+        for _ in range(batch_size)
+    ]
+    return torch.stack(rows, dim=0)
+
+
+def make_eval_group_forward(grouping_mode: str, seed: int):
+    if grouping_mode not in GROUPING_MODES:
+        raise ValueError(f"unsupported grouping mode: {grouping_mode}")
+
+    def forward(self, xyz):
+        call_idx = int(getattr(self, "_object_ssl_grouping_calls", 0))
+        self._object_ssl_grouping_calls = call_idx + 1
+        generator = torch.Generator(device=xyz.device)
+        generator.manual_seed(int(seed) + call_idx)
+
+        if grouping_mode == "random_center_knn":
+            center = _select_random_centers(xyz, self.num_group, generator)
+            idx = _knn_indices(xyz, center, self.group_size)
+        elif grouping_mode == "random_group":
+            center = _select_random_centers(xyz, self.num_group, generator)
+            idx = _random_group_indices(xyz, self.num_group, self.group_size, generator)
+        else:
+            raise ValueError("fps_knn uses the model's original Group.forward and should not be patched")
+
+        assert idx.size(1) == self.num_group
+        assert idx.size(2) == self.group_size
+        neighborhood = _batched_gather_points(xyz, idx).contiguous()
+        neighborhood = neighborhood - center.unsqueeze(2)
+        return neighborhood, center
+
+    return forward
+
+
+def patch_eval_grouping(model: torch.nn.Module, grouping_mode: str, seed: int) -> int:
+    """Patch Point-MAE-family Group modules for inference-time grouping probes.
+
+    `fps_knn` is the unmodified trained path. The random modes are eval-only
+    perturbations matching the PointGPT grouping audit: they do not retrain the
+    representation or the readout.
+    """
+    if grouping_mode == "fps_knn":
+        return 0
+    count = 0
+    for module in model.modules():
+        if hasattr(module, "num_group") and hasattr(module, "group_size") and type(module).__name__ == "Group":
+            module.forward = MethodType(make_eval_group_forward(grouping_mode, seed), module)
+            count += 1
+    if count == 0:
+        raise RuntimeError(f"no Group modules patched for grouping_mode={grouping_mode}")
+    return count
 
 
 def resample_indices(keep_idx: torch.Tensor, npoints: int, generator: torch.Generator) -> torch.Tensor:

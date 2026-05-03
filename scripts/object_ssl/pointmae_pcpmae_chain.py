@@ -151,7 +151,8 @@ class Chain:
             self.run_heldout_stage()
         if stage in {"all", "summary"}:
             if not self.args.dry_run:
-                self.write_grouping_blocked()
+                if not list((self.result_dir / "raw_grouping").glob("*.json")):
+                    self.write_grouping_blocked()
                 self.aggregate()
                 self.write_audit("final")
 
@@ -782,7 +783,7 @@ class Chain:
             markdown_table(selection_rows, ["model", "task", "split", "selection_protocol", "top1", "top2_hit", "top5_hit"]),
             "## Grouping Diagnostics",
             "",
-            "BLOCKED: grouping swaps are not run because Point-MAE/PCP-MAE grouping is embedded in model internals and swapping modes would require architecture hooks or retraining.",
+            self.grouping_summary_text(),
             "",
             "## Data Paths",
             "",
@@ -803,6 +804,19 @@ class Chain:
             "",
         ]
         write_text(self.docs_dir / "object_ssl_pointmae_pcpmae_diagnostics_summary.md", "\n".join(lines))
+
+    def grouping_summary_text(self) -> str:
+        grouping_md = self.result_dir / "object_ssl_pointmae_pcpmae_grouping.md"
+        if grouping_md.is_file():
+            text = grouping_md.read_text().strip()
+            marker = "- raw dir:"
+            if marker in text:
+                return text[text.index(marker) :].strip()
+            return text
+        return (
+            "BLOCKED: grouping swaps are not run because Point-MAE/PCP-MAE grouping is embedded "
+            "in model internals and swapping modes would require architecture hooks or retraining."
+        )
 
     def write_audit(self, label: str) -> None:
         part_root = self.find_shapenetpart_root()

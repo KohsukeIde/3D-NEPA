@@ -1,6 +1,35 @@
 # ScanObjectNN PointGPT / pointNEPA Sidecar Results (Active)
 
-Snapshot time: `2026-04-29 JST` (includes the 2026-04-22 local rebuild chain, the 2026-04-24 no-mask order-randomized downstream partial, the 2026-04-25 no-mask order-randomized readout/support audits, the 2026-04-27 severity-curve / mask-on order-randomized audits, and the 2026-04-29 train-time / eval-time grouping ablations)
+Snapshot time: `2026-05-04 JST` (includes the 2026-04-22 local rebuild chain, the 2026-04-24 no-mask order-randomized downstream partial, the 2026-04-25 no-mask order-randomized readout/support audits, the 2026-04-27 severity-curve / mask-on order-randomized audits, the 2026-04-29 PointGPT train-time / eval-time grouping ablations, and the 2026-05-04 Point-MAE / PCP-MAE object-side diagnostics)
+
+## 2026-05-04 Point-MAE / PCP-MAE related diagnostics
+
+Purpose:
+
+- Track the masked-autoencoding-family object-side diagnostics used to test whether support and readout ambiguity persist beyond the PointGPT scaffold.
+- Point-MAE is the canonical masked-autoencoding baseline; PCP-MAE is the side-channel-aware correction row. The grouping rows below are eval-time perturbations only, with checkpoint/readout fixed and no retraining.
+
+Relevant result files:
+
+- Master summary:
+  - `3D-NEPA/docs/object_ssl_pointmae_pcpmae_diagnostics_summary.md`
+- Audit / checkpoints / data paths:
+  - `3D-NEPA/docs/object_ssl_pointmae_pcpmae_audit.md`
+- Clean reproduction:
+  - `3D-NEPA/results/object_ssl_pointmae_pcpmae/object_ssl_pointmae_pcpmae_clean.md`
+- Q3 support stress:
+  - `3D-NEPA/results/object_ssl_pointmae_pcpmae/object_ssl_pointmae_pcpmae_support_stress.md`
+- Q4 candidate-set diagnostics:
+  - `3D-NEPA/results/object_ssl_pointmae_pcpmae/object_ssl_pointmae_pcpmae_topk.md`
+- Q4 held-out selection:
+  - `3D-NEPA/results/object_ssl_pointmae_pcpmae/object_ssl_pointmae_pcpmae_selection.md`
+- Eval-time grouping diagnostics:
+  - `3D-NEPA/results/object_ssl_pointmae_pcpmae/object_ssl_pointmae_pcpmae_grouping.md`
+
+Interpretation note:
+
+- These Point-MAE / PCP-MAE rows strengthen the object-side Q3/Q4 evidence beyond PointGPT-only coverage.
+- The grouping rows should not be read as train-time grouping ablations; they are inference-time patchization perturbations. Train-time grouping evidence in this ledger remains PointGPT-specific.
 
 ## 2026-04-29 grouping / patchization ablation
 

@@ -1,7 +1,7 @@
 # Point-MAE / PCP-MAE Object SSL Audit
 
 - phase: `final`
-- git commit: `3dcf4b6a299e59744adcc064c5fa5d4b2b703187`
+- git commit: `7b7b788b372fc32c8a1a3be6a88682b25bf1095f`
 - root: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA`
 - Point-MAE root: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/Point-MAE`
 - PCP-MAE root: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/PCP-MAE`

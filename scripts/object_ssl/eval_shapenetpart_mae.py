@@ -13,12 +13,14 @@ import numpy as np
 import torch
 
 from object_ssl_common import (
+    GROUPING_MODES,
     PART_CONDITIONS,
     SEG_CLASSES,
     SEG_LABEL_TO_CAT,
     file_sha256,
     git_commit,
     jsonable,
+    patch_eval_grouping,
     repo_root_from_script,
     shape_iou_metrics,
     stress_points_and_labels,
@@ -38,6 +40,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=2026)
     p.add_argument("--max-batches", type=int, default=0)
     p.add_argument("--conditions", nargs="*", default=[x[0] for x in PART_CONDITIONS])
+    p.add_argument("--grouping-mode", default="fps_knn", choices=GROUPING_MODES)
     p.add_argument("--selection-protocol", default="official_checkpoint")
     p.add_argument("--output-json", required=True)
     return p.parse_args()
@@ -197,6 +200,7 @@ def main() -> None:
     loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
     classifier = model_mod.get_model(50).cuda()
     checkpoint_note = load_seg_checkpoint(classifier, args.checkpoint)
+    patched_groups = patch_eval_grouping(classifier, args.grouping_mode, args.seed)
 
     wanted = set(args.conditions)
     rows = []
@@ -225,6 +229,8 @@ def main() -> None:
             "task": "shapenetpart",
             "split": "test",
             "selection_protocol": args.selection_protocol,
+            "grouping_mode": args.grouping_mode,
+            "patched_group_modules": patched_groups,
             "repo_root": str(repo_root),
             "checkpoint_path": str(Path(args.checkpoint).resolve()),
             "checkpoint_sha256": file_sha256(args.checkpoint),
@@ -236,7 +242,8 @@ def main() -> None:
             "npoints": args.npoints,
             "notes": (
                 "ShapeNetPart top-k is computed under the standard known-category part-label restriction "
-                f"used by the original evaluation; {checkpoint_note}."
+                "used by the original evaluation. grouping_mode is an eval-time patchization perturbation "
+                f"with checkpoint/readout fixed; fps_knn is the unmodified path; {checkpoint_note}."
             ),
         },
         "conditions": rows,
