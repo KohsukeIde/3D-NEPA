@@ -1,6 +1,40 @@
 # ScanObjectNN PointGPT / pointNEPA Sidecar Results (Active)
 
-Snapshot time: `2026-05-04 JST` (includes the 2026-04-22 local rebuild chain, the 2026-04-24 no-mask order-randomized downstream partial, the 2026-04-25 no-mask order-randomized readout/support audits, the 2026-04-27 severity-curve / mask-on order-randomized audits, the 2026-04-29 PointGPT train-time / eval-time grouping ablations, and the 2026-05-04 Point-MAE / PCP-MAE object-side diagnostics)
+Snapshot time: `2026-05-04 JST` (includes the 2026-04-22 local rebuild chain, the 2026-04-24 no-mask order-randomized downstream partial, the 2026-04-25 no-mask order-randomized readout/support audits, the 2026-04-27 severity-curve / mask-on order-randomized audits, the 2026-04-29 PointGPT train-time / eval-time grouping ablations, the 2026-05-04 Point-MAE / PCP-MAE object-side diagnostics, and the 2026-05-04 PointGPT unique-retained refresh)
+
+## 2026-05-04 PointGPT unique-retained refresh
+
+Purpose:
+
+- Refresh PointGPT-side diagnostics after identifying that ShapeNetPart segmentation support metrics must be computed on unique retained original point indices, not directly on the fixed-size resampled forward sequence.
+- Re-run official PointGPT-S ScanObjectNN `obj_bg`, `obj_only`, and `PB_T50_RS` readout/support rows, including random/structured keep `80/50/20/10`.
+- Re-run official PointGPT-S ShapeNetPart support and eval-time grouping rows with unique-retained scoring and matched clean-on-same-retained-subset deltas.
+
+Relevant result files:
+
+- Master summary:
+  - `3D-NEPA/docs/pointgpt_unique_retained_diagnostics_summary.md`
+- ScanObjectNN official support:
+  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objbg_official_support.md`
+  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objonly_official_support.md`
+  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_hardest_official_support.md`
+- ScanObjectNN official readout:
+  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objbg_official_readout.md`
+  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objonly_official_readout.md`
+  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_hardest_official_readout.md`
+- ScanObjectNN official eval-time grouping:
+  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objbg_official_grouping.md`
+- ShapeNetPart official support:
+  - `3D-NEPA/results/pointgpt_unique_retained/shapenetpart_official_support_unique.md`
+- ShapeNetPart official eval-time grouping:
+  - `3D-NEPA/results/pointgpt_unique_retained/shapenetpart_official_grouping_unique.md`
+
+Interpretation note:
+
+- ShapeNetPart rows now score unique retained original point indices. Retained points may still be resampled for fixed-size forward inference, but repeated logits are averaged back to the original retained point before scoring.
+- ScanObjectNN is single-label classification, so the repeated-point segmentation metric issue does not apply; it was rerun for protocol completeness and provenance.
+- Local PointGPT ShapeNetPart no-mask / train-time grouping checkpoints were unavailable, so those rows are blocked rather than refreshed with invented values.
+- Scene-side support diagnostics in `/home/minesawa/ssl/concerto-shortcut-mvp` were audited separately: the masking battery already separates `retained` and `full_nn` score spaces, so it does not have the ShapeNetPart fixed-size resampled-sequence mIoU issue.
 
 ## 2026-05-04 Point-MAE / PCP-MAE related diagnostics
 

@@ -52,6 +52,14 @@ def _resample(points, target, keep_idx, npoint, rng):
     return kept_points[idx], kept_target[idx]
 
 
+def _resample_indices(keep_idx, npoint, rng):
+    if keep_idx.shape[0] >= npoint:
+        local_idx = rng.choice(keep_idx.shape[0], npoint, replace=False)
+    else:
+        local_idx = rng.choice(keep_idx.shape[0], npoint, replace=True)
+    return keep_idx[local_idx]
+
+
 def _ratio_suffix(condition, prefix, suffix=""):
     if not condition.startswith(prefix):
         return None
@@ -63,20 +71,29 @@ def _ratio_suffix(condition, prefix, suffix=""):
     return int(tail) / 100.0
 
 
-def stress_one(points, target, condition, rng, local_noise_sigma=0.08):
+def label_entropy(counts):
+    total = float(np.sum(counts))
+    if total <= 0:
+        return 0.0
+    probs = counts[counts > 0].astype(np.float64) / total
+    return float(-(probs * np.log2(probs)).sum())
+
+
+def support_indices_one(points, target, condition, rng, local_noise_sigma=0.08):
     npoint = points.shape[0]
     if condition == "clean":
-        return points, target
+        keep_idx = np.arange(npoint, dtype=np.int64)
+        return keep_idx, keep_idx.copy(), -1
     if condition == "xyz_zero":
-        out = points.copy()
-        out[:, :3] = 0.0
-        return out, target
+        keep_idx = np.arange(npoint, dtype=np.int64)
+        return keep_idx, keep_idx.copy(), -1
 
     random_ratio = _ratio_suffix(condition, "random_keep")
     if random_ratio is not None:
         keep_n = max(1, int(round(random_ratio * npoint)))
         keep_idx = rng.choice(npoint, keep_n, replace=False)
-        return _resample(points, target, keep_idx, npoint, rng)
+        keep_idx = np.unique(keep_idx).astype(np.int64)
+        return keep_idx, _resample_indices(keep_idx, npoint, rng), -1
 
     structured_ratio = _ratio_suffix(condition, "structured_keep")
     if structured_ratio is not None:
@@ -84,42 +101,33 @@ def stress_one(points, target, condition, rng, local_noise_sigma=0.08):
         anchor = int(rng.randint(0, npoint))
         dist = np.sum((points[:, :3] - points[anchor : anchor + 1, :3]) ** 2, axis=1)
         keep_idx = np.argsort(dist)[-keep_n:]
-        return _resample(points, target, keep_idx, npoint, rng)
+        keep_idx = np.unique(keep_idx).astype(np.int64)
+        return keep_idx, _resample_indices(keep_idx, npoint, rng), -1
 
     local_jitter_ratio = _ratio_suffix(condition, "local_jitter")
     if local_jitter_ratio is not None:
-        out = points.copy()
-        patch_n = max(1, int(round(local_jitter_ratio * npoint)))
-        anchor = int(rng.randint(0, npoint))
-        dist = np.sum((out[:, :3] - out[anchor : anchor + 1, :3]) ** 2, axis=1)
-        patch_idx = np.argsort(dist)[:patch_n]
-        diag = float(np.linalg.norm(out[:, :3].max(axis=0) - out[:, :3].min(axis=0)))
-        sigma = max(1e-6, float(local_noise_sigma) * diag)
-        out[patch_idx, :3] = out[patch_idx, :3] + rng.normal(0.0, sigma, size=(patch_idx.size, 3)).astype(out.dtype)
-        return out, target
+        keep_idx = np.arange(npoint, dtype=np.int64)
+        return keep_idx, keep_idx.copy(), -1
 
     local_replace_ratio = _ratio_suffix(condition, "local_replace")
     if local_replace_ratio is not None:
-        out = points.copy()
-        patch_n = max(1, int(round(local_replace_ratio * npoint)))
-        anchor = int(rng.randint(0, npoint))
-        dist = np.sum((out[:, :3] - out[anchor : anchor + 1, :3]) ** 2, axis=1)
-        patch_idx = np.argsort(dist)[:patch_n]
-        mins = out[:, :3].min(axis=0)
-        maxs = out[:, :3].max(axis=0)
-        out[patch_idx, :3] = mins + rng.rand(patch_idx.size, 3).astype(out.dtype) * (maxs - mins)
-        return out, target
+        keep_idx = np.arange(npoint, dtype=np.int64)
+        return keep_idx, keep_idx.copy(), -1
 
     if condition == "part_drop_largest":
         labels, counts = np.unique(target, return_counts=True)
+        removed_part = -1
         if len(labels) <= 1:
             keep_idx = rng.choice(npoint, max(1, int(round(0.2 * npoint))), replace=False)
         else:
             drop_label = labels[np.argmax(counts)]
+            removed_part = int(drop_label)
             keep_idx = np.flatnonzero(target != drop_label)
             if keep_idx.size == 0:
                 keep_idx = rng.choice(npoint, max(1, int(round(0.2 * npoint))), replace=False)
-        return _resample(points, target, keep_idx, npoint, rng)
+                removed_part = -1
+        keep_idx = np.unique(keep_idx).astype(np.int64)
+        return keep_idx, _resample_indices(keep_idx, npoint, rng), removed_part
 
     part_keep_ratio = _ratio_suffix(condition, "part_keep", "_per_part")
     if part_keep_ratio is not None:
@@ -129,8 +137,122 @@ def stress_one(points, target, condition, rng, local_noise_sigma=0.08):
             k = max(1, int(round(part_keep_ratio * idx.size)))
             keep_parts.append(rng.choice(idx, k, replace=False))
         keep_idx = np.concatenate(keep_parts, axis=0)
-        return _resample(points, target, keep_idx, npoint, rng)
+        keep_idx = np.unique(keep_idx).astype(np.int64)
+        return keep_idx, _resample_indices(keep_idx, npoint, rng), -1
     raise ValueError(condition)
+
+
+def stress_one(points, target, condition, rng, local_noise_sigma=0.08):
+    npoint = points.shape[0]
+    keep_idx, forward_idx, _ = support_indices_one(points, target, condition, rng, local_noise_sigma)
+    out = points[forward_idx].copy()
+    if condition == "xyz_zero":
+        out[:, :3] = 0.0
+    local_jitter_ratio = _ratio_suffix(condition, "local_jitter")
+    if local_jitter_ratio is not None:
+        patch_n = max(1, int(round(local_jitter_ratio * npoint)))
+        anchor = int(rng.randint(0, npoint))
+        dist = np.sum((out[:, :3] - out[anchor : anchor + 1, :3]) ** 2, axis=1)
+        patch_idx = np.argsort(dist)[:patch_n]
+        diag = float(np.linalg.norm(out[:, :3].max(axis=0) - out[:, :3].min(axis=0)))
+        sigma = max(1e-6, float(local_noise_sigma) * diag)
+        out[patch_idx, :3] = out[patch_idx, :3] + rng.normal(0.0, sigma, size=(patch_idx.size, 3)).astype(out.dtype)
+    local_replace_ratio = _ratio_suffix(condition, "local_replace")
+    if local_replace_ratio is not None:
+        patch_n = max(1, int(round(local_replace_ratio * npoint)))
+        anchor = int(rng.randint(0, npoint))
+        dist = np.sum((out[:, :3] - out[anchor : anchor + 1, :3]) ** 2, axis=1)
+        patch_idx = np.argsort(dist)[:patch_n]
+        mins = out[:, :3].min(axis=0)
+        maxs = out[:, :3].max(axis=0)
+        out[patch_idx, :3] = mins + rng.rand(patch_idx.size, 3).astype(out.dtype) * (maxs - mins)
+    return out, target[forward_idx]
+
+
+def build_forward_points(points, forward_idx, condition, rng, local_noise_sigma=0.08):
+    npoint = points.shape[0]
+    out = points[forward_idx].copy()
+    if condition == "xyz_zero":
+        out[:, :3] = 0.0
+    local_jitter_ratio = _ratio_suffix(condition, "local_jitter")
+    if local_jitter_ratio is not None:
+        patch_n = max(1, int(round(local_jitter_ratio * npoint)))
+        anchor = int(rng.randint(0, npoint))
+        dist = np.sum((out[:, :3] - out[anchor : anchor + 1, :3]) ** 2, axis=1)
+        patch_idx = np.argsort(dist)[:patch_n]
+        diag = float(np.linalg.norm(out[:, :3].max(axis=0) - out[:, :3].min(axis=0)))
+        sigma = max(1e-6, float(local_noise_sigma) * diag)
+        out[patch_idx, :3] = out[patch_idx, :3] + rng.normal(0.0, sigma, size=(patch_idx.size, 3)).astype(out.dtype)
+    local_replace_ratio = _ratio_suffix(condition, "local_replace")
+    if local_replace_ratio is not None:
+        patch_n = max(1, int(round(local_replace_ratio * npoint)))
+        anchor = int(rng.randint(0, npoint))
+        dist = np.sum((out[:, :3] - out[anchor : anchor + 1, :3]) ** 2, axis=1)
+        patch_idx = np.argsort(dist)[:patch_n]
+        mins = out[:, :3].min(axis=0)
+        maxs = out[:, :3].max(axis=0)
+        out[patch_idx, :3] = mins + rng.rand(patch_idx.size, 3).astype(out.dtype) * (maxs - mins)
+    return out
+
+
+def average_logits_by_original_index(logits_forward, forward_idx, keep_idx):
+    local_map = {int(orig): pos for pos, orig in enumerate(keep_idx.tolist())}
+    local_idx = np.asarray([local_map[int(orig)] for orig in forward_idx.tolist()], dtype=np.int64)
+    logits_unique = np.zeros((keep_idx.shape[0], logits_forward.shape[1]), dtype=np.float64)
+    counts = np.zeros((keep_idx.shape[0], 1), dtype=np.float64)
+    np.add.at(logits_unique, local_idx, logits_forward.astype(np.float64))
+    np.add.at(counts, local_idx, 1.0)
+    return logits_unique / np.maximum(counts, 1.0)
+
+
+def category_restricted_prediction(logits, target):
+    cat = seg_label_to_cat[int(target[0])]
+    part_ids = np.asarray(seg_classes[cat], dtype=np.int64)
+    pred_local = np.argmax(logits[:, part_ids], axis=1)
+    return part_ids[pred_local].astype(np.int32)
+
+
+def new_accumulator():
+    return {
+        "total_correct": 0,
+        "total_seen": 0,
+        "total_seen_class": np.zeros(50, dtype=np.int64),
+        "total_correct_class": np.zeros(50, dtype=np.int64),
+        "shape_ious": {cat: [] for cat in seg_classes.keys()},
+    }
+
+
+def update_accumulator(acc, pred, target):
+    acc["total_correct"] += int(np.sum(pred == target))
+    acc["total_seen"] += int(target.size)
+    for part_id in range(50):
+        acc["total_seen_class"][part_id] += int(np.sum(target == part_id))
+        acc["total_correct_class"][part_id] += int(np.sum((pred == part_id) & (target == part_id)))
+    cat = seg_label_to_cat[int(target[0])]
+    part_ious = []
+    for part_id in seg_classes[cat]:
+        denom = np.sum((target == part_id) | (pred == part_id))
+        if denom == 0:
+            part_ious.append(1.0)
+        else:
+            part_ious.append(float(np.sum((target == part_id) & (pred == part_id)) / denom))
+    acc["shape_ious"][cat].append(float(np.mean(part_ious)))
+
+
+def finalize_accumulator(acc):
+    per_cat_iou = {
+        cat: float(np.mean(vals)) if vals else float("nan")
+        for cat, vals in acc["shape_ious"].items()
+    }
+    all_shape_ious = [x for vals in acc["shape_ious"].values() for x in vals]
+    class_acc = acc["total_correct_class"] / np.maximum(1, acc["total_seen_class"].astype(float))
+    return {
+        "accuracy": float(acc["total_correct"] / max(1, acc["total_seen"])),
+        "class_avg_accuracy": float(np.nanmean(class_acc)),
+        "class_avg_iou": float(np.nanmean(list(per_cat_iou.values()))),
+        "instance_avg_iou": float(np.mean(all_shape_ious)) if all_shape_ious else float("nan"),
+        "per_category_iou": per_cat_iou,
+    }
 
 
 def build_model(args):
@@ -138,7 +260,10 @@ def build_model(args):
 
     module = importlib.import_module(args.model)
     classifier, _ = get_model_loss(module, args, num_part=50)
-    state = torch.load(args.ckpt, map_location="cpu", weights_only=False)
+    try:
+        state = torch.load(args.ckpt, map_location="cpu", weights_only=False)
+    except TypeError:
+        state = torch.load(args.ckpt, map_location="cpu")
     state_dict = state.get("model_state_dict", state)
     classifier.load_state_dict(state_dict, strict=False)
     classifier.eval()
@@ -172,67 +297,96 @@ def evaluate_condition(model, loader, condition, args):
         "xyz_zero": 22,
     }
     rng = np.random.RandomState(args.seed + condition_offsets[condition])
-    total_correct = 0
-    total_seen = 0
-    total_seen_class = [0 for _ in range(50)]
-    total_correct_class = [0 for _ in range(50)]
-    shape_ious = {cat: [] for cat in seg_classes.keys()}
+    eval_acc = new_accumulator()
+    clean_subset_acc = new_accumulator()
+    before_hist = np.zeros(50, dtype=np.int64)
+    retained_hist = np.zeros(50, dtype=np.int64)
+    removed_hist = np.zeros(50, dtype=np.int64)
+    retained_counts = []
+    forward_counts = []
+    repeated_forward_counts = []
 
     with torch.no_grad():
         for points, label, target in tqdm(loader, desc=condition):
             pts_np = points.numpy()
             tgt_np = target.numpy()
             stressed_pts = []
-            stressed_tgt = []
+            keep_indices = []
+            forward_indices = []
+            removed_parts = []
             for i in range(pts_np.shape[0]):
-                pts_i, tgt_i = stress_one(pts_np[i], tgt_np[i], condition, rng, args.local_noise_sigma)
+                keep_idx, forward_idx, removed_part = support_indices_one(
+                    pts_np[i],
+                    tgt_np[i],
+                    condition,
+                    rng,
+                    args.local_noise_sigma,
+                )
+                pts_i = build_forward_points(pts_np[i], forward_idx, condition, rng, args.local_noise_sigma)
                 stressed_pts.append(pts_i)
-                stressed_tgt.append(tgt_i)
+                keep_indices.append(keep_idx)
+                forward_indices.append(forward_idx)
+                removed_parts.append(removed_part)
             points_t = torch.tensor(np.stack(stressed_pts), dtype=torch.float32).cuda().transpose(2, 1)
-            target_np = np.stack(stressed_tgt)
             label_t = label.long().cuda()
 
             seg_pred = model(points_t, to_categorical(label_t, 16))
             logits_np = seg_pred.cpu().numpy()
             if logits_np.ndim == 3 and logits_np.shape[1] == 50:
                 logits_np = np.transpose(logits_np, (0, 2, 1))
-            pred_np = np.zeros(target_np.shape, dtype=np.int32)
-            for i in range(target_np.shape[0]):
-                cat = seg_label_to_cat[int(target_np[i, 0])]
-                part_ids = seg_classes[cat]
-                cat_logits = np.take(logits_np[i], part_ids, axis=1)
-                pred_np[i] = np.argmax(cat_logits, axis=1) + part_ids[0]
 
-            total_correct += int(np.sum(pred_np == target_np))
-            total_seen += int(np.prod(target_np.shape))
-            for part_id in range(50):
-                total_seen_class[part_id] += int(np.sum(target_np == part_id))
-                total_correct_class[part_id] += int(np.sum((pred_np == part_id) & (target_np == part_id)))
+            if condition == "clean":
+                clean_logits_np = logits_np
+            else:
+                clean_pred = model(points.float().cuda().transpose(2, 1), to_categorical(label_t, 16))
+                clean_logits_np = clean_pred.cpu().numpy()
+                if clean_logits_np.ndim == 3 and clean_logits_np.shape[1] == 50:
+                    clean_logits_np = np.transpose(clean_logits_np, (0, 2, 1))
 
-            for i in range(target_np.shape[0]):
-                segp = pred_np[i]
-                segl = target_np[i]
-                cat = seg_label_to_cat[int(segl[0])]
-                part_ious = []
-                for part_id in seg_classes[cat]:
-                    denom = np.sum((segl == part_id) | (segp == part_id))
-                    if denom == 0:
-                        part_ious.append(1.0)
-                    else:
-                        part_ious.append(float(np.sum((segl == part_id) & (segp == part_id)) / denom))
-                shape_ious[cat].append(float(np.mean(part_ious)))
+            for i, keep_idx in enumerate(keep_indices):
+                forward_idx = forward_indices[i]
+                target_unique = tgt_np[i][keep_idx].astype(np.int64)
+                logits_unique = average_logits_by_original_index(logits_np[i], forward_idx, keep_idx)
+                pred_unique = category_restricted_prediction(logits_unique, target_unique)
+                clean_pred_unique = category_restricted_prediction(clean_logits_np[i][keep_idx], target_unique)
+                update_accumulator(eval_acc, pred_unique, target_unique)
+                update_accumulator(clean_subset_acc, clean_pred_unique, target_unique)
 
-    per_cat_iou = {cat: float(np.mean(vals)) if vals else float("nan") for cat, vals in shape_ious.items()}
-    all_shape_ious = [x for vals in shape_ious.values() for x in vals]
-    class_acc = np.array(total_correct_class) / np.maximum(1, np.array(total_seen_class, dtype=float))
-    return {
+                before_hist += np.bincount(tgt_np[i].reshape(-1), minlength=50).astype(np.int64)
+                retained_hist += np.bincount(target_unique.reshape(-1), minlength=50).astype(np.int64)
+                if removed_parts[i] >= 0:
+                    removed_hist[removed_parts[i]] += 1
+                retained_counts.append(int(keep_idx.size))
+                forward_counts.append(int(forward_idx.size))
+                repeated_forward_counts.append(int(forward_idx.size - np.unique(forward_idx).size))
+
+    result = finalize_accumulator(eval_acc)
+    clean_subset = finalize_accumulator(clean_subset_acc)
+    retained_counts_np = np.asarray(retained_counts, dtype=np.float64)
+    forward_counts_np = np.asarray(forward_counts, dtype=np.float64)
+    repeated_counts_np = np.asarray(repeated_forward_counts, dtype=np.float64)
+    result.update({
         "condition": condition,
-        "accuracy": float(total_correct / max(1, total_seen)),
-        "class_avg_accuracy": float(np.nanmean(class_acc)),
-        "class_avg_iou": float(np.nanmean(list(per_cat_iou.values()))),
-        "instance_avg_iou": float(np.mean(all_shape_ious)) if all_shape_ious else float("nan"),
-        "per_category_iou": per_cat_iou,
-    }
+        "clean_subset_accuracy": clean_subset["accuracy"],
+        "clean_subset_class_avg_iou": clean_subset["class_avg_iou"],
+        "clean_subset_instance_avg_iou": clean_subset["instance_avg_iou"],
+        "damage_class_avg_iou": clean_subset["class_avg_iou"] - result["class_avg_iou"],
+        "damage_instance_avg_iou": clean_subset["instance_avg_iou"] - result["instance_avg_iou"],
+        "metric_scope": "unique_retained_original_points",
+        "logit_aggregation": "mean_by_original_index",
+        "mean_retained_unique_points": float(retained_counts_np.mean()),
+        "min_retained_unique_points": int(retained_counts_np.min()),
+        "max_retained_unique_points": int(retained_counts_np.max()),
+        "mean_forward_points": float(forward_counts_np.mean()),
+        "mean_repeated_forward_points": float(repeated_counts_np.mean()),
+        "mean_forward_duplication_factor": float(np.mean(forward_counts_np / np.maximum(retained_counts_np, 1.0))),
+        "part_histogram_before": before_hist.tolist(),
+        "part_histogram_retained": retained_hist.tolist(),
+        "removed_part_histogram": removed_hist.tolist(),
+        "part_entropy_before": label_entropy(before_hist),
+        "part_entropy_retained": label_entropy(retained_hist),
+    })
+    return result
 
 
 def to_md(summary):
@@ -242,18 +396,24 @@ def to_md(summary):
         f"- ckpt: `{summary['ckpt']}`",
         f"- root: `{summary['root']}`",
         "",
-        "| condition | accuracy | class avg IoU | instance avg IoU |",
-        "|---|---:|---:|---:|",
+        "| condition | accuracy | class avg IoU | instance avg IoU | clean subset inst IoU | damage inst IoU | retained unique pts | repeated forward pts |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in summary["conditions"]:
         lines.append(
-            f"| `{row['condition']}` | `{row['accuracy']:.4f}` | `{row['class_avg_iou']:.4f}` | `{row['instance_avg_iou']:.4f}` |"
+            f"| `{row['condition']}` | `{row['accuracy']:.4f}` | `{row['class_avg_iou']:.4f}` | "
+            f"`{row['instance_avg_iou']:.4f}` | `{row['clean_subset_instance_avg_iou']:.4f}` | "
+            f"`{row['damage_instance_avg_iou']:.4f}` | `{row['mean_retained_unique_points']:.1f}` | "
+            f"`{row['mean_repeated_forward_points']:.1f}` |"
         )
     lines.append("")
     lines.append("## Notes")
     lines.append("")
-    lines.append("- `part_drop_largest` removes the largest ground-truth part within each object before resampling.")
-    lines.append("- `part_keepXX_per_part` keeps XX% of each ground-truth part before resampling. These are support-stress probes, not official ShapeNetPart scores.")
+    lines.append("- Metrics are computed on unique retained original point indices.")
+    lines.append("- When retained support is resampled for the fixed-size forward pass, repeated logits are averaged back to the original retained point before scoring.")
+    lines.append("- `clean subset inst IoU` evaluates clean full-input predictions on the same retained point set; `damage inst IoU` is the matched retained-subset delta.")
+    lines.append("- `part_drop_largest` removes the largest ground-truth part within each object before fixed-size forward resampling.")
+    lines.append("- `part_keepXX_per_part` keeps XX% of each ground-truth part before fixed-size forward resampling. These are support-stress probes, not official ShapeNetPart scores.")
     return "\n".join(lines) + "\n"
 
 

@@ -42,6 +42,8 @@ def parse_args():
     p.add_argument("--normal", action="store_true", default=False)
     p.add_argument("--radius", type=float, default=0.22)
     p.add_argument("--voxel_grid", type=int, default=6)
+    p.add_argument("--local_noise_sigma", type=float, default=0.08,
+                   help="Scale for local jitter/replace support stresses, relative to object diagonal.")
     # build_model() reuses the training-time model factory, which expects the
     # base grouping arguments even though this script later patches grouping
     # modes per condition.
@@ -217,19 +219,22 @@ def row_to_md(summary):
         f"- ckpt: `{summary['ckpt']}`",
         f"- root: `{summary['root']}`",
         "",
-        "| group mode | condition | accuracy | class avg IoU | instance avg IoU |",
-        "|---|---|---:|---:|---:|",
+        "| group mode | condition | accuracy | class avg IoU | instance avg IoU | clean subset inst IoU | damage inst IoU | retained unique pts | repeated forward pts |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in summary["rows"]:
         lines.append(
             f"| `{row['group_mode']}` | `{row['condition']}` | "
             f"`{row['accuracy']:.4f}` | `{row['class_avg_iou']:.4f}` | "
-            f"`{row['instance_avg_iou']:.4f}` |"
+            f"`{row['instance_avg_iou']:.4f}` | `{row['clean_subset_instance_avg_iou']:.4f}` | "
+            f"`{row['damage_instance_avg_iou']:.4f}` | `{row['mean_retained_unique_points']:.1f}` | "
+            f"`{row['mean_repeated_forward_points']:.1f}` |"
         )
     lines.append("")
     lines.append("## Notes")
     lines.append("")
     lines.append("- The checkpoint/head are fixed. Only grouping center/neighborhood construction is changed at inference time.")
+    lines.append("- ShapeNetPart support metrics are computed on unique retained original point indices; fixed-size forward resampling is aggregated back by original point.")
     lines.append("- `random_group` destroys local neighborhoods and is a destructive sanity check.")
     lines.append("- This is a diagnostic ablation, not a retrained architecture comparison.")
     return "\n".join(lines) + "\n"
@@ -270,7 +275,21 @@ def main():
         with out.open("w", newline="") as f:
             writer = csv.DictWriter(
                 f,
-                fieldnames=["group_mode", "condition", "accuracy", "class_avg_iou", "instance_avg_iou"],
+                fieldnames=[
+                    "group_mode",
+                    "condition",
+                    "accuracy",
+                    "class_avg_iou",
+                    "instance_avg_iou",
+                    "clean_subset_class_avg_iou",
+                    "clean_subset_instance_avg_iou",
+                    "damage_class_avg_iou",
+                    "damage_instance_avg_iou",
+                    "mean_retained_unique_points",
+                    "mean_repeated_forward_points",
+                    "metric_scope",
+                    "logit_aggregation",
+                ],
             )
             writer.writeheader()
             for row in rows:
