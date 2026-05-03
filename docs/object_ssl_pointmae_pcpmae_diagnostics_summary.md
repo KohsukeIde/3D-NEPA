@@ -7,7 +7,7 @@ ShapeNetPart support rows report metrics on unique retained original point indic
 When retained support is resampled to satisfy the fixed-size forward pass, logits are averaged back to each original retained point before mIoU/top-k computation.
 `clean_subset_score` is the clean full-input prediction evaluated on the same retained point set, so `damage_pp` is a matched retained-subset delta for ShapeNetPart rows.
 
-- git commit: `fd9da67bb59f04e034c8f98fa1e9f42244801318`
+- git commit: `82a07015ea865349cdd6a537cfaca3128bce9086`
 - result dir: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/results/object_ssl_pointmae_pcpmae`
 - log dir: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/logs/object_ssl_pointmae_pcpmae`
 
