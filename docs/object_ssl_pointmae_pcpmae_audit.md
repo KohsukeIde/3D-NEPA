@@ -1,12 +1,12 @@
 # Point-MAE / PCP-MAE Object SSL Audit
 
 - phase: `final`
-- git commit: `82a07015ea865349cdd6a537cfaca3128bce9086`
+- git commit: `476c3b421d9b308e5907a376819c07dc90f6d6d0`
 - root: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA`
 - Point-MAE root: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/Point-MAE`
 - PCP-MAE root: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/PCP-MAE`
-- Point-MAE python: `/home/minesawa/anaconda3/envs/scenemi/bin/python`
-- PCP-MAE python: `/home/minesawa/anaconda3/envs/scenemi/bin/python`
+- Point-MAE python: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/.venv/bin/python`
+- PCP-MAE python: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/.venv/bin/python`
 - GPUs: `0,1,2,3`
 - ScanObjectNN root: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/data/ScanObjectNN/h5_files`
 - ShapeNetPart root: `/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/data/shapenetcore_partanno_segmentation_benchmark_v0_normal`

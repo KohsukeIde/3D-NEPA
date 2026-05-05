@@ -82,6 +82,7 @@ PART_CONDITIONS = [
     ("structured_keep10", "structured_drop", 0.1),
     ("largest_part_removed", "largest_part_removed", 0.0),
     ("part_keep20_per_part", "part_keep", 0.2),
+    ("part_keep50_per_part", "part_keep", 0.5),
     ("xyz_zero", "xyz_zero", 0.0),
 ]
 

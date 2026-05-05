@@ -1,6 +1,56 @@
 # ScanObjectNN PointGPT / pointNEPA Sidecar Results (Active)
 
-Snapshot time: `2026-05-04 JST` (includes the 2026-04-22 local rebuild chain, the 2026-04-24 no-mask order-randomized downstream partial, the 2026-04-25 no-mask order-randomized readout/support audits, the 2026-04-27 severity-curve / mask-on order-randomized audits, the 2026-04-29 PointGPT train-time / eval-time grouping ablations, the 2026-05-04 Point-MAE / PCP-MAE object-side diagnostics, and the 2026-05-04 PointGPT unique-retained refresh)
+Snapshot time: `2026-05-05 JST` (includes the 2026-04-22 local rebuild chain, the 2026-04-24 no-mask order-randomized downstream partial, the 2026-04-25 no-mask order-randomized readout/support audits, the 2026-04-27 severity-curve / mask-on order-randomized audits, the 2026-04-29 PointGPT train-time / eval-time grouping ablations, the 2026-05-04 Point-MAE / PCP-MAE object-side diagnostics, the 2026-05-04 PointGPT unique-retained refresh, and the 2026-05-05 PointGPT-S no-mask order-randomized full chain)
+
+## 2026-05-05 PointGPT-S no-mask order-randomized full chain
+
+Purpose:
+
+- Re-run PointGPT-S with both mask removal and order randomization through pretrain, ScanObjectNN `obj_bg` / `obj_only` / `PB_T50_RS` fine-tuning, ShapeNetPart fine-tuning, and downstream diagnostics.
+- Match the current unique-retained ShapeNetPart scoring convention: retained support is resampled only for fixed-size forward inference, then logits are aggregated back to unique original retained points before mIoU.
+- Reproduce the PointGPT-style object diagnostics used in this ledger: ScanObjectNN readout/top-k, random/structured keep `80/50/20/10`, `xyz_zero`, and eval-time grouping; ShapeNetPart support and eval-time grouping.
+
+Relevant result files:
+
+- Master summary:
+  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/pointgpt_nomask_orderrandom_diagnostics_summary.md`
+- ScanObjectNN `obj_bg`:
+  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_readout.md`
+  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_support.md`
+  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_grouping.md`
+- ScanObjectNN `obj_only`:
+  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_readout.md`
+  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_support.md`
+  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_grouping.md`
+- ScanObjectNN `PB_T50_RS`:
+  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_readout.md`
+  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_support.md`
+  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_grouping.md`
+- ShapeNetPart:
+  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/shapenetpart_nomask_ordrand_support_unique.md`
+  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/shapenetpart_nomask_ordrand_grouping_unique.md`
+
+### ScanObjectNN readout summary
+
+| split | top1 | top2 hit | top5 hit | hardest pair |
+|---|---:|---:|---:|---|
+| `obj_bg` | `0.9053` | `0.9639` | `0.9931` | `bag -> box` |
+| `obj_only` | `0.8830` | `0.9398` | `0.9845` | `sink -> table` |
+| `PB_T50_RS` | `0.8397` | `0.9310` | `0.9847` | `bed -> sofa` |
+
+### ScanObjectNN support summary
+
+| split | clean | random80 | random50 | random20 | random10 | structured80 | structured50 | structured20 | structured10 | xyz_zero |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `obj_bg` | `0.9002` | `0.8950` | `0.8950` | `0.5697` | `0.1532` | `0.8709` | `0.7194` | `0.2496` | `0.1188` | `0.0929` |
+| `obj_only` | `0.8881` | `0.8812` | `0.8675` | `0.5577` | `0.1807` | `0.8503` | `0.7470` | `0.3322` | `0.1532` | `0.0929` |
+| `PB_T50_RS` | `0.8334` | `0.8393` | `0.8116` | `0.3765` | `0.1405` | `0.8102` | `0.6724` | `0.2401` | `0.1374` | `0.0708` |
+
+Interpretation note:
+
+- This is a PointGPT scaffold intervention row, not a canonical object-SSL comparator row.
+- The strongest supported use is to ask whether the no-mask pattern persists when patch order is randomized and whether the same support/readout diagnostics remain visible across ScanObjectNN variants and ShapeNetPart.
+- Eval-time grouping rows keep the trained checkpoint/readout fixed; they do not add a new train-time grouping model.
 
 ## 2026-05-04 PointGPT unique-retained refresh
 
