@@ -130,6 +130,7 @@
 | pcpmae | shapenetpart | test | structured_keep20 | Instance mIoU (%) | 55.3745 | 89.4929 | 34.1184 | 410.0000 | 1638.0000 | finetuned_from_public_pretrain |
 | pcpmae | shapenetpart | test | structured_keep10 | Instance mIoU (%) | 44.3529 | 91.3150 | 46.9621 | 205.0000 | 1843.0000 | finetuned_from_public_pretrain |
 | pcpmae | shapenetpart | test | largest_part_removed | Instance mIoU (%) | 46.0976 | 65.1813 | 19.0837 | 775.2749 | 1272.7251 | finetuned_from_public_pretrain |
+| pcpmae | shapenetpart | test | part_keep50_per_part | Instance mIoU (%) | 85.7723 | 86.1376 | 0.3653 | 1023.9993 | 1024.0007 | finetuned_from_public_pretrain |
 | pcpmae | shapenetpart | test | part_keep20_per_part | Instance mIoU (%) | 82.1125 | 86.3716 | 4.2591 | 409.6343 | 1638.3657 | finetuned_from_public_pretrain |
 | pcpmae | shapenetpart | test | xyz_zero | Instance mIoU (%) | 32.7590 | 85.9889 | 53.2299 | 2048.0000 | 0.0000 | finetuned_from_public_pretrain |
 | pcpmae | shapenetpart | test | clean | Instance mIoU (%) | 85.8322 | 85.8322 | 0.0000 | 2048.0000 | 0.0000 | finetuned_from_public_pretrain_ckpt300 |
@@ -142,6 +143,7 @@
 | pcpmae | shapenetpart | test | structured_keep20 | Instance mIoU (%) | 54.0379 | 89.2615 | 35.2236 | 410.0000 | 1638.0000 | finetuned_from_public_pretrain_ckpt300 |
 | pcpmae | shapenetpart | test | structured_keep10 | Instance mIoU (%) | 41.8619 | 91.2811 | 49.4192 | 205.0000 | 1843.0000 | finetuned_from_public_pretrain_ckpt300 |
 | pcpmae | shapenetpart | test | largest_part_removed | Instance mIoU (%) | 44.3507 | 64.7302 | 20.3795 | 776.2418 | 1271.7582 | finetuned_from_public_pretrain_ckpt300 |
+| pcpmae | shapenetpart | test | part_keep50_per_part | Instance mIoU (%) | 85.6092 | 86.0522 | 0.4430 | 1024.0191 | 1023.9809 | finetuned_from_public_pretrain_ckpt300 |
 | pcpmae | shapenetpart | test | part_keep20_per_part | Instance mIoU (%) | 81.9100 | 86.2420 | 4.3320 | 409.6068 | 1638.3932 | finetuned_from_public_pretrain_ckpt300 |
 | pcpmae | shapenetpart | test | xyz_zero | Instance mIoU (%) | 33.2066 | 85.8322 | 52.6256 | 2048.0000 | 0.0000 | finetuned_from_public_pretrain_ckpt300 |
 | pointmae | shapenetpart | test | clean | Instance mIoU (%) | 86.0791 | 86.0791 | 0.0000 | 2048.0000 | 0.0000 | official_checkpoint |
@@ -154,5 +156,6 @@
 | pointmae | shapenetpart | test | structured_keep20 | Instance mIoU (%) | 54.3569 | 89.5506 | 35.1938 | 410.0000 | 1638.0000 | official_checkpoint |
 | pointmae | shapenetpart | test | structured_keep10 | Instance mIoU (%) | 41.1261 | 91.3828 | 50.2566 | 205.0000 | 1843.0000 | official_checkpoint |
 | pointmae | shapenetpart | test | largest_part_removed | Instance mIoU (%) | 45.6727 | 64.9442 | 19.2716 | 774.9175 | 1273.0825 | official_checkpoint |
+| pointmae | shapenetpart | test | part_keep50_per_part | Instance mIoU (%) | 85.9101 | 86.1507 | 0.2406 | 1024.0000 | 1024.0000 | official_checkpoint |
 | pointmae | shapenetpart | test | part_keep20_per_part | Instance mIoU (%) | 81.9024 | 86.3709 | 4.4685 | 409.6211 | 1638.3789 | official_checkpoint |
 | pointmae | shapenetpart | test | xyz_zero | Instance mIoU (%) | 31.7246 | 86.0791 | 54.3545 | 2048.0000 | 0.0000 | official_checkpoint |
