@@ -1,6 +1,38 @@
 # ScanObjectNN PointGPT / pointNEPA Sidecar Results (Active)
 
-Snapshot time: `2026-05-05 JST` (includes the 2026-04-22 local rebuild chain, the 2026-04-24 no-mask order-randomized downstream partial, the 2026-04-25 no-mask order-randomized readout/support audits, the 2026-04-27 severity-curve / mask-on order-randomized audits, the 2026-04-29 PointGPT train-time / eval-time grouping ablations, the 2026-05-04 Point-MAE / PCP-MAE object-side diagnostics, the 2026-05-04 PointGPT unique-retained refresh, and the 2026-05-05 PointGPT-S no-mask order-randomized full chain)
+Snapshot time: `2026-05-07 JST` (includes the 2026-04-22 local rebuild chain, the 2026-04-24 no-mask order-randomized downstream partial, the 2026-04-25 no-mask order-randomized readout/support audits, the 2026-04-27 severity-curve / mask-on order-randomized audits, the 2026-04-29 PointGPT train-time / eval-time grouping ablations, the 2026-05-04 Point-MAE / PCP-MAE object-side diagnostics, the 2026-05-04 PointGPT unique-retained refresh, the 2026-05-05 PointGPT-S no-mask order-randomized full chain, and the 2026-05-07 ShapeNetPart semantic per-part thinning curve)
+
+## 2026-05-07 ShapeNetPart semantic per-part thinning curve
+
+Purpose:
+
+- Fill the Object / ShapeNetPart semantic support curve for Point-MAE and PCP-MAE with per-part thinning conditions `part_keep80_per_part`, `part_keep50_per_part`, `part_keep20_per_part`, and `part_keep10_per_part`.
+- Keep largest-part removal separate from this curve because it is a stronger semantic removal family, not a matched per-part thinning condition.
+- Use the same unique-retained scoring convention as the refreshed ShapeNetPart support diagnostics: retained points are resampled only for fixed-size forward inference, then logits are averaged back by original point index before mIoU scoring.
+
+Relevant result files:
+
+- Master summary:
+  - `3D-NEPA/results/object_ssl_pointmae_pcpmae/semantic_curve/shapenetpart_semantic_curve_summary.md`
+- Summary CSV:
+  - `3D-NEPA/results/object_ssl_pointmae_pcpmae/semantic_curve/shapenetpart_semantic_curve_summary.csv`
+- Raw JSON:
+  - `3D-NEPA/results/object_ssl_pointmae_pcpmae/semantic_curve/pointmae_shapenetpart_semantic_curve.json`
+  - `3D-NEPA/results/object_ssl_pointmae_pcpmae/semantic_curve/pcpmae_shapenetpart_semantic_curve.json`
+  - `3D-NEPA/results/object_ssl_pointmae_pcpmae/semantic_curve/pcpmae_ckpt300_shapenetpart_semantic_curve.json`
+
+### Instance mIoU summary
+
+| model | Semantic80 | Semantic50 | Semantic20 | Semantic10 |
+|---|---:|---:|---:|---:|
+| Point-MAE | `85.9729` | `85.7288` | `81.8297` | `68.8604` |
+| PCP-MAE | `85.9239` | `85.8457` | `81.9898` | `67.8759` |
+| PCP-MAE-ckpt300 | `85.6937` | `85.6757` | `81.6351` | `67.2090` |
+
+Interpretation note:
+
+- SemanticR keeps R% of each ground-truth part label before fixed-size forward resampling.
+- These rows complete the ShapeNetPart semantic curve for Point-MAE and PCP-MAE. PointGPT ShapeNetPart support already includes `part_keep80_per_part`, `part_keep50_per_part`, `part_keep20_per_part`, and `part_keep10_per_part` in its unique-retained result files.
 
 ## 2026-05-05 PointGPT-S no-mask order-randomized full chain
 
