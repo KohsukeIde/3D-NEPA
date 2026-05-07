@@ -1,6 +1,34 @@
 # ScanObjectNN PointGPT / pointNEPA Sidecar Results (Active)
 
-Snapshot time: `2026-05-07 JST` (includes the 2026-04-22 local rebuild chain, the 2026-04-24 no-mask order-randomized downstream partial, the 2026-04-25 no-mask order-randomized readout/support audits, the 2026-04-27 severity-curve / mask-on order-randomized audits, the 2026-04-29 PointGPT train-time / eval-time grouping ablations, the 2026-05-04 Point-MAE / PCP-MAE object-side diagnostics, the 2026-05-04 PointGPT unique-retained refresh, the 2026-05-05 PointGPT-S no-mask order-randomized full chain, the 2026-05-07 ShapeNetPart semantic per-part thinning curve, and the 2026-05-07 PointGPT-S mask-on order-randomized ShapeNetPart seed repeats)
+Snapshot time: `2026-05-07 JST` (includes the 2026-04-22 local rebuild chain, the 2026-04-24 no-mask order-randomized downstream partial, the 2026-04-25 no-mask order-randomized readout/support audits, the 2026-04-27 severity-curve / mask-on order-randomized audits, the 2026-04-29 PointGPT train-time / eval-time grouping ablations, the 2026-05-04 Point-MAE / PCP-MAE object-side diagnostics, the 2026-05-04 PointGPT unique-retained refresh, the 2026-05-05 PointGPT-S no-mask order-randomized full chain, the 2026-05-07 ShapeNetPart semantic per-part thinning curve, and the 2026-05-07 PointGPT-S mask-on order-randomized `obj_bg` / ShapeNetPart seed repeats)
+
+## 2026-05-07 PointGPT-S mask-on order-randomized ScanObjectNN obj_bg seed repeats
+
+Purpose:
+
+- Track completed ScanObjectNN `obj_bg` seed repeats for the mask-on, order-randomized PointGPT-S row.
+- Keep this separate from the Q1 2x2 single-run table unless the paper switches to seed-averaged reporting.
+
+Relevant result files:
+
+- Summary MD:
+  - `3D-NEPA/results/pointgpt_masked_orderrandom_seed_repeats/scan_objbg_seed_repeat_summary.md`
+- Summary CSV:
+  - `3D-NEPA/results/pointgpt_masked_orderrandom_seed_repeats/scan_objbg_seed_repeat_summary.csv`
+
+### ScanObjectNN obj_bg seed-repeat summary
+
+| row | best epoch | best accuracy (%) | epoch300 accuracy (%) |
+|---|---:|---:|---:|
+| seed1 | `238` | `91.0499` | `89.1566` |
+| seed2 | `210` | `90.3614` | `89.3287` |
+| mean | `224` | `90.70565` | `89.24265` |
+| sample std | `19.79899` | `0.48684` | `0.12169` |
+
+Interpretation note:
+
+- These are stability repeats for the mask-on, order-randomized `obj_bg` fine-tuning row.
+- The current Q1 2x2 table uses the matched single-run values. If the paper reports seed means, update all rows consistently rather than replacing only this cell.
 
 ## 2026-05-07 PointGPT-S mask-on order-randomized ShapeNetPart seed repeats
 
