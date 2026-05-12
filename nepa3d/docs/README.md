@@ -1,147 +1,183 @@
 # NEPA3D Docs Hub
 
-Last updated: 2026-03-14
+Last updated: 2026-05-12
 
 ## Current Snapshot
 
-- current PatchNEPA mainline:
+- paper-facing direction:
+  - derived geometric teacher pretraining for point-context encoders
+  - short name: geo-teacher
+- historical mainline kept for provenance:
   - PatchNEPA v2 reconstruction `recong2` full300
   - `recon_chamfer`, `composite`, generator depth `2`
-- current canonical ScanObjectNN headline:
+- current route decision:
+  - Route A if matched 100-epoch geo-teacher pretraining is favorable on ScanObjectNN and ShapeNetPart transfer; Route B if the strongest signal remains direct geometry readouts, controls, and completion.
+- current benchmark status:
+  - ScanObjectNN PatchNEPA headline remains pending under official test-as-val; historical file-split FT numbers are internal only.
   - `obj_bg=pending`
   - `obj_only=pending`
   - `pb_t50_rs=pending`
-- canonical machine-readable current state:
+- machine-readable state source:
   - `nepa3d/docs/current_state.json`
-- first collaborator-facing entrypoint:
-  - `nepa3d/docs/patch_nepa/collaborator_reading_guide_active.md`
-- benchmark note:
-  - ScanObjectNN headline is under revalidation after the 2026-03-14 policy
-    correction from `file` split to official `test-as-val`.
 
-## Start Here (Current)
+## Start Here
 
+- Current LLM brief:
+  - `nepa3d/docs/patch_nepa/current_llm_brief_active.md`
+- Claude compact context:
+  - `nepa3d/docs/patch_nepa/claude_context_active.md`
+- Paper-facing direction:
+  - `nepa3d/docs/patch_nepa/paper_direction_geo_teacher_202604.md`
+- Dataset / split semantics:
+  - `nepa3d/docs/patch_nepa/dataset_geo_teacher_v1_spec.md`
+- Route A/B decision matrix:
+  - `nepa3d/docs/patch_nepa/experiment_route_ab_matrix_202604.md`
 - Collaborator reading guide:
   - `nepa3d/docs/patch_nepa/collaborator_reading_guide_active.md`
-- Insight register:
-  - `nepa3d/docs/insight_register_active.md`
-- Docs cleanup plan:
-  - `nepa3d/docs/docs_cleanup_plan_active.md`
-- Docs inventory:
-  - `nepa3d/docs/docs_inventory_active.md`
-- Code organization inventory:
-  - `nepa3d/docs/code_inventory_active.md`
-- Config inventory:
-  - `nepa3d/docs/config_inventory_active.md`
-- Operations boundary (local vs ABCI):
-  - `nepa3d/docs/operations/README.md`
 - LLM retrieval index:
   - `nepa3d/docs/llm_retrieval_index.md`
-- Track split index (Query vs Patch):
-  - `nepa3d/docs/patch_nepa/nepa_tracks_index.md`
-- Code track index:
-  - `nepa3d/tracks/README.md`
-- Patch-NEPA folder guide:
-  - `nepa3d/docs/patch_nepa/README.md`
-- QueryNEPA -> PatchNEPA -> external baseline storyline:
-  - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
-- ScanObjectNN FT policy audit:
-  - `nepa3d/docs/patch_nepa/scanobjectnn_ft_policy_audit_active.md`
-- Patch-NEPA hypothesis matrix:
-  - `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
-- Patch-NEPA local execution backlog:
-  - `nepa3d/docs/patch_nepa/execution_backlog_active.md`
-- Patch-NEPA Stage-2 active plan:
-  - `nepa3d/docs/patch_nepa/patch_nepa_stage2_active.md`
-- Patch-NEPA Stage-2 runlog:
-  - `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`
-- Patch-NEPA Query->Patch gap audit:
-  - `nepa3d/docs/patch_nepa/gap_audit_query_to_patch_active.md`
-- Query chronology audit for Patch porting:
-  - `nepa3d/docs/patch_nepa/query_nepa_chronology_audit_202602_active.md`
+- Results index:
+  - `nepa3d/docs/results_index.md`
 
-- Protocol-correct ScanObjectNN benchmark (canonical): `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
-- Query-NEPA historical runlog (job-level): `nepa3d/docs/query_nepa/runlog_202602.md`
-- Non-retrieval results master index: `nepa3d/docs/active/results_master_nonretrieval.md`
+## Physical Layout Contract
+
+Root files are the control plane. Only these should live directly under
+`nepa3d/docs/`:
+
+- `README.md`
+  - human entrypoint and physical tree map
+- `current_state.json`
+  - machine-readable current state
+- `llm_retrieval_index.md`
+  - authoritative LLM retrieval contract
+- `results_index.md`
+  - result and benchmark navigation surface
+
+Everything else should live in a folder. Parallel folders are grouped by role:
+
+- `_meta/`
+  - docs governance, inventories, cleanup state, insight register, code/config
+    ownership
+- `patch_nepa/`
+  - current PatchNEPA / geo-teacher paper-facing method, protocol, evidence,
+    and PatchNEPA provenance
+- `classification/`
+  - classification task ledgers and PointGPT / pointNEPA sidecar results
+- `completion/`
+  - UCPR / CPAC / completion-domain ledgers
+- `operations/`
+  - execution-surface boundaries and local-vs-ABCI policy
+- `query_nepa/`
+  - historical QueryNEPA ledgers; not current truth by default
+- `history/`
+  - cross-era narratives and broad provenance
+- `archive/`
+  - frozen low-priority docs excluded from default retrieval
+
+New loose root files are not allowed unless they are part of the control plane.
+New scientific docs should go to the nearest topic folder; new docs about docs
+should go to `_meta/`.
+
+## Current Evidence Boundaries
+
+- Canonical ScanObjectNN benchmark page:
+  - `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
+- File-split demotion rule:
+  - `nepa3d/docs/patch_nepa/scanobjectnn_ft_policy_audit_active.md`
+- Historical PatchNEPA trajectory:
+  - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
+- CQA / geo-teacher hypothesis surface:
+  - `nepa3d/docs/patch_nepa/hypothesis_matrix_geo_teacher_v1.md`
+- Older PatchNEPA hypothesis surface:
+  - `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
+  - historical/mixed March surface; read after the geo-teacher brief when the
+    question needs reconstruction-era context.
+- Itachi-local result ledger:
+  - `nepa3d/docs/patch_nepa/itachi/results_geo_teacher_itachi_active.md`
+  - local evidence only unless copied into canonical benchmark pages.
+- PointGPT / pointNEPA sidecar ledger:
+  - `nepa3d/docs/classification/results_scanobjectnn_pointgpt_pointnepa_active.md`
+  - active comparison context, not a PatchNEPA headline page.
 
 ## Default Retrieval Policy
 
-- For most Patch-NEPA questions, read only:
-  - `nepa3d/docs/llm_retrieval_index.md`
-  - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
-  - `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
-- For local execution / next-run questions, also read:
+- For current paper / method questions, read:
+  - `nepa3d/docs/patch_nepa/current_llm_brief_active.md`
+  - `nepa3d/docs/patch_nepa/claude_context_active.md`
+  - `nepa3d/docs/patch_nepa/paper_direction_geo_teacher_202604.md`
+  - `nepa3d/docs/patch_nepa/dataset_geo_teacher_v1_spec.md`
+  - `nepa3d/docs/patch_nepa/experiment_route_ab_matrix_202604.md`
+- For benchmark status, add:
+  - `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
+  - `nepa3d/docs/patch_nepa/scanobjectnn_ft_policy_audit_active.md`
+- For local execution / next-run questions, add:
   - `nepa3d/docs/patch_nepa/execution_backlog_active.md`
   - `nepa3d/docs/operations/README.md`
-- For code-layout / ownership questions, also read:
-  - `nepa3d/docs/code_inventory_active.md`
-  - `nepa3d/docs/patch_nepa/nepa_tracks_index.md`
-- For config ownership / migration questions, also read:
-  - `nepa3d/docs/config_inventory_active.md`
-- Read `restart_plan_patchnepa_data_v2_20260303.md` only when current-branch
-  detail is required.
-- Read raw runlogs only when provenance or exact launch history is required.
+- For code-layout / ownership questions, add:
+  - `nepa3d/docs/_meta/code_inventory_active.md`
+  - `nepa3d/docs/_meta/config_inventory_active.md`
+- Read raw runlogs only when exact job provenance is required.
 - Do not retrieve `nepa3d/docs/archive/` by default.
 
-## Legacy Ledgers
+## Operations And Code
 
-- Historical 1024 multi-node ledger: `nepa3d/docs/query_nepa/pretrain_abcd_1024_multinode_active.md`
-- Historical variant re-eval ledger: `nepa3d/docs/query_nepa/pretrain_abcd_1024_variant_reval_active.md`
+- Operations boundary:
+  - `nepa3d/docs/operations/README.md`
+- ABCI collaborator entrypoints:
+  - `scripts/abci/README.md`
+- Local workstation entrypoints:
+  - `scripts/local/README.md`
+- Code organization inventory:
+  - `nepa3d/docs/_meta/code_inventory_active.md`
+- Config ownership inventory:
+  - `nepa3d/docs/_meta/config_inventory_active.md`
+- Track split index:
+  - `nepa3d/docs/patch_nepa/nepa_tracks_index.md`
+  - historical/mixed track map; current code ownership is in
+    `nepa3d/docs/_meta/code_inventory_active.md`.
 
 ## Folder Map
 
-- `nepa3d/docs/operations/`: execution-surface boundary and operational entrypoint guide
-- `nepa3d/docs/query_nepa/`: Query-NEPA historical ledgers, runlog, and folder guide
-- `nepa3d/docs/patch_nepa/`: Patch-NEPA active plan/runlog plus synthesis docs
-- `nepa3d/docs/classification/`: ScanObjectNN / ModelNet result ledgers
-- `nepa3d/docs/completion/`: CPAC/UCPR/completion ledgers and planning
-- `nepa3d/docs/history/`: cross-era timeline/memos/legacy consolidated history
-- `nepa3d/docs/active/`: cross-track master index only
+- `nepa3d/docs/_meta/`: docs governance, inventories, insight register, and
+  code/config ownership maps
+- `nepa3d/docs/patch_nepa/`: current PatchNEPA / geo-teacher synthesis,
+  protocol, local evidence, and provenance ledgers
+- `nepa3d/docs/classification/`: ScanObjectNN / ModelNet / PointGPT sidecar
+  ledgers
+- `nepa3d/docs/completion/`: historical UCPR/CPAC/completion ledgers
+- `nepa3d/docs/query_nepa/`: QueryNEPA historical ledgers and runlog
+- `nepa3d/docs/history/`: cross-era historical narratives
+- `nepa3d/docs/operations/`: execution-surface boundary
 - `nepa3d/docs/archive/`: frozen low-priority docs excluded from default retrieval
 
 ## Update Policy
 
 - Top-level docs contract:
   - `nepa3d/docs/README.md`, `nepa3d/docs/llm_retrieval_index.md`, and
-    `nepa3d/docs/results_index.md` must always reflect the current mainline.
-  - `nepa3d/docs/current_state.json` is the machine-readable source of truth
-    for the current mainline snapshot used by top-level docs checks.
-  - Update them whenever benchmark headline, retrieval order, or collaborator
-    entrypoint changes.
+    `nepa3d/docs/results_index.md` must reflect `nepa3d/docs/current_state.json`.
+  - Update all four when paper direction, benchmark status, retrieval order,
+    or collaborator entrypoints change.
 - Validation:
-  - run `python scripts/analysis/check_top_level_docs_sync.py`
-    after updating the current mainline or benchmark headline.
+  - run `python3 scripts/analysis/check_top_level_docs_sync.py` after updates.
   - commit-time enforcement:
     - install tracked hooks with `bash scripts/analysis/install_git_hooks.sh`
     - this activates `.githooks/pre-commit`, which blocks commits when the
       top-level docs are out of sync.
-- Put headline benchmark numbers only in `patch_nepa/benchmark_scanobjectnn_variant.md`.
-- Put Patch-NEPA Stage-2 job history in `patch_nepa/runlog_patch_nepa_202602.md`.
-- Put cross-line conclusions in `patch_nepa/storyline_query_to_patch_v2_active.md`.
-- Put active hypothesis status in `patch_nepa/hypothesis_matrix_active.md`.
-- Keep Query-NEPA historical job history in `query_nepa/runlog_202602.md`.
-- Put local-vs-ABCI operational boundary notes in `operations/README.md`.
-- Keep `test_acc` as headline metric for ScanObjectNN benchmark tables.
-- Keep `best_val` and `best_ep` as diagnostics (not headline).
-- Keep protocol metadata for every table row:
-  - checkpoint path
-  - `SCAN_CACHE_ROOT`
-  - pretrain family (`fps`, `rfps`, etc.)
-  - job ID
+- Put headline ScanObjectNN benchmark numbers only in
+  `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`.
+- Put paper-facing protocol decisions in:
+  - `nepa3d/docs/patch_nepa/paper_direction_geo_teacher_202604.md`
+  - `nepa3d/docs/patch_nepa/dataset_geo_teacher_v1_spec.md`
+  - `nepa3d/docs/patch_nepa/experiment_route_ab_matrix_202604.md`
+- Put local-only Itachi facts under `nepa3d/docs/patch_nepa/itachi/`.
+- Keep raw runlogs append-only provenance.
 
 ## Notes
 
-- `scanobjectnn_main_split_v2` mixed-cache reporting is not used for fair benchmark headline.
-- Variant-split caches (`obj_bg`, `obj_only`, `pb_t50_rs`) are the default benchmark protocol.
-- Local derived-cache cleanup (2026-03-06):
-  - removed from this workspace to prevent accidental reuse:
-    - `data/scanobjectnn_cache_v2`
-    - `data/shapenet_cache_v0`
-    - `data/shapenet_unpaired_cache_v1`
-    - `data/shapenet_unpaired_splits_v1.json`
-  - source dataset roots were kept
-  - current mainline requires regenerating canonical caches before running:
-    - ScanObjectNN: `data/scanobjectnn_obj_bg_v3_nonorm`, `data/scanobjectnn_obj_only_v3_nonorm`, `data/scanobjectnn_pb_t50_rs_v3_nonorm`
-    - ShapeNet: `data/shapenet_cache_v2_20260303`, `data/shapenet_unpaired_cache_v2_20260303` and any active v2 variants
-- Raw log pruning helper:
-  - `scripts/logs/prune_superseded_logs.sh` (`--dry-run` / `--apply`)
+- Historical file-split FT numbers can explain why a branch was promising, but
+  they are not current benchmark headlines.
+- Itachi 100/300-epoch results are useful local evidence, but benchmark-facing
+  claims must be copied into canonical benchmark docs first.
+- Existing log helpers under `scripts/logs/` are:
+  - `scripts/logs/cleanup_stale_pids.sh`
+  - `scripts/logs/show_pipeline_status.sh`

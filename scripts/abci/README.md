@@ -16,7 +16,18 @@ need the full internal script tree.
   `scripts/analysis/`
 - operational boundary notes live in `nepa3d/docs/operations/README.md`
 
-## Current Defaults
+## Current Paper-Facing Boundary
+
+The April 2026 paper-facing line is geo-teacher. For the current Route A/B
+compare, start from:
+
+- `submit_patchnepa_geo_teacher_compare_pretrain.sh`
+
+The older `submit_patchnepa_current_*` wrappers remain maintained for the
+historical `recong2` / CQA line and for compatibility with existing docs, but
+they are not the shortest route to the current paper-facing decision.
+
+## Historical Reconstruction Defaults
 
 - current pretrain line: PatchNEPA v2 reconstruction `g2`
 - objective: `recon_chamfer`
@@ -41,6 +52,9 @@ Reason:
 
 Reference:
 
+- `nepa3d/docs/patch_nepa/current_llm_brief_active.md`
+- `nepa3d/docs/patch_nepa/paper_direction_geo_teacher_202604.md`
+- `nepa3d/docs/patch_nepa/experiment_route_ab_matrix_202604.md`
 - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
 - `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
 - `nepa3d/docs/operations/README.md`
@@ -48,7 +62,7 @@ Reference:
 ## Entrypoints
 
 - `submit_patchnepa_current_pretrain.sh`
-  - submit current PatchNEPA token-path pretrain on ABCI
+  - submit historical/current-maintained PatchNEPA token-path pretrain on ABCI
   - default mix: `pc33mesh33udf33`
   - override with `MIX_VARIANT=pc100|mesh50udf50|pc33mesh33udf33`
 - `submit_patchnepa_current_ft.sh`
@@ -67,16 +81,17 @@ Reference:
   - submit the matched `100`-epoch geo-teacher compare on ABCI
   - default config: `shapenet_geo_teacher_packed_distnorm_unsigned_v1.yaml`
   - default protocol: `packed + multihead + per_task + no_q`
+  - current paper-facing entrypoint
 
 ## Recommended Reading
 
-1. `nepa3d/docs/patch_nepa/collaborator_reading_guide_active.md`
-2. `nepa3d/docs/patch_nepa/README.md`
-3. `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
-4. `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
-5. `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
-6. `nepa3d/docs/patch_nepa/spec_cqa_vocab.md`
-7. `nepa3d/docs/patch_nepa/experiment_route_ab_matrix_202604.md`
+1. `nepa3d/docs/patch_nepa/current_llm_brief_active.md`
+2. `nepa3d/docs/patch_nepa/collaborator_reading_guide_active.md`
+3. `nepa3d/docs/patch_nepa/README.md`
+4. `nepa3d/docs/patch_nepa/paper_direction_geo_teacher_202604.md`
+5. `nepa3d/docs/patch_nepa/experiment_route_ab_matrix_202604.md`
+6. `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
+7. `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
 
 ## Examples
 

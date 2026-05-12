@@ -370,11 +370,11 @@ Fine-tune:
 - fine-tune logs: `logs/finetune/`
 - UCPR/CPAC JSON: `results/ucpr_*.json`, `results/cpac_*.json`
 
-Helpers:
+Maintained log helpers:
 
 ```bash
-bash scripts/logs/prune_superseded_logs.sh --dry-run
-bash scripts/logs/prune_superseded_logs.sh --apply
+bash scripts/logs/show_pipeline_status.sh
+bash scripts/logs/cleanup_stale_pids.sh
 ```
 
 ## 6) Current result snapshot

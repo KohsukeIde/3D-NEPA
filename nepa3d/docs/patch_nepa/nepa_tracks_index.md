@@ -2,6 +2,13 @@
 
 Last updated: 2026-03-30
 
+> Historical/mixed status: this file is useful for QueryNEPA vs PatchNEPA
+> provenance and code-path translation, but parts of its "active line" wording
+> predate the April 2026 geo-teacher paper-facing layer. For current retrieval,
+> start from `nepa3d/docs/patch_nepa/current_llm_brief_active.md` and
+> `nepa3d/docs/llm_retrieval_index.md`; for code ownership, prefer
+> `nepa3d/docs/_meta/code_inventory_active.md`.
+
 ## 1. Purpose
 
 This file separates documentation by model line to avoid mixing conclusions:
@@ -22,7 +29,7 @@ It now also matches the code layout:
 
 Canonical code-boundary reference:
 
-- `nepa3d/docs/code_inventory_active.md`
+- `nepa3d/docs/_meta/code_inventory_active.md`
 
 ## 2. Active Line (Patch-NEPA)
 

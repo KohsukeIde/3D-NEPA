@@ -1,18 +1,33 @@
 {
-  "last_updated": "2026-03-14",
+  "last_updated": "2026-05-12",
   "patchnepa": {
-    "mainline_name": "PatchNEPA v2 reconstruction `recong2` full300",
-    "objective": "`recon_chamfer`, `composite`, generator depth `2`",
+    "paper_direction": "derived geometric teacher pretraining for point-context encoders",
+    "paper_direction_short": "geo-teacher",
+    "historical_mainline_name": "PatchNEPA v2 reconstruction `recong2` full300",
+    "historical_objective": "`recon_chamfer`, `composite`, generator depth `2`",
+    "active_route_decision": "Route A if matched 100-epoch geo-teacher pretraining is favorable on ScanObjectNN and ShapeNetPart transfer; Route B if the strongest signal remains direct geometry readouts, controls, and completion.",
+    "route_a_state": "Itachi 100/300-epoch geo-teacher utility reads are local evidence; 300 epochs improves Route-B same-context geometry more than Route-A utility, so the interim compare budget remains 100 pretrain epochs.",
+    "route_b_state": "CQA distance+normal_unsigned remains the safest geometry anchor; packed common-split is a small positive over mixture; external Point-MAE CQA is a sidecar control, not a PatchNEPA headline.",
+    "benchmark_status": "ScanObjectNN PatchNEPA headline remains pending under official test-as-val; historical file-split FT numbers are internal only.",
     "headline": {
       "obj_bg": "pending",
       "obj_only": "pending",
       "pb_t50_rs": "pending"
     },
+    "llm_brief_doc": "nepa3d/docs/patch_nepa/current_llm_brief_active.md",
+    "paper_direction_doc": "nepa3d/docs/patch_nepa/paper_direction_geo_teacher_202604.md",
+    "dataset_spec_doc": "nepa3d/docs/patch_nepa/dataset_geo_teacher_v1_spec.md",
+    "route_matrix_doc": "nepa3d/docs/patch_nepa/experiment_route_ab_matrix_202604.md",
+    "geo_teacher_hypothesis_doc": "nepa3d/docs/patch_nepa/hypothesis_matrix_geo_teacher_v1.md",
     "collaborator_entrypoint": "nepa3d/docs/patch_nepa/collaborator_reading_guide_active.md",
     "local_execution_source": "nepa3d/docs/patch_nepa/execution_backlog_active.md",
     "operations_entrypoint": "nepa3d/docs/operations/README.md",
     "benchmark_doc": "nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md",
     "storyline_doc": "nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md",
-    "hypothesis_doc": "nepa3d/docs/patch_nepa/hypothesis_matrix_active.md"
+    "hypothesis_doc": "nepa3d/docs/patch_nepa/hypothesis_matrix_active.md",
+    "itachi_results_doc": "nepa3d/docs/patch_nepa/itachi/results_geo_teacher_itachi_active.md",
+    "pointgpt_sidecar_doc": "nepa3d/docs/classification/results_scanobjectnn_pointgpt_pointnepa_active.md",
+    "code_inventory_doc": "nepa3d/docs/_meta/code_inventory_active.md",
+    "config_inventory_doc": "nepa3d/docs/_meta/config_inventory_active.md"
   }
 }

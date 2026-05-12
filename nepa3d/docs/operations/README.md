@@ -17,6 +17,9 @@ Use it to answer:
   - `scripts/abci/README.md`
 - supporting sanity / compatibility scripts:
   - `scripts/sanity/README.md`
+- paper-facing retrieval / route decision:
+  - `nepa3d/docs/patch_nepa/current_llm_brief_active.md`
+  - `nepa3d/docs/patch_nepa/experiment_route_ab_matrix_202604.md`
 
 ## Boundary Rules
 
@@ -26,10 +29,16 @@ Use it to answer:
 - ABCI-facing wrappers belong under `scripts/abci/`
 - `scripts/sanity/` is not a primary launch surface; use it only for sanity
   jobs, screening, environment checks, or compatibility shims
+- `scripts/pretrain/`, `scripts/finetune/`, `scripts/eval/`, and
+  `scripts/analysis/` are worker/wrapper layers behind the primary local and
+  ABCI surfaces
 - scientific conclusions, benchmark tables, and ablation interpretations stay
   in the task docs under `nepa3d/docs/patch_nepa/`,
   `nepa3d/docs/classification/`, `nepa3d/docs/completion/`, and related
   folders
+- Itachi-local results stay local evidence under
+  `nepa3d/docs/patch_nepa/itachi/` unless they are explicitly copied into a
+  canonical benchmark-facing doc
 
 ## Documentation Rule
 
@@ -41,3 +50,9 @@ When operational guidance is needed:
 1. document the execution surface here
 2. link to the maintained script README
 3. keep result interpretation in the science docs
+
+Current paper-facing ABCI handoff should start from
+`scripts/abci/submit_patchnepa_geo_teacher_compare_pretrain.sh`. The older
+`submit_patchnepa_current_*` wrappers remain maintained compatibility surfaces
+for the historical `recong2` / CQA line, but they are not the shortest route to
+the April 2026 geo-teacher paper decision.

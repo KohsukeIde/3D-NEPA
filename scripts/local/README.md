@@ -36,6 +36,9 @@ NeurIPS, while PBS/QF runners are no longer the default operational path.
 
 ## Source of Truth
 
+- current paper-facing retrieval:
+  - `nepa3d/docs/patch_nepa/current_llm_brief_active.md`
+  - `nepa3d/docs/patch_nepa/experiment_route_ab_matrix_202604.md`
 - scientific conclusions still live in:
   - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
   - `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
@@ -69,6 +72,8 @@ bash scripts/local/patchnepa_visocc_branch.sh
 - runner state is written under `logs/local_queue/<queue_name>/`
 - the runner does not update docs automatically
 - canonicalization must be done manually from structured outputs
+- local Itachi results are local evidence until copied into canonical
+  benchmark-facing docs
 - keep launch commands relative to the repo root
 - prefer existing maintained wrappers under `scripts/pretrain/`,
   `scripts/analysis/`, and `scripts/finetune/`

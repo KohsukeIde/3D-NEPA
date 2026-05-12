@@ -8,42 +8,44 @@ Point-MAE and PointGPT.
 
 0. `../llm_retrieval_index.md`
    - Default retrieval policy for the whole `docs/` tree.
-1. `collaborator_reading_guide_active.md`
+1. `current_llm_brief_active.md`
+   - Shortest current truth / do-not-use / exact-next-docs surface for LLMs.
+2. `collaborator_reading_guide_active.md`
    - One-page collaborator-facing entrypoint.
    - Start here when sharing the current line with a coauthor.
-2. `paper_direction_geo_teacher_202604.md`
+3. `paper_direction_geo_teacher_202604.md`
    - Paper-facing direction layer added above the historical mainline docs.
-3. `dataset_geo_teacher_v1_spec.md`
+4. `dataset_geo_teacher_v1_spec.md`
    - Paper-facing dataset / split / protocol source of truth.
-4. `experiment_route_ab_matrix_202604.md`
+5. `experiment_route_ab_matrix_202604.md`
    - First matched `100`-epoch decision matrix for Route A vs Route B.
-5. `storyline_query_to_patch_v2_active.md`
+6. `storyline_query_to_patch_v2_active.md`
    - Cross-line storyline and interpretation boundary.
    - Start here when asking "what happened?" or "which result is valid?"
-6. `hypothesis_matrix_geo_teacher_v1.md`
+7. `hypothesis_matrix_geo_teacher_v1.md`
    - Paper-facing geo-teacher hypothesis sheet.
-7. `hypothesis_matrix_active.md`
-   - Hypotheses, supporting evidence, current status, and next minimal tests.
-8. `scanobjectnn_ft_policy_audit_active.md`
+8. `hypothesis_matrix_active.md`
+   - Older reconstruction-era / mixed hypothesis surface.
+9. `scanobjectnn_ft_policy_audit_active.md`
    - Exact list of old ScanObjectNN FT result families that are now
      historical/internal because they came from the earlier `file`-split
      policy.
-9. `migration_cross_primitive_to_geo_teacher_202604.md`
+10. `migration_cross_primitive_to_geo_teacher_202604.md`
    - Old-claim to new-claim migration note.
-10. `spec_geo_teacher_vocab_v1.md`
+11. `spec_geo_teacher_vocab_v1.md`
    - Paper-facing canonical task vocabulary.
-11. `execution_backlog_active.md`
+12. `execution_backlog_active.md`
    - Canonical local-only execution backlog and gating rules.
    - Start here when asking "what should run next locally?"
-12. `restart_plan_patchnepa_data_v2_20260303.md`
-   - Active investigation memo for the current v2 token-path branch.
-13. `patch_nepa_stage2_active.md`
-   - Active mainline policy and stage-2 execution rules.
-14. `runlog_patch_nepa_202602.md`
+13. `restart_plan_patchnepa_data_v2_20260303.md`
+   - Detailed March reconstruction/CQA branch memo; not default retrieval.
+14. `patch_nepa_stage2_active.md`
+   - Historical March Stage-2 policy memo; retained for provenance.
+15. `runlog_patch_nepa_202602.md`
    - Raw execution ledger for Patch-NEPA jobs.
-15. `benchmark_scanobjectnn_variant.md`
+16. `benchmark_scanobjectnn_variant.md`
    - Canonical headline ScanObjectNN benchmark table.
-16. `../code_inventory_active.md`
+17. `../_meta/code_inventory_active.md`
    - Canonical code-organization boundary for current path ownership.
 
 ## Machine-Specific Notes
@@ -68,25 +70,28 @@ If a collaborator asks:
 
 start from:
 
-1. `collaborator_reading_guide_active.md`
+1. `current_llm_brief_active.md`
+   - shortest current truth and routing surface
+2. `collaborator_reading_guide_active.md`
    - one-page reading order and file-role memo
-2. `scripts/abci/README.md`
+3. `scripts/abci/README.md`
    - curated ABCI entrypoints for the current PatchNEPA line
    - includes the thin submit wrappers for pretrain / finetune / mini-CPAC
-3. `storyline_query_to_patch_v2_active.md`
-   - shortest answer to "what is the current valid result?"
-4. `benchmark_scanobjectnn_variant.md`
+4. `paper_direction_geo_teacher_202604.md`
+   - current paper-facing framing
+5. `benchmark_scanobjectnn_variant.md`
    - canonical ScanObjectNN headline table
-5. `scanobjectnn_ft_policy_audit_active.md`
+6. `scanobjectnn_ft_policy_audit_active.md`
    - exact boundary between historical file-split FT rows and maintained
      official benchmark rows
-6. `restart_plan_patchnepa_data_v2_20260303.md`
-   - current branch memo and the most detailed active result backfill
+7. `storyline_query_to_patch_v2_active.md`
+   - historical trajectory and validity boundary
 
 Current short answer:
 
-- current main reconstruction line: PatchNEPA v2 `recong2` full300
-- current paper-facing direction: geometric-teacher pretraining on the CQA path
+- current paper-facing direction: derived geometric teacher pretraining for
+  point-context encoders
+- historical main reconstruction line: PatchNEPA v2 `recong2` full300
 - current ScanObjectNN benchmark headline: pending revalidation
 - historical file-split FT headline: `0.8485 / 0.8589 / 0.8140`
 - current thin ABCI entrypoints:
@@ -111,7 +116,7 @@ Important:
 - active guide docs should point to the canonical ownership paths above
 - historical ledgers may still mention the shim paths that were executed at the
   time
-- the canonical boundary doc is `../code_inventory_active.md`
+- the canonical boundary doc is `../_meta/code_inventory_active.md`
 
 ## Experimental CQA Branch
 
@@ -216,16 +221,22 @@ The data-freeze policy is:
 
 ## Policy
 
-- Use `storyline_query_to_patch_v2_active.md` as the default retrieval target.
+- Use `current_llm_brief_active.md` and `../llm_retrieval_index.md` as the
+  default retrieval targets.
 - Put raw run additions into `runlog_patch_nepa_202602.md`.
 - Put current-branch reasoning updates into
   `restart_plan_patchnepa_data_v2_20260303.md`.
 - Put local-only next-run decisions into `execution_backlog_active.md`.
-- Put cross-line conclusions only into
-  `storyline_query_to_patch_v2_active.md` and
-  `hypothesis_matrix_active.md`.
+- Put paper-facing direction and route decisions into
+  `paper_direction_geo_teacher_202604.md`,
+  `dataset_geo_teacher_v1_spec.md`, and
+  `experiment_route_ab_matrix_202604.md`.
+- Put cross-line historical conclusions into
+  `storyline_query_to_patch_v2_active.md`.
 - For collaborator-facing ABCI usage, prefer the curated wrappers under
   `scripts/abci/` over searching the broader `scripts/` tree directly.
+- Keep Itachi results local-only unless they are copied into canonical
+  benchmark docs.
 - Do not treat historical Point-MAE-style split rows as mainline evidence unless
   explicitly labeled as historical/reference.
 - Do not retrieve archive docs for Patch-NEPA by default.

@@ -2,6 +2,13 @@
 
 Last updated: 2026-03-14
 
+> Historical/mixed status: this is the older reconstruction-era PatchNEPA
+> hypothesis surface. It remains useful for `recong2`, cosine-collapse, and
+> March CQA provenance, but the current paper-facing hypotheses live in
+> `nepa3d/docs/patch_nepa/hypothesis_matrix_geo_teacher_v1.md`. Read
+> `nepa3d/docs/patch_nepa/current_llm_brief_active.md` first for current
+> retrieval.
+
 ## 1. Purpose
 
 This file keeps the active hypotheses stable across runs so later analysis does

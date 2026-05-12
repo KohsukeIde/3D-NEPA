@@ -58,6 +58,8 @@ Primary evidence:
 
 ## 10-Minute Reading Order
 
+0. `nepa3d/docs/patch_nepa/current_llm_brief_active.md`
+   - Shortest current truth / do-not-use / exact-next-docs surface.
 1. `nepa3d/docs/patch_nepa/paper_direction_geo_teacher_202604.md`
    - Shortest answer to "what is the current paper-facing direction?"
    - Explains why the paper layer is now geometric-teacher focused rather than
@@ -80,7 +82,7 @@ Primary evidence:
 7. `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
    - Shows which hypotheses are now supported, unsupported, or still open.
 
-If you only read three files, read items `1-3`.
+If you only read three files, read items `0-2`.
 
 ## 30-Minute Reading Order
 
@@ -135,7 +137,7 @@ After the 10-minute path, read:
   - Which jobs ran, when, and with which IDs?
 - `scripts/abci/README.md`
   - Which maintained wrapper should a collaborator actually run?
-- `nepa3d/docs/code_inventory_active.md`
+- `nepa3d/docs/_meta/code_inventory_active.md`
   - Which code path is canonical now versus historical shim-only?
 
 ## Code Entry Points
@@ -158,7 +160,7 @@ start here:
    - PBS submit wrapper for pretrain.
 5. `scripts/finetune/patchnepa_scanobjectnn_finetune.sh`
    - Main finetune entrypoint.
-6. `nepa3d/docs/code_inventory_active.md`
+6. `nepa3d/docs/_meta/code_inventory_active.md`
    - Canonical map for `track` vs `shared` vs `compat` paths.
 
 ## Reproduction Entry Points
@@ -189,17 +191,18 @@ Those are useful for provenance, not for understanding the current line.
 When sending materials to a coauthor, send this exact set first:
 
 1. `nepa3d/docs/patch_nepa/collaborator_reading_guide_active.md`
-2. `nepa3d/docs/patch_nepa/paper_direction_geo_teacher_202604.md`
-3. `nepa3d/docs/patch_nepa/dataset_geo_teacher_v1_spec.md`
-4. `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
-5. `scripts/abci/README.md`
+2. `nepa3d/docs/patch_nepa/current_llm_brief_active.md`
+3. `nepa3d/docs/patch_nepa/paper_direction_geo_teacher_202604.md`
+4. `nepa3d/docs/patch_nepa/dataset_geo_teacher_v1_spec.md`
+5. `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`
+6. `scripts/abci/README.md`
 
 If they then ask for branch detail, add:
 
-6. `nepa3d/docs/patch_nepa/spec_geo_teacher_vocab_v1.md`
-7. `nepa3d/docs/patch_nepa/hypothesis_matrix_geo_teacher_v1.md`
-8. `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
+7. `nepa3d/docs/patch_nepa/spec_geo_teacher_vocab_v1.md`
+8. `nepa3d/docs/patch_nepa/hypothesis_matrix_geo_teacher_v1.md`
+9. `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
 
 If they ask for provenance, add:
 
-9. `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`
+10. `nepa3d/docs/patch_nepa/runlog_patch_nepa_202602.md`

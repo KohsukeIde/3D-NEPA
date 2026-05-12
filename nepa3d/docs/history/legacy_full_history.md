@@ -32,8 +32,11 @@ Current log locations:
 - pretrain: `logs/pretrain/m1/`
 - finetune table: `logs/finetune/scan_m1_table/`
 - auto-chain watcher: `logs/finetune/m1_after_pretrain/`
-- historical status/cleanup helpers were retired; the maintained helper is
-  `scripts/logs/prune_superseded_logs.sh`
+- historical status/cleanup helpers were retired; the old
+  scripts/logs/prune_superseded_logs.sh helper is no longer present in the
+  active scripts tree. Current maintained log helpers are
+  `scripts/logs/show_pipeline_status.sh` and
+  `scripts/logs/cleanup_stale_pids.sh`.
 
 Legacy ModelNet40-era experiments are kept for reference but are no longer the primary experimental path.
 

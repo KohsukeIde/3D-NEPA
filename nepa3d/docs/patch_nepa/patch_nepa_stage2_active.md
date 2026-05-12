@@ -2,6 +2,13 @@
 
 Last updated: 2026-03-01
 
+> Historical/stale status: this file is retained for March 2026 Stage-2
+> provenance. It is not the current paper-facing plan and should not be used as
+> the default LLM entrypoint. For current direction, read
+> `nepa3d/docs/patch_nepa/current_llm_brief_active.md`,
+> `nepa3d/docs/patch_nepa/paper_direction_geo_teacher_202604.md`, and
+> `nepa3d/docs/patch_nepa/experiment_route_ab_matrix_202604.md` first.
+
 ## 1. Scope
 
 This document is the active source for the new pipeline:
