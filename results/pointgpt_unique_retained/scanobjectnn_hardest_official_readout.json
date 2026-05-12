@@ -1,0 +1,42 @@
+{
+  "config": "cfgs/PointGPT-S/finetune_scan_hardest.yaml",
+  "ckpt": "checkpoints/official/PointGPT-S/finetune_scan_hardest.pth",
+  "train_split": "train",
+  "test_split": "test",
+  "top1_acc": 0.866759181022644,
+  "top1_hit": 0.866759181022644,
+  "top2_hit": 0.9486467838287354,
+  "top5_hit": 0.9868147373199463,
+  "hardest_pair": {
+    "a_id": 0,
+    "b_id": 2,
+    "a_name": "bag",
+    "b_name": "box",
+    "rate": 0.16867469251155853,
+    "count": 14,
+    "pair_samples": 216,
+    "direct_top1_acc": 0.7638888955116272,
+    "a_to_b_rate": 0.1686746987951807,
+    "b_to_a_rate": 0.022556390977443608,
+    "mean_margin_a_minus_b": -3.426959276199341,
+    "pair_probe_bal_acc": 0.8622610743726786,
+    "pair_probe_acc": 0.875
+  },
+  "per_class_acc": {
+    "bag": 0.7349397590361446,
+    "bin": 0.8693467336683417,
+    "box": 0.7819548872180451,
+    "cabinet": 0.8413978494623656,
+    "chair": 0.9666666666666667,
+    "desk": 0.8533333333333334,
+    "display": 0.9362745098039216,
+    "door": 0.9238095238095239,
+    "shelf": 0.9004149377593361,
+    "table": 0.7185185185185186,
+    "bed": 0.8363636363636363,
+    "pillow": 0.8095238095238095,
+    "sink": 0.7916666666666666,
+    "sofa": 0.9476190476190476,
+    "toilet": 0.8823529411764706
+  }
+}

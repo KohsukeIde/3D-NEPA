@@ -1,0 +1,5 @@
+row,seed,best_epoch,best_accuracy_percent,epoch300_accuracy_percent,run_name,source_log
+seed1,1,238,91.0499,89.1566,pgpt_s_masked_ordrand_objbg_e300_seed1_20260507,logs/pointgpt_masked_orderrandom_seed_repeats/scan_objbg_seed1.log
+seed2,2,210,90.3614,89.3287,pgpt_s_masked_ordrand_objbg_e300_seed2_20260507,logs/pointgpt_masked_orderrandom_seed_repeats/scan_objbg_seed2.log
+mean,,224,90.70565,89.24265,,computed from seed1 and seed2
+sample_std,,19.79899,0.48684,0.12169,,n=2 sample standard deviation

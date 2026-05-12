@@ -1,0 +1,42 @@
+{
+  "config": "cfgs/PointGPT-S/finetune_scan_hardest.yaml",
+  "ckpt": "/mnt/urashima/users/minesawa/home-offload/ssl/3D-NEPA/PointGPT/experiments/finetune_scan_hardest/PointGPT-S/pgpt_s_nomask_ordrand_hardest_e300_20260504/ckpt-best.pth",
+  "train_split": "train",
+  "test_split": "test",
+  "top1_acc": 0.8396946787834167,
+  "top1_hit": 0.8396946787834167,
+  "top2_hit": 0.9309507012367249,
+  "top5_hit": 0.9847328066825867,
+  "hardest_pair": {
+    "a_id": 10,
+    "b_id": 13,
+    "a_name": "bed",
+    "b_name": "sofa",
+    "rate": 0.15454545617103577,
+    "count": 17,
+    "pair_samples": 320,
+    "direct_top1_acc": 0.8843749761581421,
+    "a_to_b_rate": 0.15454545454545454,
+    "b_to_a_rate": 0.01904761904761905,
+    "mean_margin_a_minus_b": -4.3326826095581055,
+    "pair_probe_bal_acc": 0.8995670995670996,
+    "pair_probe_acc": 0.925
+  },
+  "per_class_acc": {
+    "bag": 0.6867469879518072,
+    "bin": 0.8492462311557789,
+    "box": 0.6842105263157895,
+    "cabinet": 0.8172043010752689,
+    "chair": 0.9461538461538461,
+    "desk": 0.82,
+    "display": 0.8921568627450981,
+    "door": 0.919047619047619,
+    "shelf": 0.8423236514522822,
+    "table": 0.7333333333333333,
+    "bed": 0.8181818181818182,
+    "pillow": 0.7714285714285715,
+    "sink": 0.7666666666666667,
+    "sofa": 0.919047619047619,
+    "toilet": 0.8823529411764706
+  }
+}

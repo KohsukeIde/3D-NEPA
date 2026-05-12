@@ -185,12 +185,17 @@ def run_net(args, config, train_writer=None, val_writer=None, wandb_run=None):
             cos_prev_val = float('nan')
             gap_val = float('nan')
             copy_win_val = float('nan')
+            recon_cd_l1_val = float('nan')
+            recon_cd_l2_val = float('nan')
             if torch.is_tensor(pretrain_diag) and pretrain_diag.numel() >= 5:
                 loss_main_val = float(pretrain_diag[0].item())
                 cos_tgt_val = float(pretrain_diag[1].item())
                 cos_prev_val = float(pretrain_diag[2].item())
                 gap_val = float(pretrain_diag[3].item())
                 copy_win_val = float(pretrain_diag[4].item())
+                if pretrain_diag.numel() >= 7:
+                    recon_cd_l1_val = float(pretrain_diag[5].item())
+                    recon_cd_l2_val = float(pretrain_diag[6].item())
 
             if args.distributed:
                 torch.cuda.synchronize()
@@ -207,6 +212,10 @@ def run_net(args, config, train_writer=None, val_writer=None, wandb_run=None):
                     train_writer.add_scalar('Diag/Batch/Gap', gap_val, n_itr)
                 if copy_win_val == copy_win_val:
                     train_writer.add_scalar('Diag/Batch/CopyWin', copy_win_val, n_itr)
+                if recon_cd_l1_val == recon_cd_l1_val:
+                    train_writer.add_scalar('Diag/Batch/ReconCDL1', recon_cd_l1_val, n_itr)
+                if recon_cd_l2_val == recon_cd_l2_val:
+                    train_writer.add_scalar('Diag/Batch/ReconCDL2', recon_cd_l2_val, n_itr)
                 train_writer.add_scalar(
                     'Loss/Batch/LR', optimizer.param_groups[0]['lr'], n_itr)
 
@@ -228,6 +237,10 @@ def run_net(args, config, train_writer=None, val_writer=None, wandb_run=None):
                     wb['diag/gap'] = gap_val
                 if copy_win_val == copy_win_val:
                     wb['diag/copy_win'] = copy_win_val
+                if recon_cd_l1_val == recon_cd_l1_val:
+                    wb['diag/recon_cd_l1'] = recon_cd_l1_val
+                if recon_cd_l2_val == recon_cd_l2_val:
+                    wb['diag/recon_cd_l2'] = recon_cd_l2_val
                 wandb_run.log(wb, step=int(n_itr))
 
             batch_time.update(time.time() - batch_start_time)
@@ -235,11 +248,12 @@ def run_net(args, config, train_writer=None, val_writer=None, wandb_run=None):
 
             if idx % 20 == 0:
                 print_log('[Epoch %d/%d][Batch %d/%d] BatchTime = %.3f (s) DataTime = %.3f (s) Losses = %s lr = %.6f '
-                          'diag(loss_main=%s cos_tgt=%s cos_prev=%s gap=%s copy_win=%s)' %
+                          'diag(loss_main=%s cos_tgt=%s cos_prev=%s gap=%s copy_win=%s recon_cd_l1=%s recon_cd_l2=%s)' %
                           (epoch, config.max_epoch, idx + 1, n_batches, batch_time.val(), data_time.val(),
                            ['%.4f' % l for l in losses.val()], optimizer.param_groups[0]['lr'],
                            _fmt_diag(loss_main_val), _fmt_diag(cos_tgt_val), _fmt_diag(cos_prev_val),
-                           _fmt_diag(gap_val), _fmt_diag(copy_win_val)), logger=logger)
+                           _fmt_diag(gap_val), _fmt_diag(copy_win_val),
+                           _fmt_diag(recon_cd_l1_val), _fmt_diag(recon_cd_l2_val)), logger=logger)
         if isinstance(scheduler, list):
             for item in scheduler:
                 item.step(epoch)

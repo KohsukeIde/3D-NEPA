@@ -1,0 +1,42 @@
+{
+  "config": "cfgs/PointGPT-S/finetune_scan_objonly.yaml",
+  "ckpt": "checkpoints/official/PointGPT-S/finetune_scan_objonly.pth",
+  "train_split": "train",
+  "test_split": "test",
+  "top1_acc": 0.9053356051445007,
+  "top1_hit": 0.9053356051445007,
+  "top2_hit": 0.9655765891075134,
+  "top5_hit": 0.9931153059005737,
+  "hardest_pair": {
+    "a_id": 11,
+    "b_id": 0,
+    "a_name": "pillow",
+    "b_name": "bag",
+    "rate": 0.1428571492433548,
+    "count": 3,
+    "pair_samples": 38,
+    "direct_top1_acc": 0.8947368264198303,
+    "a_to_b_rate": 0.14285714285714285,
+    "b_to_a_rate": 0.0,
+    "mean_margin_a_minus_b": 0.07761505991220474,
+    "pair_probe_bal_acc": 0.9285714285714286,
+    "pair_probe_acc": 0.9210526315789473
+  },
+  "per_class_acc": {
+    "bag": 0.9411764705882353,
+    "bin": 0.95,
+    "box": 0.8571428571428571,
+    "cabinet": 0.8666666666666667,
+    "chair": 1.0,
+    "desk": 0.8666666666666667,
+    "display": 0.9285714285714286,
+    "door": 0.9285714285714286,
+    "shelf": 0.8979591836734694,
+    "table": 0.8703703703703703,
+    "bed": 0.9090909090909091,
+    "pillow": 0.8571428571428571,
+    "sink": 0.75,
+    "sofa": 0.9523809523809523,
+    "toilet": 0.8235294117647058
+  }
+}

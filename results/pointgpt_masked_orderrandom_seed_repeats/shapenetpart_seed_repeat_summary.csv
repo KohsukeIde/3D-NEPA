@@ -1,0 +1,5 @@
+row,seed,best_accuracy,best_class_avg_miou,best_instance_avg_miou,epoch300_accuracy,epoch300_class_avg_miou,epoch300_instance_avg_miou,run_name,source_log
+seed1,1,0.94470,0.83604,0.85604,0.944203,0.831859,0.854469,pgpt_s_shapenetpart_masked_ordrand_e300_seed1_20260507,logs/pointgpt_masked_orderrandom_seed_repeats/shapenetpart_seed1.log
+seed2,2,0.94491,0.83341,0.85741,0.944360,0.829411,0.854190,pgpt_s_shapenetpart_masked_ordrand_e300_seed2_20260507,logs/pointgpt_masked_orderrandom_seed_repeats/shapenetpart_seed2.log
+mean,,0.944805,0.834725,0.856725,0.9442815,0.830635,0.8543295,,computed from seed1 and seed2
+sample_std,,0.0001485,0.0018597,0.0009687,0.0001110,0.0017310,0.0001973,,n=2 sample standard deviation

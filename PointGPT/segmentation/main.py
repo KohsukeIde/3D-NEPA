@@ -9,8 +9,10 @@ import datetime
 import logging
 import sys
 import importlib
+import inspect
 import shutil
 import provider
+import random
 import numpy as np
 import torch.optim as optim
 from timm.scheduler import CosineLRScheduler
@@ -67,6 +69,14 @@ def parse_args():
                         default=2048, help='point Number')
     parser.add_argument('--normal', action='store_true',
                         default=False, help='use normals')
+    parser.add_argument('--seed', default=0, type=int, help='random seed')
+    parser.add_argument('--group_mode', default='fps_knn', type=str,
+                        choices=['fps_knn', 'random_center_knn', 'voxel_center_knn', 'radius_fps', 'random_group'],
+                        help='PointGPT patch grouping mode')
+    parser.add_argument('--group_radius', default=0.22, type=float,
+                        help='radius used by radius_fps grouping')
+    parser.add_argument('--group_voxel_grid', default=6, type=int,
+                        help='grid resolution used by voxel_center_knn grouping')
 
     # parser.add_argument('--step_size', type=int, default=20, help='decay step for lr decay')
     # parser.add_argument('--lr_decay', type=float, default=0.5, help='decay rate for lr decay')
@@ -78,17 +88,17 @@ def parse_args():
 
 def get_model_loss(MODEL, args, num_part):
     if args.model_name == 'PointGPT_S':
-        classifier = MODEL.get_model(num_part, trans_dim=384, depth=12, drop_path_rate=0.1, num_heads=6, decoder_depth=4, group_size=32, num_group=128, prop_dim=1024, label_dim1=512, label_dim2=256, encoder_dims=384)
+        classifier = MODEL.get_model(num_part, trans_dim=384, depth=12, drop_path_rate=0.1, num_heads=6, decoder_depth=4, group_size=32, num_group=128, prop_dim=1024, label_dim1=512, label_dim2=256, encoder_dims=384, group_mode=args.group_mode, group_radius=args.group_radius, group_voxel_grid=args.group_voxel_grid)
         classifier = classifier.cuda()
         criterion = MODEL.get_loss().cuda()
         classifier.apply(inplace_relu)  
     elif args.model_name == 'PointGPT_B':
-        classifier = MODEL.get_model(num_part, trans_dim=768, depth=12, drop_path_rate=0.1, num_heads=12, decoder_depth=4, group_size=32, num_group=128, prop_dim=2048, label_dim1=1024, label_dim2=512, encoder_dims=768)
+        classifier = MODEL.get_model(num_part, trans_dim=768, depth=12, drop_path_rate=0.1, num_heads=12, decoder_depth=4, group_size=32, num_group=128, prop_dim=2048, label_dim1=1024, label_dim2=512, encoder_dims=768, group_mode=args.group_mode, group_radius=args.group_radius, group_voxel_grid=args.group_voxel_grid)
         classifier = classifier.cuda()
         criterion = MODEL.get_loss().cuda()
         classifier.apply(inplace_relu)  
     elif args.model_name == 'PointGPT_L':
-        classifier = MODEL.get_model(num_part, trans_dim=1024, depth=24, drop_path_rate=0.1, num_heads=16, decoder_depth=4, group_size=32, num_group=128, prop_dim=2048, label_dim1=1024, label_dim2=512, encoder_dims=1024)
+        classifier = MODEL.get_model(num_part, trans_dim=1024, depth=24, drop_path_rate=0.1, num_heads=16, decoder_depth=4, group_size=32, num_group=128, prop_dim=2048, label_dim1=1024, label_dim2=512, encoder_dims=1024, group_mode=args.group_mode, group_radius=args.group_radius, group_voxel_grid=args.group_voxel_grid)
         classifier = classifier.cuda()
         criterion = MODEL.get_loss().cuda()
         classifier.apply(inplace_relu)  
@@ -130,6 +140,10 @@ def main(args):
     logger.addHandler(file_handler)
     log_string('PARAMETER ...')
     log_string(args)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
 
     root = args.root
 
@@ -181,15 +195,20 @@ def main(args):
     optimizer = optim.AdamW(
         param_groups, lr=args.learning_rate, weight_decay=0.05)
 
-    scheduler = CosineLRScheduler(optimizer,
-                                  t_initial=args.epoch,
-                                #   t_mul=1,
-                                  lr_min=1e-6,
-                                  cycle_decay=0.1,
-                                  warmup_lr_init=1e-6,
-                                  warmup_t=args.warmup_epoch,
-                                  cycle_limit=1,
-                                  t_in_epochs=True)
+    coslr_kwargs = dict(
+        t_initial=args.epoch,
+        lr_min=1e-6,
+        warmup_lr_init=1e-6,
+        warmup_t=args.warmup_epoch,
+        cycle_limit=1,
+        t_in_epochs=True,
+    )
+    sig = inspect.signature(CosineLRScheduler.__init__)
+    if 'cycle_decay' in sig.parameters:
+        coslr_kwargs['cycle_decay'] = 0.1
+    elif 'decay_rate' in sig.parameters:
+        coslr_kwargs['decay_rate'] = 0.1
+    scheduler = CosineLRScheduler(optimizer, **coslr_kwargs)
 
     best_acc = 0
     global_epoch = 0
@@ -317,7 +336,7 @@ def main(args):
             mean_shape_ious = np.mean(list(shape_ious.values()))
             test_metrics['accuracy'] = total_correct / float(total_seen)
             test_metrics['class_avg_accuracy'] = np.mean(
-                np.array(total_correct_class) / np.array(total_seen_class, dtype=np.float))
+                np.array(total_correct_class) / np.array(total_seen_class, dtype=float))
             for cat in sorted(shape_ious.keys()):
                 log_string('eval mIoU of %s %f' %
                            (cat + ' ' * (14 - len(cat)), shape_ious[cat]))

@@ -1,0 +1,1 @@
+- `selection=reporting` checkpoint-trajectory diagnostic was not emitted. The official fine-tuning code retained only `ckpt-best.pth` and `ckpt-last.pth`, not a full epoch checkpoint trajectory; selecting on the target test split from only these retained checkpoints would be an under-specified approximation rather than the planned diagnostic.
