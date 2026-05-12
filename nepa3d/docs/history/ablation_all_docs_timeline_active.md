@@ -19,7 +19,7 @@ Use this as the primary "what happened, when, and why it matters" memo before la
 | `nepa3d/docs/classification/results_scanobjectnn_core3_active.md` | protocol-variant causal baseline | 2026-02-15 to 2026-02-17 status note | pre-bidir reference for `obj_bg/obj_only/pb_t50_rs` |
 | `nepa3d/docs/classification/results_scanobjectnn_review_legacy.md` | legacy review snapshot | pre-bidir causal + interim notes | comparison target for active v0->v3 audit |
 | `nepa3d/docs/classification/results_scanobjectnn_review_active.md` | active Scan review | 2026-02-18 to 2026-02-20 | core source for v0/v1/v2/v3, D1/D2, G1/G2, protocol-integrity findings |
-| `nepa3d/docs/classification/results_modelnet40_pointgpt_active.md` | ModelNet PointGPT protocol page | 2026-02-17 status note | causal baseline + bidir rerun context |
+| `pointnepa/docs/results_modelnet40_active.md` | ModelNet PointGPT protocol page | 2026-02-17 status note | causal baseline + bidir rerun context |
 | `nepa3d/docs/completion/eccv_ucpr_cpac_tables.md` | stable table plan template | planning doc (no single snapshot date) | run-matrix contracts for UCPR/CPAC/few-shot |
 | `nepa3d/docs/completion/results_ucpr_cpac_active.md` | active UCPR/CPAC log | mainly 2026-02-15 to 2026-02-20 | QA cycle, MAE parity, A/B/C/D/E/6 blocks, core completion metrics |
 | `nepa3d/docs/archive/completion_results_ucpr_cpac_mixed_archive.md` | raw archival backup | same era as active UCPR/CPAC | deep command/result provenance backup |
@@ -79,7 +79,7 @@ Key points:
 Sources:
 
 - `nepa3d/docs/classification/results_scanobjectnn_core3_active.md`
-- `nepa3d/docs/classification/results_modelnet40_pointgpt_active.md`
+- `pointnepa/docs/results_modelnet40_active.md`
 - `nepa3d/docs/completion/results_completion_ae6_active.md`
 
 Key points:

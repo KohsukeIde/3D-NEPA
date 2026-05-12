@@ -3,11 +3,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
 POINTGPT_DIR="${POINTGPT_DIR:-${WORKDIR}/PointGPT}"
-POST_WRAPPER="${POST_WRAPPER:-${WORKDIR}/scripts/local/pointgpt_post_pretrain_local_ddp.sh}"
-FINETUNE_WRAPPER="${FINETUNE_WRAPPER:-${WORKDIR}/scripts/local/pointgpt_finetune_local_ddp.sh}"
-LHY_CHECKER="${LHY_CHECKER:-${WORKDIR}/scripts/local/pointgpt_labeledhybrid_status.sh}"
+POST_WRAPPER="${POST_WRAPPER:-${WORKDIR}/pointnepa/scripts/local/pointgpt_post_pretrain_local_ddp.sh}"
+FINETUNE_WRAPPER="${FINETUNE_WRAPPER:-${WORKDIR}/pointnepa/scripts/local/pointgpt_finetune_local_ddp.sh}"
+LHY_CHECKER="${LHY_CHECKER:-${WORKDIR}/pointnepa/scripts/local/pointgpt_labeledhybrid_status.sh}"
 DEFAULT_PYTHON_BIN="${WORKDIR}/.venv-pointgpt/bin/python"
 if [[ ! -x "${DEFAULT_PYTHON_BIN}" ]]; then
   DEFAULT_PYTHON_BIN="${WORKDIR}/.venv/bin/python"

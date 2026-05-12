@@ -16,19 +16,19 @@ These diagnostics are support/readout probes. They are not new PointGPT training
 ## Result Files
 
 - ScanObjectNN official support:
-  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objbg_official_support.md`
-  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objonly_official_support.md`
-  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_hardest_official_support.md`
+  - `pointnepa/results/pointgpt_unique_retained/scanobjectnn_objbg_official_support.md`
+  - `pointnepa/results/pointgpt_unique_retained/scanobjectnn_objonly_official_support.md`
+  - `pointnepa/results/pointgpt_unique_retained/scanobjectnn_hardest_official_support.md`
 - ScanObjectNN official readout:
-  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objbg_official_readout.md`
-  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objonly_official_readout.md`
-  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_hardest_official_readout.md`
+  - `pointnepa/results/pointgpt_unique_retained/scanobjectnn_objbg_official_readout.md`
+  - `pointnepa/results/pointgpt_unique_retained/scanobjectnn_objonly_official_readout.md`
+  - `pointnepa/results/pointgpt_unique_retained/scanobjectnn_hardest_official_readout.md`
 - ScanObjectNN official eval-time grouping:
-  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objbg_official_grouping.md`
+  - `pointnepa/results/pointgpt_unique_retained/scanobjectnn_objbg_official_grouping.md`
 - ShapeNetPart official support:
-  - `3D-NEPA/results/pointgpt_unique_retained/shapenetpart_official_support_unique.md`
+  - `pointnepa/results/pointgpt_unique_retained/shapenetpart_official_support_unique.md`
 - ShapeNetPart official eval-time grouping:
-  - `3D-NEPA/results/pointgpt_unique_retained/shapenetpart_official_grouping_unique.md`
+  - `pointnepa/results/pointgpt_unique_retained/shapenetpart_official_grouping_unique.md`
 
 JSON/CSV companions are in the same directory.
 

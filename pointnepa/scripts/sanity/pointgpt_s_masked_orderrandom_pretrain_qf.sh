@@ -62,6 +62,6 @@ from knn_cuda import KNN
 print("knn_cuda import: OK", KNN.__name__)
 PY
 
-bash ../scripts/local/pointgpt_s_nomask_orderrandom_full.sh
+bash "${WORKDIR}/pointnepa/scripts/local/pointgpt_s_nomask_orderrandom_full.sh"
 
 echo "[done] PointGPT-S mask0.7 order-randomized pretrain"

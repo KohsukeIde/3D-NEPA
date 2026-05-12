@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
 
 CONFIG_PATH="${CONFIG_PATH:-cfgs/PointGPT-S/pretrain_nomask_orderrandom.yaml}"
 EXP_NAME="${EXP_NAME:-pgpt_s_nomask_ordrand_e300}"

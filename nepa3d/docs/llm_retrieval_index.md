@@ -49,7 +49,7 @@ boundaries:
 - `nepa3d/docs/patch_nepa/hypothesis_matrix_geo_teacher_v1.md`
 - `nepa3d/docs/patch_nepa/hypothesis_matrix_active.md`
 - `nepa3d/docs/patch_nepa/itachi/results_geo_teacher_itachi_active.md`
-- `nepa3d/docs/classification/results_scanobjectnn_pointgpt_pointnepa_active.md`
+- `pointnepa/docs/results_scanobjectnn_active.md`
 - `nepa3d/docs/patch_nepa/execution_backlog_active.md`
 - `nepa3d/docs/operations/README.md`
 - `nepa3d/docs/_meta/code_inventory_active.md`
@@ -88,7 +88,7 @@ provenance backup, or abandoned ideas:
 | "Which ScanObjectNN numbers are headline-safe?" | `benchmark_scanobjectnn_variant.md`, `scanobjectnn_ft_policy_audit_active.md` |
 | "What should a collaborator run on ABCI?" | `collaborator_reading_guide_active.md`, `scripts/abci/README.md`, `operations/README.md` |
 | "What is Itachi-local vs paper-facing?" | `operations/README.md`, `patch_nepa/itachi/README.md`, `itachi/results_geo_teacher_itachi_active.md` |
-| "Is PointGPT / pointNEPA a PatchNEPA headline result?" | `classification/results_scanobjectnn_pointgpt_pointnepa_active.md`, then `benchmark_scanobjectnn_variant.md` |
+| "Is PointGPT / pointNEPA a PatchNEPA headline result?" | `pointnepa/docs/results_scanobjectnn_active.md`, then `benchmark_scanobjectnn_variant.md` |
 | "Where did this exact claim come from?" | add `runlog_patch_nepa_202602.md` or `query_nepa/runlog_202602.md` |
 | "How is code/config ownership organized?" | `_meta/code_inventory_active.md`, `_meta/config_inventory_active.md` |
 | "How is docs cleanup organized?" | `_meta/docs_inventory_active.md`, `_meta/docs_cleanup_plan_active.md` |

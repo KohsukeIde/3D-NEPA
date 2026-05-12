@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
 POINTGPT_DIR="${POINTGPT_DIR:-${WORKDIR}/PointGPT}"
 DEFAULT_VENV_ACTIVATE="${WORKDIR}/.venv-pointgpt/bin/activate"
 if [[ ! -f "${DEFAULT_VENV_ACTIVATE}" ]]; then

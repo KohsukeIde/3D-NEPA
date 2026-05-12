@@ -26,7 +26,7 @@
     "storyline_doc": "nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md",
     "hypothesis_doc": "nepa3d/docs/patch_nepa/hypothesis_matrix_active.md",
     "itachi_results_doc": "nepa3d/docs/patch_nepa/itachi/results_geo_teacher_itachi_active.md",
-    "pointgpt_sidecar_doc": "nepa3d/docs/classification/results_scanobjectnn_pointgpt_pointnepa_active.md",
+    "pointgpt_sidecar_doc": "pointnepa/docs/results_scanobjectnn_active.md",
     "code_inventory_doc": "nepa3d/docs/_meta/code_inventory_active.md",
     "config_inventory_doc": "nepa3d/docs/_meta/config_inventory_active.md"
   }

@@ -205,7 +205,8 @@ Current canonical destinations:
 - local-only Itachi evidence:
   - `patch_nepa/itachi/results_geo_teacher_itachi_active.md`
 - PointGPT / pointNEPA sidecar:
-  - `classification/results_scanobjectnn_pointgpt_pointnepa_active.md`
+  - `pointnepa/docs/results_scanobjectnn_active.md`
+  - wrapper root: `pointnepa/README.md`
 
 ## Immediate Next Step
 
@@ -233,6 +234,10 @@ Start with:
   - `nepa3d/docs/current_state.json`
   - `nepa3d/docs/README.md`
   - `nepa3d/docs/llm_retrieval_index.md`
+  - `nepa3d/docs/results_index.md`
+- split PointGPT / pointNEPA docs, launchers, and tracked summaries into
+  `pointnepa/`
+- updated sidecar references in:
   - `nepa3d/docs/results_index.md`
   - `nepa3d/docs/_meta/insight_register_active.md`
 - promoted April 2026 geo-teacher docs into default retrieval:

@@ -3,9 +3,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
 POINTGPT_DIR="${POINTGPT_DIR:-${WORKDIR}/PointGPT}"
-FINETUNE_WRAPPER="${FINETUNE_WRAPPER:-${WORKDIR}/scripts/local/pointgpt_finetune_local_ddp.sh}"
+FINETUNE_WRAPPER="${FINETUNE_WRAPPER:-${WORKDIR}/pointnepa/scripts/local/pointgpt_finetune_local_ddp.sh}"
 DEFAULT_PYTHON_BIN="${WORKDIR}/.venv-pointgpt/bin/python"
 if [[ ! -x "${DEFAULT_PYTHON_BIN}" ]]; then
   DEFAULT_PYTHON_BIN="${WORKDIR}/.venv/bin/python"

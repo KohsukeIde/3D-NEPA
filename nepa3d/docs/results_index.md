@@ -57,7 +57,7 @@ This page is the canonical non-retrieval result index.
   - `patch_nepa/itachi/results_geo_teacher_itachi_active.md`
   - local evidence only unless copied into canonical benchmark docs.
 - PointGPT / pointNEPA sidecar results:
-  - `classification/results_scanobjectnn_pointgpt_pointnepa_active.md`
+  - `pointnepa/docs/results_scanobjectnn_active.md`
   - comparison context, not a PatchNEPA headline surface.
 - Historical PatchNEPA storyline:
   - `patch_nepa/storyline_query_to_patch_v2_active.md`
@@ -73,7 +73,7 @@ This page is the canonical non-retrieval result index.
 - ScanObjectNN core3 historical active table:
   - `classification/results_scanobjectnn_core3_active.md`
 - ModelNet40 PointGPT-style protocol:
-  - `classification/results_modelnet40_pointgpt_active.md`
+  - `pointnepa/docs/results_modelnet40_active.md`
 - UCPR/CPAC active results:
   - `completion/results_ucpr_cpac_active.md`
 - UCPR/CPAC plane baselines:

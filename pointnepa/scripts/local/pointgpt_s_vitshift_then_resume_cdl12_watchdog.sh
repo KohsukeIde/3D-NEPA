@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
 CHAIN_SCRIPT="${CHAIN_SCRIPT:-${SCRIPT_DIR}/pointgpt_s_vitshift_then_resume_cdl12.sh}"
 LOG_ROOT="${LOG_ROOT:-${WORKDIR}/logs/local/pointgpt_s_watchdog}"
 POLL_SEC="${POLL_SEC:-60}"

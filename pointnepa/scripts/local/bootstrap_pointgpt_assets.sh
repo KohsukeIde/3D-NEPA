@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 POINTGPT_DIR="${POINTGPT_DIR:-${REPO_ROOT}/PointGPT}"
 PYTHON_BIN="${PYTHON_BIN:-${REPO_ROOT}/.venv-pointgpt/bin/python}"
 

@@ -12,9 +12,9 @@ Purpose:
 Relevant result files:
 
 - Summary MD:
-  - `3D-NEPA/results/pointgpt_masked_orderrandom_seed_repeats/scan_objbg_seed_repeat_summary.md`
+  - `pointnepa/results/pointgpt_masked_orderrandom_seed_repeats/scan_objbg_seed_repeat_summary.md`
 - Summary CSV:
-  - `3D-NEPA/results/pointgpt_masked_orderrandom_seed_repeats/scan_objbg_seed_repeat_summary.csv`
+  - `pointnepa/results/pointgpt_masked_orderrandom_seed_repeats/scan_objbg_seed_repeat_summary.csv`
 
 ### ScanObjectNN obj_bg seed-repeat summary
 
@@ -40,9 +40,9 @@ Purpose:
 Relevant result files:
 
 - Summary MD:
-  - `3D-NEPA/results/pointgpt_masked_orderrandom_seed_repeats/shapenetpart_seed_repeat_summary.md`
+  - `pointnepa/results/pointgpt_masked_orderrandom_seed_repeats/shapenetpart_seed_repeat_summary.md`
 - Summary CSV:
-  - `3D-NEPA/results/pointgpt_masked_orderrandom_seed_repeats/shapenetpart_seed_repeat_summary.csv`
+  - `pointnepa/results/pointgpt_masked_orderrandom_seed_repeats/shapenetpart_seed_repeat_summary.csv`
 
 ### ShapeNetPart seed-repeat summary
 
@@ -101,22 +101,22 @@ Purpose:
 Relevant result files:
 
 - Master summary:
-  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/pointgpt_nomask_orderrandom_diagnostics_summary.md`
+  - `pointnepa/results/pointgpt_nomask_orderrandom_full/pointgpt_nomask_orderrandom_diagnostics_summary.md`
 - ScanObjectNN `obj_bg`:
-  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_readout.md`
-  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_support.md`
-  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_grouping.md`
+  - `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_readout.md`
+  - `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_support.md`
+  - `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_grouping.md`
 - ScanObjectNN `obj_only`:
-  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_readout.md`
-  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_support.md`
-  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_grouping.md`
+  - `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_readout.md`
+  - `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_support.md`
+  - `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_grouping.md`
 - ScanObjectNN `PB_T50_RS`:
-  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_readout.md`
-  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_support.md`
-  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_grouping.md`
+  - `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_readout.md`
+  - `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_support.md`
+  - `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_grouping.md`
 - ShapeNetPart:
-  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/shapenetpart_nomask_ordrand_support_unique.md`
-  - `3D-NEPA/results/pointgpt_nomask_orderrandom_full/shapenetpart_nomask_ordrand_grouping_unique.md`
+  - `pointnepa/results/pointgpt_nomask_orderrandom_full/shapenetpart_nomask_ordrand_support_unique.md`
+  - `pointnepa/results/pointgpt_nomask_orderrandom_full/shapenetpart_nomask_ordrand_grouping_unique.md`
 
 ### ScanObjectNN readout summary
 
@@ -151,21 +151,21 @@ Purpose:
 Relevant result files:
 
 - Master summary:
-  - `3D-NEPA/docs/pointgpt_unique_retained_diagnostics_summary.md`
+  - `pointnepa/docs/pointgpt_unique_retained_diagnostics_summary.md`
 - ScanObjectNN official support:
-  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objbg_official_support.md`
-  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objonly_official_support.md`
-  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_hardest_official_support.md`
+  - `pointnepa/results/pointgpt_unique_retained/scanobjectnn_objbg_official_support.md`
+  - `pointnepa/results/pointgpt_unique_retained/scanobjectnn_objonly_official_support.md`
+  - `pointnepa/results/pointgpt_unique_retained/scanobjectnn_hardest_official_support.md`
 - ScanObjectNN official readout:
-  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objbg_official_readout.md`
-  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objonly_official_readout.md`
-  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_hardest_official_readout.md`
+  - `pointnepa/results/pointgpt_unique_retained/scanobjectnn_objbg_official_readout.md`
+  - `pointnepa/results/pointgpt_unique_retained/scanobjectnn_objonly_official_readout.md`
+  - `pointnepa/results/pointgpt_unique_retained/scanobjectnn_hardest_official_readout.md`
 - ScanObjectNN official eval-time grouping:
-  - `3D-NEPA/results/pointgpt_unique_retained/scanobjectnn_objbg_official_grouping.md`
+  - `pointnepa/results/pointgpt_unique_retained/scanobjectnn_objbg_official_grouping.md`
 - ShapeNetPart official support:
-  - `3D-NEPA/results/pointgpt_unique_retained/shapenetpart_official_support_unique.md`
+  - `pointnepa/results/pointgpt_unique_retained/shapenetpart_official_support_unique.md`
 - ShapeNetPart official eval-time grouping:
-  - `3D-NEPA/results/pointgpt_unique_retained/shapenetpart_official_grouping_unique.md`
+  - `pointnepa/results/pointgpt_unique_retained/shapenetpart_official_grouping_unique.md`
 
 Interpretation note:
 
@@ -893,7 +893,7 @@ Code paths:
 
 - classification/pretrain grouping: `PointGPT/models/PointGPT.py`
 - ShapeNetPart grouping: `PointGPT/segmentation/models/pt.py`
-- QF stage script: `scripts/sanity/pointgpt_grouping_retrain_stage_qf.sh`
+- QF stage script: `pointnepa/scripts/sanity/pointgpt_grouping_retrain_stage_qf.sh`
 
 Smoke checks completed before queueing:
 

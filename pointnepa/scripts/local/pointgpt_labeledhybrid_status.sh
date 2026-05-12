@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
 POINTGPT_DIR="${POINTGPT_DIR:-${WORKDIR}/PointGPT}"
 HYBRID_ROOT="${HYBRID_ROOT:-${POINTGPT_DIR}/data/HybridDatasets}"
 DATA_ROOT="${DATA_ROOT:-${HYBRID_ROOT}/post_pretrain}"

@@ -26,7 +26,7 @@ This page is a single entry point for all docs that contain quantitative results
 | ScanObjectNN review baseline | legacy | `nepa3d/docs/classification/results_scanobjectnn_review_legacy.md` | causal-era snapshot |
 | ScanObjectNN core3 table | legacy-active snapshot | `nepa3d/docs/classification/results_scanobjectnn_core3_active.md` | pre-bidir reference |
 | ScanObjectNN M1 table | legacy | `nepa3d/docs/classification/results_scanobjectnn_m1_legacy.md` | old cache/protocol naming |
-| ModelNet40 PointGPT protocol | active baseline page | `nepa3d/docs/classification/results_modelnet40_pointgpt_active.md` | full FT + few-shot LP |
+| ModelNet40 PointGPT protocol | active baseline page | `pointnepa/docs/results_modelnet40_active.md` | full FT + few-shot LP |
 | ModelNet40 legacy summary | legacy | `nepa3d/docs/classification/results_modelnet40_legacy.md` | v0/v1 transfer-era summary |
 
 ## Completion / CPAC Result Docs

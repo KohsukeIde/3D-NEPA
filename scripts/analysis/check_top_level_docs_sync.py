@@ -33,7 +33,10 @@ STALE_TOP_LEVEL_SNIPPETS = [
     "current PatchNEPA mainline:\n  - PatchNEPA v2 reconstruction `recong2` full300",
     "For most Patch-NEPA questions, read only:\n  - `nepa3d/docs/llm_retrieval_index.md`\n  - `nepa3d/docs/patch_nepa/storyline_query_to_patch_v2_active.md`",
 ]
-LOCAL_REF_RE = re.compile(r"`((?:nepa3d|scripts)/[^`\\s)]+)`|\\((?:\\./)?((?:nepa3d|scripts)/[^)\\s]+)\\)")
+LOCAL_REF_RE = re.compile(
+    r"`((?:nepa3d|scripts|pointnepa)/[^`\s)]+)`"
+    r"|\((?:\./)?((?:nepa3d|scripts|pointnepa)/[^)\s]+)\)"
+)
 
 
 def load_text(path: Path) -> str:
@@ -133,6 +136,7 @@ def main() -> int:
             patch["collaborator_entrypoint"],
             patch["local_execution_source"],
             patch["operations_entrypoint"],
+            patch["pointgpt_sidecar_doc"],
             "nepa3d/docs/current_state.json",
         ],
         REPO_ROOT / "nepa3d/docs/llm_retrieval_index.md": [
@@ -148,6 +152,7 @@ def main() -> int:
             patch["route_matrix_doc"],
             patch["collaborator_entrypoint"],
             patch["local_execution_source"],
+            patch["pointgpt_sidecar_doc"],
             "nepa3d/docs/current_state.json",
         ],
         REPO_ROOT / "nepa3d/docs/results_index.md": [
@@ -163,6 +168,7 @@ def main() -> int:
             "patch_nepa/collaborator_reading_guide_active.md",
             "patch_nepa/execution_backlog_active.md",
             "operations/README.md",
+            patch["pointgpt_sidecar_doc"],
             "nepa3d/docs/current_state.json",
         ],
     }
@@ -211,6 +217,7 @@ def main() -> int:
         REPO_ROOT / patch["operations_entrypoint"],
         REPO_ROOT / patch["itachi_results_doc"],
         REPO_ROOT / patch["pointgpt_sidecar_doc"],
+        REPO_ROOT / "pointnepa/docs/README.md",
         *TOP_LEVEL_DOCS,
     ]
     for path in tier_docs:

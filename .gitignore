@@ -21,6 +21,7 @@ viz_output/
 *.sh
 !nepa3d/**/*.sh
 !scripts/**/*.sh
+!pointnepa/**/*.sh
 
 **/.ipynb_checkpoints/
 
@@ -32,6 +33,11 @@ viz_output/
 logs/
 runs/
 results/
+!pointnepa/results/
+!pointnepa/results/README.md
+!pointnepa/results/modelnet40_pointgpt_protocol_*.csv
+!pointnepa/results/pointgpt_*/
+!pointnepa/results/pointgpt_*/*
 
 # Local archives / cache bundles
 scanobjectnn_cache_v2.tar.gz

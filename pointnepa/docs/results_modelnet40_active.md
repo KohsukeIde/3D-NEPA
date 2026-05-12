@@ -11,8 +11,8 @@ Status note (Feb 17, 2026):
 Run root: `runs/modelnet40_pointgpt_protocol/`
 
 Artifacts:
-- raw: `results/modelnet40_pointgpt_protocol_raw.csv`
-- summary: `results/modelnet40_pointgpt_protocol_summary.csv`
+- raw: `pointnepa/results/modelnet40_pointgpt_protocol_raw.csv`
+- summary: `pointnepa/results/modelnet40_pointgpt_protocol_summary.csv`
 
 Completeness:
 - full: `15/15`

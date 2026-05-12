@@ -62,7 +62,7 @@ Everything else should live in a folder. Parallel folders are grouped by role:
   - current PatchNEPA / geo-teacher paper-facing method, protocol, evidence,
     and PatchNEPA provenance
 - `classification/`
-  - classification task ledgers and PointGPT / pointNEPA sidecar results
+  - NEPA / PatchNEPA classification task ledgers
 - `completion/`
   - UCPR / CPAC / completion-domain ledgers
 - `operations/`
@@ -96,7 +96,7 @@ should go to `_meta/`.
   - `nepa3d/docs/patch_nepa/itachi/results_geo_teacher_itachi_active.md`
   - local evidence only unless copied into canonical benchmark pages.
 - PointGPT / pointNEPA sidecar ledger:
-  - `nepa3d/docs/classification/results_scanobjectnn_pointgpt_pointnepa_active.md`
+  - `pointnepa/docs/results_scanobjectnn_active.md`
   - active comparison context, not a PatchNEPA headline page.
 
 ## Default Retrieval Policy
@@ -142,8 +142,10 @@ should go to `_meta/`.
   code/config ownership maps
 - `nepa3d/docs/patch_nepa/`: current PatchNEPA / geo-teacher synthesis,
   protocol, local evidence, and provenance ledgers
-- `nepa3d/docs/classification/`: ScanObjectNN / ModelNet / PointGPT sidecar
-  ledgers
+- `nepa3d/docs/classification/`: NEPA / PatchNEPA ScanObjectNN and ModelNet
+  classification ledgers
+- `pointnepa/docs/`: PointGPT / pointNEPA sidecar ledgers outside the
+  `nepa3d/docs/` tree
 - `nepa3d/docs/completion/`: historical UCPR/CPAC/completion ledgers
 - `nepa3d/docs/query_nepa/`: QueryNEPA historical ledgers and runlog
 - `nepa3d/docs/history/`: cross-era historical narratives

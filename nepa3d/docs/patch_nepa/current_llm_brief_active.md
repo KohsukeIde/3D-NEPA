@@ -37,7 +37,7 @@ For current results and boundaries, then add:
 - `nepa3d/docs/patch_nepa/benchmark_scanobjectnn_variant.md`
 - `nepa3d/docs/patch_nepa/scanobjectnn_ft_policy_audit_active.md`
 - `nepa3d/docs/patch_nepa/itachi/results_geo_teacher_itachi_active.md`
-- `nepa3d/docs/classification/results_scanobjectnn_pointgpt_pointnepa_active.md`
+- `pointnepa/docs/results_scanobjectnn_active.md`
 
 ## Do Not Use As Current Truth
 
@@ -66,7 +66,7 @@ For current results and boundaries, then add:
 | local execution / gating | `nepa3d/docs/patch_nepa/execution_backlog_active.md` |
 | local vs ABCI boundary | `nepa3d/docs/operations/README.md` |
 | Itachi-local evidence | `nepa3d/docs/patch_nepa/itachi/results_geo_teacher_itachi_active.md` |
-| PointGPT / pointNEPA sidecar | `nepa3d/docs/classification/results_scanobjectnn_pointgpt_pointnepa_active.md` |
+| PointGPT / pointNEPA sidecar | `pointnepa/docs/results_scanobjectnn_active.md` |
 
 ## Source Of Truth Contract
 

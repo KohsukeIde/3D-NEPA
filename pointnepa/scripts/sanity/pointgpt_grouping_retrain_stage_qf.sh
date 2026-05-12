@@ -82,7 +82,7 @@ case "${STAGE}" in
     export EXP_NAME="${pretrain_exp}"
     export WANDB_GROUP="pointgpt_grouping_pretrain"
     export WANDB_RUN_NAME="${EXP_NAME}"
-    bash ../scripts/local/pointgpt_train_local_ddp.sh
+    bash "${WORKDIR}/pointnepa/scripts/local/pointgpt_train_local_ddp.sh"
     ;;
 
   objbg_ft)
@@ -98,7 +98,7 @@ case "${STAGE}" in
     export EXTRA_ARGS="${EXTRA_ARGS:---seed 0}"
     export WANDB_GROUP="pointgpt_grouping_objbg_ft"
     export WANDB_RUN_NAME="${EXP_NAME}"
-    bash ../scripts/local/pointgpt_finetune_local_ddp.sh
+    bash "${WORKDIR}/pointnepa/scripts/local/pointgpt_finetune_local_ddp.sh"
     ;;
 
   partseg_ft)
@@ -112,7 +112,7 @@ case "${STAGE}" in
     export SEED="${SEED:-0}"
     export EPOCH="${EPOCH:-300}"
     export BATCH_SIZE="${BATCH_SIZE:-16}"
-    bash ../scripts/local/pointgpt_s_shapenetpart_ft.sh
+    bash "${WORKDIR}/pointnepa/scripts/local/pointgpt_s_shapenetpart_ft.sh"
     ;;
 
   objbg_audit)

@@ -34,4 +34,4 @@ export CKPT_PATH="${WORKDIR}/PointGPT/experiments/pretrain_nomask/PointGPT-S/pgp
 export RUN_NAME="pgpt_s_shapenetpart_nomask_e300"
 
 cd "${POINTGPT_DIR}"
-bash ../scripts/local/pointgpt_s_shapenetpart_ft.sh
+bash "${WORKDIR}/pointnepa/scripts/local/pointgpt_s_shapenetpart_ft.sh"

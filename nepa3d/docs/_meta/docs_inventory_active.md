@@ -102,11 +102,22 @@ control plane.
 | `classification/README.md` | folder guide | `tier2` | `keep` | self | lightweight entrypoint |
 | `classification/results_scanobjectnn_core3_active.md` | active historical ScanObjectNN table | `tier2` | `review` | maybe merge selected rows into `patch_nepa/benchmark_scanobjectnn_variant.md` | still useful, but not headline surface |
 | `classification/results_scanobjectnn_review_active.md` | active review ledger | `tier2` | `keep` | self | still used for review-era traceback |
-| `classification/results_scanobjectnn_pointgpt_pointnepa_active.md` | PointGPT / pointNEPA sidecar ledger | `tier1` | `keep` | self | active comparison context, not PatchNEPA headline |
 | `classification/results_scanobjectnn_review_legacy.md` | legacy review snapshot | `archive` | `archive` | `classification/results_scanobjectnn_review_active.md` | likely next archive candidate |
 | `classification/results_scanobjectnn_m1_legacy.md` | legacy M1 snapshot | `archive` | `archive` | `classification/results_scanobjectnn_review_active.md` | likely next archive candidate |
-| `classification/results_modelnet40_pointgpt_active.md` | active ModelNet40 PointGPT-style baseline | `tier2` | `keep` | self | still useful external control page |
-| `classification/results_modelnet40_legacy.md` | legacy ModelNet40 summary | `archive` | `archive` | `classification/results_modelnet40_pointgpt_active.md` | likely next archive candidate |
+| `classification/results_modelnet40_legacy.md` | legacy ModelNet40 summary | `archive` | `archive` | `pointnepa/docs/results_modelnet40_active.md` | likely next archive candidate |
+
+## External Sidecars
+
+These docs are intentionally outside `nepa3d/docs/` because they belong to a
+wrapper sidecar, not the PatchNEPA / CQA / geo-teacher docs tree.
+
+| path | role | retrieval | status | canonical target / action | note |
+|---|---|---|---|---|---|
+| `pointnepa/README.md` | pointNEPA / PointGPT sidecar entrypoint | `tier1` | `keep` | self | wrapper workspace; depends on sibling `PointGPT/` |
+| `pointnepa/docs/README.md` | sidecar docs guide | `tier1` | `keep` | self | routes sidecar result ledgers |
+| `pointnepa/docs/results_scanobjectnn_active.md` | PointGPT / pointNEPA sidecar ledger | `tier1` | `keep` | self | active comparison context, not PatchNEPA headline |
+| `pointnepa/docs/results_modelnet40_active.md` | active ModelNet40 PointGPT-style baseline | `tier2` | `keep` | self | external control page |
+| `pointnepa/docs/pointgpt_unique_retained_diagnostics_summary.md` | unique-retained diagnostic summary | `tier2` | `keep` | `pointnepa/docs/results_scanobjectnn_active.md` | focused sidecar diagnostic page |
 
 ## `completion/`
 

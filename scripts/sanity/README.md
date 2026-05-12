@@ -16,15 +16,17 @@ Use it only for:
 - collaborator-facing ABCI entrypoints belong in `scripts/abci/`
 - maintained scheduler workers still belong in `scripts/pretrain/`,
   `scripts/finetune/`, `scripts/eval/`, and `scripts/analysis/`
+- PointGPT / pointNEPA sanity and QF launchers belong in
+  `pointnepa/scripts/sanity/`
 
 In particular:
 
-- `scripts/sanity/pointgpt_train_local_ddp.sh`
-- `scripts/sanity/pointgpt_finetune_local_ddp.sh`
-- `scripts/sanity/pointgpt_nepa_vs_cdl12_pipeline.sh`
+- `pointnepa/scripts/sanity/pointgpt_train_local_ddp.sh`
+- `pointnepa/scripts/sanity/pointgpt_finetune_local_ddp.sh`
+- `pointnepa/scripts/sanity/pointgpt_nepa_vs_cdl12_pipeline.sh`
 
 are compatibility shims only. Their maintained implementations live under
-`scripts/local/`.
+`pointnepa/scripts/local/`.
 
 ## Rule
 

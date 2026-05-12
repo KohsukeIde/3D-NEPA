@@ -15,6 +15,9 @@ and archived legacy scripts.
 - `scripts/sanity/`
   - supporting sanity / screening / compatibility area only
   - do not treat this as a primary launch surface
+- `pointnepa/scripts/`
+  - PointGPT / pointNEPA sidecar launchers; these are intentionally outside
+    the repo-global NEPA scripts tree
 
 If a launcher is maintained and local-only, it belongs in `scripts/local/`.
 If it is maintained and ABCI-facing, it belongs in `scripts/abci/`.
@@ -46,8 +49,9 @@ If it is maintained and ABCI-facing, it belongs in `scripts/abci/`.
     start from `scripts/local/`
   - see `scripts/finetune/README.md`
 - `scripts/sanity/`
-  - external baseline / environment sanity jobs (Point-MAE, PointGPT, patch
-    ablation submitters) plus compatibility shims
+  - external baseline / environment sanity jobs (Point-MAE and patch ablation
+    submitters) plus compatibility shims
+  - PointGPT / pointNEPA sanity scripts live under `pointnepa/scripts/sanity/`
   - see `scripts/sanity/README.md`
 - `scripts/logs/`
   - maintained workspace cleanup helpers

@@ -34,4 +34,4 @@ export CKPT_PATH="${WORKDIR}/PointGPT/checkpoints/official/pointgpt_s_pretrain_o
 export RUN_NAME="pgpt_s_shapenetpart_official_e300"
 
 cd "${POINTGPT_DIR}"
-bash ../scripts/local/pointgpt_s_shapenetpart_ft.sh
+bash "${WORKDIR}/pointnepa/scripts/local/pointgpt_s_shapenetpart_ft.sh"

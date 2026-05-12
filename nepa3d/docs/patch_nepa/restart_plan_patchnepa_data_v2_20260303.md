@@ -1508,8 +1508,8 @@ Prep updates:
   - robust path parsing for non-legacy list formats (`train/<tax>/<id>.npz`).
   - random sampler made point-count robust (works with 2048-point caches while sampling 1024).
 - new submit path:
-  - `scripts/sanity/pointgpt_pretrain_shapenet_qf.sh`
-  - `scripts/sanity/submit_pointgpt_pretrain_shapenet_qf.sh`
+  - `pointnepa/scripts/sanity/pointgpt_pretrain_shapenet_qf.sh`
+  - `pointnepa/scripts/sanity/submit_pointgpt_pretrain_shapenet_qf.sh`
 
 Data wiring used:
 

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
 POINTGPT_DIR="${POINTGPT_DIR:-${WORKDIR}/PointGPT}"
 DEFAULT_VENV_ACTIVATE="${WORKDIR}/.venv-pointgpt/bin/activate"
 if [[ ! -f "${DEFAULT_VENV_ACTIVATE}" ]]; then
@@ -35,7 +35,7 @@ DATA_ROOT="${DATA_ROOT:-${HYBRID_ROOT}/post_pretrain}"
 PC_PATH="${PC_PATH:-${HYBRID_ROOT}}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 CHECK_SAMPLES="${CHECK_SAMPLES:-32}"
-LHY_CHECKER="${LHY_CHECKER:-${WORKDIR}/scripts/local/pointgpt_labeledhybrid_status.sh}"
+LHY_CHECKER="${LHY_CHECKER:-${WORKDIR}/pointnepa/scripts/local/pointgpt_labeledhybrid_status.sh}"
 
 if [[ ! -d "${POINTGPT_DIR}" ]]; then
   echo "[error] PointGPT dir not found: ${POINTGPT_DIR}"

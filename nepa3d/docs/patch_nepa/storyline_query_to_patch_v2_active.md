@@ -141,7 +141,7 @@ Current interpretation boundary:
 Reference:
 
 - `nepa3d/docs/patch_nepa/restart_plan_patchnepa_data_v2_20260303.md`
-- `nepa3d/docs/classification/results_modelnet40_pointgpt_active.md`
+- `pointnepa/docs/results_modelnet40_active.md`
 
 ## 5. Concrete PatchNEPA v2 Findings
 

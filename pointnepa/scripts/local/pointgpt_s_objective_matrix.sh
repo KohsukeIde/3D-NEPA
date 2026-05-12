@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
 POINTGPT_DIR="${POINTGPT_DIR:-${WORKDIR}/PointGPT}"
 PRETRAIN_WRAPPER="${SCRIPT_DIR}/pointgpt_train_local_ddp.sh"
 MATRIX_SCRIPT="${SCRIPT_DIR}/pointgpt_ft_recipe_matrix_2x2.sh"

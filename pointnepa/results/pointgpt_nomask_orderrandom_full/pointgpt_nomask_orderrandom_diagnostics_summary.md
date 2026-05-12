@@ -9,17 +9,17 @@ Purpose: rerun the PointGPT no-mask + order-randomized object diagnostics with t
 
 ## Result Files
 
-- ScanObjectNN `obj_bg` readout: `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_readout.md`
-- ScanObjectNN `obj_bg` support: `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_support.md`
-- ScanObjectNN `obj_bg` eval-time grouping: `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_grouping.md`
-- ScanObjectNN `obj_only` readout: `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_readout.md`
-- ScanObjectNN `obj_only` support: `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_support.md`
-- ScanObjectNN `obj_only` eval-time grouping: `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_grouping.md`
-- ScanObjectNN `pb_t50_rs` readout: `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_readout.md`
-- ScanObjectNN `pb_t50_rs` support: `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_support.md`
-- ScanObjectNN `pb_t50_rs` eval-time grouping: `3D-NEPA/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_grouping.md`
-- ShapeNetPart support: `3D-NEPA/results/pointgpt_nomask_orderrandom_full/shapenetpart_nomask_ordrand_support_unique.md`
-- ShapeNetPart eval-time grouping: `3D-NEPA/results/pointgpt_nomask_orderrandom_full/shapenetpart_nomask_ordrand_grouping_unique.md`
+- ScanObjectNN `obj_bg` readout: `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_readout.md`
+- ScanObjectNN `obj_bg` support: `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_support.md`
+- ScanObjectNN `obj_bg` eval-time grouping: `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_bg_nomask_ordrand_grouping.md`
+- ScanObjectNN `obj_only` readout: `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_readout.md`
+- ScanObjectNN `obj_only` support: `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_support.md`
+- ScanObjectNN `obj_only` eval-time grouping: `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_obj_only_nomask_ordrand_grouping.md`
+- ScanObjectNN `pb_t50_rs` readout: `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_readout.md`
+- ScanObjectNN `pb_t50_rs` support: `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_support.md`
+- ScanObjectNN `pb_t50_rs` eval-time grouping: `pointnepa/results/pointgpt_nomask_orderrandom_full/scanobjectnn_pb_t50_rs_nomask_ordrand_grouping.md`
+- ShapeNetPart support: `pointnepa/results/pointgpt_nomask_orderrandom_full/shapenetpart_nomask_ordrand_support_unique.md`
+- ShapeNetPart eval-time grouping: `pointnepa/results/pointgpt_nomask_orderrandom_full/shapenetpart_nomask_ordrand_grouping_unique.md`
 
 ## ScanObjectNN Readout
 

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
 VITSHIFT_SCRIPT="${SCRIPT_DIR}/pointgpt_s_pointnepa_vitshift_ablation.sh"
 S_MATRIX_SCRIPT="${SCRIPT_DIR}/pointgpt_s_objective_matrix.sh"
 POLL_SEC="${POLL_SEC:-60}"

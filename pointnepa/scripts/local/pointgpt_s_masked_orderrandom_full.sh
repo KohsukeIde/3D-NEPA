@@ -3,12 +3,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
 POINTGPT_DIR="${POINTGPT_DIR:-${WORKDIR}/PointGPT}"
 DATA_ROOT="${DATA_ROOT:-${WORKDIR}/data}"
 DATA_ROOT="$(cd "${DATA_ROOT}" && pwd)"
 SHAPENETPART_ROOT="${SHAPENETPART_ROOT:-${DATA_ROOT}/shapenetcore_partanno_segmentation_benchmark_v0_normal}"
-RUN_ROOT="${RUN_ROOT:-${WORKDIR}/results/pointgpt_masked_orderrandom_full}"
+RUN_ROOT="${RUN_ROOT:-${WORKDIR}/pointnepa/results/pointgpt_masked_orderrandom_full}"
 LOG_ROOT="${LOG_ROOT:-${WORKDIR}/logs/pointgpt_masked_orderrandom_full}"
 MARKER_ROOT="${RUN_ROOT}/markers"
 
@@ -212,7 +212,7 @@ run_part_ft() {
       LEARNING_RATE="${PART_LR}" \
       SEED="${SEED}" \
       GROUP_MODE=fps_knn \
-      bash "${WORKDIR}/scripts/local/pointgpt_s_shapenetpart_ft.sh"
+      bash "${WORKDIR}/pointnepa/scripts/local/pointgpt_s_shapenetpart_ft.sh"
 }
 
 run_downstream_all() {

@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUN_SCRIPT="${SCRIPT_DIR}/pointgpt_oneoff_qf.sh"
-WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+WORKDIR="${WORKDIR:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
 
 RUN_TAG="${RUN_TAG:-pointgpt_oneoff_$(date +%Y%m%d_%H%M%S)}"
 RT_QF="${RT_QF:-1}"

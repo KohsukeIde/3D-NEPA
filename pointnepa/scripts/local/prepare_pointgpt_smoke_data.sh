@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 POINTGPT_DIR="${POINTGPT_DIR:-${REPO_ROOT}/PointGPT}"
 SRC_ROOT="${SRC_ROOT:-${POINTGPT_DIR}/data/ShapeNet55-34}"
 OUT_ROOT="${OUT_ROOT:-${POINTGPT_DIR}/data/ShapeNet55-34-smoke}"

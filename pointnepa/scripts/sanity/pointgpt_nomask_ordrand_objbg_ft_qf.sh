@@ -63,6 +63,6 @@ from knn_cuda import KNN
 print("knn_cuda import: OK", KNN.__name__)
 PY
 
-bash ../scripts/local/pointgpt_s_nomask_ordrand_objbg_ft.sh
+bash "${WORKDIR}/pointnepa/scripts/local/pointgpt_s_nomask_ordrand_objbg_ft.sh"
 
 echo "[done] PointGPT no-mask order-randomized obj_bg fine-tune"

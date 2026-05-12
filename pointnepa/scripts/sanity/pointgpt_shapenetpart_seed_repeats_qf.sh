@@ -77,6 +77,6 @@ from pointnet2_ops import pointnet2_utils
 print("pointnet2_ops import: OK", pointnet2_utils.__name__)
 PY
 
-bash ../scripts/local/pointgpt_s_shapenetpart_ft.sh
+bash "${WORKDIR}/pointnepa/scripts/local/pointgpt_s_shapenetpart_ft.sh"
 
 echo "[done] PointGPT-S ShapeNetPart seed repeat"

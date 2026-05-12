@@ -30,7 +30,7 @@ Add only when needed:
 - Itachi-local result boundary:
   `nepa3d/docs/patch_nepa/itachi/results_geo_teacher_itachi_active.md`
 - PointGPT / pointNEPA sidecar boundary:
-  `nepa3d/docs/classification/results_scanobjectnn_pointgpt_pointnepa_active.md`
+  `pointnepa/docs/results_scanobjectnn_active.md`
 
 ## Exclude By Default
 

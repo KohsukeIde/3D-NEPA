@@ -24,7 +24,8 @@ Legacy means early/pre-review snapshots (including old ModelNet40-era runs). Cur
 - ScanObjectNN core3 active tables: `nepa3d/docs/classification/results_scanobjectnn_core3_active.md`
 - ScanObjectNN review tables (bidir + vote10 active): `nepa3d/docs/classification/results_scanobjectnn_review_active.md`
 - ScanObjectNN review legacy snapshot: `nepa3d/docs/classification/results_scanobjectnn_review_legacy.md`
-- ModelNet40 PointGPT-style protocol (full + few-shot LP): `nepa3d/docs/classification/results_modelnet40_pointgpt_active.md`
+- pointNEPA / PointGPT sidecar workspace: `pointnepa/README.md`
+- ModelNet40 PointGPT-style protocol (full + few-shot LP): `pointnepa/docs/results_modelnet40_active.md`
 - ScanObjectNN M1 legacy snapshot (`75/75`): `nepa3d/docs/classification/results_scanobjectnn_m1_legacy.md`
 - UCPR/CPAC active results (incl. QA cycle): `nepa3d/docs/completion/results_ucpr_cpac_active.md`
 - UCPR/CPAC planning doc: `nepa3d/docs/completion/eccv_ucpr_cpac_tables.md`
@@ -402,8 +403,8 @@ Best-by-setting:
 
 Full tables:
 
-- `nepa3d/docs/classification/results_modelnet40_pointgpt_active.md`
-- raw/summary CSV: `results/modelnet40_pointgpt_protocol_raw.csv`, `results/modelnet40_pointgpt_protocol_summary.csv`
+- `pointnepa/docs/results_modelnet40_active.md`
+- raw/summary CSV: `pointnepa/results/modelnet40_pointgpt_protocol_raw.csv`, `pointnepa/results/modelnet40_pointgpt_protocol_summary.csv`
 
 ### 6.3 Paper-safe ScanObjectNN core3 baseline snapshot
 
