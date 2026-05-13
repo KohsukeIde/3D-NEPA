@@ -28,6 +28,16 @@ The pack is designed to answer three precise questions before implementing full 
 - No multi-seed sweep; single-run is aligned with point-cloud SSL reporting conventions.
 - No grouping ablation as a main claim. Grouping is fixed by default.
 
+## Active Interpretation Notes
+
+- Research framing, Mirai connection, PointGPT/Point-MAE/PCP-MAE boundary, and
+  Sinkhorn/OT loss positioning:
+  `docs/research_framing_active.md`
+- Literature and protocol caveats for the current Stage 1 run:
+  `docs/literature_protocol_notes_active.md`
+- Short Q1-Q3 paper framing:
+  `docs/q1_q3_revised.md`
+
 ## Local fixes in this repo
 
 This checked-in copy adds a few guardrails beyond the original zip:
