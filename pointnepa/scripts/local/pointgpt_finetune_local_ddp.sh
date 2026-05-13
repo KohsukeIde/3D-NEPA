@@ -21,6 +21,7 @@ CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 VAL_FREQ="${VAL_FREQ:-1}"
 FT_RECON_WEIGHT="${FT_RECON_WEIGHT:-0}"
 SAVE_LAST_EVERY_EPOCH="${SAVE_LAST_EVERY_EPOCH:-0}"
+FREEZE_BACKBONE="${FREEZE_BACKBONE:-0}"
 NO_TEST_AS_VAL="${NO_TEST_AS_VAL:-0}"
 VAL_RATIO="${VAL_RATIO:-0.1}"
 VAL_SEED="${VAL_SEED:-0}"
@@ -180,6 +181,7 @@ echo "master_port=${MASTER_PORT}"
 echo "val_freq=${VAL_FREQ}"
 echo "ft_recon_weight=${FT_RECON_WEIGHT}"
 echo "save_last_every_epoch=${SAVE_LAST_EVERY_EPOCH}"
+echo "freeze_backbone=${FREEZE_BACKBONE}"
 echo "no_test_as_val=${NO_TEST_AS_VAL}"
 echo "resolved_experiment_path=${RESOLVED_EXPERIMENT_PATH}"
 if [[ "${NO_TEST_AS_VAL}" == "1" ]]; then
@@ -191,6 +193,11 @@ else
 fi
 echo "use_wandb=${USE_WANDB} project=${WANDB_PROJECT} group=${WANDB_GROUP} run=${WANDB_RUN_NAME} mode=${WANDB_MODE}"
 echo
+
+FREEZE_ARGS=()
+if [[ "${FREEZE_BACKBONE}" == "1" ]]; then
+  FREEZE_ARGS=(--freeze_backbone)
+fi
 
 torchrun \
   --standalone \
@@ -206,4 +213,5 @@ torchrun \
   --save_last_every_epoch "${SAVE_LAST_EVERY_EPOCH}" \
   --finetune_model \
   --ckpts "${CKPT_PATH}" \
+  "${FREEZE_ARGS[@]}" \
   ${EXTRA_ARGS}

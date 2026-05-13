@@ -128,6 +128,11 @@ def get_args():
         choices=[0, 1],
         help='save ckpt-last at every epoch during fine-tuning; set 0 to save only once at the end')
     parser.add_argument(
+        '--freeze_backbone',
+        action='store_true',
+        default=False,
+        help='during fine-tuning, freeze the pretrained backbone and train only the classification head')
+    parser.add_argument(
         '--test_vote_times',
         type=int,
         default=int(os.environ.get('TEST_VOTE_TIMES', '299')),

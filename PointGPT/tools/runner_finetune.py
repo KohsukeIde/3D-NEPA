@@ -34,6 +34,22 @@ test_transforms = transforms.Compose(
 )
 
 
+def _unwrap_model(model):
+    return model.module if hasattr(model, "module") else model
+
+
+def _set_backbone_frozen_train_mode(model, freeze_backbone):
+    model.train()
+    if not freeze_backbone:
+        return
+    unwrapped = _unwrap_model(model)
+    unwrapped.eval()
+    if hasattr(unwrapped.blocks, "cls_norm"):
+        unwrapped.blocks.cls_norm.train()
+    if hasattr(unwrapped.blocks, "cls_head_finetune"):
+        unwrapped.blocks.cls_head_finetune.train()
+
+
 class Acc_Metric:
     def __init__(self, acc=0.):
         if type(acc).__name__ == 'dict':
@@ -64,6 +80,7 @@ def run_net(args, config, train_writer=None, val_writer=None, wandb_run=None):
         builder.dataset_builder(args, config.dataset.val)
     # build model
     base_model = builder.model_builder(config.model)
+    freeze_backbone = bool(getattr(args, 'freeze_backbone', False))
 
     # parameter setting
     start_epoch = 0
@@ -81,6 +98,20 @@ def run_net(args, config, train_writer=None, val_writer=None, wandb_run=None):
             base_model.load_model_from_ckpt(args.ckpts)
         else:
             print_log('Training from scratch', logger=logger)
+
+    if freeze_backbone:
+        trainable_keys = ('cls_head_finetune', 'cls_norm')
+        total_params = 0
+        trainable_params = 0
+        for name, param in base_model.named_parameters():
+            total_params += param.numel()
+            param.requires_grad = any(key in name for key in trainable_keys)
+            if param.requires_grad:
+                trainable_params += param.numel()
+        print_log(
+            f'[FineTune] freeze_backbone=1 trainable_params={trainable_params} / {total_params}',
+            logger=logger,
+        )
 
     if args.use_gpu:
         base_model.to(args.local_rank)
@@ -113,7 +144,7 @@ def run_net(args, config, train_writer=None, val_writer=None, wandb_run=None):
     for epoch in range(start_epoch, config.max_epoch + 1):
         if args.distributed:
             train_sampler.set_epoch(epoch)
-        base_model.train()
+        _set_backbone_frozen_train_mode(base_model, freeze_backbone)
 
         epoch_start_time = time.time()
         batch_start_time = time.time()
@@ -121,7 +152,7 @@ def run_net(args, config, train_writer=None, val_writer=None, wandb_run=None):
         data_time = AverageMeter()
         losses = AverageMeter(['loss', 'loss_r', 'acc'])
         num_iter = 0
-        base_model.train()  # set model to training mode
+        _set_backbone_frozen_train_mode(base_model, freeze_backbone)
         n_batches = len(train_dataloader)
 
         npoints = config.npoints

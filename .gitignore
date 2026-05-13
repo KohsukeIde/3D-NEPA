@@ -22,6 +22,7 @@ viz_output/
 !nepa3d/**/*.sh
 !scripts/**/*.sh
 !pointnepa/**/*.sh
+!posetnepa_mask_order_preflight/**/*.sh
 
 **/.ipynb_checkpoints/
 
@@ -62,6 +63,8 @@ Point-MAE/
 PointGPT/checkpoints/
 PointGPT/experiments/
 PointGPT/wandb/
+PointGPT/cfgs/PointGPT-S/poset_mask_order_preflight/
+PointGPT/models/*.poset_preflight.bak
 PointGPT/**/__pycache__/
 PointGPT/**/*.py[cod]
 PointGPT/**/*.log
@@ -75,3 +78,7 @@ PointGPT/knn_cuda/**/*.so
 PointGPT/knn_cuda/**/build/
 PointGPT/.venv/
 PointGPT/.pytest_cache/
+
+# PosetNEPA pre-flight generated manifests/summaries; promote selected results
+# into pointnepa/results or docs when they become canonical.
+posetnepa_mask_order_preflight/generated/
