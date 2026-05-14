@@ -137,7 +137,7 @@ construction does.
 
 ## Current Experimental Reading
 
-As of 2026-05-13 19:38 JST:
+As of 2026-05-14 13:23 JST:
 
 - `simplified_morton_m0p0` is strongest among completed Stage 1 rows:
   PB-T50-RS `82.3040`, `copy_win=0.5440`.
@@ -150,17 +150,31 @@ As of 2026-05-13 19:38 JST:
 - `diffusion_shell_m0p7` has pretrain diagnostics but its fine-tune row did not
   complete in the original Stage 1 chain because the fine-tune wrapper failed
   after `random_m0p7`. Treat this row as pending, not negative.
-- The post-Stage 1 chain has moved to `fixed_random` controls. Both
-  `fixed_random` pretrains are complete:
+- The `fixed_random` controls completed:
   - `fixed_random_m0p0`: loss `0.1654`, gap `-0.0026`, `copy_win=0.5098`.
   - `fixed_random_m0p7`: loss `0.1806`, gap `-0.0049`, `copy_win=0.5170`.
-- `fixed_random_m0p0` fine-tune is currently running. Its downstream row is
-  not interpretable until the 50-epoch run completes.
+  - downstream PB-T50-RS: `79.2852` for mask-off and `78.2790` for mask-on.
+- The small pretrain-order x fine-tune-order mismatch matrix completed for
+  mask-off rows:
+  - pretrain `simplified_morton` -> fine-tune `diffusion_shell`: `81.8182`.
+  - pretrain `simplified_morton` -> fine-tune `random`: `81.8529`.
+  - pretrain `random` -> fine-tune `diffusion_shell`: `78.7994`.
+  - pretrain `random` -> fine-tune `simplified_morton`: `78.4178`.
+  - pretrain `diffusion_shell` -> fine-tune `random`: `80.2568`.
+  - pretrain `diffusion_shell` -> fine-tune `simplified_morton`: `79.3546`.
+- The scratch/early/frozen chain is now running. All early pretrains for
+  `simplified_morton` and `diffusion_shell` at epochs `1/5/10` finished. The
+  current active job is scratch fine-tuning for `simplified_morton_m0p0`; it is
+  at epoch 24/50 with current best PB-T50-RS `57.0090`.
 
 Current claim boundary:
 
 - Supported: order/filtration changes pretext shortcut profile.
 - Not supported yet: diffusion-shell improves classification.
+- Strengthened caveat: the mismatch matrix suggests full fine-tune can recover
+  much of the diagonal order performance even when fine-tune order differs from
+  pretrain order. This weakens any claim that the current total-order
+  PosetNEPA-Lite rows are learning a robust order-specific representation.
 - Still required: fixed-random controls, immediate-neighbor blocked control,
   center-leakage control, order mismatch, frozen/readout, and full frontier
   set prediction.
