@@ -15,15 +15,23 @@ USE_WANDB="${USE_WANDB:-0}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-2}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 NUM_WORKERS="${NUM_WORKERS:-8}"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+if [[ -z "${PYTHON_BIN:-}" ]]; then
+  if [[ -x "${WORKDIR}/.venv/bin/python3" ]]; then
+    PYTHON_BIN="${WORKDIR}/.venv/bin/python3"
+  else
+    PYTHON_BIN="python3"
+  fi
+fi
 
 RUN_FIXED_RANDOM="${RUN_FIXED_RANDOM:-1}"
 RUN_MISMATCH="${RUN_MISMATCH:-1}"
 RUN_SCRATCH="${RUN_SCRATCH:-0}"
+RUN_LINEAR_PROBE="${RUN_LINEAR_PROBE:-0}"
 
 FIXED_RANDOM_TAG="${FIXED_RANDOM_TAG:-fixedrandom_after_${STAGE1_TAG}}"
 MISMATCH_TAG="${MISMATCH_TAG:-order_mismatch_${STAGE1_TAG}_maskoff}"
 SCRATCH_TAG="${SCRATCH_TAG:-scratch_early_${STAGE1_TAG}_maskoff}"
+LINEAR_PROBE_TAG="${LINEAR_PROBE_TAG:-rep_probe_after_${STAGE1_TAG}}"
 
 stage1_live() {
   pgrep -af "${STAGE1_TAG}" \
@@ -141,6 +149,32 @@ if [[ "${RUN_SCRATCH}" == "1" ]]; then
   "${PYTHON_BIN}" "${SCRIPT_DIR}/15_extract_followup_finetune_results.py" \
     --repo-root "${WORKDIR}" \
     --manifest "posetnepa_mask_order_preflight/generated/${SCRATCH_TAG}/scratch_early_manifest.json"
+fi
+
+if [[ "${RUN_LINEAR_PROBE}" == "1" ]]; then
+  echo "[post] running frozen linear probe: ${LINEAR_PROBE_TAG} $(date -Is)"
+  LINEAR_PROBE_OUT_DIR="posetnepa_mask_order_preflight/generated/${LINEAR_PROBE_TAG}"
+  LINEAR_MANIFEST_ARGS=(
+    --manifest-spec "${STAGE1_MANIFEST}::${STAGE1_TAG}::stage1"
+  )
+  if [[ -f "${WORKDIR}/posetnepa_mask_order_preflight/generated/${FIXED_RANDOM_TAG}/manifest.json" ]]; then
+    LINEAR_MANIFEST_ARGS+=(
+      --manifest-spec "posetnepa_mask_order_preflight/generated/${FIXED_RANDOM_TAG}/manifest.json::${FIXED_RANDOM_TAG}::fixed_random"
+    )
+  fi
+  CUDA_VISIBLE_DEVICES="${LINEAR_PROBE_CUDA_VISIBLE_DEVICES:-${CUDA_VISIBLE_DEVICES%%,*}}" \
+  "${PYTHON_BIN}" "${SCRIPT_DIR}/17_linear_probe_scanobjectnn.py" \
+    --repo-root "${WORKDIR}" \
+    "${LINEAR_MANIFEST_ARGS[@]}" \
+    --splits "${LINEAR_PROBE_SPLITS:-${FT_SPLITS}}" \
+    --probe-epochs "${LINEAR_PROBE_EPOCHS:-200}" \
+    --seeds "${LINEAR_PROBE_SEEDS:-0}" \
+    --device "${LINEAR_PROBE_DEVICE:-cuda}" \
+    --feature-batch-size "${LINEAR_PROBE_FEATURE_BATCH_SIZE:-64}" \
+    --probe-batch-size "${LINEAR_PROBE_BATCH_SIZE:-2048}" \
+    --cache-dir "${LINEAR_PROBE_OUT_DIR}/feature_cache" \
+    --out-csv "${LINEAR_PROBE_OUT_DIR}/linear_probe_scanobjectnn.csv" \
+    --out-md "${LINEAR_PROBE_OUT_DIR}/linear_probe_scanobjectnn.md"
 fi
 
 echo "[post] done $(date -Is)"

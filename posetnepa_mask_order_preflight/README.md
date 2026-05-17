@@ -125,6 +125,38 @@ CUDA_VISIBLE_DEVICES=0,1 NPROC_PER_NODE=2 USE_WANDB=0 \
 Use `DRY_RUN=1` to print the full chain without launching training.
 Stage summaries are written to `posetnepa_mask_order_preflight/generated/<RUN_TAG>/`.
 
+## Representation Probes
+
+Full fine-tuning can erase the very order/filtration differences this pack is
+trying to diagnose. The follow-up chain therefore has two readout controls:
+
+- `freeze_backbone` fine-tune: freezes the pretrained PointTransformer and
+  trains the repo's normal classification head.
+- frozen linear probe: extracts frozen `PointTransformer` features and trains
+  only one linear classifier on cached features.
+
+The linear probe can be queued after the current post-stage follow-up:
+
+```bash
+POST_WAIT_PID=<post_followup_pid> \
+STAGE1_TAG=stage1_20260513_025903 \
+PROBE_EPOCHS=200 PROBE_SEEDS=0 SPLITS=hardest CUDA_VISIBLE_DEVICES=0 \
+  bash posetnepa_mask_order_preflight/scripts/18_run_rep_probe_after_post.sh
+```
+
+For a fresh post-stage chain, it can also be run inline:
+
+```bash
+RUN_LINEAR_PROBE=1 LINEAR_PROBE_SPLITS=hardest \
+  bash posetnepa_mask_order_preflight/scripts/16_run_post_stage1_followup.sh
+```
+
+It writes:
+
+```text
+posetnepa_mask_order_preflight/generated/rep_probe_after_<STAGE1_TAG>/linear_probe_scanobjectnn.md
+```
+
 ## Full pre-flight chain
 
 Stage 1 is the required diagnostic lock. Stage 2/3 are intentionally opt-in

@@ -137,7 +137,7 @@ construction does.
 
 ## Current Experimental Reading
 
-As of 2026-05-14 13:23 JST:
+As of 2026-05-17 20:39 JST:
 
 - `simplified_morton_m0p0` is strongest among completed Stage 1 rows:
   PB-T50-RS `82.3040`, `copy_win=0.5440`.
@@ -147,9 +147,10 @@ As of 2026-05-14 13:23 JST:
   PB-T50-RS `81.8182`, but `copy_win=0.6606`, which is suspicious under the
   PointGPT / PCP-MAE shortcut framing.
 - `random_m0p7` completed at PB-T50-RS `78.5912`.
-- `diffusion_shell_m0p7` has pretrain diagnostics but its fine-tune row did not
-  complete in the original Stage 1 chain because the fine-tune wrapper failed
-  after `random_m0p7`. Treat this row as pending, not negative.
+- `diffusion_shell_m0p7` has pretrain diagnostics but its diagonal full
+  fine-tune row did not complete in the original Stage 1 chain because the
+  fine-tune wrapper failed after `random_m0p7`. Treat this row as missing from
+  the full-finetune table, not negative.
 - The `fixed_random` controls completed:
   - `fixed_random_m0p0`: loss `0.1654`, gap `-0.0026`, `copy_win=0.5098`.
   - `fixed_random_m0p7`: loss `0.1806`, gap `-0.0049`, `copy_win=0.5170`.
@@ -162,22 +163,44 @@ As of 2026-05-14 13:23 JST:
   - pretrain `random` -> fine-tune `simplified_morton`: `78.4178`.
   - pretrain `diffusion_shell` -> fine-tune `random`: `80.2568`.
   - pretrain `diffusion_shell` -> fine-tune `simplified_morton`: `79.3546`.
-- The scratch/early/frozen chain is now running. All early pretrains for
-  `simplified_morton` and `diffusion_shell` at epochs `1/5/10` finished. The
-  current active job is scratch fine-tuning for `simplified_morton_m0p0`; it is
-  at epoch 24/50 with current best PB-T50-RS `57.0090`.
+- The scratch/early/frozen chain completed for mask-off `simplified_morton` and
+  `diffusion_shell` on ScanObjectNN hardest:
+  - scratch `simplified_morton`: `73.3518`.
+  - early `simplified_morton` e1/e5/e10: `74.1152`, `72.8661`, `79.9792`.
+  - Stage 1 last `simplified_morton` e30: `82.4774`.
+  - frozen-head `simplified_morton` e30: `50.0000`.
+  - scratch `diffusion_shell`: `73.0049`.
+  - early `diffusion_shell` e1/e5/e10: `75.5031`, `69.3615`, `75.9195`.
+  - Stage 1 last `diffusion_shell` e30: `79.3199`.
+  - frozen-head `diffusion_shell` e30: `43.0951`.
+- The true frozen-feature linear probe also completed on ScanObjectNN hardest:
+  - `simplified_morton_m0p0`: `51.8390`.
+  - `random_m0p0`: `48.2998`.
+  - `diffusion_shell_m0p0`: best `45.4892`, last `44.9341`.
+  - `simplified_morton_m0p7`: best `51.1797`, last `51.0062`.
+  - `random_m0p7`: `48.4039`.
+  - `diffusion_shell_m0p7`: best `47.1201`, last `46.7384`.
+  - `fixed_random_m0p0`: best `47.7099`, last `47.5711`.
+  - `fixed_random_m0p7`: `48.0569`.
 
 Current claim boundary:
 
 - Supported: order/filtration changes pretext shortcut profile.
-- Not supported yet: diffusion-shell improves classification.
+- Not supported: diffusion-shell improves classification in this
+  PointGPT-style total-order lite setup.
 - Strengthened caveat: the mismatch matrix suggests full fine-tune can recover
   much of the diagonal order performance even when fine-tune order differs from
   pretrain order. This weakens any claim that the current total-order
   PosetNEPA-Lite rows are learning a robust order-specific representation.
-- Still required: fixed-random controls, immediate-neighbor blocked control,
-  center-leakage control, order mismatch, frozen/readout, and full frontier
-  set prediction.
+- New readout conclusion: full fine-tuning strongly amplifies the Stage 1
+  pretraining advantage (`82.4774` vs scratch `73.3518` for
+  `simplified_morton`), but frozen-head and linear-probe performance are only
+  around `50-52%`. This means the current evaluation is not a clean
+  representation-quality proof. It is mainly evidence that full fine-tune can
+  exploit the initialization and rewrite/adapt features.
+- Still required: immediate-neighbor blocked control, center-leakage control,
+  a cleaner frozen/linear probe protocol if this becomes a paper claim, and
+  full frontier set prediction.
 
 ## Next Kill Tests
 
