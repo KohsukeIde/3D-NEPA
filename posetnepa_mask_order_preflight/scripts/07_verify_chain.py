@@ -64,6 +64,17 @@ def main() -> None:
                     mask = model.get("transformer_config", {}).get("mask_ratio")
                     if float(mask) != expected_mask:
                         errors.append(f"{cfg_rel}: mask_ratio mismatch {mask} != {expected_mask}")
+                    if "skip_k" in entry and int(model.get("nepa_skip_k", 1)) != int(entry["skip_k"]):
+                        errors.append(f"{cfg_rel}: nepa_skip_k mismatch")
+                    if "pretrain_position_mode" in entry and model.get("pretrain_position_mode", "normal") != entry["pretrain_position_mode"]:
+                        errors.append(f"{cfg_rel}: pretrain_position_mode mismatch")
+                    if "center_aux_weight" in entry and abs(float(model.get("center_aux_weight", 0.0)) - float(entry["center_aux_weight"])) > 1e-9:
+                        errors.append(f"{cfg_rel}: center_aux_weight mismatch")
+                if expected_mask is None and "readout_position_mode" in entry:
+                    expected_pos = entry.get("readout_position_mode", "normal")
+                    actual_pos = model.get("position_mode", "normal")
+                    if actual_pos != expected_pos:
+                        errors.append(f"{cfg_rel}: position_mode mismatch {actual_pos} != {expected_pos}")
 
     if errors:
         print("[chain-verify] FAILED")

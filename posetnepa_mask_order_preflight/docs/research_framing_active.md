@@ -137,7 +137,7 @@ construction does.
 
 ## Current Experimental Reading
 
-As of 2026-05-17 20:39 JST:
+As of 2026-05-19 JST:
 
 - `simplified_morton_m0p0` is strongest among completed Stage 1 rows:
   PB-T50-RS `82.3040`, `copy_win=0.5440`.
@@ -182,12 +182,38 @@ As of 2026-05-17 20:39 JST:
   - `diffusion_shell_m0p7`: best `47.1201`, last `46.7384`.
   - `fixed_random_m0p0`: best `47.7099`, last `47.5711`.
   - `fixed_random_m0p7`: `48.0569`.
+- The skip-k / center-leakage chain completed as
+  `skipcenter_20260517_213653` on 2026-05-18 17:59 JST:
+  - `skip2`: PB-T50-RS `81.0548`, linear probe `52.9146`,
+    `copy_win=0.4829`, gap `0.0074`.
+  - `skip4`: PB-T50-RS `80.1527`, linear probe `51.5961`,
+    `copy_win=0.4819`, gap `0.0089`.
+  - `skip8`: PB-T50-RS `78.9035`, linear probe `49.2019`,
+    `copy_win=0.4970`, gap `0.0048`.
+  - `poszero`: PB-T50-RS `76.5094`, linear probe `45.9056`,
+    `copy_win=0.6224`, gap `-0.0090`.
+  - `posshuffle`: PB-T50-RS `80.8813`, linear probe `51.4920`,
+    `copy_win=0.6374`, gap `-0.0213`.
+  - `centeraux`: PB-T50-RS `82.0264`, linear probe `53.5045`,
+    `copy_win=0.5395`, gap `-0.0020`.
+  - `skip4_poszero`: PB-T50-RS `77.3074`, linear probe `48.6468`,
+    `copy_win=0.4899`, gap `0.0034`.
 
 Current claim boundary:
 
 - Supported: order/filtration changes pretext shortcut profile.
 - Not supported: diffusion-shell improves classification in this
   PointGPT-style total-order lite setup.
+- Supported after skip-center: the explanation is not just immediate
+  previous-token copying. `skip2` remains competitive, but larger skip distance
+  degrades both full fine-tune and frozen linear readout. The useful signal is
+  local-neighborhood continuity, not only `z_{t-1}` copying.
+- Supported after position controls: position/center side-channels matter.
+  Zeroing pretrain positions collapses both PB-T50-RS and linear probe, while
+  position shuffling can recover under full fine-tune but worsens copy/gap
+  diagnostics.
+- Not supported: long-range skip-k latent AR as a simple fix. No skip-k row
+  gives a large frozen-readout improvement, and larger skips hurt.
 - Strengthened caveat: the mismatch matrix suggests full fine-tune can recover
   much of the diagonal order performance even when fine-tune order differs from
   pretrain order. This weakens any claim that the current total-order
@@ -198,9 +224,15 @@ Current claim boundary:
   around `50-52%`. This means the current evaluation is not a clean
   representation-quality proof. It is mainly evidence that full fine-tune can
   exploit the initialization and rewrite/adapt features.
-- Still required: immediate-neighbor blocked control, center-leakage control,
-  a cleaner frozen/linear probe protocol if this becomes a paper claim, and
-  full frontier set prediction.
+- Current action: PosetNEPA-Lite is killed as the main route, and the
+  skip-k/center chain is now complete. The next method experiment should be
+  PosetNEPA-Core smoke: frontier-set prediction with explicit random-frontier
+  and position/center controls.
+- Still required: frontier-set prediction, random-frontier controls,
+  structured robustness/stress readouts, and a cleaner frozen/linear protocol
+  if this becomes a paper claim.
+
+The active decision plan is `docs/skip_center_decision_plan_active.md`.
 
 ## Next Kill Tests
 

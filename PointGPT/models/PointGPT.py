@@ -599,7 +599,12 @@ class GPT_Transformer(nn.Module):
         self.drop_path_rate = config.transformer_config.drop_path_rate
         self.num_heads = config.transformer_config.num_heads
         self.group_size = config.group_size
+        self.pretrain_position_mode = str(
+            getattr(config, 'pretrain_position_mode', 'normal'))
         print_log(f'[args] {config.transformer_config}', logger='Transformer')
+        print_log(
+            f'[args] pretrain_position_mode = {self.pretrain_position_mode}',
+            logger='Transformer')
 
         self.encoder_dims = config.transformer_config.encoder_dims
 
@@ -640,6 +645,21 @@ class GPT_Transformer(nn.Module):
         self.norm = nn.LayerNorm(self.trans_dim)
         self.apply(self._init_weights)
 
+    def _position_centers(self, center):
+        mode = self.pretrain_position_mode
+        if mode in ("normal", "identity", ""):
+            return center
+        if mode in ("zero", "none", "hidden"):
+            return torch.zeros_like(center)
+        if mode in ("shuffle", "center_shuffle", "token_shuffle"):
+            batch_size, num_group, _ = center.shape
+            rows = []
+            for batch_idx in range(batch_size):
+                perm = torch.randperm(num_group, device=center.device)
+                rows.append(center[batch_idx, perm])
+            return torch.stack(rows, dim=0)
+        raise ValueError(f"Unsupported pretrain_position_mode: {mode}")
+
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
@@ -660,21 +680,23 @@ class GPT_Transformer(nn.Module):
 
         batch_size, num_patch_tokens, C = group_input_tokens.size()
 
-        relative_position = center[:, 1:, :] - center[:, :-1, :]
+        position_center = self._position_centers(center)
+
+        relative_position = position_center[:, 1:, :] - position_center[:, :-1, :]
         relative_norm = torch.norm(relative_position, dim=-1, keepdim=True)
-        relative_direction = relative_position / relative_norm
+        relative_direction = relative_position / (relative_norm + 1e-6)
         position = torch.cat(
-            [center[:, 0, :].unsqueeze(1), relative_direction], dim=1)
+            [position_center[:, 0, :].unsqueeze(1), relative_direction], dim=1)
         pos_relative = self.pos_embed(position)
 
         sos_pos = self.sos_pos.expand(group_input_tokens.size(0), -1, -1)
         if prediction_mode == "pointgpt":
-            pos_absolute = self.pos_embed(center[:, :-1, :])
+            pos_absolute = self.pos_embed(position_center[:, :-1, :])
             pos_absolute = torch.cat([sos_pos, pos_absolute], dim=1)
             seq_len = num_patch_tokens
             protected_tokens = self.keep_attend
         elif prediction_mode == "vitshift":
-            pos_absolute = self.pos_embed(center)
+            pos_absolute = self.pos_embed(position_center)
             pos_absolute = torch.cat([sos_pos, pos_absolute], dim=1)
             seq_len = num_patch_tokens + 1
             protected_tokens = self.keep_attend + 1
@@ -745,10 +767,16 @@ class PointGPT(nn.Module):
         self.num_group = config.num_group
         self.drop_path_rate = config.transformer_config.drop_path_rate
         self.weight_center = config.weight_center
+        self.nepa_skip_k = int(getattr(config, 'nepa_skip_k', 1))
+        if self.nepa_skip_k < 1:
+            raise ValueError(f"nepa_skip_k must be >= 1, got {self.nepa_skip_k}")
+        self.center_aux_weight = float(getattr(config, 'center_aux_weight', 0.0))
         self.order_mode = getattr(config, 'order_mode', 'simplified_morton')
         self.group_mode = getattr(config, 'group_mode', 'fps_knn')
         self.group_radius = getattr(config, 'group_radius', 0.22)
         self.group_voxel_grid = getattr(config, 'group_voxel_grid', 6)
+        self.pretrain_position_mode = str(
+            getattr(config, 'pretrain_position_mode', 'normal'))
 
         print_log(
             f'[PointGPT] divide point cloud into G{self.num_group} x S{self.group_size} points ...', logger='PointGPT')
@@ -757,6 +785,15 @@ class PointGPT(nn.Module):
             logger='PointGPT')
         print_log(
             f'[PointGPT] patch group mode = {self.group_mode}',
+            logger='PointGPT')
+        print_log(
+            f'[PointGPT] nepa_skip_k = {self.nepa_skip_k}',
+            logger='PointGPT')
+        print_log(
+            f'[PointGPT] pretrain_position_mode = {self.pretrain_position_mode}',
+            logger='PointGPT')
+        print_log(
+            f'[PointGPT] center_aux_weight = {self.center_aux_weight}',
             logger='PointGPT')
         self.group_divider = Group(
             num_group=self.num_group,
@@ -767,6 +804,8 @@ class PointGPT(nn.Module):
             group_voxel_grid=self.group_voxel_grid)
 
         self.loss = config.loss
+        if self.center_aux_weight > 0:
+            self.center_head = nn.Linear(self.trans_dim, 3)
 
         self.build_loss_func(self.loss)
 
@@ -807,16 +846,39 @@ class PointGPT(nn.Module):
                 diag.append(loss_main.new_tensor(float(value)))
         return torch.stack(diag)
 
-    def _compute_nepa_cosine_loss_and_diag(self, pred_tokens, target_tokens):
+    def _align_nepa_tokens(self, pred_tokens, target_tokens, center=None):
+        skip_k = self.nepa_skip_k
+        if pred_tokens.size(1) < skip_k:
+            raise ValueError(
+                f"sequence length {pred_tokens.size(1)} is shorter than nepa_skip_k={skip_k}")
+        if skip_k == 1:
+            pred_aligned = pred_tokens
+            target_aligned = target_tokens
+            center_aligned = center
+        else:
+            pred_aligned = pred_tokens[:, :-(skip_k - 1), :]
+            target_aligned = target_tokens[:, skip_k - 1:, :]
+            center_aligned = center[:, skip_k - 1:, :] if center is not None else None
+        return pred_aligned, target_aligned, center_aligned
+
+    def _compute_nepa_cosine_loss_and_diag(self, pred_tokens, target_tokens, center=None):
         pred_tokens = pred_tokens.float()
         target_tokens = target_tokens.detach().float()
-        cos_full = F.cosine_similarity(pred_tokens, target_tokens, dim=-1)
-        loss_main = 1.0 - cos_full.mean()
+        pred_aligned, target_aligned, center_aligned = self._align_nepa_tokens(
+            pred_tokens, target_tokens, center=center)
+        cos_full = F.cosine_similarity(pred_aligned, target_aligned, dim=-1)
+        loss_cos = 1.0 - cos_full.mean()
+        loss_main = loss_cos
+        center_loss = None
+        if self.center_aux_weight > 0 and center_aligned is not None:
+            center_pred = self.center_head(pred_aligned)
+            center_loss = F.smooth_l1_loss(center_pred, center_aligned.detach())
+            loss_main = loss_main + self.center_aux_weight * center_loss
 
-        if pred_tokens.size(1) > 1:
-            pred_tail = pred_tokens[:, 1:, :]
-            tgt_tail = target_tokens[:, 1:, :]
-            prev_tail = target_tokens[:, :-1, :]
+        if pred_aligned.size(1) > 1:
+            pred_tail = pred_aligned[:, 1:, :]
+            tgt_tail = target_aligned[:, 1:, :]
+            prev_tail = target_tokens[:, :-self.nepa_skip_k, :]
             cos_tgt = F.cosine_similarity(pred_tail, tgt_tail, dim=-1)
             cos_prev = F.cosine_similarity(pred_tail, prev_tail, dim=-1)
             cos_tgt_mean = cos_tgt.mean()
@@ -835,18 +897,27 @@ class PointGPT(nn.Module):
             cos_prev=cos_prev_mean,
             gap=gap,
             copy_win=copy_win,
+            extra_values=[loss_cos, center_loss] if self.center_aux_weight > 0 else None,
         )
 
-    def _compute_nepa_cosine_vitshift_loss_and_diag(self, pred_tokens, target_tokens):
+    def _compute_nepa_cosine_vitshift_loss_and_diag(self, pred_tokens, target_tokens, center=None):
         pred_tokens = pred_tokens[:, :-1, :].float()
         target_tokens = target_tokens.detach().float()
-        cos_full = F.cosine_similarity(pred_tokens, target_tokens, dim=-1)
-        loss_main = 1.0 - cos_full.mean()
+        pred_aligned, target_aligned, center_aligned = self._align_nepa_tokens(
+            pred_tokens, target_tokens, center=center)
+        cos_full = F.cosine_similarity(pred_aligned, target_aligned, dim=-1)
+        loss_cos = 1.0 - cos_full.mean()
+        loss_main = loss_cos
+        center_loss = None
+        if self.center_aux_weight > 0 and center_aligned is not None:
+            center_pred = self.center_head(pred_aligned)
+            center_loss = F.smooth_l1_loss(center_pred, center_aligned.detach())
+            loss_main = loss_main + self.center_aux_weight * center_loss
 
-        if pred_tokens.size(1) > 1:
-            pred_tail = pred_tokens[:, 1:, :]
-            tgt_tail = target_tokens[:, 1:, :]
-            prev_tail = target_tokens[:, :-1, :]
+        if pred_aligned.size(1) > 1:
+            pred_tail = pred_aligned[:, 1:, :]
+            tgt_tail = target_aligned[:, 1:, :]
+            prev_tail = target_tokens[:, :-self.nepa_skip_k, :]
             cos_tgt = F.cosine_similarity(pred_tail, tgt_tail, dim=-1)
             cos_prev = F.cosine_similarity(pred_tail, prev_tail, dim=-1)
             cos_tgt_mean = cos_tgt.mean()
@@ -865,6 +936,7 @@ class PointGPT(nn.Module):
             cos_prev=cos_prev_mean,
             gap=gap,
             copy_win=copy_win,
+            extra_values=[loss_cos, center_loss] if self.center_aux_weight > 0 else None,
         )
 
     def forward(self, pts, vis=False, **kwargs):
@@ -877,14 +949,14 @@ class PointGPT(nn.Module):
             # content embedding is therefore the skip_k=1 target for each predicted slot.
             encoded_features, group_input_tokens = self.GPT_Transformer(
                 neighborhood, center, return_patch_tokens=True)
-            return self._compute_nepa_cosine_loss_and_diag(encoded_features, group_input_tokens)
+            return self._compute_nepa_cosine_loss_and_diag(encoded_features, group_input_tokens, center=center)
 
         if self.loss == "nepa_cosine_vitshift":
             if vis:
                 raise NotImplementedError("vis=True is only supported for reconstruction objectives.")
             encoded_features, group_input_tokens = self.GPT_Transformer(
                 neighborhood, center, return_patch_tokens=True, prediction_mode="vitshift")
-            return self._compute_nepa_cosine_vitshift_loss_and_diag(encoded_features, group_input_tokens)
+            return self._compute_nepa_cosine_vitshift_loss_and_diag(encoded_features, group_input_tokens, center=center)
 
         B = neighborhood.shape[0]
         generated_points = self.GPT_Transformer(
@@ -937,6 +1009,7 @@ class PointTransformer(nn.Module):
         self.group_size = config.group_size
         self.num_group = config.num_group
         self.encoder_dims = config.encoder_dims
+        self.position_mode = str(getattr(config, 'position_mode', 'normal'))
         self.order_mode = getattr(config, 'order_mode', 'simplified_morton')
         self.group_mode = getattr(config, 'group_mode', 'fps_knn')
         self.group_radius = getattr(config, 'group_radius', 0.22)
@@ -954,6 +1027,9 @@ class PointTransformer(nn.Module):
             logger='Transformer')
         print_log(
             f'[PointTransformer] patch group mode = {self.group_mode}',
+            logger='Transformer')
+        print_log(
+            f'[PointTransformer] position mode = {self.position_mode}',
             logger='Transformer')
 
         assert self.encoder_dims in [384, 768, 1024]
@@ -1068,6 +1144,21 @@ class PointTransformer(nn.Module):
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
 
+    def _position_centers(self, center):
+        mode = self.position_mode
+        if mode in ("normal", "identity", ""):
+            return center
+        if mode in ("zero", "none", "hidden"):
+            return torch.zeros_like(center)
+        if mode in ("shuffle", "center_shuffle", "token_shuffle"):
+            batch_size, num_group, _ = center.shape
+            rows = []
+            for batch_idx in range(batch_size):
+                perm = torch.randperm(num_group, device=center.device)
+                rows.append(center[batch_idx, perm])
+            return torch.stack(rows, dim=0)
+        raise ValueError(f"Unsupported position_mode: {mode}")
+
     def forward(self, pts, compute_recon=True, return_features=False):
 
         neighborhood, center = self.group_divider(pts)
@@ -1078,15 +1169,17 @@ class PointTransformer(nn.Module):
         cls_tokens = self.cls_token.expand(group_input_tokens.size(0), -1, -1)
         cls_pos = self.cls_pos.expand(group_input_tokens.size(0), -1, -1)
 
-        pos = self.pos_embed(center)
+        position_center = self._position_centers(center)
+
+        pos = self.pos_embed(position_center)
         sos_pos = self.sos_pos.expand(group_input_tokens.size(0), -1, -1)
         pos = torch.cat([sos_pos, pos], dim=1)
 
-        relative_position = center[:, 1:, :] - center[:, :-1, :]
+        relative_position = position_center[:, 1:, :] - position_center[:, :-1, :]
         relative_norm = torch.norm(relative_position, dim=-1, keepdim=True)
-        relative_direction = relative_position / relative_norm
+        relative_direction = relative_position / (relative_norm + 1e-6)
         position = torch.cat(
-            [center[:, 0, :].unsqueeze(1), relative_direction], dim=1)
+            [position_center[:, 0, :].unsqueeze(1), relative_direction], dim=1)
         pos_relative = self.pos_embed(position)
 
         x = torch.cat((cls_tokens, group_input_tokens), dim=1)

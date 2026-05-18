@@ -35,6 +35,8 @@ The pack is designed to answer three precise questions before implementing full 
   `docs/research_framing_active.md`
 - Literature and protocol caveats for the current Stage 1 run:
   `docs/literature_protocol_notes_active.md`
+- Post-Lite skip-k / center leakage decision plan:
+  `docs/skip_center_decision_plan_active.md`
 - Short Q1-Q3 paper framing:
   `docs/q1_q3_revised.md`
 
@@ -156,6 +158,39 @@ It writes:
 ```text
 posetnepa_mask_order_preflight/generated/rep_probe_after_<STAGE1_TAG>/linear_probe_scanobjectnn.md
 ```
+
+## Skip-k / Center Leakage Chain
+
+After PosetNEPA-Lite, do not jump straight to frontier-level Core. The next
+diagnostic chain tests local-continuity dependence and position side-channels:
+
+```bash
+USE_WANDB=0 CUDA_VISIBLE_DEVICES=0,1 NPROC_PER_NODE=2 \
+  bash posetnepa_mask_order_preflight/scripts/20_run_skip_center_chain.sh
+```
+
+Default variants are `skip2`, `skip4`, `skip8`, `poszero`, `posshuffle`,
+`centeraux`, and `skip4_poszero`, all on `simplified_morton`, `mask=0.0`,
+`group_mode=fps_knn`.
+
+Outputs are written under:
+
+```text
+posetnepa_mask_order_preflight/generated/<RUN_TAG>/
+```
+
+The completed local run `skipcenter_20260517_213653` is summarized in
+`docs/skip_center_decision_plan_active.md`. The short read is:
+
+- `skip2` remains competitive, so the shortcut is not only immediate
+  previous-token copy.
+- `skip4` and `skip8` degrade, so local-neighborhood continuity is important.
+- zero/shuffled position controls show position and center side-channels are
+  part of the current objective.
+- pretrain curves decrease for all rows, but raw loss is not comparable across
+  variants with different targets or side information.
+- the recommended next method test is frontier-set PosetNEPA-Core, not another
+  total-order Lite sweep.
 
 ## Full pre-flight chain
 
