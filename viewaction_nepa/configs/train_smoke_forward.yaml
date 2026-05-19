@@ -1,0 +1,9 @@
+cache_root: data/viewaction_shapenet_hpr_v12
+output_dir: outputs/viewaction_smoke/action
+epochs: 50
+batch_size: 64
+ema_momentum: 0.996
+inverse_weight: 0.1
+variance_weight: 0.0
+latent_dim: 384
+variant: action
