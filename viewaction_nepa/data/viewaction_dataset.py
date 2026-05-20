@@ -99,11 +99,14 @@ class ViewActionDataset(Dataset):
         category = self._as_str(data.get("category"), "unknown")
         shape_id = self._as_str(data.get("shape_id"), self.files[fi].stem)
         if self.mode == "all_views":
-            return {
+            item = {
                 "views": torch.from_numpy(views),
                 "shape_id": shape_id,
                 "category": category,
             }
+            if "visible_counts" in data:
+                item["visible_counts"] = torch.from_numpy(data["visible_counts"].astype(np.float32))
+            return item
         s, t = self.edges[ei]
         # Next edge for 2-step rollout: choose first outgoing edge from target if available.
         outgoing = np.nonzero(self.edges[:, 0] == t)[0]
