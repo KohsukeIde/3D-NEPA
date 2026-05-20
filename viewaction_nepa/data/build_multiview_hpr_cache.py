@@ -84,6 +84,35 @@ def normalize_points(pts: np.ndarray, mode: str = "unit_sphere") -> np.ndarray:
     return pts / max(float(s), 1e-6)
 
 
+def stable_int_seed(*parts: object) -> int:
+    raw = "::".join(str(p) for p in parts)
+    return int(hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16], 16) % (2**32)
+
+
+def random_rotation_matrix(rng: np.random.Generator) -> np.ndarray:
+    """Sample a uniform SO(3) rotation matrix from a random unit quaternion."""
+    u1, u2, u3 = rng.random(3)
+    q = np.asarray(
+        [
+            np.sqrt(1.0 - u1) * np.sin(2.0 * np.pi * u2),
+            np.sqrt(1.0 - u1) * np.cos(2.0 * np.pi * u2),
+            np.sqrt(u1) * np.sin(2.0 * np.pi * u3),
+            np.sqrt(u1) * np.cos(2.0 * np.pi * u3),
+        ],
+        dtype=np.float64,
+    )
+    x, y, z, w = q
+    r = np.asarray(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+        ],
+        dtype=np.float32,
+    )
+    return r
+
+
 def make_camera_basis(camera_pos: np.ndarray):
     forward = -camera_pos / (np.linalg.norm(camera_pos) + 1e-8)
     up0 = np.asarray([0, 1, 0], dtype=np.float32)
@@ -96,13 +125,17 @@ def make_camera_basis(camera_pos: np.ndarray):
     return right, up, forward
 
 
-def visible_zbuffer(points: np.ndarray, camera_pos: np.ndarray, grid: int = 96, margin: float = 1.05) -> np.ndarray:
+def visible_zbuffer(points: np.ndarray, camera_pos: np.ndarray, camera_frame: np.ndarray | None = None,
+                    grid: int = 96, margin: float = 1.05) -> np.ndarray:
     """Fast z-buffer-style visibility fallback.
 
     Projects points into a camera plane and keeps the closest point per grid cell.
     This is not a physical renderer, but it gives stable partial views without Open3D.
     """
-    right, up, forward = make_camera_basis(camera_pos)
+    if camera_frame is None:
+        right, up, forward = make_camera_basis(camera_pos)
+    else:
+        right, up, forward = camera_frame[:, 0], camera_frame[:, 1], camera_frame[:, 2]
     rel = points - camera_pos.reshape(1, 3)
     x = rel @ right
     y = rel @ up
@@ -239,6 +272,11 @@ def main() -> None:
                     help="Optional split:path file. Lines are filenames or relative paths.")
     ap.add_argument("--max-shapes", type=int, default=0)
     ap.add_argument("--shuffle-files", action="store_true")
+    ap.add_argument("--randomize-camera-frame-per-shape", action="store_true",
+                    help="Rotate camera positions and frames by a deterministic random SO(3) per shape.")
+    ap.add_argument("--random-seed", type=int, default=0,
+                    help="Seed mixed with shape id for per-shape camera-frame randomization.")
+    ap.add_argument("--camera-frame-seed", type=int, dest="random_seed", help=argparse.SUPPRESS)
     ap.add_argument("--min-visible", type=int, default=128)
     ap.add_argument("--on-low-visible", default="warn", choices=["warn", "fail"])
     ap.add_argument("--seed", type=int, default=0)
@@ -271,6 +309,8 @@ def main() -> None:
         "split_files": args.split_file,
         "num_shapes": len(files),
         "input_root": str(inp),
+        "randomize_camera_frame_per_shape": bool(args.randomize_camera_frame_per_shape),
+        "random_seed": int(args.random_seed),
     }
     (out / "metadata.json").write_text(json.dumps(meta, indent=2))
     np.savez_compressed(out / "view_graph.npz",
@@ -285,25 +325,44 @@ def main() -> None:
     for idx, p in enumerate(files):
         try:
             pts = normalize_points(load_points(p, args.source_sample_points, rng), args.normalize)
+            sid = shape_id_from_path(p, inp)
+            if args.randomize_camera_frame_per_shape:
+                frame_seed = stable_int_seed(args.random_seed, sid)
+                frame_rng = np.random.default_rng(frame_seed)
+                camera_rotation = random_rotation_matrix(frame_rng)
+                camera_pos = (graph.camera_pos @ camera_rotation.T).astype(np.float32)
+                camera_frame = np.einsum("ij,vjk->vik", camera_rotation, graph.camera_frame).astype(np.float32)
+            else:
+                frame_seed = None
+                camera_pos = graph.camera_pos
+                camera_frame = graph.camera_frame
             views = []
             visible_counts = []
-            for cam in graph.camera_pos:
-                vis = visible_zbuffer(pts, cam)
+            for cam, frame in zip(camera_pos, camera_frame):
+                vis = visible_zbuffer(pts, cam, frame)
                 visible_counts.append(len(vis))
                 views.append(fps_numpy(vis, args.points_per_view, rng))
-            sid = shape_id_from_path(p, inp)
             cat = category_from_path(p, inp)
             source_split = split_map.get(p.name, "all")
             target_dir = out / cat
             target_dir.mkdir(parents=True, exist_ok=True)
             cache_path = target_dir / f"{sid}.npz"
-            np.savez_compressed(cache_path,
-                                views=np.stack(views, axis=0).astype(np.float32),
-                                visible_counts=np.asarray(visible_counts, dtype=np.int64),
-                                shape_id=np.asarray(sid),
-                                category=np.asarray(cat),
-                                source_split=np.asarray(source_split),
-                                source_path=np.asarray(str(p)))
+            cache_payload = {
+                "views": np.stack(views, axis=0).astype(np.float32),
+                "visible_counts": np.asarray(visible_counts, dtype=np.int64),
+                "shape_id": np.asarray(sid),
+                "category": np.asarray(cat),
+                "source_split": np.asarray(source_split),
+                "source_path": np.asarray(str(p)),
+            }
+            if args.randomize_camera_frame_per_shape:
+                cache_payload.update(
+                    camera_rotation=camera_rotation.astype(np.float32),
+                    camera_pos=camera_pos.astype(np.float32),
+                    camera_frame=camera_frame.astype(np.float32),
+                    camera_frame_seed=np.asarray(int(frame_seed), dtype=np.int64),
+                )
+            np.savez_compressed(cache_path, **cache_payload)
             row = {
                 "shape_id": sid,
                 "canonical_shape_id": sid,
@@ -316,6 +375,14 @@ def main() -> None:
                 "mean_visible": float(np.mean(visible_counts)),
                 "max_visible": int(np.max(visible_counts)),
             }
+            if args.randomize_camera_frame_per_shape:
+                row.update(
+                    {
+                        "randomized_camera_frame": True,
+                        "camera_frame_seed": int(frame_seed),
+                        "camera_rotation": camera_rotation.tolist(),
+                    }
+                )
             stats.append(row)
             manifest_rows.append(row)
         except Exception as e:
