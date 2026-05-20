@@ -1,0 +1,22 @@
+# Smoke config for Denoising-Time NEPA.
+# Scripts currently expose these as CLI/env vars; keep this file as documentation and for future config parsing.
+data_root: /path/to/shapenet_pc
+npoints: 1024
+max_shapes: 0
+num_steps: 1000
+min_gap: 50
+model:
+  encoder: simple
+  embed_dim: 384
+  ema_momentum: 0.996
+  residual_predictor: true
+train:
+  epochs: 50
+  batch_size: 64
+  lr: 0.001
+  weight_decay: 0.05
+  semigroup_weight: 0.0
+  var_weight: 0.0
+premortem:
+  noise_pairs: "750:350,650:250,500:100"
+  bins: "50,200,400,600,800"
