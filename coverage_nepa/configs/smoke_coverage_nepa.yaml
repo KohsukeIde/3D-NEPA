@@ -1,0 +1,12 @@
+cache_root: data/coverage_shapenet55_v12_greedy_fixed1024_smoke
+out: outputs/coverage_nepa/smoke_conditioned
+epochs: 50
+batch_size: 64
+lr: 0.001
+weight_decay: 0.05
+dim: 256
+hidden: 512
+max_levels: 12
+ema_momentum: 0.996
+variant: conditioned
+pair_mode: forward
