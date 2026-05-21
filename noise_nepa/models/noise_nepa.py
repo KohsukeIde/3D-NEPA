@@ -19,6 +19,8 @@ class NoiseNEPAOutput:
     loss_semigroup: torch.Tensor
     cos_forward: torch.Tensor
     z_var: torch.Tensor
+    z_eff_rank: torch.Tensor
+    z_norm_mean: torch.Tensor
 
 
 class NoiseNEPA(nn.Module):
@@ -62,8 +64,16 @@ class NoiseNEPA(nn.Module):
 
     def variance_regularizer(self, z: torch.Tensor) -> torch.Tensor:
         # VICReg-style anti-collapse regularizer, optional.
-        std = torch.sqrt(z.var(dim=0) + 1e-4)
+        std = torch.sqrt(z.var(dim=0, unbiased=False) + 1e-4)
         return torch.mean(F.relu(1.0 - std))
+
+    def effective_rank(self, z: torch.Tensor) -> torch.Tensor:
+        if z.shape[0] < 2:
+            return torch.ones((), device=z.device, dtype=z.dtype)
+        centered = z - z.mean(dim=0, keepdim=True)
+        s = torch.linalg.svdvals(centered.float())
+        p = s / s.sum().clamp_min(1e-12)
+        return torch.exp(-(p * torch.log(p.clamp_min(1e-12))).sum()).to(z.dtype)
 
     def forward(self, batch: dict) -> NoiseNEPAOutput:
         x_t, x_s = batch["x_t"], batch["x_s"]
@@ -71,7 +81,14 @@ class NoiseNEPA(nn.Module):
         z_t = self.encode_online(x_t)
         with torch.no_grad():
             z_s = self.encode_target(x_s)
-        z_hat_s = self.predict(z_t, t, s)
+        if bool(batch.get("time_only", False)):
+            z_in = torch.zeros_like(z_t)
+        elif bool(batch.get("z_shuffle", False)):
+            perm = torch.randperm(z_t.shape[0], device=z_t.device)
+            z_in = z_t[perm]
+        else:
+            z_in = z_t
+        z_hat_s = self.predict(z_in, t, s)
         cos = F.cosine_similarity(z_hat_s, z_s, dim=-1)
         loss_forward = (1.0 - cos).mean()
         loss_semigroup = torch.zeros_like(loss_forward)
@@ -80,7 +97,7 @@ class NoiseNEPA(nn.Module):
             with torch.no_grad():
                 z_r = self.encode_target(x_r)
             z_hat_r_roll = self.predict(z_hat_s, s, r)
-            z_hat_r_direct = self.predict(z_t, t, r)
+            z_hat_r_direct = self.predict(z_in, t, r)
             loss_roll_target = (1.0 - F.cosine_similarity(z_hat_r_roll, z_r, dim=-1)).mean()
             loss_direct_target = (1.0 - F.cosine_similarity(z_hat_r_direct, z_r, dim=-1)).mean()
             loss_cons = (1.0 - F.cosine_similarity(z_hat_r_roll, z_hat_r_direct.detach(), dim=-1)).mean()
@@ -92,5 +109,7 @@ class NoiseNEPA(nn.Module):
             loss_forward=loss_forward.detach(),
             loss_semigroup=loss_semigroup.detach(),
             cos_forward=cos.detach().mean(),
-            z_var=z_t.detach().var(dim=0).mean(),
+            z_var=z_t.detach().var(dim=0, unbiased=False).mean(),
+            z_eff_rank=self.effective_rank(z_t.detach()),
+            z_norm_mean=z_t.detach().norm(dim=-1).mean(),
         )

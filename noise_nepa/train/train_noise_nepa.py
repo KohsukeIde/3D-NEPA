@@ -10,13 +10,13 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 from torch.optim import AdamW
 
 # Allow running from repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from noise_nepa.data.noise_dataset import NoisePairDataset
+from noise_nepa.data.noise_dataset import NoisePairDataset, discover_files
 from noise_nepa.models.noise_nepa import NoiseNEPA
 
 
@@ -24,6 +24,7 @@ def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-root", required=True)
     ap.add_argument("--split-file", default="")
+    ap.add_argument("--val-split-file", default="")
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-shapes", type=int, default=0)
     ap.add_argument("--npoints", type=int, default=1024)
@@ -39,9 +40,12 @@ def parse_args():
     ap.add_argument("--ema-momentum", type=float, default=0.996)
     ap.add_argument("--semigroup-weight", type=float, default=0.0)
     ap.add_argument("--var-weight", type=float, default=0.0)
-    ap.add_argument("--variant", default="time", choices=["time", "no_time", "shuffled_time"])
+    ap.add_argument("--variant", default="time", choices=["time", "no_time", "shuffled_time", "time_only", "z_shuffled"])
     ap.add_argument("--device", default="auto")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--deterministic-train", action="store_true")
+    ap.add_argument("--samples-per-shape", type=int, default=1)
+    ap.add_argument("--epsilon-mode", default="independent", choices=["independent", "shared"])
     ap.add_argument("--log-every", type=int, default=50)
     return ap.parse_args()
 
@@ -72,6 +76,14 @@ def apply_variant(batch, variant: str):
         if "r" in batch:
             batch["r"] = batch["r"][perm]
         return batch
+    if variant == "time_only":
+        batch = dict(batch)
+        batch["time_only"] = True
+        return batch
+    if variant == "z_shuffled":
+        batch = dict(batch)
+        batch["z_shuffle"] = True
+        return batch
     return batch
 
 
@@ -88,21 +100,76 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "args.json").write_text(json.dumps(vars(args), indent=2))
 
-    ds = NoisePairDataset(
-        root=args.data_root,
-        split_file=args.split_file or None,
-        max_shapes=args.max_shapes,
-        npoints=args.npoints,
-        num_steps=args.num_steps,
-        min_gap=args.min_gap,
-        seed=args.seed,
-        deterministic=True,
-    )
-    if len(ds) < 2:
-        raise SystemExit(f"[error] need at least 2 shapes, got {len(ds)}")
-    n_val = max(1, int(0.1 * len(ds)))
-    n_train = len(ds) - n_val
-    train_ds, val_ds = random_split(ds, [n_train, n_val], generator=torch.Generator().manual_seed(0))
+    if args.val_split_file:
+        train_ds = NoisePairDataset(
+            root=args.data_root,
+            split_file=args.split_file or None,
+            max_shapes=args.max_shapes,
+            npoints=args.npoints,
+            num_steps=args.num_steps,
+            min_gap=args.min_gap,
+            seed=args.seed,
+            deterministic=args.deterministic_train,
+            samples_per_shape=args.samples_per_shape,
+            epsilon_mode=args.epsilon_mode,
+        )
+        val_ds = NoisePairDataset(
+            root=args.data_root,
+            split_file=args.val_split_file,
+            max_shapes=0,
+            npoints=args.npoints,
+            num_steps=args.num_steps,
+            min_gap=args.min_gap,
+            fixed_eval=True,
+            seed=args.seed,
+            samples_per_shape=1,
+            epsilon_mode=args.epsilon_mode,
+        )
+    else:
+        root = Path(args.data_root).resolve()
+        files = discover_files(root, max_shapes=args.max_shapes, split_file=args.split_file or None)
+        if len(files) < 2:
+            raise SystemExit(f"[error] need at least 2 shapes, got {len(files)}")
+        rels = [str(p.resolve().relative_to(root)) for p in files]
+        rng = random.Random(args.seed)
+        rng.shuffle(rels)
+        n_val = max(1, int(round(0.1 * len(rels))))
+        if n_val >= len(rels):
+            n_val = 1
+        train_rels = rels[:-n_val]
+        val_rels = rels[-n_val:]
+        split_dir = out_dir / "auto_splits"
+        split_dir.mkdir(parents=True, exist_ok=True)
+        train_split_file = split_dir / "train.txt"
+        val_split_file = split_dir / "val.txt"
+        train_split_file.write_text("\n".join(train_rels) + "\n")
+        val_split_file.write_text("\n".join(val_rels) + "\n")
+        train_ds = NoisePairDataset(
+            root=args.data_root,
+            split_file=str(train_split_file),
+            max_shapes=0,
+            npoints=args.npoints,
+            num_steps=args.num_steps,
+            min_gap=args.min_gap,
+            seed=args.seed,
+            deterministic=args.deterministic_train,
+            samples_per_shape=args.samples_per_shape,
+            epsilon_mode=args.epsilon_mode,
+        )
+        val_ds = NoisePairDataset(
+            root=args.data_root,
+            split_file=str(val_split_file),
+            max_shapes=0,
+            npoints=args.npoints,
+            num_steps=args.num_steps,
+            min_gap=args.min_gap,
+            fixed_eval=True,
+            seed=args.seed,
+            samples_per_shape=1,
+            epsilon_mode=args.epsilon_mode,
+        )
+    if len(train_ds) < 1 or len(val_ds) < 1:
+        raise SystemExit(f"[error] empty train/val split: train={len(train_ds)} val={len(val_ds)}")
     drop_last = len(train_ds) >= args.batch_size
     loader_gen = torch.Generator().manual_seed(args.seed)
 
@@ -164,6 +231,8 @@ def main():
                     "loss_semigroup": float(res.loss_semigroup.cpu()),
                     "cos_forward": float(res.cos_forward.cpu()),
                     "z_var": float(res.z_var.cpu()),
+                    "z_eff_rank": float(res.z_eff_rank.cpu()),
+                    "z_norm_mean": float(res.z_norm_mean.cpu()),
                 }
                 with log_path.open("a") as f:
                     f.write(json.dumps(row) + "\n")
@@ -174,14 +243,25 @@ def main():
         # validation
         model.eval()
         vals = []
+        val_ranks = []
+        val_vars = []
         with torch.no_grad():
             for batch in val_loader:
                 batch = move_batch(batch, device)
                 batch = apply_variant(batch, args.variant)
                 res = model(batch)
                 vals.append(float(res.loss.cpu()))
+                val_ranks.append(float(res.z_eff_rank.cpu()))
+                val_vars.append(float(res.z_var.cpu()))
         val = sum(vals) / max(1, len(vals))
-        row = {"epoch": epoch, "step": step, "split": "val", "loss": val}
+        row = {
+            "epoch": epoch,
+            "step": step,
+            "split": "val",
+            "loss": val,
+            "z_eff_rank": sum(val_ranks) / max(1, len(val_ranks)),
+            "z_var": sum(val_vars) / max(1, len(val_vars)),
+        }
         with log_path.open("a") as f:
             f.write(json.dumps(row) + "\n")
         if val < best_val:

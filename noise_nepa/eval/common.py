@@ -42,6 +42,7 @@ def make_loader(
     num_steps=1000,
     min_gap=50,
     seed=0,
+    epsilon_mode="independent",
 ):
     ds = NoisePairDataset(
         data_root,
@@ -52,6 +53,7 @@ def make_loader(
         num_steps=num_steps,
         min_gap=min_gap,
         seed=seed,
+        epsilon_mode=epsilon_mode,
     )
     return DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, drop_last=False)
 
@@ -69,7 +71,21 @@ def topk_retrieval(pred, target, topk=(1, 5)):
     pos = (ranks == labels[:, None]).nonzero()[:, 1].float() + 1.0
     out["mrr"] = float((1.0 / pos).mean().cpu())
     out["mean_rank"] = float(pos.mean().cpu())
+    pos_sim = sim[labels, labels]
+    masked = sim.clone()
+    masked[labels, labels] = -1e9
+    neg_sim = masked.max(dim=1).values
+    out["margin"] = float((pos_sim - neg_sim).mean().cpu())
     return out
+
+
+def effective_rank(z: torch.Tensor) -> float:
+    if z.shape[0] < 2:
+        return 1.0
+    centered = z - z.mean(dim=0, keepdim=True)
+    s = torch.linalg.svdvals(centered.float())
+    p = s / s.sum().clamp_min(1e-12)
+    return float(torch.exp(-(p * torch.log(p.clamp_min(1e-12))).sum()).cpu())
 
 
 def write_json_md(metrics: dict, out_json: str | Path, out_md: str | Path, title: str):

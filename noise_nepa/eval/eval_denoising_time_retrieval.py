@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 
-from common import load_model, make_loader, topk_retrieval, write_json_md
+from common import effective_rank, load_model, make_loader, topk_retrieval, write_json_md
 
 
 def main():
@@ -18,7 +18,8 @@ def main():
     ap.add_argument("--npoints", type=int, default=1024)
     ap.add_argument("--batch-size", type=int, default=64)
     ap.add_argument("--num-workers", type=int, default=4)
-    ap.add_argument("--variant", default="time", choices=["time", "no_time", "shuffled_time", "identity"])
+    ap.add_argument("--variant", default="time", choices=["time", "no_time", "shuffled_time", "time_only", "z_shuffled", "identity"])
+    ap.add_argument("--epsilon-mode", default="", choices=["", "independent", "shared"])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out-dir", required=True)
     args = ap.parse_args()
@@ -35,6 +36,7 @@ def main():
         num_steps=int(ckpt_args.get("num_steps", 1000)),
         min_gap=int(ckpt_args.get("min_gap", 50)),
         seed=args.seed,
+        epsilon_mode=args.epsilon_mode or ckpt_args.get("epsilon_mode", "independent"),
     )
     preds, tgts, currents = [], [], []
     with torch.no_grad():
@@ -51,7 +53,14 @@ def main():
                 elif args.variant == "shuffled_time":
                     perm = torch.randperm(t.shape[0], device=t.device)
                     t = t[perm]; s = s[perm]
-                z_pred = model.predict(z_t, t, s)
+                if args.variant == "time_only":
+                    z_in = torch.zeros_like(z_t)
+                elif args.variant == "z_shuffled":
+                    perm = torch.randperm(z_t.shape[0], device=z_t.device)
+                    z_in = z_t[perm]
+                else:
+                    z_in = z_t
+                z_pred = model.predict(z_in, t, s)
             preds.append(z_pred.cpu()); tgts.append(z_s.cpu()); currents.append(z_t.cpu())
     pred = torch.cat(preds, 0).to(device)
     tgt = torch.cat(tgts, 0).to(device)
@@ -59,7 +68,12 @@ def main():
     metrics = topk_retrieval(pred, tgt, topk=(1, 3, 5))
     metrics["cos_to_target"] = float(torch.nn.functional.cosine_similarity(pred, tgt, dim=-1).mean().cpu())
     metrics["cos_to_current"] = float(torch.nn.functional.cosine_similarity(pred, cur, dim=-1).mean().cpu())
+    metrics["pred_eff_rank"] = effective_rank(pred.cpu())
+    metrics["target_eff_rank"] = effective_rank(tgt.cpu())
+    metrics["current_eff_rank"] = effective_rank(cur.cpu())
+    metrics["pred_var"] = float(pred.cpu().var(dim=0, unbiased=False).mean())
     metrics["variant"] = args.variant
+    metrics["epsilon_mode"] = args.epsilon_mode or ckpt_args.get("epsilon_mode", "independent")
     out = Path(args.out_dir)
     write_json_md(metrics, out / f"retrieval_{args.variant}.json", out / f"retrieval_{args.variant}.md", f"Denoising-time retrieval ({args.variant})")
     print(metrics)

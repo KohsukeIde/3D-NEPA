@@ -27,10 +27,11 @@ def main():
     ap.add_argument("--max-shapes", type=int, default=512)
     ap.add_argument("--npoints", type=int, default=1024)
     ap.add_argument("--batch-size", type=int, default=32)
-    ap.add_argument("--variant", default="time", choices=["time", "no_time", "shuffled_time", "identity"])
+    ap.add_argument("--variant", default="time", choices=["time", "no_time", "shuffled_time", "time_only", "z_shuffled", "identity"])
     ap.add_argument("--t-level", type=int, default=900)
     ap.add_argument("--candidate-levels", default="50,150,300,450,600,750")
     ap.add_argument("--include-current", action="store_true")
+    ap.add_argument("--epsilon-mode", default="", choices=["", "independent", "shared"])
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out-dir", required=True)
     args = ap.parse_args()
@@ -54,6 +55,7 @@ def main():
         fixed_eval=True,
         seed=args.seed,
     )
+    epsilon_mode = args.epsilon_mode or ckpt_args.get("epsilon_mode", "independent")
     schedule = ds.schedule
     hits1, hits3, mrrs, margins = [], [], [], []
     current_hits = []
@@ -70,11 +72,19 @@ def main():
                 labels.append(label)
                 t = torch.tensor(args.t_level, dtype=torch.long)
                 gen_t = torch.Generator().manual_seed(args.seed * 10_000_019 + idx * 97 + 1)
-                xs_t.append(add_gaussian_noise(x0, t, schedule, generator=gen_t))
+                if epsilon_mode == "shared":
+                    eps = torch.randn(x0.shape, generator=gen_t, dtype=x0.dtype)
+                    xs_t.append(add_gaussian_noise(x0, t, schedule, noise=eps))
+                else:
+                    eps = None
+                    xs_t.append(add_gaussian_noise(x0, t, schedule, generator=gen_t))
                 cands = []
                 for k, s_level in enumerate(levels):
                     gen_s = torch.Generator().manual_seed(args.seed * 10_000_019 + idx * 97 + 100 + k)
-                    cands.append(add_gaussian_noise(x0, torch.tensor(s_level, dtype=torch.long), schedule, generator=gen_s))
+                    if epsilon_mode == "shared":
+                        cands.append(add_gaussian_noise(x0, torch.tensor(s_level, dtype=torch.long), schedule, noise=eps))
+                    else:
+                        cands.append(add_gaussian_noise(x0, torch.tensor(s_level, dtype=torch.long), schedule, generator=gen_s))
                 if args.include_current:
                     cands.append(xs_t[-1])
                 cand_xs.append(torch.stack(cands, dim=0))
@@ -97,7 +107,14 @@ def main():
                 elif args.variant == "shuffled_time":
                     perm = torch.randperm(B, device=device)
                     s_vals = s_vals[perm]
-                z_pred = model.predict(z_t, t, s_vals)
+                if args.variant == "time_only":
+                    z_in = torch.zeros_like(z_t)
+                elif args.variant == "z_shuffled":
+                    perm = torch.randperm(B, device=device)
+                    z_in = z_t[perm]
+                else:
+                    z_in = z_t
+                z_pred = model.predict(z_in, t, s_vals)
 
             sim = torch.einsum(
                 "bd,bcd->bc",
@@ -126,6 +143,7 @@ def main():
         "top3": float(torch.cat(hits3).mean()),
         "mrr": float(torch.cat(mrrs).mean()),
         "margin": float(torch.cat(margins).mean()),
+        "epsilon_mode": epsilon_mode,
     }
     if current_hits:
         metrics["current_select_rate"] = float(torch.cat(current_hits).mean())

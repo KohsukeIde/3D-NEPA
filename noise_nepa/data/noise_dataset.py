@@ -62,19 +62,29 @@ def discover_files(root: str | Path, max_shapes: int = 0, split_file: str | None
     root = Path(root)
     if split_file:
         paths = []
+        missing = []
         for line in Path(split_file).read_text().splitlines():
             line = line.strip()
-            if not line:
+            if not line or line.startswith("#"):
                 continue
             p = root / line
             if p.exists():
                 paths.append(p)
                 continue
+            found = False
             for ext in [".npy", ".npz", ".ply"]:
                 p = root / (line + ext)
                 if p.exists():
                     paths.append(p)
+                    found = True
                     break
+            if not found:
+                missing.append(line)
+        if missing:
+            raise FileNotFoundError(
+                f"{len(missing)} split entries could not be resolved under {root}; "
+                f"first missing entries: {missing[:5]}"
+            )
         files = paths
     else:
         files = []
@@ -86,6 +96,15 @@ def discover_files(root: str | Path, max_shapes: int = 0, split_file: str | None
     if not files:
         raise RuntimeError(f"No point files discovered under {root}")
     return files
+
+
+def make_noise(
+    shape: torch.Size | tuple[int, ...],
+    generator: torch.Generator | None = None,
+    dtype: torch.dtype = torch.float32,
+    device: torch.device | str = "cpu",
+) -> torch.Tensor:
+    return torch.randn(shape, generator=generator, dtype=dtype, device=device)
 
 
 class NoisePairDataset(Dataset):
@@ -100,6 +119,8 @@ class NoisePairDataset(Dataset):
         fixed_eval: bool = False,
         seed: int = 0,
         deterministic: bool = False,
+        samples_per_shape: int = 1,
+        epsilon_mode: str = "independent",
     ):
         self.root = Path(root)
         self.files = discover_files(root, max_shapes=max_shapes, split_file=split_file)
@@ -110,9 +131,13 @@ class NoisePairDataset(Dataset):
         self.fixed_eval = fixed_eval
         self.seed = int(seed)
         self.deterministic = bool(deterministic)
+        self.samples_per_shape = max(1, int(samples_per_shape))
+        if epsilon_mode not in {"independent", "shared"}:
+            raise ValueError(f"epsilon_mode must be independent or shared, got {epsilon_mode}")
+        self.epsilon_mode = epsilon_mode
 
     def __len__(self):
-        return len(self.files)
+        return len(self.files) * self.samples_per_shape
 
     def _sample_points(self, pts: np.ndarray, rng: np.random.Generator) -> torch.Tensor:
         if pts.shape[0] >= self.npoints:
@@ -123,8 +148,14 @@ class NoisePairDataset(Dataset):
         return normalize_point_cloud(x)
 
     def __getitem__(self, idx: int):
-        path = self.files[idx]
-        rng_seed = self.seed * 1_000_003 + idx if (self.fixed_eval or self.deterministic) else None
+        file_idx = idx % len(self.files)
+        aug_idx = idx // len(self.files)
+        path = self.files[file_idx]
+        if self.fixed_eval or self.deterministic:
+            rng_seed = self.seed * 1_000_003 + file_idx * 10_007 + aug_idx
+        else:
+            # Uses worker-level NumPy state, which is seeded by train_noise_nepa.py.
+            rng_seed = int(np.random.randint(0, np.iinfo(np.uint32).max))
         rng = np.random.default_rng(rng_seed)
         pts = load_points(path)
         x0 = self._sample_points(pts, rng)
@@ -136,17 +167,25 @@ class NoisePairDataset(Dataset):
         t = torch.tensor(t_val, dtype=torch.long)
         s = torch.tensor(s_val, dtype=torch.long)
         r = torch.tensor(r_val, dtype=torch.long)
-        # Generate independent noise for each level. For fixed eval, use stateless
-        # seeds so separate variant processes compare exactly the same tensors.
+        # For fixed/deterministic modes, use stateless seeds so separate variant
+        # processes compare exactly the same tensors.
         if self.fixed_eval or self.deterministic:
-            gen_t = torch.Generator().manual_seed(self.seed * 10_000_019 + idx * 31 + 1)
-            gen_s = torch.Generator().manual_seed(self.seed * 10_000_019 + idx * 31 + 2)
-            gen_r = torch.Generator().manual_seed(self.seed * 10_000_019 + idx * 31 + 3)
+            gen_base = self.seed * 10_000_019 + file_idx * 31 + aug_idx * 1009
+            gen_t = torch.Generator().manual_seed(gen_base + 1)
+            gen_s = torch.Generator().manual_seed(gen_base + 2)
+            gen_r = torch.Generator().manual_seed(gen_base + 3)
         else:
             gen_t = gen_s = gen_r = None
-        x_t = add_gaussian_noise(x0, t, self.schedule, generator=gen_t)
-        x_s = add_gaussian_noise(x0, s, self.schedule, generator=gen_s)
-        x_r = add_gaussian_noise(x0, r, self.schedule, generator=gen_r)
+        if self.epsilon_mode == "shared":
+            gen = gen_t
+            eps = make_noise(x0.shape, generator=gen, dtype=x0.dtype, device=x0.device)
+            x_t = add_gaussian_noise(x0, t, self.schedule, noise=eps)
+            x_s = add_gaussian_noise(x0, s, self.schedule, noise=eps)
+            x_r = add_gaussian_noise(x0, r, self.schedule, noise=eps)
+        else:
+            x_t = add_gaussian_noise(x0, t, self.schedule, generator=gen_t)
+            x_s = add_gaussian_noise(x0, s, self.schedule, generator=gen_s)
+            x_r = add_gaussian_noise(x0, r, self.schedule, generator=gen_r)
         return {
             "x0": x0.float(),
             "x_t": x_t.float(),
@@ -156,5 +195,6 @@ class NoisePairDataset(Dataset):
             "s": s,
             "r": r,
             "path": str(path),
-            "idx": idx,
+            "idx": file_idx,
+            "aug_idx": aug_idx,
         }
