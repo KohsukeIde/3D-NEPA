@@ -219,6 +219,33 @@ The useful result is diagnostic:
 - Raw/input stats do not trivially reveal coverage level.
 - But the latent transition objective still collapses into shortcut-equivalent behavior and does not demonstrate state-conditioned coverage prediction.
 
+## Final Axis Tests
+
+The remaining loophole was that fixed-N coverage states might still contain a supervised coverage axis even though the NEPA objective failed.
+
+This was tested in:
+
+```text
+coverage_nepa/docs/final_axis_tests_active.md
+```
+
+Summary:
+
+| test | key result | decision |
+|---|---|---|
+| supervised coverage-level ceiling | greedy PointNet mean top1 0.1791, SimpleEncoder 0.1667, chance 0.1667 | fail |
+| shortcut margin | greedy PointNet is -0.0558 below best input shortcut | fail |
+| category monotonicity | greedy PointNet C5-C0 accuracy delta +0.0263, sign rate 0.5702 | fail |
+| greedy vs random | random control matches or beats greedy on monotonicity | fail |
+
+Final decision:
+
+```text
+Coverage-NEPA is killed for the current AAAI main route.
+```
+
+Do not run full pretraining, ScanObjectNN, PointGPT integration, or nestedness-preserving redesign for this track without a new representation proposal and a stronger supervised ceiling first.
+
 Current recommendation:
 
 1. Archive Coverage-NEPA as a no-go for the current SimpleEncoder / same-shape latent retrieval setup.
